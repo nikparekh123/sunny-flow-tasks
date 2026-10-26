@@ -3,7 +3,7 @@
 //  Sunny
 //
 //  Blocks 12 and 12a (handoff 30, 22 Oct 2026) · the Positions tab: the native
-//  nav bar (large title, a subtitle, the filter menu), the book's totals in one
+//  nav bar (large title and a subtitle; no filters since 26 Oct 2026), the book's totals in one
 //  sideways row, one glass card per name with To do first, then Inventory.
 //  The chrome is the system's; only what sits inside the cards is custom.
 //
@@ -21,6 +21,11 @@ struct SunnyPositionsTab: View {
     /// card under the finger (Nik, 23 Oct 2026: "the cards are changing sequence as I am looking at it").
     /// A name it does not know goes last.
     @State private var order: [String] = []
+    /// Read so the badges and counts redraw the moment a sale is marked placed or done for the week.
+    @AppStorage(POrders.placedKey) private var placedRaw = ""
+    @AppStorage(POrders.doneKey) private var doneRaw = ""
+    /// Scrolled: the small title reads "Positions" alone, no line under it (Nik, 26 Oct 2026).
+    @State private var scrolled = false
 
     var body: some View {
         @Bindable var router = router
@@ -39,7 +44,8 @@ struct SunnyPositionsTab: View {
     private func screen(_ home: HomePayload) -> some View {
         let words = store.words ?? home
         let all = PNames.keep(PNames.build(home, orderFrom: words), order)
-        let shown = all.filter { $0.matches(router.filter) }
+        // No filters (Nik, 26 Oct 2026): every name, always.
+        let shown = all
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -48,12 +54,6 @@ struct SunnyPositionsTab: View {
                     } else {
                         totals(PMath.legs(home))
                             .padding(.bottom, 12)
-                        if shown.isEmpty {
-                            Text(router.filter.none)
-                                .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
-                                .foregroundStyle(S.muted)
-                                .padding(.bottom, 12)
-                        }
                         SunnyPositionCards(home: home, names: shown)
                         SunnyInventory(home: home, words: words)
                             .id("inventory")
@@ -70,6 +70,7 @@ struct SunnyPositionsTab: View {
             .scrollPosition($top)
             .onChange(of: router.topTick[.positions]) { _, _ in withAnimation(reduce ? nil : S.standard(0.45)) { top.scrollTo(edge: .top) } }
             .scrollEdgeEffectStyle(.soft, for: .top)
+            .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 50 } action: { _, v in scrolled = v }
             .refreshable { await store.refresh(.pull); reorder() }
             .onAppear { if order.isEmpty { reorder() } }
             .onChange(of: router.tab) { _, t in if t == .positions { reorder() } }
@@ -80,14 +81,7 @@ struct SunnyPositionsTab: View {
                 router.scrollTo = nil
             }
         }
-        .navigationSubtitle(subtitle(all, shown: shown.count))
-        .toolbar {
-            if !all.isEmpty {
-                // While a filter is on the button is its own ink circle, not inside the bar's glass.
-                ToolbarItem(placement: .topBarTrailing) { filterMenu(all) }
-                    .sharedBackgroundVisibility(router.filter != .all ? .hidden : .automatic)
-            }
-        }
+        .navigationSubtitle(scrolled ? "" : subtitle(all))
     }
 
     /// The order as the data reads now: names with To do first, then the cards' own order.
@@ -110,14 +104,13 @@ struct SunnyPositionsTab: View {
         }
     }
 
-    /// "7 names · 5 with To do", or while a filter is on "Stock up · 4 of 7 names".
-    private func subtitle(_ all: [PName], shown: Int) -> String {
+    /// "7 names · 5 with To do".
+    private func subtitle(_ all: [PName]) -> String {
         let names = PWords.n(all.count, "name"), todo = all.filter(\.hasTodo).count
-        if router.filter != .all { return "\(router.filter.title) · \(shown) of \(names)" }
         return names + (todo > 0 ? " · \(todo) with To do" : "")
     }
 
-    // MARK: Totals (block 12): always the whole book, a filter never changes them
+    // MARK: Totals (block 12): always the whole book
 
     private func totals(_ L: [PLeg]) -> some View {
         let word = ["time value", "% change", "$ change"][mode]
@@ -185,38 +178,6 @@ struct SunnyPositionsTab: View {
         .accessibilityHint("Tap for the next view")
     }
 
-    // MARK: Filter (block 12): one native toolbar menu, one filter at a time
-
-    private func filterMenu(_ all: [PName]) -> some View {
-        let on = router.filter != .all
-        // Toggles, not an inline Picker: inside a menu the picker drops its section headers and the
-        // count under each option. One filter at a time; picking the one that is on goes back to all.
-        func opt(_ f: PFilter, _ title: String) -> some View {
-            Toggle(isOn: Binding(get: { router.filter == f },
-                                 set: { v in withAnimation(reduce ? nil : S.standard(0.35)) { router.filter = v ? f : .all } })) {
-                Text(title)
-                Text(PWords.n(all.filter { $0.matches(f) }.count, "name"))
-            }
-        }
-        return Menu {
-            Section {
-                opt(.all, "All names")
-                opt(.todo, "To do")
-            }
-            Section("The stock today") {
-                opt(.up, "Stock up")
-                opt(.down, "Stock down")
-            }
-            Section("Calls that kept at least") {
-                ForEach([25, 50, 75, 90], id: \.self) { p in opt(.kept(p), "\(p)% of premium") }
-            }
-        } label: {
-            Label("Filter", systemImage: "line.3.horizontal.decrease")
-        }
-        .modifier(PFilterButton(on: on))
-        .accessibilityLabel(on ? "Filter, \(router.filter.title) is on" : "Filter")
-    }
-
     private var empty: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("No open positions").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
@@ -228,15 +189,6 @@ struct SunnyPositionsTab: View {
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
-    }
-}
-
-/// While a filter is on, the toolbar button turns prominent in ink (block 12).
-private struct PFilterButton: ViewModifier {
-    let on: Bool
-    func body(content: Content) -> some View {
-        // A menu takes a button style only as a button-style menu.
-        if on { content.menuStyle(.button).buttonStyle(.glassProminent).buttonBorderShape(.circle).tint(S.ink) } else { content }
     }
 }
 

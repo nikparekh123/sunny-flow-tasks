@@ -116,7 +116,16 @@ struct HomeView: View {
             Tab("Positions", systemImage: "rectangle.stack.fill", value: HomeRouter.Tab.positions) {
                 NavigationStack { SunnyPositionsTab(store: store) }
             }
+            // Handoff 32 (12c): Gamma and Insights, one name at a time, the name carried between them.
+            Tab("Gamma", systemImage: "chart.bar.doc.horizontal", value: HomeRouter.Tab.gamma) {
+                NavigationStack { SunnyGammaTab(store: store) }
+            }
+            Tab("Insights", systemImage: "lightbulb", value: HomeRouter.Tab.insights) {
+                NavigationStack { SunnyInsightsTab(store: store) }
+            }
         }
+        // The bar stays as it is while scrolling (Nik, 26 Oct 2026: do not minimise it).
+        .tabBarMinimizeBehavior(.never)
     }
 
     private func page(_ home: HomePayload) -> some View {
@@ -236,7 +245,12 @@ struct HomeView: View {
             else if v.hasPrefix("insights:") { router.insights = String(v.dropFirst(9)) }
             else if v == "aftershock" { router.openAftershock(animated: false) }
             else if v.hasPrefix("at:") { router.scrollID = String(v.dropFirst(3)) }
-            else if v.hasPrefix("tab:") { router.tab = v.dropFirst(4) == "positions" ? .positions : .home }
+            else if v.hasPrefix("tab:") {
+                let x = v.dropFirst(4)
+                router.tab = x == "positions" ? .positions : x == "gamma" ? .gamma : x == "insights" ? .insights : .home
+            }
+            else if v.hasPrefix("gamma:") { let p = v.dropFirst(6).split(separator: ":").map(String.init); router.openGamma(p[0], view: p.count > 1 ? p[1] : nil, wall: nil) }
+            else if v.hasPrefix("itab:") { let t = String(v.dropFirst(5)); router.tab = .insights; if t != "All" { router.insightsAll = false; router.focus = t } }
             else if v.hasPrefix("walls:") {
                 router.tab = .positions
                 try? await Task.sleep(for: .milliseconds(500))

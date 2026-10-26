@@ -95,6 +95,8 @@ struct SunnyWalls: View {
     let sells: String?
     /// The tags under each expiry: Your sells, Your hedge · calls held, Your hedge · new buys.
     let tags: [String: [String]]
+    /// Inside another screen's scroll (the Gamma tab's watchlist names): no scroll, background or nav bar.
+    var embedded = false
     @State private var rows: [WallDay] = []
     @State private var loaded = false
     @State private var exp: String?
@@ -102,9 +104,42 @@ struct SunnyWalls: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
+        if embedded {
+            content.task(id: t) { await load() }
+        } else {
+            screen
+        }
+    }
+
+    private func load() async {
+        rows = (try? await WallsData.load(t, today: today)) ?? []
+        loaded = true
+        #if DEBUG && targetEnvironment(simulator)
+        // `-wallsExp 2027-01-15` opens that expiry, `-wallsAll` opens All strikes (screenshots).
+        let a = ProcessInfo.processInfo.arguments
+        if let i = a.firstIndex(of: "-wallsExp"), i + 1 < a.count { exp = a[i + 1] }
+        if a.contains("-wallsAll") { allOpen = true }
+        #endif
+    }
+
+    private var screen: some View {
         ZStack {
             SBackground()
             ScrollView {
+                content
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 40)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .navigationTitle("Walls")
+        .navigationBarTitleDisplayMode(.large)
+        .navigationSubtitle("\(t) · $\(PF.price(px)) · \(PWays.weekday(today)) \(PF.monthDay(today))")
+        .task(id: t) { await load() }
+    }
+
+    private var content: some View {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("1st wall has the most gamma · orange: moved to a new strike")
                         .sType(SType(size: 13, weight: 400, line: 18, tracking: 0), tabular: false)
@@ -124,25 +159,6 @@ struct SunnyWalls: View {
                         allStrikes(e)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
-                .padding(.bottom, 40)
-            }
-            .scrollIndicators(.hidden)
-        }
-        .navigationTitle("Walls")
-        .navigationBarTitleDisplayMode(.large)
-        .navigationSubtitle("\(t) · $\(PF.price(px)) · \(PWays.weekday(today)) \(PF.monthDay(today))")
-        .task(id: t) {
-            rows = (try? await WallsData.load(t, today: today)) ?? []
-            loaded = true
-            #if DEBUG && targetEnvironment(simulator)
-            // `-wallsExp 2027-01-15` opens that expiry, `-wallsAll` opens All strikes (screenshots).
-            let a = ProcessInfo.processInfo.arguments
-            if let i = a.firstIndex(of: "-wallsExp"), i + 1 < a.count { exp = a[i + 1] }
-            if a.contains("-wallsAll") { allOpen = true }
-            #endif
-        }
     }
 
     // MARK: The expiries

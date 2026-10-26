@@ -22,8 +22,8 @@ final class HomeRouter {
         case book = "Book", risk = "Risk", income = "Income", results = "Results"
         var id: String { rawValue }
     }
-    /// The two tabs (block 12a). Opens on Home.
-    enum Tab: Hashable { case home, positions }
+    /// The four tabs (block 12c, handoff 32). Opens on Home.
+    enum Tab: Hashable { case home, positions, gamma, insights }
 
     var tab: Tab = .home
     /// Tapping the open tab scrolls it to the top (block 12a): each tab watches its own count.
@@ -34,6 +34,8 @@ final class HomeRouter {
 
     /// The Delta and Gamma jump, %: one value for every card and the Home map (3 to 10).
     var jump = 7
+    /// The Δ Γ face's move, % (handoff 32, 13g): one value for every card, 10% down to 10% up.
+    var move = 7
     /// A card opened from a tap: the face it opens on ("todo", "sold", "bought", "dg"), and the ring.
     var cardFace: [String: String] = [:]
     var cardTick = 0
@@ -46,6 +48,23 @@ final class HomeRouter {
     var insights: String?
     /// The Walls screen's name (13d), pushed in the Positions stack from All walls on a card.
     var walls: String?
+    /// The name Gamma and Insights are on (12c: it carries over between the two tabs).
+    var focus: String?
+    /// Insights opens on All the first time, then follows Gamma (12c).
+    var insightsAll = true
+    /// A wall chip in a To do order: Gamma on that name and chain, the wall ringed for 2.6 s (13e).
+    var gammaView: String?
+    var gammaRing: Double?
+    func openGamma(_ t: String, view: String?, wall: Double?) {
+        focus = t
+        gammaView = view
+        tab = .gamma
+        gammaRing = wall
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2.6 + 0.5))
+            if self.gammaRing == wall { withAnimation(.easeOut(duration: 0.4)) { self.gammaRing = nil } }
+        }
+    }
 
     /// Opens a name's Position card on a face from anywhere: the Positions tab, then the card
     /// scrolled under the nav bar on that face, ringed 2 pt for 1.8 s (block 12a).

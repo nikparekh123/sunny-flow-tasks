@@ -54,10 +54,23 @@ struct HomePayload: Decodable {
     /// The To do face's ways per name (handoff 31, block 13c). When a name has them, they replace the
     /// bars and the rows.
     let ways: Lenient<[String: NameWays]>?
+    /// The week's plan per name (handoff 32): the sale, the hedge calls, insurance puts, weekly puts, the budget.
+    let plan: Lenient<[String: NamePlan]>?
+    /// Insights, the All page (handoff 32, 14d).
+    let insightsAll: Lenient<InsightsAll>?
+    /// Each name's flow profile (rule 5): five inputs ranked against about 100 names.
+    let flowProfile: Lenient<[String: FlowProfile]>?
+    /// Daily closes per name, 160 days, for the Bought face (handoff 32, 13f).
+    let daily: Lenient<[String: DailyCloses]>?
 }
 
 /// One name's To do as two blocks (block 13c): Sell (next Friday's calls and puts) and Buy (the delta
 /// still needed; the quarterly's put walls as data). Every count is the server's, net of what IBKR shows.
+struct DailyCloses: Decodable, Hashable {
+    let d: [String]
+    let c: [Double]
+}
+
 struct NameWays: Decodable, Hashable {
     let sell: Sell
     let buy: Buy
@@ -176,6 +189,11 @@ struct DGBook: Decodable, Hashable {
     let needs: Bool
     /// [move %, bought $, sold $, net $, cost $] every 0.5% from 0 to 10%.
     let ser: [[Double]]
+    /// Handoff 32 (13g): [move %, bought, sold, net, cost $] (delta in shares) every 0.5% from 10% down to 10% up; today's
+    /// long (bought) delta; where net falls under 25% of it going up, % (nil past 10%).
+    let ser2: [[Double]]?
+    let long0: Double?
+    let thin25: Double?
 
     struct Point { let m: Double; let b: Double; let s: Double; let n: Double; let gb: Double }
     func at(_ m: Double) -> Point {
@@ -200,6 +218,41 @@ struct NameInsights: Decodable, Hashable {
     let strategy: String?
     let points: [Point]
     struct Point: Decodable, Hashable { let lead: String; let body: String }
+    /// Handoff 32 (14d): the verdict, its chips, six tagged points in the design's order, and the long term.
+    let v2: V2?
+    struct V2: Decodable, Hashable {
+        let verdict: String
+        let chips: [Chip]
+        let points: [P]
+        let longTerm: String?
+        let orders: Int
+        struct Chip: Decodable, Hashable { let k: String; let v: String; let tone: String }
+        struct P: Decodable, Hashable { let key: String; let kind: String; let tag: String; let lead: String; let body: String; let isNew: Bool? }
+    }
+}
+
+/// A name's flow profile (rule 5): five inputs over 20 sessions, each with its percentile toward retail; Retail-heavy
+/// when at least 3 rank beyond the 70th.
+struct FlowProfile: Decodable, Hashable {
+    let asof: String
+    let sessions: Int
+    let universe: Int
+    let retail: Int
+    let profile: String
+    let inputs: [Input]
+    struct Input: Decodable, Hashable { let key: String; let name: String; let value: Double?; let pct: Double?; let retail: Bool }
+    var label: String { profile == "retail-heavy" ? "Retail-heavy" : "Institution-heavy" }
+}
+
+/// Insights, the All page (14d): the verdict, the counts, what changed per name (most pressing first), the rest folded.
+struct InsightsAll: Decodable, Hashable {
+    let verdict: String
+    let todo: Int
+    let watch: Int
+    let quiet: Int
+    let rows: [Row]
+    let folded: [String]
+    struct Row: Decodable, Hashable { let t: String; let key: String; let tag: String; let lead: String; let body: String; let todo: Bool }
 }
 
 /// Aftershock: the universe, the last scans and the last two weeks of crashes,
@@ -514,6 +567,20 @@ struct Payback: Decodable {
     /// Made (realized plus premium in hand), a week, over the last five weeks.
     let paceMade: Double?
     let newLeapDays: [String]?
+    /// Handoff 32 (18): one base with Yield (the LEAPs held now at their average cost), made after closing costs and
+    /// hedges (the hedge cost spread to date on hedges still held comes off), settled and open, the two paces.
+    let base: Double?
+    let made: Double?
+    let settled: Double?
+    let open: Double?
+    let closing: Double?
+    let hedges: Double?
+    let paceStart: Double?
+    /// The last 4 weeks' pace (server `pace_recent`).
+    let paceRecent: Double?
+    let leapsValue: Double?
+    /// [day, capital in LEAPs, made]
+    let series2: [[Scalar]]?
     struct Now: Decodable { let d: String; let inT: Double; let tvT: Double; let inPaid: Double; let tvPaid: Double
                             let allReal: Double?; let held: Double? }
 }
@@ -547,6 +614,9 @@ struct YieldWeek: Decodable {
     let invested: Double
     let callsSold: Double, callsBack: Double, putsSold: Double, putsBack: Double
     let callsSoldTv: Double?, callsBackTv: Double?, putsSoldTv: Double?, putsBackTv: Double?
+    /// Handoff 32 (17): the LEAPs base at the week's end (this week: today) and the week's hedge charge.
+    let leaps: Double?
+    let hedge: Double?
 }
 
 // MARK: - Account chart (block 02b)

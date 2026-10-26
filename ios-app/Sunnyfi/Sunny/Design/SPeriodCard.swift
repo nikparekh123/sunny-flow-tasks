@@ -141,6 +141,8 @@ struct SPeriodHeader: View {
     var arrows = true
     /// False when the period on screen is the book's first (no earlier data).
     var canGoBack = true
+    /// Yield's "This week, Oct 26 to 30 · on $226K in LEAPS" wraps to a second line (handoff 32).
+    var subLines = 1
 
     var body: some View {
         // The arrows sit beside the label; the number runs the full width under them.
@@ -166,7 +168,8 @@ struct SPeriodHeader: View {
                         .contentTransition(.numericText(value: heroValue))
                         .lineLimit(1).minimumScaleFactor(0.6)
                     Text(sub).sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
-                        .foregroundStyle(S.muted).lineLimit(1)
+                        .foregroundStyle(S.muted).lineLimit(subLines)
+                        .fixedSize(horizontal: false, vertical: subLines > 1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -261,6 +264,9 @@ struct SBar {
     /// Rolled count under the label, after a hatched swatch in `rolledHue`.
     var rolled: Int? = nil
     var rolledHue: Color = S.green
+    /// A loss under the line, in points (Yield, handoff 32: a closing cost bigger than the sale drops below in red).
+    var below: CGFloat = 0
+    var belowColor: Color = S.red
 }
 
 struct SBarColumn: Identifiable {
@@ -284,6 +290,9 @@ struct SBarChart: View {
 
     private static let H: CGFloat = 172
     private static let colW: CGFloat = 80, gap: CGFloat = 40
+
+    /// Room under the line for the deepest loss (zero when nothing drops below).
+    private var under: CGFloat { columns.flatMap(\.bars).map(\.below).max() ?? 0 }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -393,6 +402,16 @@ struct SBarChart: View {
                                 }
                             }
                             .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                            // Under the line: the loss, hanging from it; every column keeps the same room.
+                            if under > 0 {
+                                ZStack(alignment: .top) {
+                                    Color.clear.frame(height: under)
+                                    UnevenRoundedRectangle(cornerRadii: .init(bottomLeading: 5, bottomTrailing: 5), style: .continuous)
+                                        .fill(b.belowColor)
+                                        .frame(height: grown ? b.below : 0)
+                                }
+                                .padding(.top, -4)
+                            }
                         }
                         // Bar heights, and the label riding on top, 0.7 s.
                         .animation(S.standard(S.grow), value: grown)

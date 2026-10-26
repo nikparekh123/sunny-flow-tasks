@@ -18,6 +18,7 @@
 import Foundation
 import Network
 import Observation
+import QuartzCore
 import Supabase
 
 @MainActor
@@ -54,7 +55,22 @@ final class HomeStore {
     private var lastAttemptFailedOffline = false
     private let path = NWPathMonitor()
 
+    #if DEBUG && targetEnvironment(simulator)
+    /// Frame gaps over 100 ms, printed (SUNNY-PERF): what the phone's hang detector reports.
+    private final class Hitch: NSObject {
+        var last: CFTimeInterval = 0
+        @objc func tick(_ l: CADisplayLink) {
+            if last > 0, l.timestamp - last > 0.05 { print("SUNNY-PERF hitch \(Int((l.timestamp - last) * 1000)) ms at \(Int(l.timestamp * 1000) % 100000)") }
+            last = l.timestamp
+        }
+    }
+    private let hitch = Hitch()
+    #endif
+
     init() {
+        #if DEBUG && targetEnvironment(simulator)
+        CADisplayLink(target: hitch, selector: #selector(Hitch.tick(_:))).add(to: .main, forMode: .common)
+        #endif
         // Back online: refresh at once (block 01).
         path.pathUpdateHandler = { [weak self] p in
             guard p.status == .satisfied else { return }
@@ -88,7 +104,13 @@ final class HomeStore {
     private func fetch(_ reason: Reason) async {
         do {
             let data = try await Self.source()
+            #if DEBUG && targetEnvironment(simulator)
+            let t0 = CFAbsoluteTimeGetCurrent()
+            #endif
             let payload = try Self.decoder.decode(Row.self, from: data).payload
+            #if DEBUG && targetEnvironment(simulator)
+            print("SUNNY-PERF decode \(Int((CFAbsoluteTimeGetCurrent() - t0) * 1000)) ms, \(data.count / 1024) KB")
+            #endif
             if let old = home, reason == .tick || reason == .pull {
                 let before = Dictionary(old.legs.map { ($0.id, $0.n) }, uniquingKeysWith: +)
                 let after = Dictionary(payload.legs.map { ($0.id, $0.n) }, uniquingKeysWith: +)

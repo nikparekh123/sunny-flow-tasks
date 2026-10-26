@@ -8,9 +8,11 @@
 //  To do comes first while the name has work and goes once IBKR shows the
 //  trades (nothing is ticked). The card is as tall as the face it is on and
 //  blends between two faces mid-swipe (handoff 31). With ways (13c) the To do
-//  face is SunnyWays and the count badge is its number of trades; every card
-//  ends with This week's insights (a sheet) and All walls (13d). Nothing
-//  bought: no Δ Γ face.
+//  face is SunnyWays and the count badge is its number of trades. With the
+//  week's plan (handoff 32, 13e) the To do face is this week's orders
+//  (SunnyOrders) and the badge counts the orders to place; the insights and
+//  walls buttons are gone (Insights and Gamma are tabs). Nothing bought: no
+//  Δ Γ face.
 //
 
 import SwiftUI
@@ -33,9 +35,20 @@ struct PName: Identifiable {
     let ways: NameWays?
     /// The most any call sold has kept of its premium, % (Calls that kept at least).
     let kept: Double
+    /// The week's plan (handoff 32): the To do face becomes its orders.
+    var plan: NamePlan? = nil
+    var legs: [Leg] = []
+    var earnings: String? = nil
+    var daily: DailyCloses? = nil
 
-    /// The badge: the trades left with ways on, else the To do rows.
-    var todoN: Int { ways?.trades ?? tasks.count }
+    /// The orders still to place with a plan, else the trades left with ways on, else the To do rows. Worked out
+    /// once when the names are built (it was rebuilt on every redraw: a hang on the phone, 26 Oct 2026).
+    var todo = 0
+    var todoN: Int { todo }
+    func countTodo() -> Int {
+        if let p = plan { return POrders.count(POrders.build(t, p, legs: legs, dg: dg, earnings: earnings, placed: POrders.placed(t, p.week), done: POrders.done(t, p.week))) }
+        return ways?.trades ?? tasks.count
+    }
     var hasTodo: Bool { todoN > 0 }
 
     func matches(_ f: PFilter) -> Bool {
@@ -52,22 +65,33 @@ struct PName: Identifiable {
 enum PNames {
     /// Every name with a card (TSLA sits on the Home map only): names with To do first, then the
     /// order the cards already keep, safest first.
+    /// Built once per update and reused by every screen that asks (Positions, Gamma, Insights, the strip): it was
+    /// rebuilt in each body on every redraw.
+    private static var memoKey = "", memo: [PName] = []
     @MainActor static func build(_ home: HomePayload, orderFrom: HomePayload?) -> [PName] {
+        let key = "\(home.builtAt)|\(orderFrom?.builtAt ?? "")|\(UserDefaults.standard.string(forKey: POrders.doneKey) ?? "")|\(UserDefaults.standard.string(forKey: POrders.placedKey) ?? "")"
+        if key == memoKey { return memo }
+        let out = make(home, orderFrom: orderFrom)
+        memoKey = key; memo = out
+        return out
+    }
+    @MainActor private static func make(_ home: HomePayload, orderFrom: HomePayload?) -> [PName] {
         let pages = PCache.pages(home, orderFrom: orderFrom)
         let sold = pages.first { $0.kind == .sold }, bought = pages.first { $0.kind == .bought }
         let names = ((sold?.cards.map(\.t) ?? []) + (bought?.cards.map(\.t) ?? [])).reduce(into: [String]()) { a, t in
             if !a.contains(t) && t != "TSLA" { a.append(t) }
         }
-        let rows = home.thisWeek?.value ?? [], bars = home.todo?.value ?? [:], ways = home.ways?.value ?? [:]
+        let rows = home.thisWeek?.value ?? [], bars = home.todo?.value ?? [:], ways = home.ways?.value ?? [:], plans = home.plan?.value ?? [:]
         let moves = Dictionary(home.portfolio.map { ($0.ticker, $0.ranges.d) }, uniquingKeysWith: { a, _ in a })
-        let all: [PName] = names.map { t in
+        let all: [PName] = names.map { t -> PName in
             let sc = sold?.cards.first { $0.t == t }, bc = bought?.cards.first { $0.t == t }
             let calls = (sc?.legs ?? []).filter { $0.call && $0.base > 0 }
             return PName(t: t, px: (sc ?? bc)?.px ?? 0, move: moves[t] ?? nil, sold: sc, bought: bc,
                          dg: home.writes.names.first { $0.ticker == t }?.dg?.value, strategy: home.strategies?[t],
                          tasks: rows.filter { $0.t == t }.sorted { !$0.buy && $1.buy }, bars: bars[t], ways: ways[t],
-                         kept: calls.map { $0.g / $0.base * 100 }.max() ?? 0)
-        }
+                         kept: calls.map { $0.g / $0.base * 100 }.max() ?? 0, plan: plans[t], legs: home.legs.filter { $0.ticker == t },
+                         earnings: home.writes.names.first { $0.ticker == t }?.nextEarnings?.date, daily: home.daily?.value?[t])
+        }.map { n in var n = n; n.todo = n.countTodo(); return n }
         return all.filter(\.hasTodo) + all.filter { !$0.hasTodo }
     }
 
@@ -100,13 +124,16 @@ struct SunnyPositionCards: View {
         let hours = home.hours
         let live = PChartGeom.liveSlot(sessions: hours?.days ?? [], today: home.today, now: SClock.now(), calendar: home.calendar)
         let open = MarketClock.isRegular(SClock.now(), calendar: home.calendar)
-        VStack(alignment: .leading, spacing: 12) {
+        // Lazy: only the cards on screen are built and redrawn on each 15 s update (Nik's phone showed a 550 ms hang
+        // when all seven cards, four faces each, redrew every update; 26 Oct 2026).
+        LazyVStack(alignment: .leading, spacing: 12) {
             ForEach(Array(names.enumerated()), id: \.element.id) { j, n in
                 PNameCard(n: n, ringed: router.ring == n.t, width: width,
                           go: seen || reduce, delay: Double(min(j, 6)) * S.stagger,
-                          hours: hours, live: live, today: home.today, open: open)
-                    // Scrolled to from a tap: the card lands 16 pt under the nav bar (block 12a).
-                    .background(alignment: .top) { Color.clear.frame(height: 1).offset(y: -16).id("pos-\(n.t)") }
+                          hours: hours, live: live, today: home.today, open: open, cal: home.calendar)
+                    // Scrolled to from a tap: the id sits on the row itself, so the lazy list can find a card it has
+                    // not built yet (block 12a).
+                    .id("pos-\(n.t)")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -160,11 +187,15 @@ private struct PNameCard: View {
     let live: Double
     let today: String
     let open: Bool
+    let cal: [CalendarDay]
 
     @State private var pos = ScrollPosition()
     @State private var prog = PFaceProgress()
     /// Each face's own height: the card takes the one it is on, blended mid-swipe (handoff 31).
     @State private var hs: [Face: CGFloat] = [:]
+    /// Done for this week on a sale: read so the badge redraws with it.
+    @AppStorage(POrders.doneKey) private var doneRaw = ""
+    @AppStorage(POrders.placedKey) private var placedRaw = ""
     /// The To do face's chip and tapped ways, kept for the session (13c).
     @State private var block: PWays.Block = .sell
     @State private var sel: [PWays.Block: String] = [:]
@@ -175,7 +206,7 @@ private struct PNameCard: View {
     private var pageW: CGFloat { width + 40 }
     private var faces: [Face] {
         // With ways the To do face stays on every card, the walls showing even with nothing to trade (23 Oct).
-        [n.hasTodo || n.ways != nil ? .todo : nil, n.sold != nil ? .sold : nil, n.bought != nil ? .bought : nil,
+        [n.hasTodo || n.ways != nil || n.plan != nil ? .todo : nil, n.sold != nil ? .sold : nil, n.bought != nil ? .bought : nil,
          n.bought != nil && n.dg != nil ? .dg : nil].compactMap { $0 }
     }
     /// The Δ Γ dot, only while a buy is open: red when it goes short inside a normal week's move,
@@ -187,6 +218,14 @@ private struct PNameCard: View {
         return nil
     }
     private func mark(_ f: Face) -> PMark {
+        // With a plan: the orders to place on To do, an orange dot on Δ Γ while a hedge is due (13e).
+        if let p = n.plan {
+            return switch f {
+            case .todo: n.todoN > 0 ? .badge(n.todoN) : .none
+            case .dg: (p.hedge?.add ?? 0) > 0 ? .dot(S.orange) : .none
+            default: .none
+            }
+        }
         // With ways the badge says it all: no dots on the other tabs (13c).
         if n.ways != nil { return f == .todo && n.todoN > 0 ? .badge(n.todoN) : .none }
         return switch f {
@@ -233,30 +272,6 @@ private struct PNameCard: View {
                 .onScrollPhaseChange { _, ph in prog.moving = ph != .idle }
             }
             .frame(width: pageW)
-            HStack(spacing: 8) {
-                Button { router.insights = t } label: {
-                    Text("This week's insights").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
-                        .foregroundStyle(S.ink)
-                        .lineLimit(1).minimumScaleFactor(0.85)
-                        .frame(maxWidth: .infinity).frame(height: 44)
-                        .background(Capsule().fill(S.track))
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(SPressStyle(scale: 0.97))
-                .accessibilityLabel("Open this week's insights for \(t)")
-                // The Walls screen for this name (13d), pushed in the Positions stack.
-                Button { router.walls = t } label: {
-                    Text("All walls").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
-                        .foregroundStyle(S.ink)
-                        .lineLimit(1)
-                        .padding(.horizontal, 20).frame(height: 44)
-                        .background(Capsule().fill(S.track))
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(SPressStyle(scale: 0.97))
-                .accessibilityLabel("All walls for \(t)")
-            }
-            .padding(.horizontal, 20)
         }
         .foregroundStyle(S.ink)
         .padding(.vertical, 20)
@@ -349,10 +364,12 @@ private struct PNameCard: View {
     @ViewBuilder private func face(_ f: Face) -> some View {
         switch f {
         case .todo:
-            if let w = n.ways { PWaysFace(t: t, px: n.px, w: w, block: $block, sel: $sel) } else { todoFace }
-        case .sold: if let c = n.sold { side(c) }
-        case .bought: if let c = n.bought { side(c) }
-        case .dg: if let d = n.dg { PDGFace(t: t, dg: d, width: width) }
+            if let p = n.plan { POrdersFace(t: t, p: p, n: n, legs: n.legs, earnings: n.earnings) }
+            else if let w = n.ways { PWaysFace(t: t, px: n.px, w: w, block: $block, sel: $sel) } else { todoFace }
+        // With the week's plan: Sold and Bought as 13f (handoff 32).
+        case .sold: if let c = n.sold { if n.plan != nil, let v = PSoldPlan(c: c, n: n, hours: hours, live: live, today: today, cal: cal, width: width) { v } else { side(c) } }
+        case .bought: if let c = n.bought { if n.plan != nil { PBoughtPlan(c: c, n: n, today: today, width: width) } else { side(c) } }
+        case .dg: if let d = n.dg { PDGFace(t: t, dg: d, width: width, plan: n.plan) }
         }
     }
 
