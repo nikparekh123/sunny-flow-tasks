@@ -45,6 +45,15 @@ enum MarketClock {
         return isTradingDay(t.date, weekday: t.weekday, calendar) && t.minutes >= 4 * 60 && t.minutes < 20 * 60
     }
 
+    /// 18:00 to the 9:30 open, from the evening before a trading day: the Today cards show where the index
+    /// futures point and the app keeps updating (Nik, 25 Oct 2026: "every night from 6 PM"). Not Friday or
+    /// Saturday night, nor the night before a market holiday.
+    static func futuresNight(_ d: Date, calendar: [CalendarDay]) -> Bool {
+        let t = ny(d)
+        if t.minutes >= 18 * 60 { let n = addDays(t.date, 1); return isTradingDay(n.iso, weekday: n.weekday, calendar) }
+        return t.minutes < 9 * 60 + 30 && isTradingDay(t.date, weekday: t.weekday, calendar)
+    }
+
     /// 9:30 to the close on a trading day.
     static func isRegular(_ d: Date, calendar: [CalendarDay]) -> Bool {
         let t = ny(d)

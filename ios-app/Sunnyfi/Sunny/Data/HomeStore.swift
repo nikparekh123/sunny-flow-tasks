@@ -176,7 +176,8 @@ final class HomeStore {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(Self.untilNextBuild(calendar: home?.calendar ?? [])))
             if Task.isCancelled { break }
-            if MarketClock.inSession(SClock.now(), calendar: home?.calendar ?? []) {
+            if MarketClock.inSession(SClock.now(), calendar: home?.calendar ?? [])
+                || MarketClock.futuresNight(SClock.now(), calendar: home?.calendar ?? []) {
                 await refresh(.tick)
                 updateHealth()
             } else if let h = home, MarketClock.ny(SClock.now()).date != h.today {

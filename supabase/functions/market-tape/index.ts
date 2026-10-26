@@ -1,12 +1,14 @@
 /**
  * market-tape — the market around the book, from Yahoo, every 30 s from
- * 4:00 to 20:00 New York time on weekdays.
+ * 4:00 to 20:00 New York time on weekdays, and through the night while the
+ * index futures trade (Sunday 18:00 to Friday 17:00, less the daily 17:00-18:00
+ * break) so the Today cards can show them from 18:00 (Nik, 25 Oct 2026).
  *
  *   SPY QQQ IWM            the Today row, through pre-market and after hours
  *   ^VIX                   a level, not a price
  *   ^N225 ^GDAXI ^NSEI 000001.SS   the Overnight card (pre-market only)
  *   INTU ADBE PYPL VZ TMUS SPCX TSLA APP  the Watchlist (Nik, 12 and 14 Oct 2026)
- *   ES=F NQ=F RTY=F        front-month futures for the 7:00-9:30 cards (handoff 24,
+ *   ES=F NQ=F RTY=F        front-month futures for the 18:00-9:30 cards (handoff 24,
  *                          block 09). Yahoo's are ~10 min delayed (measured 600 s);
  *                          Nik took that on 15 Oct. VX is not on Yahoo, so VIX has none.
  *                          Each one's 16:00 price is kept in daily_closes as the base.
@@ -31,7 +33,7 @@
  * not a JWT, so a verify_jwt function answers 401 to every scheduled call
  * (12 Oct 2026: the first deploys did exactly that).
  */
-const BUILD = '2026-10-15.1';
+const BUILD = '2026-10-25.1';
 const UA = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 '
     + '(KHTML, like Gecko) Version/17.0 Safari/605.1.15',
@@ -159,8 +161,13 @@ Deno.serve(async (req) => {
 
     const ny = nyParts();
     const weekday = !['Sat', 'Sun'].includes(ny.wd);
-    if (!body.force && !(weekday && ny.mins >= 4 * 60 && ny.mins < 20 * 60)) {
-      return new Response(JSON.stringify({ ok: true, build: BUILD, skipped: 'outside 4:00-20:00 ET weekdays' }),
+    /* CME's equity index futures: Sunday 18:00 to Friday 17:00 New York, with a 17:00-18:00 break each
+       weekday. The cron calls every minute; outside both windows this returns at once. */
+    const futuresOpen = (ny.wd === 'Sun' && ny.mins >= 18 * 60)
+      || (['Mon', 'Tue', 'Wed', 'Thu'].includes(ny.wd) && !(ny.mins >= 17 * 60 && ny.mins < 18 * 60))
+      || (ny.wd === 'Fri' && ny.mins < 17 * 60);
+    if (!body.force && !(weekday && ny.mins >= 4 * 60 && ny.mins < 20 * 60) && !futuresOpen) {
+      return new Response(JSON.stringify({ ok: true, build: BUILD, skipped: 'outside 4:00-20:00 ET weekdays and the futures hours' }),
         { headers: { 'Content-Type': 'application/json' } });
     }
 

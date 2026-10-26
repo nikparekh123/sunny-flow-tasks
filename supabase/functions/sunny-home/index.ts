@@ -17,10 +17,10 @@
  * Daily Flex, both accounts), market_calendar, earnings_events,
  * earnings_season, daily_closes, and Theta for an earnings card's priced move.
  *
- * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
- * 30 s apart, a quiet pass every 10 minutes otherwise).
+ * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours and
+ * while the index futures trade, 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-23.3';
+const BUILD = '2026-10-25.1';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -626,13 +626,16 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   });
   const indices = ['SPY', 'QQQ', 'IWM', '^VIX'].map((s) => tape(mk(s))).filter(Boolean);
   const overnight = ['^N225', '^GDAXI', '^NSEI', '000001.SS'].map((s) => tape(mk(s))).filter(Boolean);
-  /* Futures for the 7:00-9:30 cards (handoff 24, block 09): each card's 16:00
-     close times (future now / its 16:00 price). The base is the future's last
-     stored 16:00 before today; the app judges staleness from `at` (Yahoo runs
-     ~10 min behind; Nik allows 20). VIX has no future here (no VX on Yahoo). */
+  /* Futures for the cards from 18:00 to the 9:30 open (handoff 24, block 09; from 18:00 since Nik, 25 Oct
+     2026): each card's 16:00 close times (future now / its 16:00 price). The base is the future's 16:00
+     price on the SAME day as the card's last regular close, so an evening runs from today's close and a
+     morning from yesterday's (it used to take the last one before today, wrong after the close). The app
+     judges staleness from `at` (Yahoo runs ~10 min behind; Nik allows 20). VIX has no future here. */
+  const nyDay = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
   const futures = [['SPY', 'ES=F', 'ES'], ['QQQ', 'NQ=F', 'NQ'], ['IWM', 'RTY=F', 'RTY']].map(([card, sym, pill]) => {
-    const m = mk(sym);
-    const b = closes.filter((c) => c.ticker === sym && String(c.date) < today).sort((x, y) => String(y.date).localeCompare(String(x.date)))[0];
+    const m = mk(sym), closeDay = mk(card)?.regular_time ? nyDay(String(mk(card)!.regular_time)) : null;
+    const b = closes.filter((c) => c.ticker === sym && (closeDay ? String(c.date) === closeDay : String(c.date) < today))
+      .sort((x, y) => String(y.date).localeCompare(String(x.date)))[0];
     return { card, symbol: sym, pill, price: num(m?.price), at: m?.regular_time ?? null,
              base: b ? Number(b.close_price) : null, base_date: b ? String(b.date) : null };
   });
@@ -2371,7 +2374,12 @@ Deno.serve(async (req) => {
   try { if (req.method === 'POST') body = await req.json(); } catch { /* cron sends {} */ }
   try {
     const n = ny();
-    const live = !['Sat', 'Sun'].includes(n.wd) && n.mins >= 4 * 60 && n.mins < 20 * 60;
+    /* Every 30 s while the index futures trade too (Sunday 18:00 to Friday 17:00, less 17:00-18:00):
+       the Today cards show them from 18:00 (Nik, 25 Oct 2026). */
+    const futuresOpen = (n.wd === 'Sun' && n.mins >= 18 * 60)
+      || (['Mon', 'Tue', 'Wed', 'Thu'].includes(n.wd) && !(n.mins >= 17 * 60 && n.mins < 18 * 60))
+      || (n.wd === 'Fri' && n.mins < 17 * 60);
+    const live = (!['Sat', 'Sun'].includes(n.wd) && n.mins >= 4 * 60 && n.mins < 20 * 60) || futuresOpen;
     /* ⚠ EVERY 15 S IN THE REGULAR SESSION (Nik, 14 Oct 2026): mp-refresh
        prices at :00 :15 :30 :45 from 9:30 to 16:00 New York, so four builds,
        each just after a price pass; every 30 s otherwise. */

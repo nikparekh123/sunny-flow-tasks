@@ -4,10 +4,11 @@
 //
 //  Block 08 · quick nav (Book · Risk · Income · Results) and the section
 //  titles it scrolls to. Block 09 · Today: SPY · QQQ · IWM · VIX cards
-//  (three in view, swipe for VIX, tap switches % and $), Overnight under
-//  them 4:00 to 7:00, futures-implied prices 7:00 to 9:30 with the bell at
-//  9:30 (handoff 24), Last week in their place from Friday's close to
-//  Monday 4:00. New York time throughout.
+//  (three in view, swipe for VIX, tap switches % and $), futures-implied
+//  prices from 18:00 the evening before a trading day to the bell at 9:30
+//  (handoff 24; from 18:00 since Nik, 25 Oct 2026), Overnight under them
+//  4:00 to 7:00, Last week in their place from Friday's close to Sunday
+//  18:00. New York time throughout.
 //
 
 import SwiftUI
@@ -74,19 +75,22 @@ struct SunnyToday: View {
     @State private var captionClosed = false       // its 26 pt closed
     @Environment(\.accessibilityReduceMotion) private var reduce
 
-    private enum Mode { case cards, preMarket, futures, lastWeek }
+    private enum Mode { case cards, futures, lastWeek }
 
     private var mode: Mode {
-        let t = MarketClock.ny(SClock.now()), m = t.minutes
+        let now = SClock.now(), t = MarketClock.ny(now), m = t.minutes
+        // 18:00 to 9:30 before a trading day: where futures point (Sunday night included).
+        if MarketClock.futuresNight(now, calendar: home.calendar) { return .futures }
         let holiday = MarketClock.closure(t.date, home.calendar)?.kind == "closed" && t.weekday != 1 && t.weekday != 7
         if holiday { return .cards }
-        let weekend = (t.weekday == 6 && m >= 16 * 60) || t.weekday == 7 || t.weekday == 1 || (t.weekday == 2 && m < 4 * 60)
+        let weekend = (t.weekday == 6 && m >= 16 * 60) || t.weekday == 7 || t.weekday == 1
         if weekend, home.lastWeek != nil { return .lastWeek }
-        let trading = MarketClock.isTradingDay(t.date, weekday: t.weekday, home.calendar)
-        if trading, m >= 4 * 60, m < 7 * 60 { return .preMarket }
-        // 7:00 to 9:30: the cards show where futures point (handoff 24).
-        if trading, m >= 7 * 60, m < 9 * 60 + 30 { return .futures }
         return .cards
+    }
+    /// The Overnight card (Asia and Europe) under the cards, 4:00 to 7:00 on a trading day.
+    private var overnightHours: Bool {
+        let t = MarketClock.ny(SClock.now())
+        return MarketClock.isTradingDay(t.date, weekday: t.weekday, home.calendar) && t.minutes >= 4 * 60 && t.minutes < 7 * 60
     }
 
     /// What a card shows. Futures: the 16:00 close times (future now / its 16:00
@@ -136,7 +140,7 @@ struct SunnyToday: View {
                                 .padding(.horizontal, S.margin)
                         }
                     }
-                    if md == .preMarket, !home.overnight.isEmpty {
+                    if overnightHours, !home.overnight.isEmpty {
                         OvernightCard(tapes: home.overnight).padding(.horizontal, S.margin)
                     }
                 }
@@ -153,13 +157,17 @@ struct SunnyToday: View {
     /// background more than 60 s late, or Reduce Motion: a plain swap.
     private func bell() async {
         rolled = []; captionGone = false; captionClosed = false
-        var wait = Self.secondsToBell(SClock.now())
+        // From 18:00 the bell is the next morning's: 9:30 tomorrow, not 9:30 already gone today.
+        let start = SClock.now()
+        var wait = Self.secondsToBell(start)
+        if MarketClock.ny(start).minutes >= 12 * 60 { wait += 86_400 }
         #if DEBUG && targetEnvironment(simulator)
         if let d = DebugPreset.double("today.bell") { wait = d }       // audits: the clock is pinned
         #endif
+        let bellAt = start.addingTimeInterval(wait)
         if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
         guard !Task.isCancelled else { return }
-        let late = -Self.secondsToBell(SClock.now())
+        let late = SClock.now().timeIntervalSince(bellAt)
         let symbols = home.indices.map(\.symbol)
         if reduce || (late > 60 && DebugPreset.double("today.bell") == nil) {
             withAnimation(reduce ? .easeOut(duration: 0.2) : nil) { rolled = Set(symbols) }
