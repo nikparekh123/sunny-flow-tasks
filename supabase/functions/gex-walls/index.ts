@@ -32,9 +32,13 @@ type Row = Record<string, any>;
 
 class ThetaError extends Error {}
 async function theta(path: string): Promise<Row[]> {
-  const r = await fetch(`${THETA_URL}${path}&format=json`, { headers: { 'x-proxy-key': THETA_KEY }, signal: AbortSignal.timeout(60_000) });
-  if (!r.ok) throw new ThetaError(`Theta ${r.status} on ${path.split('?')[0]}: ${(await r.text()).slice(0, 200)}`);
-  return ((await r.json())?.response ?? []) as Row[];
+  for (let i = 0; ; i++) {
+    const r = await fetch(`${THETA_URL}${path}&format=json`, { headers: { 'x-proxy-key': THETA_KEY }, signal: AbortSignal.timeout(60_000) });
+    // "Too many concurrent requests": wait and ask again, 1, 2, then 4 s.
+    if (r.status === 429 && i < 3) { await r.body?.cancel(); await new Promise((f) => setTimeout(f, 1000 * 2 ** i)); continue; }
+    if (!r.ok) throw new ThetaError(`Theta ${r.status} on ${path.split('?')[0]}: ${(await r.text()).slice(0, 200)}`);
+    return ((await r.json())?.response ?? []) as Row[];
+  }
 }
 
 async function db(path: string, init?: RequestInit): Promise<Row[]> {
@@ -75,10 +79,12 @@ async function loadChain(ticker: string, o: { days?: number; expiries?: string[]
   const live = nyNow(), day = o.asOf ?? live.day, afterClose = o.asOf ? true : live.afterClose;
   const nowMs = o.asOf ? closeMs(o.asOf) : Date.now();
   const D = day.replaceAll('-', '');
-  // A past session: the whole end-of-day chain at once, and its expiries are the listed ones.
-  const hist = o.asOf ? await theta(`/v3/option/history/eod?symbol=${ticker}&expiration=*&start_date=${D}&end_date=${D}`) : [];
-  const listed = o.asOf ? [...new Set(hist.map((r) => String(r.contract.expiration)))].sort()
-    : (await theta(`/v3/option/list/expirations?symbol=${ticker}`)).map((x) => String(x.expiration));
+  // A past session: the whole end-of-day chain at once (its expiries are the listed ones), or, with named
+  // expiries, just those (SPY's whole chain is too big for one call; the list keeps past expiries too).
+  const named = !!(o.asOf && o.expiries?.length);
+  const hist = o.asOf && !named ? await theta(`/v3/option/history/eod?symbol=${ticker}&expiration=*&start_date=${D}&end_date=${D}`) : [];
+  const listed = o.asOf && !named ? [...new Set(hist.map((r) => String(r.contract.expiration)))].sort()
+    : (await theta(`/v3/option/list/expirations?symbol=${ticker}`)).map((x) => String(x.expiration)).sort();
   if (!listed.length) throw new IncompleteChain([`Theta lists no expirations for ${ticker}${o.asOf ? ` on ${o.asOf}` : ''}`]);
   let want: string[];
   if (o.expiries?.length) {
@@ -104,11 +110,19 @@ async function loadChain(ticker: string, o: { days?: number; expiries?: string[]
   // 23 Oct 2026). Their quotes are fetched for the price only when they are not in the run.
   const nearest2 = listed.filter((e) => e >= day && !(e === day && afterClose)).slice(0, 2);
   const extra = nearest2.filter((e) => !want.includes(e));
-  const [ivs, ois, ohlc, extraIvs] = o.asOf
+  // Named expiries one call at a time: Theta's Standard plan refuses many at once (429, 24 Oct 2026).
+  const each = async (paths: string[]) => { const out: Row[] = []; for (const p of paths) out.push(...(await theta(p))); return out; };
+  const eodOf = (es: string[]) => each(es.map((e) => `/v3/option/history/eod?symbol=${ticker}&expiration=${e.replaceAll('-', '')}&start_date=${D}&end_date=${D}`));
+  const [ivs, ois, ohlc, extraIvs] = named
+    ? await (async () => { const q = await eodOf(want);
+        const oi = await each(want.map((e) => `/v3/option/history/open_interest?symbol=${ticker}&expiration=${e.replaceAll('-', '')}&date=${D}`));
+        return [q, oi, q, await eodOf(extra)]; })()
+    : o.asOf
     ? [hist.filter((r) => want.includes(String(r.contract.expiration))),
        (await theta(`/v3/option/history/open_interest?symbol=${ticker}&expiration=*&date=${D}`)).filter((r) => want.includes(String(r.contract.expiration))),
        hist, hist.filter((r) => extra.includes(String(r.contract.expiration)))]
-    : await Promise.all([all('greeks/implied_volatility'), all('open_interest'), all('ohlc', '&current_day_only=true'),
+    // Today's volume is only there on a trading day (a weekend run reads none: Theta 472, 24 Oct 2026).
+    : await Promise.all([all('greeks/implied_volatility'), all('open_interest'), all('ohlc', '&current_day_only=true').catch(() => [] as Row[]),
       Promise.all(extra.map((e) => theta(q('greeks/implied_volatility', e.replaceAll('-', ''))))).then((xs) => xs.flat())]);
   const oi = new Map(ois.map((r) => [key(r.contract), Number((r.data ?? []).at(-1)?.open_interest ?? 0)]));
   const vol = new Map(ohlc.map((r) => [key(r.contract), Number((r.data ?? []).at(-1)?.volume ?? 0)]));
@@ -153,8 +167,8 @@ async function loadChain(ticker: string, o: { days?: number; expiries?: string[]
   return { chain: { ticker, spot, expiries: want, contracts }, warnings, nowMs, day };
 }
 
-async function run(ticker: string, days: number, expiries?: string[], pct?: number, save = true) {
-  const { chain, warnings: w0, nowMs, day } = await loadChain(ticker, { days, expiries });
+async function run(ticker: string, days: number, expiries?: string[], pct?: number, save = true, asOf?: string) {
+  const { chain, warnings: w0, nowMs, day } = await loadChain(ticker, { days, expiries, asOf });
   const b = buildStrikes(chain, { nowMs });
   // The flip is the zero-gamma level (Nik, 22 Oct 2026: the spec's cumulative crossing is dropped).
   const walls = findWalls(b.rows, chain.spot), flip = zeroGamma(b.legs, chain.spot);
@@ -193,8 +207,8 @@ async function run(ticker: string, days: number, expiries?: string[], pct?: numb
 
 /** One row per expiry (handoff 31, 13d): each expiry's own walls, flip, sleeping walls and strikes, saved
     for the day in place of any earlier run's. A failed expiry (too little quoted) is named, the rest saved. */
-async function runExpiries(ticker: string, asOf?: string, save = true) {
-  const { chain, warnings, nowMs, day } = await loadChain(ticker, { pick: logged, asOf });
+async function runExpiries(ticker: string, asOf?: string, save = true, expiries?: string[]) {
+  const { chain, warnings, nowMs, day } = await loadChain(ticker, expiries?.length ? { expiries, asOf } : { pick: logged, asOf });
   const rows: Row[] = [], errors: string[] = [];
   const m = (v: number | undefined) => v == null ? null : Math.round(v);
   for (const e of chain.expiries) {
@@ -223,7 +237,10 @@ async function runExpiries(ticker: string, asOf?: string, save = true) {
     await db(`gex_walls?ticker=eq.${ticker}&day=eq.${day}&expiry=not.is.null`, { method: 'DELETE' });
     await db('gex_walls', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(rows) });
   }
-  return { ticker, day, spot: chain.spot, saved: rows.map((r) => `${r.expiry} c ${r.call_wall}/${r.call_wall2} p ${r.put_wall}/${r.put_wall2}`), errors, warnings };
+  return { ticker, day, spot: chain.spot, saved: rows.map((r) => `${r.expiry} c ${r.call_wall}/${r.call_wall2} p ${r.put_wall}/${r.put_wall2}`),
+    rows: rows.map((r) => ({ expiry: r.expiry, flip: r.flip, net_gex: r.net_gex,
+      call: [[r.call_wall, r.call_wall_gex], [r.call_wall2, r.call_wall2_gex]], put: [[r.put_wall, r.put_wall_gex], [r.put_wall2, r.put_wall2_gex]], sleep: r.sleep })),
+    errors, warnings };
 }
 
 /* Who may call: the scheduler's x-cron-key, the service-role key, or a signed-in user of the app. */
@@ -244,7 +261,12 @@ Deno.serve(async (req) => {
   if (!THETA_URL || !THETA_KEY) return json({ ok: false, error: 'THETA_URL / THETA_PROXY_KEY not set' }, 500);
   let body: { ticker?: string; tickers?: string[]; days?: number | string[]; expiries?: string[]; target?: number; save?: boolean;
     mode?: string; per_expiry?: boolean; as_of?: string } = {};
-  try { if (req.method === 'POST') body = await req.json(); } catch { /* empty body */ }
+  // A body that does not parse is refused: it used to fall through to the daily save (24 Oct 2026, a
+  // malformed request on a Saturday wrote the book's rows for a day with no session).
+  if (req.method === 'POST') {
+    const raw = await req.text();
+    if (raw.trim()) { try { body = JSON.parse(raw); } catch { return json({ ok: false, error: 'body is not JSON' }, 400); } }
+  }
   const days = Math.max(1, Math.min(400, Number(Array.isArray(body.days) ? 45 : body.days ?? 45)));
   const book = async () => Object.keys((await db('home_snapshot?id=eq.1&select=s:payload->strategies'))[0]?.s ?? {}).sort();
   try {
@@ -258,11 +280,12 @@ Deno.serve(async (req) => {
       }
       return json({ ok: results.every((r) => !('error' in r) && !(r as Row).errors?.length), results });
     }
-    if (body.ticker && body.per_expiry) return json({ ok: true, ...(await runExpiries(body.ticker.toUpperCase(), body.as_of, body.save ?? true)) });
-    if (body.mode === 'daily' || !body.ticker) {
+    if (body.ticker && body.per_expiry) return json({ ok: true, ...(await runExpiries(body.ticker.toUpperCase(), body.as_of, body.save ?? true, body.expiries)) });
+    if (body.mode === 'daily') {
       const { day } = nyNow();
-      const closed = await db(`market_calendar?date=eq.${day}&kind=eq.closed&select=date`);
-      if (closed.length) return json({ ok: true, day, skipped: 'market closed' });
+      const wd = new Date(day + 'T12:00:00Z').getUTCDay();
+      const closed = wd === 0 || wd === 6 || (await db(`market_calendar?date=eq.${day}&kind=eq.closed&select=date`)).length > 0;
+      if (closed) return json({ ok: true, day, skipped: 'market closed' });
       // The open names: Home's strategy map has one key per name with a leg (the chain table can
       // hold a closed name, and a read of it caps at 1,000 rows).
       const names = body.tickers?.length ? body.tickers : await book();
@@ -279,7 +302,8 @@ Deno.serve(async (req) => {
       }
       return json({ ok: results.every((r) => !('error' in r)), day, results });
     }
-    return json(await run(body.ticker.toUpperCase(), days, body.expiries, body.target, body.save ?? true));
+    if (!body.ticker) return json({ ok: false, error: 'ticker, or mode daily or backfill, is required' }, 400);
+    return json(await run(body.ticker.toUpperCase(), days, body.expiries, body.target, body.save ?? true, body.as_of));
   } catch (e) {
     if (e instanceof IncompleteChain) return json({ ok: false, error: 'incomplete chain', problems: e.problems }, 422);
     if (e instanceof ThetaError) return json({ ok: false, error: e.message }, 502);
