@@ -1,0 +1,371 @@
+<title>LEAP Put Overlay Test</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (max 1120px). Verdict, then the trade sheet, then the five combination tables
+   with a name switcher. Numbers in mono; gain ink blue, loss ink orange, the app's own convention. */
+:root {
+  --bg: #0d0f12; --surface: #14171c; --raise: #1a1e24; --line: #262b33; --line-soft: #1e2229;
+  --fg: #e6e8eb; --muted: #949ca7; --faint: #6b737e;
+  --gain: #7fb0ff; --loss: #ffa166; --pick: rgba(127,176,255,0.09); --pick-line: rgba(127,176,255,0.45);
+  --chip: #1d2128; --chip-on: #e6e8eb; --chip-on-fg: #0d0f12;
+  --display: "Newsreader", Georgia, "Times New Roman", serif;
+  --body: "Inter", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f5f6f8; --surface: #ffffff; --raise: #f0f2f5; --line: #d9dde3; --line-soft: #e7eaee;
+    --fg: #15181d; --muted: #59616c; --faint: #858d98;
+    --gain: #1d5fd1; --loss: #c0530c; --pick: rgba(29,95,209,0.07); --pick-line: rgba(29,95,209,0.4);
+    --chip: #e8ebef; --chip-on: #15181d; --chip-on-fg: #ffffff;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f5f6f8; --surface: #ffffff; --raise: #f0f2f5; --line: #d9dde3; --line-soft: #e7eaee;
+  --fg: #15181d; --muted: #59616c; --faint: #858d98;
+  --gain: #1d5fd1; --loss: #c0530c; --pick: rgba(29,95,209,0.07); --pick-line: rgba(29,95,209,0.4);
+  --chip: #e8ebef; --chip-on: #15181d; --chip-on-fg: #ffffff;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 36px 64px; display: grid; gap: 44px; }
+@media (max-width: 520px) { .wrap { padding-inline: 16px; padding-block: 24px 48px; gap: 36px; } }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(30px, 5vw, 44px); line-height: 1.08; }
+h2 { font-size: 24px; line-height: 1.2; }
+h3 { font-size: 18px; line-height: 1.25; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.muted { color: var(--muted); }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.gain { color: var(--gain); } .loss { color: var(--loss); }
+header { display: grid; gap: 12px; }
+header .lede { color: var(--muted); font-size: 16px; }
+section { display: grid; gap: 16px; min-width: 0; }
+.sec-head { display: grid; gap: 6px; }
+
+/* verdict */
+.verdict { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 22px; display: grid; gap: 20px; }
+.figs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.fig { background: var(--raise); padding: 14px 16px; display: grid; gap: 4px; }
+.fig .k { font-size: 12px; color: var(--muted); }
+.fig .v { font-family: var(--mono); font-size: 22px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.fig .s { font-size: 12px; color: var(--faint); }
+@media (max-width: 720px) { .figs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+ul.points { margin: 0; padding-left: 20px; display: grid; gap: 8px; max-width: 76ch; }
+ul.points li::marker { color: var(--faint); }
+
+/* tables */
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 14px; }
+th, td { padding: 9px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line-soft); }
+tr:last-child td { border-bottom: 0; }
+thead th { font-weight: 500; font-size: 12px; color: var(--muted); background: var(--raise); border-bottom: 1px solid var(--line); vertical-align: bottom; line-height: 1.3; }
+th:first-child, td:first-child { text-align: left; position: sticky; left: 0; background: var(--surface); z-index: 1; }
+thead th:first-child { background: var(--raise); }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+td.sep, th.sep { border-left: 1px solid var(--line); }
+tr.pick td { background: var(--pick); }
+tr.pick td:first-child { background: linear-gradient(var(--pick), var(--pick)), var(--surface); box-shadow: inset 3px 0 0 var(--pick-line); }
+.pill { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 500; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--pick-line); color: var(--gain); vertical-align: 1px; }
+.tnote { font-size: 13px; color: var(--muted); max-width: 80ch; }
+.combo { display: grid; gap: 10px; min-width: 0; }
+.combo h3 .n { font-family: var(--mono); font-size: 13px; color: var(--faint); margin-right: 8px; font-weight: 400; }
+
+/* controls */
+.controls { display: grid; gap: 12px; position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); padding-block: 10px; border-bottom: 1px solid var(--line); }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { font: 500 13px var(--body); padding: 7px 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--chip); color: var(--fg); cursor: pointer; white-space: nowrap; }
+.chip[aria-pressed="true"] { background: var(--chip-on); color: var(--chip-on-fg); border-color: var(--chip-on); }
+.chip:focus-visible, .seg button:focus-visible, .toggle input:focus-visible { outline: 2px solid var(--gain); outline-offset: 2px; }
+.row2 { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 99px; overflow: hidden; }
+.seg button { font: 500 13px var(--body); padding: 6px 12px; background: transparent; color: var(--muted); border: 0; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--chip); color: var(--fg); }
+.toggle { display: inline-flex; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); cursor: pointer; }
+.strip { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; display: grid; gap: 8px; }
+.strip .facts { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 14px; }
+.strip .facts b { font-weight: 500; }
+
+/* trade sheet */
+.sheet { display: grid; gap: 22px; }
+.when { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.when div { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: grid; gap: 4px; }
+.when b { font-weight: 600; font-size: 14px; }
+.when span { font-size: 14px; color: var(--muted); }
+@media (max-width: 720px) { .when { grid-template-columns: 1fr; } }
+dl.defs { display: grid; grid-template-columns: max-content 1fr; gap: 8px 18px; margin: 0; max-width: 860px; }
+dl.defs dt { font-weight: 500; }
+dl.defs dd { margin: 0; color: var(--muted); }
+@media (max-width: 560px) { dl.defs { grid-template-columns: 1fr; gap: 2px; } dl.defs dd { margin-bottom: 8px; } }
+footer { font-size: 13px; color: var(--faint); border-top: 1px solid var(--line); padding-top: 16px; }
+@media (prefers-reduced-motion: no-preference) { .chip, .seg button { transition: background .15s, color .15s; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Forward test · 15 Oct 2026 · 300 paths × 12 months per future</div>
+    <h1>LEAP Put Overlay Test</h1>
+    <p class="lede">Buying in-the-money puts against the LEAPs, selling weekly puts to pay for them, and the ways to keep upside. Ten names, five combinations, each tested on the same nine futures.</p>
+  </header>
+
+  <section class="verdict" aria-labelledby="v-h">
+    <div class="sec-head"><h2 id="v-h">What the test suggests</h2>
+      <p class="muted">All ten names together, 12 months, compared with today's position: LEAPs with calls sold on all of them, no puts. Strict view: weekly options lose their extra richness within two months.</p></div>
+    <div class="figs">
+      <div class="fig"><span class="k">Flat year</span><span class="v loss">−$17K</span><span class="s">all ten names</span></div>
+      <div class="fig"><span class="k">30% crash in 2 months</span><span class="v gain">+$208K</span><span class="s">vs today</span></div>
+      <div class="fig"><span class="k">30% jump in a month</span><span class="v loss">−$160K</span><span class="s">what it costs in a rip</span></div>
+      <div class="fig"><span class="k">Sudden 15% drop today</span><span class="v">$113K → $77K</span><span class="s">loss, a third smaller</span></div>
+    </div>
+    <ul class="points">
+      <li><b>Puts:</b> buy March 2027 puts on half the LEAPs, at the strike nearest 8% above the price. Sell weekly puts on a quarter of the LEAPs, at the first strike 2% below the price. Selling at the money instead is about the same: a little cheaper in rallies, a little less crash protection.</li>
+      <li><b>Calls:</b> keep 30% at the money and 70% at 0.6 SD; 1 SD costs more everywhere. Selling on all LEAPs is best on your four names if weekly options stay as rich as today. If that richness fades, selling on 70 to 80% does slightly better.</li>
+      <li><b>Extra upside</b> is optional: out-of-the-money calls cost $1K to $6K a name in a flat year and win back $5K to $25K in a 30% jump.</li>
+      <li><b>The price of the hedge:</b> about $17K in a flat year across the ten names ($6K to $11K on your four), $59K if everything rises 15%, $160K in a sudden 30% jump.</li>
+    </ul>
+    <p class="tnote"><b>Corrected 15 Oct, evening.</b> The first version overstated weekly option income: it priced the four weeks after each report as if the report were still ahead. The flat-year cost rose from $4K to $17K and the call-count advice now depends on richness. The put advice held.</p>
+
+  </section>
+
+  <section class="sheet" aria-labelledby="s-h">
+    <div class="sec-head"><h2 id="s-h">Trade sheet</h2>
+      <p class="muted">Quotes at 1:46 pm ET, 15 Oct. Cost uses the price the test assumed: the middle plus a quarter of the spread. Counts are rounded from one put per 2 LEAPs, one weekly put per 4, one call per 3.</p></div>
+    <div class="combo"><h3>Puts to buy · expiry Fri 19 Mar 2027</h3><div class="tbl-wrap"><table id="t-buy"></table></div>
+      <p class="tnote">Your four current names cost $39,400. All ten cost $108,000.</p></div>
+    <div class="combo"><h3>Puts to sell this Friday · expiry Fri 23 Oct</h3><div class="tbl-wrap"><table id="t-sell"></table></div>
+      <p class="tnote">NFLX (20 Oct) and TSLA (21 Oct) report this week, so their premium and their risk are both high.</p></div>
+    <div class="combo"><h3>Calls to buy for extra upside · optional</h3><div class="tbl-wrap"><table id="t-calls"></table></div>
+      <p class="tnote">Flat year and 30% jump are what the calls add to the hedged position over 12 months. Each name gets the version (quarterly 15% out, or 1-year 30% out) that did better on the no-view paths. * SPCX and TSLA: the calls look good, but selling weekly calls on these two loses money while their weekly options stay priced below their moves (see Which name to add). PYPL's spread is very wide: work a limit near $2.50.</p></div>
+    <div class="when">
+      <div><b>Weekly puts</b><span>Sell every Friday for the next Friday. Never above the long put strike. Close any short put that is in the money before Friday's close.</span></div>
+      <div><b>Long puts</b><span>Sell and roll before the close on 19 Mar 2027 (an in-the-money put left to expire becomes short stock). Roll into Aug 20 2027 at the strike nearest 8% above the price.</span></div>
+      <div><b>Quarterly calls</b><span>Roll on 15 Jan into Apr 16 2027, again about 15% out. Then July, then October.</span></div>
+      <div><b>Weekly calls and 1-year calls</b><span>No change to the weekly calls: 30% at the money, 70% at 0.6 SD on all LEAPs. Hold the 1-year calls.</span></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="n-h">
+    <div class="sec-head"><h2 id="n-h">NKE: which put strike</h2>
+      <p class="muted">March 2027 puts sized to about the same hedge. Change vs today's NKE position over 12 months, $K. Strict view; with today's richness held the order is the same.</p></div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Set-up</th><th>Time value paid</th><th>Flat</th><th>Up 15%</th><th>Jump +30%</th><th>Crash −30%</th><th>No view</th><th class="sep">Margin relief</th></tr></thead>
+      <tbody>
+        <tr><th scope="row" style="text-align:left">30 × $40, sell 15</th><td class="num">$8,500</td><td class="num loss">−5.6</td><td class="num loss">−15.1</td><td class="num loss">−31.6</td><td class="num gain">+34.6</td><td class="num">−0.4</td><td class="num sep">$6.1K</td></tr>
+        <tr class="pick"><th scope="row" style="text-align:left;font-weight:600">25 × $42.50, sell 12<span class="pill">Suggested</span></th><td class="num">$5,090</td><td class="num loss">−4.1</td><td class="num loss">−12.8</td><td class="num loss">−32.6</td><td class="num gain">+32.5</td><td class="num">+0.1</td><td class="num sep">$6.2K</td></tr>
+        <tr><th scope="row" style="text-align:left">20 × $45, sell 10</th><td class="num">$2,870</td><td class="num loss">−2.3</td><td class="num loss">−10.8</td><td class="num loss">−30.2</td><td class="num gain">+26.9</td><td class="num">−0.1</td><td class="num sep">$5.3K</td></tr>
+        <tr><th scope="row" style="text-align:left">20 × $45, sell 15</th><td class="num">$2,870</td><td class="num loss">−2.3</td><td class="num loss">−9.6</td><td class="num loss">−27.7</td><td class="num gain">+24.1</td><td class="num">−0.1</td><td class="num sep">$3.3K</td></tr>
+        <tr><th scope="row" style="text-align:left">20 × $45, sell 20</th><td class="num">$2,870</td><td class="num loss">−1.5</td><td class="num loss">−8.8</td><td class="num loss">−25.5</td><td class="num gain">+21.3</td><td class="num">−0.1</td><td class="num sep">$1.2K</td></tr>
+        <tr><th scope="row" style="text-align:left">18 × $50, sell 9</th><td class="num">$1,550</td><td class="num loss">−1.7</td><td class="num loss">−9.5</td><td class="num loss">−34.4</td><td class="num gain">+26.7</td><td class="num">+0.1</td><td class="num sep">$5.4K</td></tr>
+        <tr><th scope="row" style="text-align:left">20 × $45, sell 15, + 30 Dec 2027 $50 calls</th><td class="num">$2,870 + $9,180</td><td class="num loss">−11.8</td><td class="num loss">−15.9</td><td class="num gain">+8.4</td><td class="num gain">+13.7</td><td class="num">−1.8</td><td class="num sep">$0</td></tr>
+      </tbody></table></div>
+    <p class="tnote">Time value is what you pay above the put's worth today, at 1:46 pm quotes. Margin relief is the drop in the worst loss on a sudden 15% move either way, after the weekly sale. For the puts alone IBKR showed $7.8K (30 × $40) and $9.1K (20 × $45); this test gives $6.0K and $6.8K, the same order. Deeper strikes cost less to hold but protect less in a crash, and selling more weekly puts against them gives back the margin relief.</p>
+  </section>
+
+  <section aria-labelledby="a-h">
+    <div class="sec-head"><h2 id="a-h">Which name to add</h2>
+      <p class="muted">Every name as the same new block: about $150K of stock as a Jan 2028 LEAP near 0.80 delta, calls on all, plus the suggested puts. Per $100K of stock over 12 months, $K. NKE left out as already large. UBER is tested as a new block too, not your Jan 2029 calls. SNDK is SanDisk.</p></div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Name</th><th>LEAP time value a year</th><th>Weekly options vs moves</th><th>Place in 52-week range</th><th class="sep">Flat</th><th>Crash −30%</th><th>No view, richness fades</th><th>No view, richness holds</th></tr></thead>
+      <tbody>
+        <tr class="pick"><th scope="row" style="text-align:left;font-weight:600">PYPL<span class="pill">First</span></th><td class="num">6.1%</td><td class="num">1.04</td><td class="num">51%</td><td class="num sep loss">−2.2</td><td class="num gain">+1.4</td><td class="num gain">+5.3</td><td class="num gain">+4.5</td></tr>
+        <tr><th scope="row" style="text-align:left">UBER<span class="pill">Second</span></th><td class="num">7.0%</td><td class="num">1.12</td><td class="num">16%</td><td class="num sep loss">−7.7</td><td class="num loss">−3.0</td><td class="num gain">+0.3</td><td class="num gain">+6.0</td></tr>
+        <tr><th scope="row" style="text-align:left">NFLX</th><td class="num">8.5%</td><td class="num">1.16</td><td class="num">10%</td><td class="num sep loss">−9.8</td><td class="num loss">−3.7</td><td class="num loss">−2.3</td><td class="num gain">+5.1</td></tr>
+        <tr><th scope="row" style="text-align:left">BABA</th><td class="num">7.9%</td><td class="num">1.12</td><td class="num">18%</td><td class="num sep loss">−10.1</td><td class="num loss">−4.1</td><td class="num loss">−1.6</td><td class="num gain">+5.2</td></tr>
+        <tr><th scope="row" style="text-align:left">INTU</th><td class="num">8.5%</td><td class="num">1.15</td><td class="num">18%</td><td class="num sep loss">−11.0</td><td class="num loss">−8.9</td><td class="num loss">−6.4</td><td class="num gain">+1.3</td></tr>
+        <tr><th scope="row" style="text-align:left">DELL</th><td class="num">11.9%</td><td class="num">1.01</td><td class="num">75%</td><td class="num sep loss">−12.4</td><td class="num loss">−12.5</td><td class="num gain">+2.7</td><td class="num loss">−2.7</td></tr>
+        <tr><th scope="row" style="text-align:left">ADBE</th><td class="num">9.7%</td><td class="num">1.07</td><td class="num">34%</td><td class="num sep loss">−10.5</td><td class="num loss">−6.1</td><td class="num loss">−4.7</td><td class="num loss">−3.2</td></tr>
+        <tr><th scope="row" style="text-align:left">LULU</th><td class="num">10.6%</td><td class="num">1.05</td><td class="num">6%</td><td class="num sep loss">−13.1</td><td class="num loss">−9.3</td><td class="num loss">−4.7</td><td class="num loss">−4.7</td></tr>
+        <tr><th scope="row" style="text-align:left">TSLA</th><td class="num">9.7%</td><td class="num">0.95</td><td class="num">32%</td><td class="num sep loss">−10.7</td><td class="num loss">−7.9</td><td class="num gain">+2.3</td><td class="num loss">−10.7</td></tr>
+        <tr><th scope="row" style="text-align:left">SPCX</th><td class="num">8.1%</td><td class="num">0.90</td><td class="num">37%</td><td class="num sep loss">−10.6</td><td class="num loss">−15.5</td><td class="num gain">+2.5</td><td class="num loss">−25.1</td></tr>
+        <tr><th scope="row" style="text-align:left">SNDK</th><td class="num">13.0%</td><td class="num">0.90</td><td class="num">57%</td><td class="num sep loss">−12.3</td><td class="num loss">−15.2</td><td class="num gain">+15.0</td><td class="num loss">−18.7</td></tr>
+        <tr><th scope="row" style="text-align:left">APP</th><td class="num">12.7%</td><td class="num">0.99</td><td class="num">3%</td><td class="num sep loss">−19.5</td><td class="num loss">−19.8</td><td class="num loss">−8.8</td><td class="num loss">−18.6</td></tr>
+      </tbody></table></div>
+    <p class="tnote">LEAP time value a year is what the LEAP loses to time if the price does not move. Weekly options vs moves is weekly implied volatility over recent moves: above 1, selling calls has an edge; below 1, it loses. Flat and crash are the strict view. PYPL leads on cheap LEAPs (priced at 29% volatility while it has moved 39%), but it sits mid-range, not near a 52-week low. UBER is near its 52-week low with cheap LEAPs and rich weekly options. TSLA, SPCX and SNDK swing on whether their weekly options get richer; SNDK and DELL move 60 to 100% a year.</p>
+  </section>
+
+  <section aria-labelledby="c-h">
+    <div class="sec-head"><h2 id="c-h">The five combinations</h2>
+      <p class="muted">Each table changes one thing and keeps the rest at the suggested set-up. Pick all ten names or one name.</p></div>
+    <div class="controls">
+      <div class="chips" id="chips" role="group" aria-label="Name"></div>
+      <div class="row2">
+        <div class="seg" role="group" aria-label="Values">
+          <button id="m-chg" aria-pressed="true">Change vs today</button>
+          <button id="m-tot" aria-pressed="false">12-month total</button>
+        </div>
+        <div class="seg" role="group" aria-label="Weekly option richness">
+          <button id="r-fade" aria-pressed="true">Richness fades</button>
+          <button id="r-hold" aria-pressed="false">Stays as today</button>
+        </div>
+        <label class="toggle"><input type="checkbox" id="all9"> All nine futures</label>
+      </div>
+    </div>
+    <div id="strip"></div>
+    <div id="combos" style="display:grid;gap:30px"></div>
+  </section>
+
+  <section aria-labelledby="d-h">
+    <div class="sec-head"><h2 id="d-h">How to read the tables</h2></div>
+    <dl class="defs">
+      <dt>Figures</dt><dd>$K over 12 months, the middle result of 300 paths. In "Change vs today", + means better than today's position.</dd>
+      <dt>Flat, Up 15%, Down 15%</dt><dd>The stock ends the year there, wandering the way it usually does.</dd>
+      <dt>Jump +30%</dt><dd>Up 30% within a month, then holds.</dd>
+      <dt>Crash −30%</dt><dd>Down 30% within two months, then holds.</dd>
+      <dt>No view</dt><dd>300 random paths with no direction, averaged. The fairest single number.</dd>
+      <dt>Sudden −15%</dt><dd>How much the position loses if the stock drops 15% today. A rough stand-in for margin.</dd>
+      <dt>Delta at start</dt><dd>Dollars of stock the whole position is long right after setting it up.</dd>
+      <dt>Days delta negative</dt><dd>Share of days, on the no-view paths, when the position is short. Mostly after falls, when the puts are working.</dd>
+    </dl>
+  </section>
+
+  <section aria-labelledby="k-h">
+    <div class="sec-head"><h2 id="k-h">Know before you trade</h2></div>
+    <ul class="points">
+      <li><b>Delta.</b> Every combination starts delta positive. After a big fall the hedged versions turn short for a while: on 34% of days on the no-view paths, against 15% today. The only rule that prevents it (sell calls only while delta stays above +20%) gives up half the crash protection (+$103K instead of +$208K).</li>
+      <li><b>TSLA, SPCX and APP.</b> Their weekly options are priced below how much they move (0.90 to 0.99), so selling calls on them loses money while that lasts; switch to "Stays as today" to see it. Anything bought on them looks cheap for the same reason. SPCX has only 4 months of trading; the rest is TSLA's moves scaled to SPCX.</li>
+      <li><b>LULU and NFLX gain less.</b> Their LEAP strikes sit near the price, so the LEAP already acts like a put below the strike.</li>
+      <li><b>INTU is the most expensive to hedge.</b> Its puts are priced above how much it has moved.</li>
+      <li><b>Margin.</b> Your account is on portfolio margin, which sizes margin from the worst loss over roughly a 15% move either way. On your four names that worst loss falls from $36.6K (a drop) to $23.3K (now a rise, because the puts lose value in a rally): about a third less margin. Across all ten, $113K to $77K.</li>
+      <li><b>Sizes.</b> NKE, LULU, BABA and NFLX use your real LEAPs. ADBE, INTU, SPCX, TSLA, PYPL and APP are example blocks of about $150K of stock, Jan 2028 LEAPs near 0.80 delta (SPCX 0.85). The tables use exact ratios; the trade sheet rounds them.</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="m-h">
+    <div class="sec-head"><h2 id="m-h">How the test works</h2></div>
+    <p class="muted">A forward test, not a backtest: these names fell 20 to 30% in two years, so history would flatter any put. Each path starts at today's price and runs 12 months. Daily moves are drawn in 5-day blocks from the stock's own last 3 years with the biggest days trimmed, plus an earnings jump on each report date, then bent to hit the scenario. The first puts and calls are priced at today's real quotes; later ones at today's implied volatility moved with the path. Weekly options are priced from the last 20 days' moves with report days left out (a report's own move is added only when it falls inside the week), times a richness: today's measured value, either fading to normal (1.05) within about two months or held all year. LEAPs are valued with Black-Scholes. Fills cost a quarter of the spread on long options and 2% plus $0.65 a contract on weekly ones.</p>
+  </section>
+
+  <footer>Research from a model, not financial advice. Quotes move; check them before trading.</footer>
+</div>
+
+<script>
+const DATA = /*DATA*/null;
+const TABLE_TITLES = {
+  puts: 'How many puts to buy, selling half that many each week',
+  putstrike: 'Where to sell the weekly puts',
+  callstrike: 'Where to sell the calls (30% at the money, the rest further out)',
+  callcount: 'How many calls to sell',
+  extra: 'Extra upside for a big jump'
+};
+const PICKS = { puts: [2], putstrike: [0, 1], callstrike: [0], callcount: [0], extra: [0] };
+const KEY = [['flat','Flat'],['up 15%','Up 15%'],['jump 30% in 1m','Jump +30%'],['down 15%','Down 15%'],['crash 30% in 2m','Crash −30%'],['no view','No view']];
+const ALL = [['flat','Flat'],['up 15%','Up 15%'],['rip 25% in 3m','Rip +25% in 3 mo'],['jump 30% in 1m','Jump +30% in 1 mo'],['bull +40%','Bull +40%'],['down 15%','Down 15%'],['crash 30% in 2m','Crash −30%'],['V: -20% then back','−20% then back'],['no view','No view']];
+const state = { view: 'ALL', mode: 'chg', all9: false, rich: 'fade' };
+try { const s = JSON.parse(localStorage.getItem('overlay-view') || '{}'); Object.assign(state, s); } catch (e) {}
+function save() { try { localStorage.setItem('overlay-view', JSON.stringify(state)); } catch (e) {} }
+
+const minus = '−';
+function money(v, small) {
+  const a = Math.abs(v) / 1000;
+  const s = (small || a < 10) ? a.toFixed(1) : Math.round(a).toString();
+  if (s === '0.0' || s === '0') return '0';
+  return (v < 0 ? minus : '+') + s;
+}
+function cls(v) { return Math.abs(v) < 50 ? '' : (v > 0 ? 'gain' : 'loss'); }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// one result object for the current view: a name, or the ten summed
+function cell(ti, ci) {
+  if (state.view !== 'ALL') {
+    const n = DATA.names.find(x => x.t === state.view); const r = (state.rich === 'hold' ? n.tablesHold : n.tables)[ti][ci];
+    return Object.assign({}, r, { dollarDelta: r.delta0 * n.spot });
+  }
+  const out = { dollarDelta: 0, negdays_nv: 0 };
+  for (const n of DATA.names) {
+    const r = (state.rich === 'hold' ? n.tablesHold : n.tables)[ti][ci];
+    for (const k in r) if (k !== 'delta0' && k !== 'negdays_nv') out[k] = (out[k] || 0) + r[k];
+    out.dollarDelta += r.delta0 * n.spot; out.negdays_nv += r.negdays_nv / DATA.names.length;
+  }
+  return out;
+}
+
+function renderCombos() {
+  const cols = state.all9 ? ALL : KEY;
+  const base = cell(0, 0);
+  const small = state.view !== 'ALL';
+  let html = '';
+  DATA.tables.forEach((tb, ti) => {
+    let h = '<thead><tr><th scope="col">Combination</th>' + cols.map(c => `<th scope="col">${c[1]}</th>`).join('') +
+      '<th scope="col" class="sep">Sudden<br>−15%</th><th scope="col">Delta<br>at start</th><th scope="col">Days delta<br>negative</th></tr></thead><tbody>';
+    tb.cols.forEach((name, ci) => {
+      const r = cell(ti, ci);
+      const pick = (PICKS[tb.id] || []).includes(ci);
+      const label = esc(name) + (pick ? '<span class="pill">Suggested</span>' : '') + (tb.id === 'callcount' && ci === 4 ? ' *' : '');
+      h += `<tr class="${pick ? 'pick' : ''}"><th scope="row" style="font-weight:${pick ? 600 : 400};text-align:left">${label}</th>`;
+      for (const [k] of cols) {
+        const v = state.mode === 'chg' ? r[k] - base[k] : r[k];
+        h += `<td class="num ${cls(v)}">${money(v, small)}</td>`;
+      }
+      const d15 = state.mode === 'chg' ? r.drop15 - base.drop15 : r.drop15;
+      h += `<td class="num sep ${cls(d15)}">${money(d15, small)}</td>`;
+      h += `<td class="num">$${Math.round(r.dollarDelta / 1000)}K</td><td class="num">${Math.round(r.negdays_nv * 100)}%</td></tr>`;
+    });
+    h += '</tbody>';
+    let note = '';
+    if (tb.id === 'callcount') note = '<p class="tnote">* Its flat and down numbers look good only because those paths must come back after a dip, so skipping calls after a fall looks smart. The no-view figure is the fair one.</p>';
+    if (tb.id === 'puts') note = '<p class="tnote">Weekly puts at the first strike 2% below the price. "Today" is the reference row.</p>';
+    if (tb.id === 'putstrike') note = '<p class="tnote">Buying puts on 1/2 of the LEAPs, selling on 1/4. A weekly put is never sold above the long put strike, so it stays covered.</p>';
+    if (tb.id === 'extra') note = '<p class="tnote">On top of the suggested set-up. Quarterly calls are bought at about 15% out and rolled each quarter; 1-year calls about 30% out, held. Sizes are per LEAP.</p>';
+    html += `<div class="combo"><h3><span class="n">${ti + 1}</span>${TABLE_TITLES[tb.id]}</h3><div class="tbl-wrap"><table>${h}</table></div>${note}</div>`;
+  });
+  document.getElementById('combos').innerHTML = html;
+  const st = document.getElementById('strip');
+  if (state.view === 'ALL') {
+    st.innerHTML = `<div class="strip"><div class="facts"><span><b>All ten names</b> added together</span><span class="muted">Four held at real size, six example blocks of about $150K</span><span class="muted">Delta at start shown in dollars of stock</span></div></div>`;
+  } else {
+    const n = DATA.names.find(x => x.t === state.view); const tr = n.trade;
+    st.innerHTML = `<div class="strip"><div class="facts">
+      <span><b>${n.t}</b> ${n.held ? 'held' : 'example block, not held'}</span>
+      <span class="num">${n.leap[0]} × Jan 2028 $${n.leap[1]} calls</span>
+      <span class="num">price $${tr.price}</span>
+      <span>Suggested: buy <b class="num">${tr.buy}</b> Mar 19 2027 ${tr.put} puts, sell <b class="num">${tr.sell}</b> weekly</span>
+      <span class="muted">next report ${n.earn}</span></div>
+      <p class="muted" style="font-size:14px">${esc(n.note)}</p></div>`;
+  }
+}
+
+function renderChips() {
+  const opts = [['ALL', 'All ten names']].concat(DATA.names.map(n => [n.t, n.t]));
+  document.getElementById('chips').innerHTML = opts.map(([v, l]) =>
+    `<button class="chip" data-v="${v}" aria-pressed="${state.view === v}">${l}</button>`).join('');
+}
+
+function renderSheet() {
+  const N = DATA.names;
+  document.getElementById('t-buy').innerHTML = '<thead><tr><th>Name</th><th>Price now</th><th>Put strike</th><th>In the money by</th><th>Bid / ask</th><th>Buy</th><th>Cost</th></tr></thead><tbody>' +
+    N.map(n => { const t = n.trade; return `<tr><th scope="row" style="text-align:left">${n.t}</th><td class="num">${t.price}</td><td class="num">${t.put}</td><td class="num">${t.itm}</td><td class="num">${t.pba}</td><td class="num"><b>${t.buy}</b></td><td class="num">$${t.pcost}</td></tr>`; }).join('') + '</tbody>';
+  document.getElementById('t-sell').innerHTML = '<thead><tr><th>Name</th><th>Strike</th><th>Out of the money by</th><th>Bid / ask</th><th>Sell</th><th>Income</th></tr></thead><tbody>' +
+    N.map(n => { const t = n.trade; return `<tr><th scope="row" style="text-align:left">${n.t}</th><td class="num">${t.sput}</td><td class="num">${t.otm}</td><td class="num">${t.sba}</td><td class="num"><b>${t.sell}</b></td><td class="num">$${t.inc}</td></tr>`; }).join('') + '</tbody>';
+  document.getElementById('t-calls').innerHTML = '<thead><tr><th>Name</th><th style="text-align:left">Contract</th><th>Out of the money by</th><th>Bid / ask</th><th>Buy</th><th>Cost</th><th>Flat year</th><th>30% jump</th></tr></thead><tbody>' +
+    N.map(n => { const t = n.trade; const star = (n.t === 'SPCX' || n.t === 'TSLA') ? '*' : '';
+      if (!t.xc) return `<tr><th scope="row" style="text-align:left">${n.t}</th><td style="text-align:left" class="muted">Skip: both versions cost in a flat year and on the no-view paths</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`;
+      const f = parseFloat(t.xflat), j = parseFloat(t.xjump);
+      return `<tr><th scope="row" style="text-align:left">${n.t}</th><td style="text-align:left">${t.xc}</td><td class="num">${t.xotm}</td><td class="num">${t.xba}</td><td class="num"><b>${t.xn}</b></td><td class="num">$${t.xcost}</td><td class="num ${f < 0 ? 'loss' : 'gain'}">${t.xflat.replace('-', minus)}K${star}</td><td class="num ${j < 0 ? 'loss' : 'gain'}">${t.xjump}K${star}</td></tr>`; }).join('') + '</tbody>';
+}
+
+function wire() {
+  document.getElementById('chips').addEventListener('click', e => {
+    const b = e.target.closest('.chip'); if (!b) return;
+    state.view = b.dataset.v; save(); renderChips(); renderCombos();
+  });
+  const mc = document.getElementById('m-chg'), mt = document.getElementById('m-tot'), a9 = document.getElementById('all9');
+  const rf = document.getElementById('r-fade'), rh = document.getElementById('r-hold');
+  function syncMode() { mc.setAttribute('aria-pressed', state.mode === 'chg'); mt.setAttribute('aria-pressed', state.mode === 'tot'); a9.checked = !!state.all9;
+    rf.setAttribute('aria-pressed', state.rich !== 'hold'); rh.setAttribute('aria-pressed', state.rich === 'hold'); }
+  rf.addEventListener('click', () => { state.rich = 'fade'; save(); syncMode(); renderCombos(); });
+  rh.addEventListener('click', () => { state.rich = 'hold'; save(); syncMode(); renderCombos(); });
+  mc.addEventListener('click', () => { state.mode = 'chg'; save(); syncMode(); renderCombos(); });
+  mt.addEventListener('click', () => { state.mode = 'tot'; save(); syncMode(); renderCombos(); });
+  a9.addEventListener('change', () => { state.all9 = a9.checked; save(); renderCombos(); });
+  syncMode();
+}
+if (!DATA.names.some(n => n.t === state.view)) state.view = 'ALL';
+renderSheet(); renderChips(); renderCombos(); wire();
+</script>
