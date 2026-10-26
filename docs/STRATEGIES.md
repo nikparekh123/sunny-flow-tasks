@@ -52,6 +52,20 @@ risk for nothing. The long protective puts are unchanged.
 - Hedge expiry: January until it is under 8 weeks out (to 20 Nov 2026), then March, June,
   September and December, each moving on at 8 weeks the same way.
 
+### Hedge rungs (calls and puts), from 2026-10-26 (Nik)
+
+- **Hedges (calls and insurance puts) sit in two rungs per name:** a near rung 45 to 90 days out and a far rung 90 to
+  180 days out, **any monthly expiry**, not only quarterlies. Within each window the expiry that gives the most delta
+  protection per dollar at its own 1st wall (at the +1.5 SD price on Thursday). At least one rung spans the next report.
+  New calls split 50/50; the Thursday delta check counts both rungs.
+- **Roll a rung at 45 days left** into a new far rung (the old far rung becomes the near one). For a ~7% out-of-the-money
+  hedge at 40% IV this costs about $0.050 a day of protection against $0.057 held to expiry; daily decay peaks about
+  two weeks out.
+- **LEAPS: no automatic roll-down.** Nik, 26 Oct 2026: plenty of time value left and nothing to rush; he waits for
+  the right moment himself. The app does not put LEAPS rolls in To do (sunny-home `LEAPS_ROLL_OK` is empty; a name goes
+  in only when he picks the moment). The two-rung ladder above applies to BOTH the hedge calls and the insurance puts.
+- **Weekly calls:** closing early at 80% captured is NOT adopted; test it first (the August buy-back study lost).
+
 Selling about **a quarter of the notional** each week fully funds a 1:1 six-month
 put. It works because weekly puts trade rich to six-month puts: the square root
 of time says a 6-month should cost about 5.1x a weekly, and NKE measures 6.13x,

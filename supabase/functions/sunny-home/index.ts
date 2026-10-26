@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours and
  * while the index futures trade, 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-25.1';
+const BUILD = '2026-10-26.13';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -900,6 +900,93 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     new_leap_days: [...new Set(leapLots.map((x) => x.d))].sort(),
   } : null;
 
+  /* ── One base and the hedges (handoff 32, Nik's rule 10, 25 Oct 2026) ──
+     THE BASE: what the LEAPs held now cost, contracts held at that date times their average buy price (IBKR's
+     average cost, commissions out). Yield's week and Payback read this one function.
+     HEDGES: every long put, and every long call that is not a LEAP (one held now as the call rule's upside set
+     says; a closed one is a LEAP when it ran more than 270 days from its first buy), from the book start. Each
+     lot's cost is spread straight from its buy to its expiry; a lot sold early books what was not yet spread less
+     what the sale brought, so over its life a hedge charges exactly what it lost (FIFO lots). */
+  const dayN = (a: string, b: string) => (Date.parse(b) - Date.parse(a)) / 864e5;
+  const leapsCostAsOf = (end: string) => {
+    let s = 0;
+    for (const l of legs.filter(isLeap)) {
+      let q = 0, c = 0;
+      const fills = [...(groups.get(`${l.ticker}|call|long|${l.strike}|${l.expiry}`) ?? [])]
+        .filter((t) => String(t.trade_date) <= end).sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date)) || (a.action === 'open' ? -1 : 1));
+      for (const t of fills) {
+        const n = Number(t.contracts);
+        if (t.action === 'open') { q += n; c += n * Number(t.premium) * 100; } else if (q > 0) { c -= c / q * n; q -= n; }
+      }
+      s += Math.max(0, c);
+    }
+    return s;
+  };
+  type HSeg = { o: string; e: string; until: string; n: number; p: number };
+  const hSegs: HSeg[] = [], hBook: { d: string; amt: number; net: number }[] = [];
+  for (const [, rows] of groups) {
+    const f0 = rows[0];
+    if (f0.direction !== 'long') continue;
+    const fills = [...rows].sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date))
+      || String(a.executed_at ?? '').localeCompare(String(b.executed_at ?? '')) || (a.action === 'open' ? -1 : 1));
+    const first = fills.find((f) => f.action === 'open');
+    if (!first || String(first.trade_date) < BOOK_START) continue;
+    const t = String(f0.ticker).toUpperCase(), exp = String(f0.expiry);
+    if (f0.option_type === 'call') {
+      const held = legs.find((l) => l.ticker === t && l.type === 'call' && l.side === 'bought' && l.strike === Number(f0.strike) && l.expiry === exp);
+      if (held ? isLeap(held) : dayN(String(first.trade_date), exp) > 270) continue;
+    }
+    const q: { o: string; n: number; p: number }[] = [];
+    for (const f of fills) {
+      const n = Number(f.contracts), px = Number(f.premium) * 100, d = String(f.trade_date);
+      if (f.action === 'open') { q.push({ o: d, n, p: px }); continue; }
+      let m = n;
+      while (m > 1e-9 && q.length) {
+        const L = q[0], use = Math.min(m, L.n), D = Math.max(1, dayN(L.o, exp));
+        hSegs.push({ o: L.o, e: exp, until: d, n: use, p: L.p });
+        hBook.push({ d, amt: use * L.p * Math.max(0, dayN(d, exp)) / D - use * px, net: use * L.p - use * px });
+        L.n -= use; m -= use; if (L.n <= 1e-9) q.shift();
+      }
+    }
+    for (const L of q) {
+      hSegs.push({ o: L.o, e: exp, until: exp, n: L.n, p: L.p });
+      if (exp < today) hBook.push({ d: exp, amt: 0, net: L.n * L.p });     // expired: fully spread, nothing back
+    }
+  }
+  /* The hedge charge in [a, b): the spread over the part of each lot's life inside, plus what early sales booked. */
+  const hedgeIn = (a: string, b: string) => hSegs.reduce((s, h) => {
+    const lo = a > h.o ? a : h.o, hi = b < h.until ? b : h.until;
+    return hi > lo ? s + h.n * h.p * dayN(lo, hi) / Math.max(1, dayN(h.o, h.e)) : s;
+  }, 0) + hBook.filter((x) => x.d >= a && x.d < b).reduce((s, x) => s + x.amt, 0);
+  /* Spread so far on the lots still held on d (their result is not yet in `realized`). */
+  const hedgeOpen = (d: string) => hSegs.filter((h) => h.o <= d && h.until > d)
+    .reduce((s, h) => s + h.n * h.p * dayN(h.o, d) / Math.max(1, dayN(h.o, h.e)), 0);
+  /* What closed hedges cost net of what they brought back, to d (Payback's "and $X of hedges"). */
+  const hedgeClosed = (from: string, d: string) => hBook.filter((x) => x.d >= from && x.d <= d).reduce((s, x) => s + x.net, 0);
+  const baseNow = leapsCostAsOf(today);
+  if (payback) {
+    const first = paySeries[0].d;
+    const madeAt = (p: typeof paySeries[number]) => p.allReal + p.held - hedgeOpen(p.d);
+    const now = paySeries.at(-1)!, made = madeAt(now);
+    const back = paySeries.filter((p) => p.d <= addDays(today, -28)).at(-1) ?? null;
+    const wks = Math.max(1, dayN(first, today) / 7);
+    let closing = 0;
+    for (const [, rows] of groups) {
+      if (rows[0].direction !== 'short') continue;
+      for (const t of rows) if (t.action === 'close' && String(t.trade_date) >= first && String(t.trade_date) <= today
+        && !/IBKR (A|Ex|Ep) lifecycle/.test(String(t.note ?? ''))) closing += Number(t.contracts) * Number(t.premium) * 100;
+    }
+    Object.assign(payback, {
+      /* Handoff 32 (18): made after closing costs and hedges, one base with Yield, a window of two paces. */
+      base: Math.round(baseNow), made: Math.round(made), settled: Math.round(made - now.held), open: Math.round(now.held),
+      closing: Math.round(closing), hedges: Math.round(hedgeOpen(today) + hedgeClosed(first, today)),
+      pace_start: Math.round(made / wks), pace_recent: back ? Math.round((made - madeAt(back)) / 4) : null,
+      leaps_value: Math.round(legs.filter(isLeap).reduce((s, l) => s + (l.mark ?? l.avg) * l.n * 100, 0)),
+      /* [day, capital in LEAPs, made] */
+      series2: paySeries.map((p) => [p.d, Math.round(leapsCostAsOf(p.d)), Math.round(madeAt(p))]),
+    });
+  }
+
   // ── Yield (block 17): every short credit, filed under the week it covers ──
   const weekStartOf = (iso: string) => { const d = new Date(iso + 'T12:00:00Z'); const wd = (d.getUTCDay() + 6) % 7; return addDays(iso, -wd); };
   /* Time value at a trade (Yield's third mode, block 17): the premium less
@@ -942,6 +1029,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const inv = investedAsOf(addDays(w, 6)) || investedNow;
     return { week: w, fri: addDays(w, 4), month: e.month, calls_sold: Math.round(e.cs), calls_back: Math.round(e.cb),
              puts_sold: Math.round(e.ps), puts_back: Math.round(e.pb), invested: Math.round(inv),
+             /* Handoff 32 (17): the LEAPs base at that week's end (today for this week) and the week's hedge charge. */
+             leaps: Math.round(addDays(w, 6) >= today ? baseNow : leapsCostAsOf(addDays(w, 6))), hedge: Math.round(hedgeIn(w, addDays(w, 7))),
              calls_sold_tv: Math.round(e.cst), calls_back_tv: Math.round(e.cbt),
              puts_sold_tv: Math.round(e.pst), puts_back_tv: Math.round(e.pbt) };
   });
@@ -1300,8 +1389,88 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   for (const r of posAll) if (String(r.report_date) === lastPosDay && r.asset_category === 'STK') addSh(String(r.symbol).toUpperCase(), Number(r.position ?? 0));
   for (const l of lots) if (String(l.acquired_date) > lastPosDay) addSh(String(l.ticker).toUpperCase(), Number(l.qty_original ?? 0));
   for (const x of sells) if (String(x.trade_date) > lastPosDay) addSh(String(x.ticker).toUpperCase(), -Math.abs(Number(x.quantity ?? 0)));
-  /* The To do face's ways per name (handoff 31, 13c). */
+  /* GAMMA (handoff 32): the latest session's views per name from the tape (gex-walls 'gamma'), each with the
+     walls labelled Ceiling, Floor, Accelerator or Unclear. Keyed ticker|view (an expiry, 'weeklies', 'all'). */
+  const gviews = new Map<string, Row>(), gday = new Map<string, string>();
+  if (book.length) {
+    const rows = await page(`gamma_view_day?ticker=in.(${book.join(',')})&day=gte.${addDays(today, -7)}&select=ticker,day,view,data&order=ticker.asc,day.desc,view.asc`);
+    for (const r of rows) {
+      const t = String(r.ticker), d = String(r.day);
+      if (!gday.has(t)) gday.set(t, d);
+      if (gday.get(t) === d) gviews.set(`${t}|${r.view}`, r.data as Row);
+    }
+  }
+  /* DAILY CLOSES for the Bought face (handoff 32, 13f): back as far as the hedge has left, a month at least;
+     160 days covers a March hedge. Per name, dates and closes in two arrays. */
+  const daily: Record<string, { d: string[]; c: number[] }> = {};
+  if (book.length) {
+    const rows = await page(`daily_closes?ticker=in.(${book.join(',')})&date=gte.${addDays(today, -160)}&order=ticker.asc,date.asc&select=ticker,date,close_price`);
+    for (const r of rows) { const e = (daily[String(r.ticker)] ??= { d: [], c: [] }); e.d.push(String(r.date)); e.c.push(Number(r.close_price)); }
+  }
+  /* FLOW PROFILE (rule 5): each name's five inputs ranked against about 100 names (research/flow-profile/run.py). */
+  /* DONE FOR THIS WEEK (Nik, 26 Oct 2026): a name whose week's call sale he finished on purpose with fewer calls
+     than one per LEAPS (the app's button, sale_done). That week sells nothing more and the hedge is sized on what
+     is sold. */
+  const saleDone = new Set((await get(`sale_done?book_id=eq.S&week=gte.${addDays(today, -7)}&select=ticker,week`))
+    .map((r) => `${r.ticker}|${r.week}`));
+  const flowProfile: Record<string, Row> = {};
+  for (const r of await get('flow_profile?select=ticker,asof,sessions,universe,retail,profile,inputs')) {
+    flowProfile[String(r.ticker)] = { asof: r.asof, sessions: r.sessions, universe: r.universe, retail: r.retail, profile: r.profile, inputs: r.inputs };
+  }
+  /* LEAPS ROLL-DOWN: a LEAPS leg under 0.70 delta rolls down, same expiry, to the strike nearest 0.75 delta (two
+     numbers, so it never rolls back and forth). Priced from Theta's quotes at most once an hour (leaps_roll); the order
+     waits in To do until the new strike shows in IBKR. */
+  const LEAPS_FLOOR = 0.70, LEAPS_TARGET = 0.75;
+  /* OFF for every name (Nik, 26 Oct 2026): "Long leaps we should wait for the right moment"; plenty of time value is
+     left and nothing to rush. His "B for both" meant the hedge calls and puts, not the LEAPS. A name goes in this set
+     only when he picks the moment for it. */
+  const LEAPS_ROLL_OK = new Set<string>();
+  const rollDown = new Map<string, Row>();
+  {
+    const low = legs.filter((l) => isLeap(l) && LEAPS_ROLL_OK.has(l.ticker) && l.delta != null && Number(l.delta) < LEAPS_FLOOR && l.expiry > today);
+    if (low.length) {
+      const saved = await get(`leaps_roll?ticker=in.(${[...new Set(low.map((l) => l.ticker))].join(',')})&select=ticker,expiry,strike,priced_at,data`);
+      for (const l of low) {
+        const s0 = saved.find((r) => r.ticker === l.ticker && String(r.expiry) === l.expiry && Number(r.strike) === l.strike);
+        let d: Row | null = s0 && Date.now() - Date.parse(String(s0.priced_at)) < 3600e3 ? s0.data as Row : null;
+        if (!d) {
+          try {
+            const q = await thetaJson(`/v3/option/snapshot/quote?symbol=${l.ticker}&expiration=${l.expiry.replaceAll('-', '')}`);
+            const T = Math.max(1 / 365, (Date.parse(l.expiry + 'T20:00:00Z') - Date.now()) / (365 * 864e5));
+            const S = spotOf.get(l.ticker) ?? l.underlying ?? 0;
+            let pick: Row | null = null;
+            for (const r of q.filter((x) => x.data?.[0] && String(x.contract.right).toLowerCase() === 'call')) {
+              const k = Number(r.contract.strike), bid = Number(r.data[0].bid), ask = Number(r.data[0].ask);
+              if (!(bid > 0 && ask > 0) || k >= l.strike) continue;
+              const mid = (bid + ask) / 2, v = ivCall(mid, S, k, T);
+              if (v == null) continue;
+              const dl = bsCall(S, k, T, v).delta;
+              if (!pick || Math.abs(dl - LEAPS_TARGET) < Math.abs(Number(pick.delta) - LEAPS_TARGET)) pick = { k, mid: r2(mid), delta: r2(dl), iv: r2(v) };
+            }
+            if (pick && S > 0) {
+              const old = l.mark ?? l.avg;
+              d = { from: { k: l.strike, mark: r2(old), delta: r2(Number(l.delta)) }, to: pick, n: l.n, spot: r2(S),
+                debit: Math.round((Number(pick.mid) - old) * l.n * 100),
+                tv: { old: Math.round(Math.max(0, old - Math.max(0, S - l.strike)) * l.n * 100),
+                      new: Math.round(Math.max(0, Number(pick.mid) - Math.max(0, S - Number(pick.k))) * l.n * 100) } };
+              await fetch(`${URL_}/rest/v1/leaps_roll?on_conflict=ticker,expiry,strike`, { method: 'POST',
+                headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
+                body: JSON.stringify([{ ticker: l.ticker, expiry: l.expiry, strike: l.strike, priced_at: new Date().toISOString(), data: d }]) }).catch(() => null);
+            }
+          } catch { /* a failed quote read must not stop Home */ }
+          // Theta busy or slow: the last price saved (within two days) stands.
+          if (!d && s0 && Date.now() - Date.parse(String(s0.priced_at)) < 2 * 864e5) d = s0.data as Row;
+        }
+        if (d) rollDown.set(`${l.ticker}|${l.expiry}|${l.strike}`, { ...d, exp: l.expiry });
+      }
+    }
+  }
+  /* Insurance puts per LEAPS by name (Nik, 25 Oct 2026: default 1:2; raise a name to 1:1 for full cover). */
+  const PUT_RATIO: Record<string, number> = {};
+  const putRatio = (t: string) => PUT_RATIO[t] ?? 0.5;
+  /* The To do face's ways per name (handoff 31, 13c), and the week's plan (handoff 32, 13e). */
   const ways: Record<string, Row> = {};
+  const plans: Record<string, Row> = {};
   const writes = [];
   /* This week (handoff 28, block 12b): what to roll, buy and sell by Friday, one row per task,
      from the CALL RULE (Nik, 20 Oct 2026: "our live rule, ignore the design rule"; "include
@@ -1582,10 +1751,11 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const o0 = lg.map((x) => opt(spot, x));
       /* Shares held: one delta each on the bought side, no gamma (handoff 31). */
       const shN = sharesHeld.get(t) ?? 0;
-      const at = (m: number) => { const S = spot * (1 + m / 100); let b = shN, s2 = 0, gb = 0;
+      const at = (m: number) => { const S = spot * (1 + m / 100); let b = shN, s2 = 0, gb = 0, pl = shN * (S - spot);
         lg.forEach((x, i) => { const o1 = opt(S, x), dd = x.sg * x.q * 100 * o1.d; if (x.sg < 0) s2 += dd; else b += dd;
-          gb += x.sg * x.q * 100 * (o0[i].d * (S - spot) - (o1.p - o0[i].p)); });
-        return { S, b, s: s2, d: b + s2, gb: Math.max(0, gb) }; };
+          gb += x.sg * x.q * 100 * (o0[i].d * (S - spot) - (o1.p - o0[i].p));
+          pl += x.sg * x.q * 100 * (o1.p - o0[i].p); });
+        return { S, b, s: s2, d: b + s2, gb: Math.max(0, gb), pl }; };
       const d0 = at(0).d;
       const wk = lg.filter((x) => x.sg < 0).reduce((a, x) => a + x.q * 100 * opt(spot, x, 7 / 365).p, 0);
       let thin: number | null = null, sh: number | null = null;
@@ -1595,7 +1765,14 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         thin, sh, m1, needs: m1 != null && at(m1).d < d0 / 2,
         /* [move %, bought $, sold $, net $, cost $] every 0.5% from 0 to 10%. */
         ser: Array.from({ length: 21 }, (_, i) => { const a = at(i / 2);
-          return [i / 2, Math.round(a.b * a.S), Math.round(a.s * a.S), Math.round(a.d * a.S), Math.round(a.gb)]; }) };
+          return [i / 2, Math.round(a.b * a.S), Math.round(a.s * a.S), Math.round(a.d * a.S), Math.round(a.gb)]; }),
+        /* Handoff 32 (13g): 10% down to 10% up, every 0.5%, [move %, bought, sold, net] in shares of delta. Thin
+           = net under 25% of today's LONG delta (Nik, 25 Oct 2026: a stable base), short = below zero. The 5th
+           column is the cost of the move, as in `ser`; the 6th the P&L of the move, every leg re-priced at once
+           plus the shares (Nik, 26 Oct 2026: delta alone hides what a fall costs). */
+        ser2: Array.from({ length: 41 }, (_, i) => { const m = -10 + i / 2, a = at(m); return [m, Math.round(a.b), Math.round(a.s), Math.round(a.d), Math.round(a.gb), Math.round(a.pl)]; }),
+        long0: Math.round(at(0).b),
+        thin25: (() => { const b0 = at(0).b; for (let i = 0; i <= 100; i++) if (at(i / 10).d < 0.25 * b0) return i / 10; return null; })() };
     })();
     /* ── THIS WEEK's rows for this name (the CALL RULE): this Friday's in-the-money calls rolled
        to next Friday's strike, the quarterly buy (or sell fewer), next Friday's calls and puts.
@@ -1727,6 +1904,171 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
                          calls: sellCalls, puts: sellPuts },
                  buy: { calls: buyCalls, puts: buyPuts } };
       })();
+      const wp = weekPlan(); if (wp) plans[t] = wp;
+    }
+    /* ── THE WEEK'S PLAN (handoff 32, 13e, 13g, 13h; Nik's rules, 25 Oct 2026). One function sizes the hedge so
+       Gamma, To do and Δ Γ read the same numbers.
+       The week being worked: this Friday's calls until Friday, then next Friday's. Its sale: one call per LEAP at
+       the money, never gated by the walls (Nik: walls decide the hedge, not the sale); none in an earnings week.
+       HEDGE CALLS at the hedge expiry's 1st call wall: the fewest that keep net delta at or above zero at every
+       price from today up to +1.5 weekly SD (+2 SD when an Accelerator sits within one weekly SD above the
+       strike), measured as of that week's Thursday close, counting what is held ("covered" when nothing more is
+       needed, never a sell). INSURANCE PUTS at its 1st put wall: the name's ratio of the LEAPs (default 1:2)
+       less the long puts held, cost in weeks of premium, a warning past 4. WEEKLY PUTS only above the 50-day,
+       not in an earnings week, and by the nearest put wall under the price: a Floor sells the put cap just
+       above it, Unclear sells half, an Accelerator pauses them (it gets hit first). HEDGE BUDGET: hedge calls
+       and puts spread to their expiry under 25% of a week's premium, the puts named first when over. */
+    function weekPlan(): Row | null {
+      if (!(spot > 0) || !leapN) return null;
+      const W = today >= saleDay ? targetExp : saleDay, byW = prevTrading(W);
+      /* Earnings in W's week: the report lands after that week's sale (the Friday before W's, an after-the-close
+         report that day counts) and before W's expiry (one after the close on the expiry day lands after it). */
+      const saleW = lastTradingOnOrBefore(addDays(W, -7));
+      const earnW = !!earnRow && (() => { const d = String(earnRow.report_date), amc = earnRow.report_time === 'amc';
+        return (d > saleW || (d === saleW && amc)) && (d < W || (d === W && !amc)); })();
+      const yrsW = (exp: string) => Math.max(1 / 365, (Date.parse(exp) - Date.parse(byW)) / 864e5 / 365);
+      const dW = (S: number, K: number, exp: string, iv: number | null, call: boolean) => {
+        const v = iv && iv > 0 ? iv : (ivRow?.iv ?? 0.4), dc = bsCall(S, K, yrsW(exp), v).delta; return call ? dc : dc - 1; };
+      const rowsW = chainRows.filter((r) => r.ticker === t && String(r.expiry) === W && Number(r.mid) > 0);
+      const csW = (side: string) => rowsW.filter((r) => r.side === side).map((r) => ({ k: Number(r.strike), mid: Number(r.mid), delta: num(r.delta), iv: num(r.iv) }))
+        .sort((a, b) => a.k - b.k);
+      const callsW = csW('call'), putsW = csW('put');
+      const gW = gviews.get(`${t}|${W}`) ?? gviews.get(`${t}|weeklies`) ?? null;
+      const wallsW = (gW?.walls ?? []) as Row[];
+      const sdW = sd ?? (ivRow?.iv ? spot * ivRow.iv * Math.sqrt(5 / 252) : null);
+      // The sale this week: what is left of one call per LEAP for W.
+      const soldW = ls.filter((l) => l.side === 'sold' && l.type === 'call' && l.expiry === W).reduce((a, l) => a + l.n, 0);
+      const doneW = saleDone.has(`${t}|${W}`);
+      const nCalls = coverOf(t, leapN), leftW = earnW || doneW ? 0 : Math.max(0, nCalls - soldW);
+      const atmW = callsW.find((x) => x.k >= spot) ?? null;
+      const otmW = atmW ? callsW.find((x) => x.k >= Math.max(atmW.k * 1.0001, spot * 1.02)) ?? null : null;
+      // An Accelerator within one weekly SD above the strike raises the target to 2 SD.
+      const kSell = atmW?.k ?? (soldW ? Math.min(...ls.filter((l) => l.side === 'sold' && l.type === 'call' && l.expiry === W).map((l) => l.strike)) : spot);
+      const accelAbove = sdW ? wallsW.find((w) => w.side === 'call' && w.label === 'accelerator' && w.k > kSell && w.k <= kSell + sdW) ?? null : null;
+      const tSd = accelAbove ? 2 : SAFE_SD, tPx = sdW ? spot + tSd * sdW : null;
+      // Everything still on at W's Thursday, plus the shares.
+      const sh = sharesHeld.get(t) ?? 0;
+      const onW = ls.filter((l) => l.expiry >= W);
+      const sgn = (l: Leg) => (l.side === 'bought' ? 1 : -1);
+      const netW = (S: number, sale: { k: number; n: number; iv: number | null }[]) => sh
+        + onW.reduce((a, l) => a + sgn(l) * dW(S, l.strike, l.expiry, l.iv, l.type === 'call') * l.n * 100, 0)
+        - sale.reduce((a, x) => a + dW(S, x.k, W, x.iv, true) * x.n * 100, 0);
+      // The hedge expiry's walls and chains.
+      const q = upQuotes.filter((r) => r.ticker === t && r.tenor === 'q' && Number(r.mid) > 0), qExp = q.length ? String(q[0].expiry) : null;
+      const qp = qExp ? upQuotes.filter((r) => r.ticker === t && r.tenor === 'qp' && String(r.expiry) === qExp && Number(r.mid) > 0) : [];
+      const gQ = qExp ? gviews.get(`${t}|${qExp}`) ?? null : null;
+      const wq = (gQ?.walls ?? []) as Row[];
+      const cWall = wq.find((w) => w.side === 'call' && w.rank === 1) ?? null, pWall = wq.find((w) => w.side === 'put' && w.rank === 1) ?? null;
+      const oiQ = qExp ? wallsAt(t, qExp).now : null;   // the open-interest walls, when the tape has no view yet
+      const hk0 = cWall?.k ?? (oiQ?.cw != null && oiQ.cw > spot ? oiQ.cw : null), pk0 = pWall?.k ?? (oiQ?.pw != null && oiQ.pw < spot ? oiQ.pw : null);
+      /* A WALL TOO FAR IS NO HEDGE (Nik, 26 Oct 2026): the 1st wall only when it sits within twice the 1.5 SD move
+         (the target's move for calls, 1.5 SD down for puts); otherwise the strike nearest that price. FIS's January
+         1st call wall was 60 with FIS at 36.71 (delta 0.01, "Buy 34"); NFLX's put wall was 41 at 63. */
+      const nearK = (rows: Row[], px: number) => rows.map((r) => Number(r.strike)).sort((a, b) => Math.abs(a - px) - Math.abs(b - px))[0] ?? null;
+      const upMv = tPx != null ? tPx - spot : null, dnMv = sdW ? SAFE_SD * sdW : null;
+      const hFar = hk0 != null && upMv != null && hk0 - spot > 2 * upMv, pFar = pk0 != null && dnMv != null && spot - pk0 > 2 * dnMv;
+      const hk = hFar ? nearK(q, tPx!) : hk0, pk = pFar ? nearK(qp, spot - dnMv!) : pk0;
+      const wallOf = (k: number | null, side: string) => k == null ? null : wq.find((w) => w.side === side && Math.abs(Number(w.k) - k) < 1e-6) ?? null;
+      const hWall = hFar ? wallOf(hk, 'call') : cWall, pWall2 = pFar ? wallOf(pk, 'put') : pWall;
+      const hRow = hk != null ? q.find((r) => Math.abs(Number(r.strike) - hk) < 1e-6) ?? null : null;
+      const pRow = pk != null ? qp.find((r) => Math.abs(Number(r.strike) - pk) < 1e-6) ?? null : null;
+      const grid = tPx ? Array.from({ length: 41 }, (_, i) => spot + (tPx - spot) * i / 40) : [spot];
+      /* THE HEDGE FUNCTION: extra calls at the wall so the lowest net delta from today to the target is >= 0. */
+      const hedgeFor = (sale: { k: number; n: number; iv: number | null }[]) => {
+        if (!hRow) return null;
+        const K = Number(hRow.strike), iv = num(hRow.iv);
+        let add = 0, low = { px: spot, d: Infinity };
+        for (const S of grid) {
+          const n0 = netW(S, sale);
+          if (n0 < low.d) low = { px: S, d: n0 };
+          const dq = dW(S, K, String(hRow.expiry), iv, true);
+          if (n0 < 0 && dq > 0) add = Math.max(add, Math.ceil(-n0 / (100 * dq)));
+        }
+        let lowAfter = Infinity;
+        for (const S of grid) lowAfter = Math.min(lowAfter, netW(S, sale) + add * 100 * dW(S, K, String(hRow.expiry), iv, true));
+        /* The curve for the Hedges card: net delta at that Thursday from 1.5 SD down to the target, now and with the
+           calls added, [price, now, after]. */
+        const lo = sdW ? spot - 1.5 * sdW : spot * 0.9, hi = tPx ?? spot * 1.1;
+        const curve = Array.from({ length: 33 }, (_, i) => { const S = lo + (hi - lo) * i / 32, n0 = netW(S, sale);
+          return [r2(S), Math.round(n0), Math.round(n0 + add * 100 * dW(S, K, String(hRow.expiry), iv, true))]; });
+        return { add, low: { px: r2(low.px), d: Math.round(low.d) }, lowAfter: Math.round(lowAfter), curve };
+      };
+      const atmSale = atmW && leftW ? [{ k: atmW.k, n: leftW, iv: atmW.iv }] : [];
+      const h = hedgeFor(atmSale);
+      const heldQ = ls.filter((l) => l.side === 'bought' && l.type === 'call' && upside.has(l) && l.expiry > today).reduce((a, l) => a + l.n, 0);
+      const weekPrem = (atmW ? atmW.mid * nCalls * 100 : 0) || 0;
+      const weeksTo = (exp: string) => Math.max(1, (Date.parse(exp) - Date.parse(today)) / (7 * 864e5));
+      // The sale's ways: ATM, slightly OTM, a split; each with the hedge calls it needs.
+      const way = (id: string, legs: { k: number; n: number; mid: number; iv: number | null }[]) => {
+        const hh = hedgeFor(legs.map((x) => ({ k: x.k, n: x.n, iv: x.iv })));
+        return { id, legs: legs.map((x) => ({ k: x.k, n: x.n })), pct: r2((legs[0].k / spot - 1) * 100),
+                 premium: Math.round(legs.reduce((a, x) => a + x.mid * x.n * 100, 0)), hedge: hh?.add ?? null };
+      };
+      const ways2 = !atmW || !leftW ? [] : [way('atm', [{ ...atmW, n: leftW }]),
+        ...(otmW ? [way('otm', [{ ...otmW, n: leftW }])] : []),
+        ...(otmW && leftW >= 2 ? [way('split', [{ ...atmW, n: Math.ceil(leftW / 2) }, { ...otmW, n: Math.floor(leftW / 2) }])] : [])];
+      const wallAt = (k: number) => wallsW.find((w) => Math.abs(w.k - k) < 1e-6) ?? null;
+      // Insurance puts.
+      const ratio = putRatio(t), putsHeld = ls.filter((l) => l.side === 'bought' && l.type === 'put' && l.expiry > today).reduce((a, l) => a + l.n, 0);
+      const putsTarget = Math.ceil(ratio * leapN - 1e-9), putsAdd = Math.max(0, putsTarget - putsHeld);
+      const pCost = pRow ? Math.round(putsAdd * Number(pRow.mid) * 100) : null;
+      const pWeeks = pCost != null && weekPrem > 0 ? r2(pCost / weekPrem) : null;
+      // Weekly puts, by the nearest put wall under the price.
+      const below = wallsW.filter((w) => w.side === 'put' && w.k < spot).sort((a, b) => b.k - a.k);
+      const near = below[0] ?? null;
+      const floorK = near && (near.label === 'floor' || near.label === 'unclear') ? near.k : null;
+      const putK = floorK != null ? putsW.find((x) => x.k > floorK && x.k < spot) ?? null : null;
+      const putWhy: string[] = [];
+      if (putsPaused) putWhy.push('below50');
+      if (earnW) putWhy.push('earnings');
+      if (!near) putWhy.push('nowall');
+      else if (near.label === 'accelerator') putWhy.push('accelerator');
+      const half = near?.label === 'unclear';
+      // The put cap for W's week (today's rule: 30% of the puts bought, overlay names half), none in its earnings week.
+      const capW = earnW ? 0 : Math.floor(putsN * (pRule?.share ?? PUT_SHARE) + 0.5);
+      const putsLeft = Math.max(0, capW - ls.filter((l) => l.side === 'sold' && l.type === 'put' && l.expiry === W).reduce((a, l) => a + l.n, 0));
+      const putN = putWhy.length || !putK || putsLeft <= 0 ? 0 : Math.max(1, half ? Math.floor(putsLeft / 2) : putsLeft);
+      // The hedge budget: both spread to their expiry, against a week's premium.
+      const hCost = hRow && h ? h.add * Number(hRow.mid) * 100 : 0;
+      const perWeek = (qExp ? hCost / weeksTo(qExp) + (pCost ?? 0) / weeksTo(qExp) : 0);
+      const budgetPct = weekPrem > 0 ? perWeek / weekPrem * 100 : null;
+      /* THIS WEEK (13f): the premium on what W's expiry sold against a week of decay on everything bought, each
+         leg at its own IV (Black-Scholes now and 7 days on, same price). */
+      const legPx = (l: Leg, T: number) => { const v = l.iv && l.iv > 0 ? l.iv : (ivRow?.iv ?? 0.4), c = bsCall(spot, l.strike, T, v).price;
+        return l.type === 'call' ? c : c - spot + l.strike * Math.exp(-RATE * T); };
+      const premWk = ls.filter((l) => l.side === 'sold' && l.expiry === W).reduce((a, l) => a + l.avg * l.n * 100, 0);
+      const decWk = ls.filter((l) => l.side === 'bought' && l.expiry > today && l.n > 0).reduce((a, l) => {
+        const T = Math.max(1 / 365, (Date.parse(l.expiry) - Date.parse(today)) / 864e5 / 365);
+        return a + Math.max(0, legPx(l, T) - legPx(l, Math.max(1 / 365, T - 7 / 365))) * l.n * 100; }, 0);
+      return {
+        week: W, by: byW, sd: sdW == null ? null : r2(sdW), earnings: earnW,
+        sell: { n: nCalls, sold: soldW, left: leftW, done: doneW, pick: 'atm', ways: ways2,
+                wall: atmW ? wallAt(atmW.k) : null, accel: accelAbove ? { k: accelAbove.k, conf: accelAbove.conf } : null },
+        hedge: hRow ? { exp: String(hRow.expiry), k: Number(hRow.strike), mid: r2(Number(hRow.mid)), delta: num(hRow.delta),
+          label: hWall?.label ?? null, conf: hWall?.conf ?? null, oiOnly: !hFar && !cWall, held: heldQ, add: h?.add ?? 0, covered: (h?.add ?? 0) === 0,
+          /* 'sd' when the 1st wall was too far and the strike is the one nearest the target price. */
+          pick: hFar ? 'sd' : 'wall', wallK: hk0,
+          target: { sd: tSd, px: tPx == null ? null : r2(tPx), pct: tPx == null ? null : r2((tPx / spot - 1) * 100) },
+          low: h?.low ?? null, lowAfter: h?.lowAfter ?? null, curve: h?.curve ?? null, cost: Math.round(hCost),
+          weeks: weekPrem > 0 ? r2(hCost / weekPrem) : null,
+          /* The calls needed with nothing more sold this week: the app shows it the moment Done for this week is
+             tapped, before this run sees the row. */
+          addNow: hedgeFor([])?.add ?? 0 } : null,
+        insurance: pRow ? { exp: String(pRow.expiry), k: Number(pRow.strike), mid: r2(Number(pRow.mid)), delta: num(pRow.delta),
+          label: pWall2?.label ?? null, conf: pWall2?.conf ?? null, oiOnly: !pFar && !pWall, ratio, target: putsTarget, held: putsHeld, add: putsAdd,
+          pick: pFar ? 'sd' : 'wall', wallK: pk0,
+          cost: pCost, weeks: pWeeks, warn: pWeeks != null && pWeeks > 4 } : null,
+        puts: { n: putN, k: putK?.k ?? null, mid: putK ? r2(putK.mid) : null, half, why: putWhy, cap: capW,
+                wall: near ? { k: near.k, label: near.label, conf: near.conf } : null, s50: m50 ? r2(m50.sma50) : null },
+        budget: budgetPct == null ? null : { pct: r2(budgetPct), over: budgetPct > 25, perWeek: Math.round(perWeek), premium: Math.round(weekPrem) },
+        recheck: { above: wallsW.find((w) => w.side === 'call' && w.rank === 1)?.k ?? null, below: near?.k ?? null },
+        /* W's walls for Δ Γ's axis: strike, side, label (top two each side). */
+        walls: wallsW.filter((w) => w.rank <= 2).map((w) => ({ k: w.k, side: w.side, label: w.label, rank: w.rank })),
+        wk: { prem: Math.round(premWk), dec: Math.round(decWk) },
+        /* LEAPS under 0.70 delta: the roll-down to about 0.75 (option B). */
+        leaps: [...rollDown.entries()].filter(([k]) => k.startsWith(t + '|')).map(([, v]) => v),
+        regime: gW?.regime ?? null, flip: gW?.flip ?? null, coverage: gW?.coverage ?? null, gday: gday.get(t) ?? null,
+      };
     }
     /* ── INSIGHTS (handoff 28, 14c): six plain points from the reads, written by fixed sentence
        rules (Nik, 20 Oct 2026), in the order the strategy cares about, the last always delta, read
@@ -1809,9 +2151,94 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         if (dg.thin != null) return ['Delta holds this week.', `It stays long through a normal week's move of about +${f1(dg.m1 ?? 0)}%, gets _thin after +${f1(dg.thin)}%_ and never goes short.`];
         return ['Delta is on target.', 'It stays _long all the way to a 10% jump_.'];
       };
+      /* ── Handoff 32 (14d): six tagged points in the design's order (events, range, hedge, walls, premium,
+         trend), each tagged for selling calls: Helps · Watch · Neutral · Hurts puts. Rules decide the facts, the
+         tags and the verdict (Nik's rule 9); a model may write the sentences later and a check keeps its numbers.
+         `kind` names the variant, so the All page can tell what changed since the last session. */
+      const p = plans[t] as Row | undefined;
+      const f1 = (v: number) => (Math.abs(v % 1) > 1e-9 ? v.toFixed(1) : String(v));
+      type P2 = { key: string; kind: string; tag: string; lead: string; body: string };
+      const v2: P2[] = [];
+      { const [, body] = events();
+        const ex = I.ex_div ? String(I.ex_div) : null;
+        const kind = earnWk && earnRow ? 'earnings' : ex && ex > today && ex <= targetExp ? 'exdiv' : 'none';
+        v2.push({ key: 'events', kind, tag: kind === 'none' ? 'Helps' : 'Watch',
+          lead: kind === 'earnings' ? 'Earnings land before the expiry' : kind === 'exdiv' ? 'Ex-dividend before the expiry' : 'No events this week',
+          body: kind === 'earnings' ? `${body} No weeklies that week.` : kind === 'exdiv' ? `${body} Calls in the money can be assigned the day before.` : body }); }
+      { const rd = String((R.history as Row | undefined)?.read ?? ''), lo = num(T.m_lo), hi = num(T.m_hi), c5 = num(T.close5);
+        const f = lo != null && hi != null && hi > lo ? (spot - lo) / (hi - lo) : null;
+        const where = f == null ? '' : ` and sits at the _${f >= 2 / 3 ? 'top' : f <= 1 / 3 ? 'bottom' : 'middle'} of the month's range_, ${usd(lo!)} to ${usd(hi!)}`;
+        const moved = c5 != null ? `${nm} ${spot < c5 ? 'fell' : 'rose'} from ${usd(c5)} to ${usd(spot)} in 5 days` : `${nm} is at ${usd(spot)}`;
+        // A real move is 3% or more in 5 days; less is the range talking, not a stretch.
+        const m5 = c5 != null && c5 > 0 ? (spot / c5 - 1) * 100 : 0;
+        if (rd === 'stretched down' || (f != null && f <= 1 / 3 && m5 <= -3))
+          v2.push({ key: 'range', kind: 'bounce', tag: 'Watch', lead: 'A bounce is the main risk', body: `${moved}${where}. Stocks this stretched often snap back, and a snap-back is what hurts short calls.` });
+        else if (rd === 'stretched up' || (f != null && f >= 2 / 3 && m5 >= 3))
+          v2.push({ key: 'range', kind: 'run', tag: 'Watch', lead: 'It is running at the calls', body: `${moved}${where}. A run that keeps going is what hurts short calls.` });
+        else if (f != null && f >= 2 / 3)
+          v2.push({ key: 'range', kind: 'high', tag: 'Neutral', lead: 'It sits near the top of its range', body: `${moved}${where}. A break above the month's high would press on the calls.` });
+        else v2.push({ key: 'range', kind: 'sideways', tag: 'Helps', lead: 'It is moving sideways', body: `${moved}${where}. Sideways weeks are where short calls earn most.` }); }
+      if (p?.hedge) { const h = p.hedge as Row, tg = h.target as Row;
+        const thr = `+${f1(Number(tg.sd))} SD${tg.pct != null ? ` (+${f1(Number(tg.pct))}%)` : ''}`;
+        if (Number(h.add) > 0) v2.push({ key: 'hedge', kind: 'thin', tag: 'Watch',
+          lead: dg?.thin25 != null ? `Your hedge is thin past +${f1(dg.thin25)}%` : 'Your hedge is thin',
+          body: `You stay long through ${dg?.m1 != null ? `a normal week's move, +${f1(dg.m1)}%` : 'a normal week'}.${dg?.sh != null ? ` From +${f1(dg.sh)}% you turn short.` : ''}`
+            + ` Buying ${h.add} ${mdy(String(h.exp))} calls, about ${usd0(Number(h.cost))}, keeps you safe through ${thr}. It is in To do.` });
+        else v2.push({ key: 'hedge', kind: 'covered', tag: 'Helps', lead: 'The hedge covers a big week',
+          body: `With the ${h.held} ${mdy(String(h.exp))} calls held, delta stays positive through ${thr}.` }); }
+      { const ws = (p?.walls ?? []) as Row[], c1 = ws.find((w) => w.side === 'call' && w.rank === 1);
+        const pw = ws.filter((w) => w.side === 'put' && w.rank <= 2).sort((a, b) => b.k - a.k);
+        if (c1 || pw.length) {
+          const lbl = (l: string) => l === 'ceiling' ? 'Ceiling' : l === 'floor' ? 'Floor' : l === 'accelerator' ? 'Accelerator' : 'Unclear';
+          const vs = (k: number) => `${f1(Math.round(Math.abs(k / spot - 1) * 1000) / 10)}% ${k >= spot ? 'above' : 'below'}`;
+          const cl = String(c1?.label ?? ''), pl = String(pw[0]?.label ?? '');
+          const lid = cl === 'ceiling' ? 'Calls have a lid' : cl === 'accelerator' ? 'Rallies can run' : 'No clear lid';
+          const flo = pl === 'floor' ? 'puts have a floor' : pl === 'accelerator' ? 'puts have no floor' : 'no clear floor';
+          let body = c1 ? `The ${c1.k} call wall is ${cl === 'unclear' ? 'Unclear' : `a _${lbl(cl)}_`}, ${vs(Number(c1.k))}`
+            + (cl === 'ceiling' ? ', so rallies should stall there.' : cl === 'accelerator' ? ', so a rally can speed up through it.' : '.') : '';
+          if (pw.length) { const grp = pw.filter((w) => w.label === pl), ks = grp.map((w) => String(w.k)), many = ks.length > 1;
+            body += `${body ? ' ' : ''}The ${and(ks)} put wall${many ? 's' : ''} below price ${many ? 'are' : 'is'} ${pl === 'unclear' ? 'Unclear' : many ? lbl(pl) + 's' : 'a ' + lbl(pl)}`
+              + (pl === 'accelerator' ? ', so a further drop can speed up.' : pl === 'floor' ? ', so drops should slow there.' : '.'); }
+          v2.push({ key: 'walls', kind: `${cl}|${pl}`, tag: cl === 'accelerator' || pl === 'accelerator' ? 'Watch' : cl === 'ceiling' && pl === 'floor' ? 'Helps' : 'Neutral',
+            lead: `${lid}, ${flo}`, body }); } }
+      { const iv = num(I.iv), rich = num(I.rich), u = num(T.iv_usual), skip = (R.iv as Row | undefined)?.read === 'skip';
+        if (iv != null) { const hv = rich ? iv / rich : null;
+          const vsU = u == null ? '' : Math.abs(iv - u) < 0.02 ? `, about its usual ${pc(u * 100)}` : `, ${iv < u ? 'below' : 'above'} its usual ${pc(u * 100)}`;
+          const kind = skip || (rich != null && rich < 0.9) ? 'thin' : rich != null && rich >= 1.2 ? 'rich' : 'fair';
+          v2.push({ key: 'premium', kind, tag: kind === 'rich' ? 'Helps' : kind === 'thin' ? 'Watch' : 'Neutral',
+            lead: kind === 'rich' ? 'Premium is rich' : kind === 'thin' ? 'Premium is thin' : 'Premium is fair, not rich',
+            body: `Implied volatility is ${pc(iv * 100)}${vsU}.` + (hv != null ? ` ${nm} has actually moved _${pc(hv * 100)}_ a year, so selling ${iv >= hv ? 'still pays' : 'pays less than the moves cost'}.` : '') }); } }
+      { const xs = [[10, num(T.sma10)], [50, num(T.sma50)], [100, num(T.sma100)], [200, num(T.sma200)]].filter((x) => x[1] != null) as [number, number][];
+        const below = xs.filter((x) => spot <= x[1]).map((x) => String(x[0])), above = xs.filter((x) => spot > x[1]).map((x) => String(x[0]));
+        const s50 = num((p?.puts as Row | undefined)?.s50) ?? num(T.sma50);
+        if (s50 != null && spot < s50) v2.push({ key: 'trend', kind: 'down', tag: 'Hurts puts', lead: 'The trend is down',
+          body: `${nm} trades _below_ its ${and(below)}-day average${below.length > 1 ? 's' : ''}. Puts stay paused until it closes above the 50-day, ${usd(s50)}.` });
+        else if (xs.length && !below.length) v2.push({ key: 'trend', kind: 'up', tag: 'Helps', lead: 'The trend is up',
+          body: `${nm} trades above its ${and(above)}-day averages, so weekly puts can sell at the Floor.` });
+        else if (xs.length) v2.push({ key: 'trend', kind: 'mixed', tag: 'Neutral', lead: 'The trend is mixed',
+          body: `${nm} trades above its ${and(above)}-day average${above.length > 1 ? 's' : ''} but below the ${and(below)}-day.` }); }
+      const longTerm = (() => { const a = num(F0?.analyst); if (a == null) return null; const d = (a / spot - 1) * 100;
+        return `Analysts' average target is _${usd0(a)}_, ${pc(d)} ${d >= 0 ? 'above' : 'below'} today. That ${d >= 0 ? 'supports holding' : 'is a warning for'} your long calls, but it says nothing about this week's short calls.`; })();
+      // The verdict and its chips, from the week's plan.
+      const sellL = Number(p?.sell?.left ?? 0), sold = Number(p?.sell?.sold ?? 0), putN = Number(p?.puts?.n ?? 0);
+      const calls = !p ? 'none' : p.earnings ? 'earnings' : sellL > 0 ? 'todo' : sold > 0 ? 'done' : 'none';
+      const puts = !p ? 'none' : putN > 0 ? 'todo' : ((p.puts?.why ?? []) as string[]).length ? 'paused' : 'none';
+      const hedgeS = !p?.hedge ? 'none' : Number(p.hedge.add) > 0 ? 'thin' : 'covered';
+      const evK = v2.find((x) => x.key === 'events')?.kind ?? 'none';
+      const parts = [calls === 'todo' ? `sell ${sellL} call${sellL === 1 ? '' : 's'}` : calls === 'done' ? `hold the ${sold} calls you sold` : calls === 'earnings' ? 'skip the weeklies for earnings' : null,
+        puts === 'todo' ? `sell ${putN} put${putN === 1 ? '' : 's'}` : puts === 'paused' ? 'keep puts paused' : null,
+        hedgeS === 'thin' ? 'top up the hedge' : null].filter(Boolean) as string[];
+      const chips = [
+        { k: 'Calls', v: calls === 'todo' ? `${sellL} to sell` : calls === 'earnings' ? 'skip, earnings' : calls, tone: calls === 'done' ? 'good' : calls === 'todo' ? 'todo' : 'quiet' },
+        { k: 'Puts', v: puts === 'todo' ? `${putN} to sell` : puts, tone: puts === 'todo' ? 'todo' : 'quiet' },
+        { k: 'Hedge', v: hedgeS, tone: hedgeS === 'thin' ? 'todo' : hedgeS === 'covered' ? 'good' : 'quiet' },
+        { k: 'Events', v: evK === 'earnings' ? 'earnings' : evK === 'exdiv' ? 'ex-dividend' : 'none', tone: evK === 'none' ? 'good' : 'todo' }];
+      const view2 = { verdict: parts.length ? cap(and(parts)) + '.' : 'Nothing to do this week.', chips, points: v2, longTerm,
+        orders: (calls === 'todo' ? 1 : 0) + (hedgeS === 'thin' ? 1 : 0) + (Number(p?.insurance?.add ?? 0) > 0 ? 1 : 0) + (puts === 'todo' ? 1 : 0),
+        acts: { calls: calls === 'todo', puts: puts === 'todo', hedge: hedgeS === 'thin', insurance: Number(p?.insurance?.add ?? 0) > 0 } };
       /* Every point written; the strategy's order picks six once the tags are known (below). */
       const pt = (f: () => [string, string]) => { const [lead, body] = f(); return { lead, body }; };
-      return { name: nm, day: r0.day, all: { fund: pt(fund), tech: pt(tech), trend: pt(trend), hist: pt(hist), opts: pt(opts),
+      return { name: nm, day: r0.day, v2: view2, all: { fund: pt(fund), tech: pt(tech), trend: pt(trend), hist: pt(hist), opts: pt(opts),
         events: pt(events), delta: pt(delta) } as Record<string, { lead: string; body: string }> };
     })();
     writes.push({
@@ -2317,8 +2744,52 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   for (const w of writes as Row[]) {
     if (!w.insights) continue;
     const st = strategies[w.ticker] ?? null, all = w.insights.all as Record<string, Row>;
-    w.insights = { name: w.insights.name, day: w.insights.day, strategy: st,
+    w.insights = { name: w.insights.name, day: w.insights.day, strategy: st, v2: w.insights.v2,
       points: (INSIGHT_ORDER[st ?? 'rebound'] ?? INSIGHT_ORDER.rebound).map((k) => all[k]) };
+  }
+  /* ── INSIGHTS ALL (handoff 32, 14d) ── What changed since the last session: a point is new when its tag or its
+     variant (`kind`) differs from the last session's (insight_state keeps the first read of each day). Each name
+     shows its most pressing new point; the hedge comes after the name's other Watch points (Nik, 26 Oct 2026:
+     Insights is everything that needs attention, not only the hedge). Names with nothing new fold into one line. */
+  let insightsAll: Row | null = null;
+  {
+    const ws = (writes as Row[]).filter((w) => w.insights?.v2 && w.ticker !== 'TSLA');
+    if (ws.length) {
+      const st = await get(`insight_state?ticker=in.(${ws.map((w) => w.ticker).join(',')})&day=gte.${addDays(today, -14)}&select=ticker,day,key,kind,tag&order=day.desc`);
+      const hasToday = new Set(st.filter((r) => String(r.day) === today).map((r) => String(r.ticker)));
+      const fresh = ws.filter((w) => !hasToday.has(w.ticker));
+      if (fresh.length) await fetch(`${URL_}/rest/v1/insight_state?on_conflict=ticker,day,key`, {
+        method: 'POST', headers: { ...H, Prefer: 'resolution=ignore-duplicates,return=minimal' },
+        body: JSON.stringify(fresh.flatMap((w) => (w.insights.v2.points as Row[]).map((x) => ({ ticker: w.ticker, day: today, key: x.key, kind: x.kind, tag: x.tag })))),
+      }).catch(() => null);
+      const rank = (x: Row) => x.tag === 'Watch' ? (x.key === 'hedge' ? 2 : 0) : x.tag === 'Hurts puts' ? 1 : x.tag === 'Helps' ? 3 : 4;
+      const rows: Row[] = [], quietNames: string[] = [];
+      for (const w of ws) {
+        const prevDay = st.filter((r) => r.ticker === w.ticker && String(r.day) < today).map((r) => String(r.day))[0];
+        const before = new Map(st.filter((r) => r.ticker === w.ticker && String(r.day) === prevDay).map((r) => [String(r.key), r]));
+        const pts: Row[] = (w.insights.v2.points as Row[]).map((x): Row => ({ ...x, isNew: !prevDay || !before.has(x.key) || before.get(x.key)!.kind !== x.kind || before.get(x.key)!.tag !== x.tag }));
+        w.insights.v2.points = pts;
+        const pick = pts.filter((x) => x.isNew && x.tag !== 'Neutral').sort((a, b) => rank(a) - rank(b))[0];
+        if (pick) rows.push({ t: w.ticker, key: pick.key, tag: pick.tag, lead: pick.lead, body: pick.body, rank: rank(pick), todo: w.insights.v2.orders > 0 });
+        else quietNames.push(w.ticker);
+      }
+      rows.sort((a, b) => a.rank - b.rank || Number(b.todo) - Number(a.todo));
+      const todoN = ws.filter((w) => w.insights.v2.orders > 0).length;
+      const watchN = ws.filter((w) => w.insights.v2.orders === 0 && (w.insights.v2.points as Row[]).some((x) => x.tag === 'Watch' || x.tag === 'Hurts puts')).length;
+      // The verdict: the names that need you, the most specific action first; hedge top-ups grouped.
+      // Grouped by action: sell calls on A and B; sell puts on C; top up the hedge on D (names already selling are not repeated).
+      const callsOn = ws.filter((w) => w.insights.v2.acts.calls).map((w) => w.ticker);
+      const putsOn = ws.filter((w) => w.insights.v2.acts.puts).map((w) => w.ticker);
+      const hedgeOn = ws.filter((w) => (w.insights.v2.acts.hedge || w.insights.v2.acts.insurance) && !w.insights.v2.acts.calls && !w.insights.v2.acts.puts).map((w) => w.ticker);
+      const and2 = (xs: string[]) => xs.length < 2 ? (xs[0] ?? '') : xs.slice(0, -1).join(', ') + ' and ' + xs.at(-1);
+      const names = (xs: string[]) => xs.length <= 4 ? and2(xs) : `${xs.slice(0, 3).join(', ')} and ${xs.length - 3} more`;
+      const words = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
+      const list = [callsOn.length ? `sell calls on ${names(callsOn)}` : '', putsOn.length ? `sell puts on ${names(putsOn)}` : '',
+        hedgeOn.length ? `top up the hedge on ${names(hedgeOn)}` : ''].filter(Boolean);
+      const verdict = todoN === 0 ? 'Every name is on plan this week.'
+        : `${words[todoN] ?? String(todoN)} name${todoN === 1 ? ' needs' : 's need'} you: ${list.join('; ')}.${todoN < ws.length ? ' The rest are on plan.' : ' All of it is in To do.'}`;
+      insightsAll = { verdict, todo: todoN, watch: watchN, quiet: ws.length - todoN - watchN, rows, folded: quietNames };
+    }
   }
   step('aftershock');
   const payload = {
@@ -2345,6 +2816,14 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     todo,
     /* The To do face's ways (handoff 31, 13c). */
     ways,
+    /* The week's plan per name (handoff 32): the sale, hedge calls, insurance puts, weekly puts, budget. */
+    plan: plans,
+    /* Insights, the All page (14d). */
+    insights_all: insightsAll,
+    /* Flow profile per name (rule 5). */
+    flow_profile: flowProfile,
+    /* Daily closes per name for the Bought face (13f). */
+    daily,
   };
   return { payload, ms: Date.now() - t0, steps };
 }
