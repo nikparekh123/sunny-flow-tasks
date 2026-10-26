@@ -23,6 +23,8 @@
  */
 import { buildStrikes, Chain, closeMs, Contract, findWalls, IncompleteChain, impliedSpot, isFresh, nearest,
   renderTable, sleeping, solveIv, summaryLine, target, yearsTo, zeroGamma } from './walls.ts';
+import { aggregate, aggregateStream, csvPrints, medianSize, Print, seedOf, step } from './tape.ts';
+import { Bar, centre, DContract, dealerFlip, dealerStrikes, dealerWalls, DWall, Label, median, netAt, regime, track } from './gamma.ts';
 
 const THETA_URL = Deno.env.get('THETA_URL') ?? '';
 const THETA_KEY = Deno.env.get('THETA_PROXY_KEY') ?? '';
@@ -36,8 +38,21 @@ async function theta(path: string): Promise<Row[]> {
     const r = await fetch(`${THETA_URL}${path}&format=json`, { headers: { 'x-proxy-key': THETA_KEY }, signal: AbortSignal.timeout(60_000) });
     // "Too many concurrent requests": wait and ask again, 1, 2, then 4 s.
     if (r.status === 429 && i < 3) { await r.body?.cancel(); await new Promise((f) => setTimeout(f, 1000 * 2 ** i)); continue; }
+    // 472 is "no data found": nothing traded or listed for that request, an empty answer, not a failure.
+    if (r.status === 472) { await r.body?.cancel(); return []; }
     if (!r.ok) throw new ThetaError(`Theta ${r.status} on ${path.split('?')[0]}: ${(await r.text()).slice(0, 200)}`);
     return ((await r.json())?.response ?? []) as Row[];
+  }
+}
+
+/** The same as CSV, as a stream (the tape: TSLA's weekly is about 40,000 prints a day). null when Theta has none. */
+async function thetaCsv(path: string): Promise<ReadableStream<Uint8Array> | null> {
+  for (let i = 0; ; i++) {
+    const r = await fetch(`${THETA_URL}${path}&format=csv`, { headers: { 'x-proxy-key': THETA_KEY }, signal: AbortSignal.timeout(120_000) });
+    if (r.status === 429 && i < 3) { await r.body?.cancel(); await new Promise((f) => setTimeout(f, 1000 * 2 ** i)); continue; }
+    if (r.status === 472) { await r.body?.cancel(); return null; }
+    if (!r.ok) throw new ThetaError(`Theta ${r.status} on ${path.split('?')[0]}: ${(await r.text()).slice(0, 200)}`);
+    return r.body;
   }
 }
 
@@ -45,7 +60,26 @@ async function db(path: string, init?: RequestInit): Promise<Row[]> {
   const r = await fetch(`${SB_URL}/rest/v1/${path}`, { ...init,
     headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
   if (!r.ok) throw new Error(`db ${r.status} on ${path.split('?')[0]}: ${(await r.text()).slice(0, 200)}`);
-  return r.status === 204 || r.status === 201 ? [] : await r.json();
+  // An upsert that only updates answers 200 with no body (return=minimal): an empty answer, not JSON.
+  const text = await r.text();
+  return text.trim() ? JSON.parse(text) : [];
+}
+
+/** Every row of a read, 1,000 at a time (PostgREST caps a read at 1,000 rows, silently). `path` carries its order. */
+async function dbAll(path: string): Promise<Row[]> {
+  const out: Row[] = [];
+  for (let off = 0; ; off += 1000) {
+    const page = await db(`${path}&limit=1000&offset=${off}`);
+    out.push(...page);
+    if (page.length < 1000) return out;
+  }
+}
+/** Upsert in chunks of 1,000. */
+async function upsert(table: string, conflict: string, rows: Row[]) {
+  for (let i = 0; i < rows.length; i += 1000) {
+    await db(`${table}?on_conflict=${conflict}`, { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(rows.slice(i, i + 1000)) });
+  }
 }
 
 /** Today in New York, and whether its 4 PM close has passed. */
@@ -55,6 +89,7 @@ function nyNow(): { day: string; afterClose: boolean } {
   return { day: `${p.year}-${p.month}-${p.day}`, afterClose: Number(p.hour) >= 16 };
 }
 const dte = (from: string, to: string) => Math.round((Date.parse(to) - Date.parse(from)) / 864e5);
+const addDays = (d: string, n: number) => new Date(Date.parse(d + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
 const key = (c: Row) => `${c.expiration}|${Number(c.strike)}|${c.right}`;
 
 /** Is this a standard monthly: the third Friday, or the Thursday before when that Friday is a holiday. */
@@ -243,6 +278,257 @@ async function runExpiries(ticker: string, asOf?: string, save = true, expiries?
     errors, warnings };
 }
 
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// THE TAPE AND DEALER GAMMA (handoff 32, 25 Oct 2026). 'tape' reads one session's prints for a name, by
+// expiry; 'gamma' moves the running dealer positions on by that session and builds the Gamma page's views.
+// A backfill calls both for each past session in order (positions depend on the day before).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** The hedge expiry: January 2027, then March, June, September, December, each until it is under 8 weeks out
+    (Nik, 23 Oct 2026; the same rule as chain-next). */
+function hedgeExpiry(fut: string[], day: string): string | null {
+  return fut.filter((e) => e >= '2027-01-01' && isMonthly(e) && (e.startsWith('2027-01') || [3, 6, 9, 12].includes(Number(e.slice(5, 7))))
+    && dte(day, e) >= 56).sort()[0] ?? null;
+}
+/** A week's expiry: a Friday, or the Thursday before a holiday Friday (no Friday listed that week). */
+function weekEnd(e: string, listed: string[]): boolean {
+  const wd = new Date(e + 'T12:00:00Z').getUTCDay();
+  if (wd === 5) return true;
+  if (wd !== 4) return false;
+  const fri = new Date(Date.parse(e + 'T12:00:00Z') + 864e5).toISOString().slice(0, 10);
+  return !listed.includes(fri);
+}
+/** The expiries the tape follows on a day: every week's expiry within 45 days, the monthlies within 186 (the hedge
+    rungs, 26 Oct 2026: near 45-90 days and far 90-180 days, any monthly; was 100), and the hedge expiry. Monday and
+    Wednesday expiries (TSLA) are left out. */
+function tracked(listed: string[], day: string): { all: string[]; weeklies: string[]; near: string[]; hedge: string | null } {
+  const fut = listed.filter((e) => e > day).sort();
+  const near = fut.filter((e) => weekEnd(e, listed) && dte(day, e) <= 45);
+  const weeklies = fut.filter((e) => weekEnd(e, listed) && !isMonthly(e)).slice(0, 3);
+  const hedge = hedgeExpiry(fut, day);
+  const all = [...new Set([...near, ...fut.filter((e) => isMonthly(e) && dte(day, e) <= 186), ...(hedge ? [hedge] : [])])].sort();
+  return { all, weeklies, near, hedge };
+}
+
+/** The stock's close that day (Theta's end of day), else its live price. */
+async function spotOn(ticker: string, day: string): Promise<number | null> {
+  const D = day.replaceAll('-', '');
+  const r = await theta(`/v3/stock/history/eod?symbol=${ticker}&start_date=${D}&end_date=${D}`);
+  const c = Number((r[0] as Row)?.close ?? r.at(-1)?.close);
+  if (c > 0) return c;
+  const q = await db(`ticker_quotes_live?ticker=eq.${ticker}&select=spot`);
+  return Number(q[0]?.spot) || null;
+}
+
+/** One session's tape for a name: per contract (strikes within 40% of the price) and per expiry. */
+async function tapeDay(ticker: string, day: string, only?: string[]) {
+  const listed = (await theta(`/v3/option/list/expirations?symbol=${ticker}`)).map((x) => String(x.expiration)).sort();
+  const tr = tracked(listed, day), D = day.replaceAll('-', '');
+  if (only?.length) tr.all = tr.all.filter((e) => only.includes(e));
+  const spot = await spotOn(ticker, day);
+  const band: [number, number] | undefined = spot ? [spot * 0.6, spot * 1.4] : undefined;
+  const contracts: Row[] = [], expiries: Row[] = [];
+  for (const e of tr.all) {
+    const E = e.replaceAll('-', '');
+    const body = await thetaCsv(`/v3/option/history/trade_quote?symbol=${ticker}&expiration=${E}&date=${D}`);
+    const agg = body ? await aggregateStream(csvPrints(body), band) : aggregate([], band);
+    const ois = await theta(`/v3/option/history/open_interest?symbol=${ticker}&expiration=${E}&date=${D}`);
+    const oi = new Map<string, number>();
+    for (const r of ois) {
+      const k = Number(r.contract.strike), cp = r.contract.right === 'CALL' ? 'C' : 'P';
+      if (band && (k < band[0] || k > band[1])) continue;
+      oi.set(`${k}|${cp}`, Number((r.data ?? []).at(-1)?.open_interest ?? 0));
+    }
+    const seen = new Set<string>();
+    for (const c of agg.contracts) {
+      const kk = `${c.k}|${c.cp}`; seen.add(kk);
+      contracts.push({ ticker, day, expiry: e, strike: c.k, cp: c.cp, vol: c.vol, cust_buy: +c.buy.toFixed(2), cust_sell: +c.sell.toFixed(2),
+        unclassified: +c.uncl.toFixed(2), oi: oi.get(kk) ?? 0 });
+    }
+    for (const [kk, n] of oi) {
+      if (seen.has(kk) || !n) continue;
+      const [k, cp] = kk.split('|');
+      contracts.push({ ticker, day, expiry: e, strike: Number(k), cp, vol: 0, cust_buy: 0, cust_sell: 0, unclassified: 0, oi: n });
+    }
+    const d = agg.day;
+    expiries.push({ ticker, day, expiry: e, vol: d.vol, classified: +d.classified.toFixed(2), trades: d.trades, small_trades: d.small,
+      call_vol: d.callVol, put_vol: d.putVol, sizes: d.sizes, v_single: d.byKind.single, v_multi: d.byKind.multi, v_tied: d.byKind.tied,
+      v_auction: d.byKind.auction, v_other: d.byKind.other, built_at: new Date().toISOString() });
+  }
+  await upsert('tape_contract_day', 'ticker,day,expiry,strike,cp', contracts);
+  await upsert('tape_expiry_day', 'ticker,day,expiry', expiries);
+  const vol = expiries.reduce((a, x) => a + x.vol, 0), cls = expiries.reduce((a, x) => a + x.classified, 0);
+  return { ticker, day, spot, expiries: tr.all, contracts: contracts.length, vol, coverage: vol ? +(cls / vol).toFixed(3) : null };
+}
+
+/** The day's tape in parts, two expiries per call, each call its own worker: one call for every expiry ran out of
+    compute on TSLA's busiest days (546 WORKER_RESOURCE_LIMIT on 3 and 17 Sep, 26 Oct 2026). Rows are keyed per
+    expiry, so the parts add up to the whole day. */
+async function tapeSplit(ticker: string, day: string) {
+  const listed = (await theta(`/v3/option/list/expirations?symbol=${ticker}`)).map((x) => String(x.expiration)).sort();
+  const all = tracked(listed, day).all;
+  let contracts = 0, vol = 0, cls = 0, spot: number | null = null;
+  for (let i = 0; i < all.length; i += 2) {
+    const part = all.slice(i, i + 2);
+    let j: Row = {};
+    for (let a = 0; a < 3; a++) {
+      const r = await fetch(`${SB_URL}/functions/v1/gex-walls`, { method: 'POST',
+        headers: { Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'tape', ticker, as_of: day, expiries: part }) });
+      j = await r.json().catch(() => ({ ok: false, error: `status ${r.status}` }));
+      if (j.ok) break;
+      await new Promise((res) => setTimeout(res, 5000 * (a + 1)));
+    }
+    if (!j.ok) throw new Error(`tape ${ticker} ${day} ${part.join(',')}: ${JSON.stringify(j.error ?? j).slice(0, 200)}`);
+    contracts += Number(j.contracts ?? 0); vol += Number(j.vol ?? 0); cls += Number(j.vol ?? 0) * Number(j.coverage ?? 0); spot = j.spot ?? spot;
+  }
+  return { ticker, day, spot, expiries: all, contracts, vol, coverage: vol ? +(cls / vol).toFixed(3) : null, parts: Math.ceil(all.length / 2) };
+}
+
+const sessionsBack = (days: string[], day: string, n: number) => days.filter((d) => d < day).sort().reverse()[n - 1] ?? null;
+
+/** Move the dealer positions on by one session, then build the Gamma page's views for it. */
+async function gammaDay(ticker: string, day: string, live = false, withTrack = true, positionsOnly = false) {
+  const tape = await dbAll(`tape_contract_day?ticker=eq.${ticker}&day=eq.${day}&select=expiry,strike,cp,vol,cust_buy,cust_sell,unclassified,oi&order=expiry,strike,cp`);
+  if (!tape.length) throw new IncompleteChain([`no tape stored for ${ticker} on ${day}: run mode tape first`]);
+  const held = await dbAll(`dealer_pos?ticker=eq.${ticker}&select=expiry,strike,cp,pos,seed,tape_vol,classified_vol,cum_buy,cum_sell,oi,asof&order=expiry,strike,cp`);
+  const P = new Map(held.map((r) => [`${r.expiry}|${Number(r.strike)}|${r.cp}`, r]));
+  const moved: Row[] = [];
+  for (const r of tape) {
+    const kk = `${r.expiry}|${Number(r.strike)}|${r.cp}`, p = P.get(kk);
+    if (p && String(p.asof) >= day) continue;                 // this session is already in
+    const oi = Number(r.oi ?? 0), vol = Number(r.vol);
+    // First sight: whatever was already open is seeded from the open-interest model (Nik, 25 Oct 2026).
+    const seed = p ? Number(p.seed) : seedOf(r.cp, oi);
+    const pos = step(p ? Number(p.pos) : seed, { buy: Number(r.cust_buy), sell: Number(r.cust_sell) }, oi + vol);
+    const row = { ticker, expiry: r.expiry, strike: Number(r.strike), cp: r.cp, pos: +pos.toFixed(2), seed,
+      tape_vol: +(Number(p?.tape_vol ?? 0) + vol).toFixed(2), classified_vol: +(Number(p?.classified_vol ?? 0) + vol - Number(r.unclassified)).toFixed(2),
+      // Readable buys and sells since tracking began, for one-sidedness (26 Oct 2026).
+      cum_buy: +(Number(p?.cum_buy ?? 0) + Number(r.cust_buy)).toFixed(2), cum_sell: +(Number(p?.cum_sell ?? 0) + Number(r.cust_sell)).toFixed(2),
+      oi, asof: day };
+    moved.push(row); P.set(kk, row);
+  }
+  if (!live) {
+    await upsert('dealer_pos', 'ticker,expiry,strike,cp', moved);
+    await db(`dealer_pos?ticker=eq.${ticker}&expiry=lte.${day}`, { method: 'DELETE' });   // expired
+  }
+  /* Positions only: a past session replayed for expiries newly tracked (the far hedge rungs, 26 Oct 2026). The
+     stored views of that day stay as they were; every other expiry is already past it (the asof guard). */
+  if (positionsOnly) return { ticker, day, positions: moved.length };
+  // The chain at that close (or now, live): IVs, time left, the price the quotes imply.
+  const exps = [...new Set(tape.map((r) => String(r.expiry)))].filter((e) => e > day).sort();
+  const { chain, nowMs } = await loadChain(ticker, live ? { expiries: exps } : { expiries: exps, asOf: day });
+  const spot = chain.spot;
+  const ivAt = new Map<string, number>();
+  for (const c of chain.contracts) if (c.iv) ivAt.set(`${c.exp}|${c.k}|${c.right}`, c.iv);
+  const cs: DContract[] = [];
+  for (const [kk, p] of P) {
+    const [exp, k, cp] = kk.split('|');
+    if (exp <= day || !exps.includes(exp)) continue;
+    const iv = ivAt.get(kk) ?? ivAt.get(`${exp}|${k}|${cp === 'C' ? 'P' : 'C'}`);
+    if (!iv) continue;
+    cs.push({ exp, k: Number(k), cp: cp as 'C' | 'P', T: yearsTo(exp, nowMs), iv, pos: Number(p.pos), oi: Number(p.oi ?? 0),
+      seed: Number(p.seed), tapeVol: Number(p.tape_vol), classifiedVol: Number(p.classified_vol),
+      buy: Number(p.cum_buy ?? 0), sell: Number(p.cum_sell ?? 0) });
+  }
+  // The day's coverage: the share of its volume classified by side; the print types; and the flow inputs over
+  // the last 20 sessions (volume under 7 days to expiry, calls to puts, the median trade, trades of 10 or fewer).
+  const ed = await db(`tape_expiry_day?ticker=eq.${ticker}&day=eq.${day}&select=vol,classified,v_single,v_multi,v_tied,v_auction,v_other`);
+  const tv = ed.reduce((a, x) => a + Number(x.vol), 0), coverage = tv ? ed.reduce((a, x) => a + Number(x.classified), 0) / tv : null;
+  const sumK = (k: string) => ed.reduce((a, x) => a + Number(x[k] ?? 0), 0);
+  const prints = tv ? Object.fromEntries(['single', 'multi', 'tied', 'auction', 'other'].map((k) => [k, +(sumK(`v_${k}`) / tv).toFixed(3)])) : null;
+  const f20 = await dbAll(`tape_expiry_day?ticker=eq.${ticker}&day=lte.${day}&day=gte.${new Date(Date.parse(day) - 30 * 864e5).toISOString().slice(0, 10)}`
+    + '&select=day,expiry,vol,trades,small_trades,call_vol,put_vol,sizes&order=day.desc,expiry');
+  const fDays = [...new Set(f20.map((r) => String(r.day)))].slice(0, 20), fr = f20.filter((r) => fDays.includes(String(r.day)));
+  const fVol = fr.reduce((a, r) => a + Number(r.vol), 0), fTrades = fr.reduce((a, r) => a + Number(r.trades), 0);
+  const sizes: Record<string, number> = {};
+  for (const r of fr) for (const [k, n] of Object.entries((r.sizes ?? {}) as Record<string, number>)) sizes[k] = (sizes[k] ?? 0) + Number(n);
+  const flow = fVol ? { sessions: fDays.length,
+    under7: +(fr.filter((r) => dte(String(r.day), String(r.expiry)) < 7).reduce((a, r) => a + Number(r.vol), 0) / fVol).toFixed(3),
+    callPut: +(fr.reduce((a, r) => a + Number(r.call_vol), 0) / Math.max(1, fr.reduce((a, r) => a + Number(r.put_vol), 0))).toFixed(2),
+    median: medianSize(sizes), small: fTrades ? +(fr.reduce((a, r) => a + Number(r.small_trades), 0) / fTrades).toFixed(3) : null } : null;
+  // The views: each expiry, the next three weeklies together, and everything within 45 days.
+  const listed = (await theta(`/v3/option/list/expirations?symbol=${ticker}`)).map((x) => String(x.expiration)).sort();
+  const tr = tracked(listed, day);
+  const views: [string, string[]][] = [...exps.map((e) => [e, [e]] as [string, string[]]),
+    ['weeklies', tr.weeklies.filter((e) => exps.includes(e))], ['all', tr.near.filter((e) => exps.includes(e))]];
+  const prev = await dbAll(`gamma_view_day?ticker=eq.${ticker}&day=lt.${day}&day=gte.${new Date(Date.parse(day) - 12 * 864e5).toISOString().slice(0, 10)}`
+    + '&select=day,view,data&order=day.desc,view');
+  const prevDays = [...new Set(prev.map((r) => String(r.day)))];
+  const out: Row[] = [];
+  for (const [view, ve] of views) {
+    if (!ve.length) continue;
+    const vc = cs.filter((c) => ve.includes(c.exp));
+    const rows = dealerStrikes(vc, spot);
+    const yRow = prev.find((r) => r.view === view && r.day === prevDays[0]);
+    const yWalls: DWall[] = yRow?.data?.walls ?? [];
+    // A normal wall for the name: the median size of this view's walls over the stored sessions (up to 12 days).
+    const normal = median(prev.filter((r) => r.view === view).flatMap((r) => ((r.data?.walls ?? []) as DWall[]).map((w) => Math.abs(w.gex))));
+    const walls = dealerWalls(rows, spot, { coverage, normal, held: (k: number, label: Label) => {
+      const w = yWalls.find((x) => x.k === k && x.label === label); return w ? w.held + 1 : 1; } });
+    // The move the nearest expiry prices, 1 and 1.5 SD, at the IV of the strike nearest the price.
+    const first = ve[0], atm = vc.filter((c) => c.exp === first).sort((a, b) => Math.abs(a.k - spot) - Math.abs(b.k - spot))[0];
+    const sd = atm ? spot * atm.iv * Math.sqrt(atm.T) : null;
+    // A week ago: five sessions back, the same view.
+    const wDay = sessionsBack(prevDays, day, 5), wRow = prev.find((r) => r.view === view && r.day === wDay);
+    const four = (ws: DWall[]) => ws.filter((w) => w.rank <= 2);
+    const c0 = wRow ? centre(four(wRow.data.walls)) : null, c1 = centre(four(walls));
+    const total = rows.reduce((a, r) => a + Math.abs(r.gex), 0);
+    const nextExp = ve[0];
+    out.push({ ticker, day, view, built_at: new Date().toISOString(), data: {
+      spot: +spot.toFixed(3), expiries: ve, coverage: coverage == null ? null : +coverage.toFixed(3),
+      ...(view === 'weeklies' ? { prints, flow } : {}),
+      flip: dealerFlip(vc, spot), regime: regime(vc, spot), net: Math.round(netAt(vc, spot)),
+      priced: sd ? { exp: first, sd1: +sd.toFixed(3), sd1_pct: +(sd / spot * 100).toFixed(2), sd15: +(1.5 * sd).toFixed(3) } : null,
+      walls,
+      // All: the share of dealer gamma that expires next (the roll-off).
+      rolloff: view === 'all' && total > 0 ? { exp: nextExp, share: +(rows.reduce((a, r) => a + Math.abs(r.byExp[nextExp] ?? 0), 0) / total).toFixed(3) } : null,
+      drift: c0 && c1 ? { from: +c0.toFixed(3), to: +c1.toFixed(3), pct: +((c1 / c0 - 1) * 100).toFixed(2), since: wDay } : null,
+      week: wRow ? (wRow.data.walls as DWall[]).map((w) => ({ side: w.side, rank: w.rank, k: w.k, gex: w.gex, label: w.label,
+        exp: Object.entries(w.byExp ?? {}).sort((a, b) => Math.abs(Number(b[1])) - Math.abs(Number(a[1])))[0]?.[0] ?? null })) : null,
+    } });
+  }
+  // Live (during the session): the views are saved for today, the positions are not moved on (the close does that).
+  // At the close: how the labels have held, on the Weeklies view (handoff 32, brief 15).
+  if (!live && withTrack) {
+    const wk = out.find((r) => r.view === 'weeklies');
+    if (wk) { try { wk.data.track = await trackFor(ticker, day, { day, spot, walls: wk.data.walls }); } catch (e) { console.error('track', ticker, (e as Error).message); } }
+  }
+  await upsert('gamma_view_day', 'ticker,day,view', out);
+  return { ticker, day, spot, positions: moved.length, contracts: cs.length, coverage, views: out.map((r) => `${r.view}: ` + (r.data.walls as DWall[])
+    .map((w) => `${w.side[0]}${w.rank} ${w.k} ${w.label}${'●'.repeat(w.conf)}`).join(' ')), out: live ? out : undefined };
+}
+
+/** Daily high, low and close from Theta's hourly bars (regular session; a bar with no trades or a zero price is skipped). */
+async function dailyBars(ticker: string, from: string, to: string): Promise<Bar[]> {
+  // Theta serves a month of bars per request at most: 28-day pieces, one at a time.
+  const rows: Row[] = [];
+  for (let a = from; a <= to; a = addDays(a, 28)) {
+    const e = addDays(a, 27) < to ? addDays(a, 27) : to;
+    rows.push(...(await theta(`/v3/stock/history/ohlc?symbol=${ticker}&start_date=${a.replaceAll('-', '')}&end_date=${e.replaceAll('-', '')}&interval=1h`)));
+  }
+  const by = new Map<string, Bar>();
+  for (const b of rows) {
+    if (!Number(b.count) || Math.min(Number(b.open), Number(b.high), Number(b.low), Number(b.close)) <= 0) continue;
+    const d = String(b.timestamp).slice(0, 10), x = by.get(d);
+    if (!x) by.set(d, { d, h: Number(b.high), l: Number(b.low), c: Number(b.close) });
+    else { x.h = Math.max(x.h, Number(b.high)); x.l = Math.min(x.l, Number(b.low)); x.c = Number(b.close); }
+  }
+  return [...by.values()].sort((a, b) => a.d.localeCompare(b.d));
+}
+
+/** The track record from every stored Weeklies view to `day` (plus today's, not stored yet), against the
+    daily bars since the first. Sessions counts the views, so the app can show "Building: N of 45". */
+async function trackFor(ticker: string, day: string, todayView?: { day: string; spot: number; walls: unknown }) {
+  const stored = await dbAll(`gamma_view_day?ticker=eq.${ticker}&view=eq.weeklies&day=lt.${day}&select=day,spot:data->spot,walls:data->walls&order=day`);
+  const views = [...stored, ...(todayView ? [todayView] : [])].map((v) => ({ day: String(v.day), spot: Number(v.spot),
+    walls: ((v.walls ?? []) as Row[]).map((w) => ({ side: String(w.side), k: Number(w.k), label: String(w.label) })) }));
+  if (!views.length) return { sessions: 0, rows: [] };
+  const bars = await dailyBars(ticker, views[0].day, day);
+  return { sessions: views.length, asof: day, rows: track(views, bars) };
+}
+
 /* Who may call: the scheduler's x-cron-key, the service-role key, or a signed-in user of the app. */
 async function callerOk(req: Request): Promise<boolean> {
   const cron = Deno.env.get('CRON_SECRET');
@@ -260,7 +546,7 @@ Deno.serve(async (req) => {
   if (!(await callerOk(req))) return json({ ok: false, error: 'not allowed' }, 401);
   if (!THETA_URL || !THETA_KEY) return json({ ok: false, error: 'THETA_URL / THETA_PROXY_KEY not set' }, 500);
   let body: { ticker?: string; tickers?: string[]; days?: number | string[]; expiries?: string[]; target?: number; save?: boolean;
-    mode?: string; per_expiry?: boolean; as_of?: string } = {};
+    mode?: string; per_expiry?: boolean; as_of?: string; live?: boolean; split?: boolean; no_track?: boolean; positions_only?: boolean } = {};
   // A body that does not parse is refused: it used to fall through to the daily save (24 Oct 2026, a
   // malformed request on a Saturday wrote the book's rows for a day with no session).
   if (req.method === 'POST') {
@@ -270,6 +556,33 @@ Deno.serve(async (req) => {
   const days = Math.max(1, Math.min(400, Number(Array.isArray(body.days) ? 45 : body.days ?? 45)));
   const book = async () => Object.keys((await db('home_snapshot?id=eq.1&select=s:payload->strategies'))[0]?.s ?? {}).sort();
   try {
+    if (body.mode === 'tape' && body.ticker) {
+      const t = body.ticker.toUpperCase(), d = body.as_of ?? nyNow().day;
+      return json({ ok: true, ...(body.split ? await tapeSplit(t, d) : await tapeDay(t, d, body.expiries)) });
+    }
+    /* The scheduled run, one name per call: today's tape, then the gamma views. After the close it moves the
+       positions on; during the session (live) it only refreshes today's views. Weekends and holidays skip. */
+    if (body.mode === 'tape_gamma' && body.ticker) {
+      const { day } = nyNow();
+      const wd = new Date(day + 'T12:00:00Z').getUTCDay();
+      if (wd === 0 || wd === 6 || (await db(`market_calendar?date=eq.${day}&kind=eq.closed&select=date`)).length) return json({ ok: true, day, skipped: 'market closed' });
+      // Positions move on only from 18:00 New York, once Theta's end of day is complete; earlier runs are live.
+      const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' }).format(new Date()));
+      const t = body.ticker.toUpperCase(), a = await tapeSplit(t, day), b = await gammaDay(t, day, hour < 18);
+      return json({ ok: true, day, live: hour < 18, tape: { contracts: a.contracts, coverage: a.coverage }, gamma: b.views });
+    }
+    // A backfill skips the track record on past days (no_track): only the last day's is read.
+    if (body.mode === 'gamma' && body.ticker) return json({ ok: true, ...(await gammaDay(body.ticker.toUpperCase(), body.as_of ?? nyNow().day, !!body.live, !body.no_track, !!body.positions_only)) });
+    /* The track record now, onto the latest stored Weeklies view (the close job does this every night). */
+    if (body.mode === 'track' && body.ticker) {
+      const t = body.ticker.toUpperCase();
+      const [last] = await db(`gamma_view_day?ticker=eq.${t}&view=eq.weeklies&select=day,data&order=day.desc&limit=1`);
+      if (!last) return json({ ok: false, error: `no Weeklies view for ${t}` }, 404);
+      const tr = await trackFor(t, String(last.day), { day: String(last.day), spot: Number(last.data.spot), walls: last.data.walls });
+      await db(`gamma_view_day?ticker=eq.${t}&view=eq.weeklies&day=eq.${last.day}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ data: { ...last.data, track: tr } }) });
+      return json({ ok: true, ticker: t, day: last.day, track: tr });
+    }
     if (body.mode === 'backfill') {
       const sessions = Array.isArray(body.days) ? body.days : [];
       const names = body.tickers?.length ? body.tickers : await book();

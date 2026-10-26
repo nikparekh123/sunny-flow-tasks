@@ -41,7 +41,7 @@ const json = (status: number, body: unknown) =>
     status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 
-const BUILD = '2026-10-20.2';
+const BUILD = '2026-10-26.1';
 
 const THETA_URL = Deno.env.get('THETA_URL') ?? '';
 const THETA_KEY = Deno.env.get('THETA_PROXY_KEY') ?? '';
@@ -93,7 +93,11 @@ async function thetaChain(ticker: string, expiry: string, withOi = true): Promis
     withOi ? thetaGet(`/v3/option/snapshot/open_interest?symbol=${ticker}&expiration=${ex}`) : Promise.resolve([] as TRow[]),
   ]);
   const key = (r: TRow) => `${r.contract.right.toLowerCase()}|${Number(r.contract.strike)}`;
-  const oiBy = new Map(oi.map((r) => [key(r), Number(r.data?.[0]?.open_interest)]));
+  return snapsFrom(gr, expiry, new Map(oi.map((r) => [key(r), Number(r.data?.[0]?.open_interest)])));
+}
+/** One expiry's Theta quotes in Polygon's snapshot shape: the implied spot, then IV and delta per contract. */
+function snapsFrom(gr: TRow[], expiry: string, oiBy: Map<string, number>): Snap[] {
+  const key = (r: TRow) => `${r.contract.right.toLowerCase()}|${Number(r.contract.strike)}`;
   const out: Snap[] = [];
   const flat = gr.filter((r) => r.data?.[0]).map((r) => ({
     side: r.contract.right.toLowerCase(), k: Number(r.contract.strike),
@@ -431,6 +435,7 @@ Deno.serve(async (req) => {
        the money. Their own table (option_chain_upside), so the weekly readers
        never see these expiries. Theta only: Polygon has no expiry list here. */
     const upRows: Record<string, unknown>[] = [];
+    const hedgeRows: Record<string, unknown>[] = [];
     if (useTheta) {
       const monthly = (e: string) => { const d = new Date(e + 'T12:00:00Z'), wd = d.getUTCDay(), dd = d.getUTCDate();
         return (wd === 5 && dd >= 15 && dd <= 21) || (wd === 4 && dd >= 14 && dd <= 20); };
@@ -473,6 +478,54 @@ Deno.serve(async (req) => {
           }
           notes.push(`${ticker} ${tenor} ${exp}: ${kept}`);
         }
+        /* THE HEDGE RUNGS (Nik, 26 Oct 2026): hedge calls and insurance puts sit on two monthlies, a near rung 45 to
+           90 days out and a far rung 90 to 180 days out, any monthly. Every monthly 40 to 185 days out, calls 1x to
+           1.8x the price and puts 0.6x to 1x, from ONE Theta request for every expiry of the name (0.3 to 4 s). */
+        const want = exps.filter((e) => dayN(e) >= 40 && dayN(e) <= 185);
+        if (want.length) {
+          const all = await thetaGet(`/v3/option/snapshot/quote?symbol=${ticker}&expiration=*`).catch(() => [] as TRow[]);
+          const byExp = new Map<string, TRow[]>();
+          for (const r of all) {
+            const e = String(r.contract.expiration), d = e.includes('-') ? e : `${e.slice(0, 4)}-${e.slice(4, 6)}-${e.slice(6, 8)}`;
+            if (want.includes(d)) (byExp.get(d) ?? byExp.set(d, []).get(d)!).push(r);
+          }
+          for (const e of want) {
+            const items = snapsFrom(byExp.get(e) ?? [], e, new Map());
+            const spot = items.find((c) => c.underlying_asset?.price)?.underlying_asset?.price ?? null;
+            if (!spot) { notes.push(`${ticker} hedge ${e}: no spot`); continue; }
+            let kept = 0;
+            for (const c of items) {
+              const k = c.details?.strike_price, side = c.details?.contract_type;
+              if (typeof k !== 'number' || !(side === 'call' ? k >= spot && k <= spot * 1.8 : side === 'put' ? k >= spot * 0.6 && k <= spot : false)) continue;
+              const mid = midOf(c, spot);
+              if (mid == null || c.greeks?.delta == null) continue;
+              kept++;
+              hedgeRows.push({ ticker, expiry: e, side, strike: k, mid: Math.round(mid * 100) / 100,
+                delta: Math.round(c.greeks.delta * 10000) / 10000,
+                iv: c.implied_volatility == null ? null : Math.round(c.implied_volatility * 10000) / 10000,
+                spot: Math.round(spot * 1000) / 1000, snapshot_at: runAt });
+            }
+            notes.push(`${ticker} hedge ${e}: ${kept}`);
+          }
+        }
+      }
+    }
+    if (!dryRun && hedgeRows.length) {
+      for (let i = 0; i < hedgeRows.length; i += 500) {
+        const r = await fetch(`${SB_URL}/rest/v1/option_chain_hedge?on_conflict=ticker,expiry,side,strike`, {
+          method: 'POST',
+          headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`,
+            'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
+          body: JSON.stringify(hedgeRows.slice(i, i + 500)),
+        });
+        if (!r.ok) notes.push(`hedge upsert: HTTP ${r.status} ${(await r.text()).slice(0, 200)}`);
+      }
+      /* A name this run rewrote drops what it did not touch (strikes that left the band, expiries that left the
+         window); a name Theta failed on keeps its last good rows. */
+      for (const tk of new Set(hedgeRows.map((x) => String(x.ticker)))) {
+        const d = await fetch(`${SB_URL}/rest/v1/option_chain_hedge?ticker=eq.${tk}&snapshot_at=lt.${encodeURIComponent(runAt)}`,
+          { method: 'DELETE', headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } });
+        if (!d.ok) notes.push(`hedge delete ${tk}: HTTP ${d.status}`);
       }
     }
     if (!dryRun && upRows.length) {
@@ -534,7 +587,7 @@ Deno.serve(async (req) => {
 
     return json(200, {
       ok: true, build: BUILD, source: src, dryRun, names: [...names].sort(), weeks,
-      rows: rows.length, upside: upRows.length, ms: Date.now() - t0, notes,
+      rows: rows.length, upside: upRows.length, hedge: hedgeRows.length, ms: Date.now() - t0, notes,
     });
   } catch (e) {
     return json(500, { ok: false, build: BUILD, error: (e as Error).message });
