@@ -221,18 +221,25 @@ struct AccountChart: View {
     /// at today's prices against the time value still in them. Under 5% (Nik,
     /// 19 Oct 2026; was 10%) is calm and shows nothing (Nik dropped "Decaying": the label staying put
     /// already says calm); otherwise the side with more in the money says which
-    /// way prices are pushing: calls Stocks up, puts Stocks down.
+    /// way prices are pushing: calls up, puts down. It names the tickers in the money (Nik, 27 Oct 2026: "Stocks up"
+    /// read as the whole book while only LULU was through its strike): "LULU up", "LULU, NKE up", three or more
+    /// "Stocks up".
     static func timeValueRead(_ home: HomePayload) -> (word: String, color: Color)? {
         let tv = home.account.timeValueSold ?? 0
         guard tv > 0 else { return nil }
-        var calls = 0.0, puts = 0.0
+        var calls: [String: Double] = [:], puts: [String: Double] = [:]
         for l in home.legs where l.side == "sold" && l.expiry >= home.today {
             guard let s = home.portfolio.first(where: { $0.ticker == l.ticker })?.spot ?? l.underlying else { continue }
             let x = (l.type == "call" ? max(0, s - l.strike) : max(0, l.strike - s)) * Double(l.n) * 100
-            if l.type == "call" { calls += x } else { puts += x }
+            guard x > 0 else { continue }
+            if l.type == "call" { calls[l.ticker, default: 0] += x } else { puts[l.ticker, default: 0] += x }
         }
-        if calls + puts < 0.05 * tv { return nil }
-        return calls >= puts ? ("Stocks up", S.orangeDeep) : ("Stocks down", S.red)
+        let c = calls.values.reduce(0, +), p = puts.values.reduce(0, +)
+        if c + p < 0.05 * tv { return nil }
+        let up = c >= p, side = up ? calls : puts
+        let names = side.sorted { $0.value > $1.value }.map(\.key)
+        let who = names.count <= 2 ? names.joined(separator: ", ") : "Stocks"
+        return up ? ("\(who) up", S.orangeDeep) : ("\(who) down", S.red)
     }
 
     // MARK: Where we are
