@@ -25,6 +25,9 @@ struct HomeView: View {
     @State private var shown = false
     @State private var touching = false
     @State private var homePos = ScrollPosition()
+    // Search (block 27): its thread and your last 10 live as long as the app, so a tab switch keeps them.
+    @State private var search = SearchStore()
+    @State private var voice = SXVoice()
 
     var body: some View {
         ZStack {
@@ -101,7 +104,9 @@ struct HomeView: View {
     private func tabs(_ home: HomePayload) -> some View {
         // A tap on the open tab comes through as the same value: that tab scrolls to the top.
         let pick = Binding(get: { router.tab }, set: { t in
-            if t == router.tab { router.topTick[t, default: 0] += 1 } else { router.tab = t }
+            if t == router.tab { router.topTick[t, default: 0] += 1; return }
+            if t == .search { router.searchFrom = router.tab }
+            router.tab = t
         })
         return TabView(selection: pick) {
             Tab("Home", systemImage: "house.fill", value: HomeRouter.Tab.home) {
@@ -123,7 +128,18 @@ struct HomeView: View {
             Tab("Insights", systemImage: "lightbulb", value: HomeRouter.Tab.insights) {
                 NavigationStack { SunnyInsightsTab(store: store) }
             }
+            // Block 27: the round glass search button right of the four tabs. Tap opens Search; press and hold
+            // (0.45 s) opens it listening.
+            Tab(value: HomeRouter.Tab.search, role: .search) {
+                NavigationStack {
+                    SunnySearchPage(search: search, voice: voice, from: router.searchFrom,
+                                    leave: { router.tab = router.searchFrom }, listenTick: router.listenTick)
+                        .toolbar(.hidden, for: .navigationBar)
+                }
+            }
         }
+        .background(SXHoldToTalk { router.searchFrom = router.tab == .search ? router.searchFrom : router.tab
+                                   router.tab = .search; router.listenTick += 1 })
         // The bar stays as it is while scrolling (Nik, 26 Oct 2026: do not minimise it).
         .tabBarMinimizeBehavior(.never)
     }

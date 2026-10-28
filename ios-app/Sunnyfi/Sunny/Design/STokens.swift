@@ -27,15 +27,15 @@ enum S {
     }
 
     static let ink        = dyn(0x1D1D1F, 0xF5F5F7)   // text, selected chip fill
-    static let muted      = dyn(0x6E6E73, 0x98989D)   // labels, secondary text
+    static let muted      = dyn(0x646469, 0x98989D)   // labels, secondary text (light deepened Oct 28, block 27: 4.5:1 everywhere)
     static let paper      = dyn(0xFFFFFF, 0x1C1C1E)   // solid cards
     static let surface    = dyn(0xF1F2F4, 0x2C2C2E)   // fills inside cards, soft panels
     static let line       = dyn(0xE3E5E8, 0x3A3A3C)   // card outline, hairlines
-    static let green      = dyn(0x3B873D, 0x65C466)   // gains, up
-    static let red        = dyn(0xD63437, 0xEB4B46)   // losses, down; never a minus sign
+    static let green      = dyn(0x327133, 0x65C466)   // gains, up (light deepened Oct 28)
+    static let red        = dyn(0xBC2E30, 0xEB4B46)   // losses, down; never a minus sign (light deepened Oct 28; dark kept, Nik)
     static let yellowDeep = dyn(0x996C23, 0xF7CE46)   // breakeven text, near-breakeven dot
     static let yellow     = dyn(0xF7CE46, 0xF7CE46)   // earnings card, breakeven dot, live glow
-    static let blue       = dyn(0x366DEB, 0x3A86F7)   // put strike, links
+    static let blue       = dyn(0x2E5ECA, 0x3A86F7)   // put strike, links (light deepened Oct 28)
     /// White text and marks on a filled card (Report green, Theta check ink).
     static let onFill     = Color.white
 
@@ -43,7 +43,7 @@ enum S {
     static let orange       = dyn(0xF2A93B, 0xF2A93B)  // shares, refresh sun; the alert on a thin name (Oct 16)
     /// Text on or about a thin name: a thin Delta tile's % and sub line, the
     /// Planner's band word and number (handoff 25, Added Oct 16). 5.1:1 on white.
-    static let orangeDeep   = dyn(0xB35200, 0xF2A93B)
+    static let orangeDeep   = dyn(0xA34B00, 0xF2A93B)   // light deepened Oct 28
     /// The breathing tint, ring and glow use the bright pair in both modes
     /// (SunnyDelta keyframes: 242,169,59 and 235,75,70).
     /// The To do count badge's text: dark ink (S.ink's light value) on S.orange in both modes (handoff 30).

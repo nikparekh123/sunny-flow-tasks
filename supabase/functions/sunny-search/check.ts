@@ -30,6 +30,7 @@ export function figures(text: string): Figure[] {
   t = t.replace(new RegExp(`\\b\\d{1,2}\\s+${MONTHS}\\b`, 'g'), ' ');
   t = t.replace(new RegExp(`${MONTHS}\\s+\\d{1,2}(,\\s*\\d{4})?\\b`, 'g'), ' ');
   t = t.replace(/\b(19|20)\d{2}\b/g, ' ');
+  t = t.replace(/[’']\d{2}\b/g, ' ');
   const out: Figure[] = [];
   for (const m of t.matchAll(/(\$)?(-)?(\d[\d,]*\.?\d*)\s*(K|k|M)?(%)?/g)) {
     const raw = m[3].replace(/\.$/, '').replace(/,/g, '');

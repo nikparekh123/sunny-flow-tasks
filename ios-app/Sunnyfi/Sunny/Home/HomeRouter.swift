@@ -22,10 +22,24 @@ final class HomeRouter {
         case book = "Book", risk = "Risk", income = "Income", results = "Results"
         var id: String { rawValue }
     }
-    /// The four tabs (block 12c, handoff 32). Opens on Home.
-    enum Tab: Hashable { case home, positions, gamma, insights }
+    /// The four tabs (block 12c, handoff 32) and Search, the round button right of them (block 27). Opens on Home.
+    enum Tab: Hashable {
+        case home, positions, gamma, insights, search
+        static let bar: [Tab] = [.home, .positions, .gamma, .insights]
+        var title: String { switch self { case .home: "Home"; case .positions: "Positions"; case .gamma: "Gamma"; case .insights: "Insights"; case .search: "Search" } }
+        var icon: String {
+            switch self {
+            case .home: "house.fill"; case .positions: "rectangle.stack.fill"; case .gamma: "chart.bar.doc.horizontal"
+            case .insights: "lightbulb"; case .search: "magnifyingglass"
+            }
+        }
+    }
 
     var tab: Tab = .home
+    /// The tab Search was opened from: it waits as one circle bottom left, and the circle goes back to it.
+    var searchFrom: Tab = .home
+    /// A press and hold on the search button (0.45 s) opens Search already listening.
+    var listenTick = 0
     /// Tapping the open tab scrolls it to the top (block 12a): each tab watches its own count.
     var topTick: [Tab: Int] = [:]
     var receipt: Receipt?
