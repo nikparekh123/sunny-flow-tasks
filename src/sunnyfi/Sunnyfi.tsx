@@ -13,6 +13,7 @@ import './sunnyfi.css';
 import RequireAuth from './components/RequireAuth';
 import { DashLayout } from './dashboard/DashLayout';
 const PayoffPage = lazy(() => import('@/payoff/PayoffPage'));
+const AskPage = lazy(() => import('@/ask/AskPage'));
 
 /**
  * Neon-wipe page transition. On each route change we remount a thin neon bar
@@ -158,6 +159,8 @@ export default function Sunnyfi() {
         {/* Payoff planner self-gates auth and carries its own header, like
             Positions: Nik wants it to look different from the rest of the site. */}
         <Route path="/payoff" element={<PayoffPage />} />
+        {/* Sunny search test page (27 Oct 2026): self-gated, no nav link; type the URL. */}
+        <Route path="/ask" element={<AskPage />} />
         {/* Unknown paths (incl. retired /research, /strategy, /math, /snowball)
             go to the landing page instead of rendering blank. */}
         <Route path="*" element={<Navigate to="/" replace />} />
