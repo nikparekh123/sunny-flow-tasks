@@ -25,7 +25,7 @@ import { caller, context, lookup, MENU, SB_KEY, SB_URL, type Ctx, type Row } fro
 import { checkAnswer } from './check.ts';
 import { COUNTS, fmt, SLOT, Slots } from './slots.ts';
 
-const BUILD = '2026-10-28.3';
+const BUILD = '2026-10-28.8';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';
@@ -90,6 +90,22 @@ The shape: pick what fits, never more than the question needs.
   from the price, and "· your calls" when a sold strike sits there), r the gamma in $k with muted tone. In price
   order among them, a row with a the price and b " Today" (plain), and one with a the flip (muted) and b " Flip ·
   calmer above, choppier below". Then a "body" with the move the market prices by Friday. Source live.
+- Rolling a name's calls, or how much delta a name needs (I want to roll my Nike calls, what should I do? How much
+  delta do I need on NKE?): read roll and tell it as a story, in this order. Never pick, rank or suggest: no "buy",
+  "should", "best", "cheapest" or "I'd". Nik decides.
+  1. A "say": the roll and what it leaves, its number always delta_needed (the same number as step 3): "Rolling 60
+     NKE calls to Nov 6 at $37.50 leaves you about {r:890} delta short by Thursday." When delta_needed is 0: covered,
+     with the lowest delta to spare in green. In an earnings week no calls are sold: say that instead of the roll.
+  2. A "body" for each, one or two sentences, starting with the bold word: {b:Sold.} what the calls carry now and
+     what they could be if the price reaches the target by Thursday (say the price and the SD); {b:Bought.} the
+     LEAPS and hedge calls (and shares) now and at the target; {b:Insurance.} what the puts take away now and at the
+     target (leave out when none); {b:Net.} the net now and at the target, and when lowest_on_the_way is lower, that
+     it dips to that delta at that price.
+  3. A "body": "You need about [delta_needed] more delta. Here's what each month adds." (covered: "Here's what each
+     month would add.")
+  4. Then {"roll_months": true}: Sunny adds one panel per month (its walls, the calls that would cover the delta
+     needed and their cost) and a last one for shares. Write nothing about the months yourself.
+  follow_ups such as "NKE's walls in January", "And for BABA?".
 - Panels only for an update on one name (give me an update on Nike, catch me up on BABA): a "say", a "trio" of three
   numbers, then one "panel" per topic, each with its own source: Your position, Walls this week, Fair value and
   targets, Valuation and dividend, Against peers and sector, The day after earnings. Leave out a panel when its data
@@ -188,6 +204,34 @@ function sourceLine(kind: unknown, ran: Ran[], c: Ctx, seen: Seen, webN: number)
   return null;
 }
 
+/** The roll's month panels and the shares panel (Nik, 28 Oct 2026), written here from the roll card so every
+    month reads the same: each wall's strike, label and confidence, how many calls cover the delta needed and what
+    they cost, and one call's delta at the low and price. Facts only: no pick, nothing marked best. */
+const DOTS = (n: number | null) => (n == null ? '' : ' ' + '●'.repeat(Math.max(0, Math.min(3, n))) + '○'.repeat(3 - Math.max(0, Math.min(3, n))));
+const monDay = (iso: string) => { const d = new Date(String(iso).slice(0, 10) + 'T12:00:00Z');
+  return `${d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })} ${d.getUTCDate()}`; };
+const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
+const listAnd = (xs: string[]) => (xs.length < 2 ? xs[0] ?? '' : xs.slice(0, -1).join(', ') + ' and ' + xs.at(-1));
+function rollPanels(card: Row, src: Row | null): Row[] {
+  const d = card.data ?? {}, need = Number(d.delta_needed ?? 0), out: Row[] = [];
+  for (const m of (d.months ?? []) as Row[]) {
+    const held = (m.hedge_calls_held_here ?? []) as Row[];
+    out.push({ type: 'panel', title: `${monDay(m.expiry)} · ${m.days_left} days`,
+      say: held.length ? `You hold ${listAnd(held.map((h) => `${fmt(h.contracts, '#')} at $${fmt(h.strike, 'k')}`))}.` : null,
+      trio: null, table: null, note: null, source: null,
+      rows: ((m.walls ?? []) as Row[]).map((w) => ({
+        a: `$${fmt(w.strike, 'k')}`, a_tone: 'call',
+        b: m.open_interest_only || !w.label ? ' Wall · open interest' : ` ${cap(String(w.label))}${DOTS(w.confidence)}`, b_tone: null,
+        r: need > 0 ? `${fmt(w.calls_to_cover, '#')} calls · ${fmt(w.cost_usd, '$')}` : `${fmt(w.delta_per_call_at_low, '#')} a call`, r_tone: null,
+        sub: `${fmt(w.delta_per_call_at_low, '#')} delta a call at the low · ${fmt(w.call_price, '$2')} each`, bar: null })) });
+  }
+  const sh = d.shares ?? {};
+  out.push({ type: 'panel', title: 'Shares', say: null, trio: null, table: null, note: null, source: src,
+    rows: [{ a: need > 0 ? `${fmt(sh.to_cover, '#')} shares` : 'No shares needed', a_tone: null, b: null, b_tone: null,
+      r: need > 0 ? fmt(sh.cost_usd, '$') : null, r_tone: null, sub: 'Each share adds one delta at every price.', bar: null }] });
+  return out;
+}
+
 /** Turns the model's JSON into what the app shows: every slot written out, tones checked, web pages verified, and
     the text it typed by hand (slots taken out) gathered for the number check. */
 function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
@@ -198,7 +242,8 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
     (web ? webLit : lit).push(t.replace(SLOT, ' '));
     if (web && SLOT.test(t)) bad.push('Sunny figures in the web summary');
     SLOT.lastIndex = 0;
-    return sl.fill(t, bad).replace(/ {2,}/g, ' ');
+    // A slot around a small plain number ("[1|#]") is not a slot: the number stands on its own.
+    return sl.fill(t, bad).replace(/\[(\d[\d.,]*)(?:\|[^\]]*)?\]/g, '$1').replace(/ {2,}/g, ' ');
   };
   /** A bar's end or mark: one slot, as a plain number. */
   const N = (x: unknown): number | null => {
@@ -242,6 +287,10 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
       webN = sources.length;
       parts.push({ type: 'web', summary: S(p.web.summary, true), sources, line: sourceLine('web', ran, c, seen, webN)!.text });
     } else if (p.none) parts.push({ type: 'none', why: S(p.none.why), did_you_mean: S(p.none.did_you_mean) });
+    else if (p.roll_months) {
+      const card = ran.filter((x) => x.ok && x.name === 'roll').at(-1)?.card;
+      if (card) parts.push(...rollPanels(card, sourceLine('sunny', ran, c, seen, 0)));
+    }
   }
   // A big number leads (block 27): a sentence the model put above it moves under it, as body text.
   const bi = parts.findIndex((x) => x.type === 'big');
@@ -270,6 +319,7 @@ function stepOf(name: string, a: Row): { step: string; work: boolean } {
     case 'bought': return s(t ? `Reading what you bought on ${t}` : 'Reading what you bought');
     case 'todo': return s('Reading To do');
     case 'delta_gamma': return s(t ? `Working out ${t}'s delta` : "Working out the book's delta");
+    case 'roll': return s(`Working out ${t}'s roll`);
     case 'gamma': return s(`Reading ${t}'s walls`, true);
     case 'walls_live': return s(`Reading ${t}'s live chain`, true);
     case 'yield': return s('Reading your yield');

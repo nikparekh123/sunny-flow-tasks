@@ -36,7 +36,9 @@ final class HomeRouter {
     }
 
     var tab: Tab = .home
-    /// The tab Search was opened from: it waits as one circle bottom left, and the circle goes back to it.
+    /// Search is a page of its own over the tab it was opened from (block 27, final Oct 28): the tab stays as it
+    /// was underneath, and the back button returns to it.
+    var searchOpen = false
     var searchFrom: Tab = .home
     /// A press and hold on the search button (0.45 s) opens Search already listening.
     var listenTick = 0

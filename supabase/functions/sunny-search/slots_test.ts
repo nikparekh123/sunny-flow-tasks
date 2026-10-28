@@ -27,6 +27,8 @@ Deno.test('a slot naming nothing, or a figure typed into a slot, is caught', () 
 
 Deno.test('short money', () => {
   assertEquals(fmt(3803.4, '$k'), '$3.8K');
+  assertEquals(fmt(37.5, 'k'), '37.50');
+  assertEquals(fmt(104, 'k'), '104');
   assertEquals(fmt(226010, '$k'), '$226K');
   assertEquals(fmt(56900000, '$k'), '$56.9M');
 });

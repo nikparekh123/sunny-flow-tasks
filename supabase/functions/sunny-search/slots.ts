@@ -28,7 +28,7 @@ export function fmt(v: number, f: string): string {
     case '#2': return us(a, 2);
     case 'd': return a >= 1 ? a.toFixed(2) : a.toFixed(2).replace(/^0/, '');
     case 'x': return a.toFixed(1) + 'x';
-    case 'k': return String(Math.round(a * 100) / 100);
+    case 'k': { const r = Math.round(a * 100) / 100; return Number.isInteger(r) ? String(r) : r.toFixed(2); }   // 104, 37.50
     case '': return Number.isInteger(a) ? us(a) : us(a, 2);
   }
   throw new Error(`format ${f}`);

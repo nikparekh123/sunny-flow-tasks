@@ -4,7 +4,8 @@
 //
 //  Press and hold the search button 0.45 s: Search opens already listening
 //  (block 27). The system tab bar draws the button; this adds the hold to it
-//  without touching the tap, which still opens Search as the system does.
+//  without touching the tap. It also keeps the bar, which slides away while
+//  Search is open (SXTabBar).
 //
 
 import SwiftUI
@@ -39,6 +40,7 @@ struct SXHoldToTalk: UIViewRepresentable {
             g.delegate = self
             tb.addGestureRecognizer(g)
             bar = tb
+            SXTabBar.bar = tb
         }
 
         private static func find(in v: UIView) -> UITabBar? {
@@ -59,5 +61,28 @@ struct SXHoldToTalk: UIViewRepresentable {
             return t.location(in: bar).x > bar.bounds.maxX - 90
         }
         func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith o: UIGestureRecognizer) -> Bool { true }
+    }
+}
+
+/// While Search is open the tab bar and the search button slide down 120 pt out of view (0.45 s,
+/// cubic-bezier(.32,.72,0,1)) and fade (0.3 s); closing plays it back from 0.05 s. Reduce Motion cross-fades.
+@MainActor
+enum SXTabBar {
+    static weak var bar: UITabBar?
+
+    static func slide(away: Bool, reduce: Bool) {
+        guard let bar else { return }
+        if reduce {
+            bar.transform = .identity
+            UIView.animate(withDuration: 0.25) { bar.alpha = away ? 0 : 1 }
+            return
+        }
+        let delay = away ? 0 : 0.05
+        let move = UIViewPropertyAnimator(duration: 0.45, controlPoint1: CGPoint(x: 0.32, y: 0.72), controlPoint2: CGPoint(x: 0, y: 1)) {
+            bar.transform = away ? CGAffineTransform(translationX: 0, y: 120) : .identity
+        }
+        let fade = UIViewPropertyAnimator(duration: 0.3, curve: away ? .easeOut : .easeIn) { bar.alpha = away ? 0 : 1 }
+        move.startAnimation(afterDelay: delay)
+        fade.startAnimation(afterDelay: delay)
     }
 }

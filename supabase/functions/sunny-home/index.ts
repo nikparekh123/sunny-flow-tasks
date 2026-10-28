@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours and
  * while the index futures trade, 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-26.13';
+const BUILD = '2026-10-28.1';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -277,7 +277,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   const marksFrom = [addDays(today, -45), addDays(winStart, -10), addDays(BOOK_START, -5)].sort()[0];
 
   const [trades, greeks, quotes, market, acctDays, cal, earn, seasons, closes, runs, sells, lots, savedReports, macro,
-         openChecks, divs, posAll, lmd, chainRows, savedHistory, divPast, upQuotes] = await Promise.all([
+         openChecks, divs, posAll, lmd, chainRows, savedHistory, divPast, upQuotes, rungQuotes] = await Promise.all([
     page('option_trades?voided_at=is.null&order=id.asc&select=id,ticker,trade_date,action,option_type,'
       + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl,realized_pl_source,note'),
     /* One row per leg ever marked: grows with every trade, so paged. */
@@ -313,6 +313,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     get(`dividends?pay_date=gt.${BOOK_START}&pay_date=lte.${today}&select=ticker,ex_date,pay_date&order=pay_date.asc,ticker.asc`),
     /* The 3- and 12-month upside calls the Planner sizes (chain-next, 15 min). */
     get('option_chain_upside?select=ticker,tenor,expiry,strike,mid,delta,iv,spot&order=ticker.asc,tenor.asc,strike.asc'),
+    /* The hedge rungs' calls: every monthly 40 to 185 days out, 1x to 1.8x the price (chain-next, 15 min). */
+    page('option_chain_hedge?side=eq.call&select=ticker,expiry,strike,mid,delta,iv&order=ticker.asc,expiry.asc,strike.asc'),
   ]);
 
   step('reads');
@@ -2040,7 +2042,84 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const decWk = ls.filter((l) => l.side === 'bought' && l.expiry > today && l.n > 0).reduce((a, l) => {
         const T = Math.max(1 / 365, (Date.parse(l.expiry) - Date.parse(today)) / 864e5 / 365);
         return a + Math.max(0, legPx(l, T) - legPx(l, Math.max(1 / 365, T - 7 / 365))) * l.n * 100; }, 0);
+      /* THE ROLL STORY (Nik, 28 Oct 2026: "more like a story... we don't select, we don't suggest"). The roll to
+         next Friday (targetExp: what this Friday's sale writes; the same week as W from the sale day on), on the
+         hedge rule's terms: one call per LEAP at the money, every leg still on at that week's Thursday, the target
+         +1.5 weekly SD (+2 with an Accelerator just above the strike). Told in his order: the calls sold and what
+         they could be at the target, what is bought, what insurance takes away, the net, then the delta still
+         needed (the lowest point from today to the target, as the hedge rule counts it) and each hedge monthly's
+         call walls with how many calls there would cover it. No pick. Delta in shares, signed. */
+      const story = ((R: string) => {
+        if (!sdW) return null;
+        const byR = prevTrading(R), saleR = lastTradingOnOrBefore(addDays(R, -7));
+        const yrsR = (exp: string) => Math.max(1 / 365, (Date.parse(exp) - Date.parse(byR)) / 864e5 / 365);
+        const dR = (S: number, K: number, exp: string, iv: number | null, call: boolean) => {
+          const v = iv && iv > 0 ? iv : (ivRow?.iv ?? 0.4), dc = bsCall(S, K, yrsR(exp), v).delta; return call ? dc : dc - 1; };
+        const earnR = !!earnRow && (() => { const d = String(earnRow.report_date), amc = earnRow.report_time === 'amc';
+          return (d > saleR || (d === saleR && amc)) && (d < R || (d === R && !amc)); })();
+        const callsR = chainRows.filter((r) => r.ticker === t && String(r.expiry) === R && r.side === 'call' && Number(r.mid) > 0)
+          .map((r) => ({ k: Number(r.strike), mid: Number(r.mid), delta: num(r.delta), iv: num(r.iv) })).sort((a, b) => a.k - b.k);
+        const atmR = callsR.find((x) => x.k >= spot) ?? null;
+        const soldR = ls.filter((l) => l.side === 'sold' && l.type === 'call' && l.expiry === R).reduce((a, l) => a + l.n, 0);
+        const leftR = earnR || saleDone.has(`${t}|${R}`) ? 0 : Math.max(0, nCalls - soldR);
+        const sale = atmR && leftR ? [{ k: atmR.k, n: leftR, iv: atmR.iv }] : [];
+        const wallsR = ((gviews.get(`${t}|${R}`) ?? gviews.get(`${t}|weeklies`))?.walls ?? []) as Row[];
+        const kR = atmR?.k ?? spot;
+        const accR = wallsR.find((w) => w.side === 'call' && w.label === 'accelerator' && w.k > kR && w.k <= kR + sdW) ?? null;
+        const sdR = accR ? 2 : SAFE_SD, pxR = spot + sdR * sdW;
+        const onR = ls.filter((l) => l.expiry >= R);
+        const netR = (S: number) => sh + onR.reduce((a, l) => a + sgn(l) * dR(S, l.strike, l.expiry, l.iv, l.type === 'call') * l.n * 100, 0)
+          - sale.reduce((a, x) => a + dR(S, x.k, R, x.iv, true) * x.n * 100, 0);
+        const gridR = Array.from({ length: 41 }, (_, i) => spot + (pxR - spot) * i / 40);
+        const dNow = (l: Leg) => num(l.delta) ?? dR(spot, l.strike, l.expiry, l.iv, l.type === 'call');
+        const grp = (xs: Leg[]) => xs.length ? { n: xs.reduce((a, l) => a + l.n, 0),
+          now: Math.round(xs.reduce((a, l) => a + sgn(l) * dNow(l) * l.n * 100, 0)),
+          at: Math.round(xs.reduce((a, l) => a + sgn(l) * dR(pxR, l.strike, l.expiry, l.iv, l.type === 'call') * l.n * 100, 0)) } : null;
+        const sc0 = grp(onR.filter((l) => l.side === 'sold' && l.type === 'call'));
+        const saleNow = sale.reduce((a, x) => a - (atmR?.delta ?? dR(spot, x.k, R, x.iv, true)) * x.n * 100, 0);
+        const saleAt = sale.reduce((a, x) => a - dR(pxR, x.k, R, x.iv, true) * x.n * 100, 0);
+        const soldCalls = { n: (sc0?.n ?? 0) + (sale[0]?.n ?? 0), held: sc0?.n ?? 0, sale: sale[0] ? { n: sale[0].n, k: sale[0].k } : null,
+          now: Math.round((sc0?.now ?? 0) + saleNow), at: Math.round((sc0?.at ?? 0) + saleAt) };
+        const leaps = grp(onR.filter(isLeap)), hedgeC = grp(onR.filter((l) => l.side === 'bought' && l.type === 'call' && upside.has(l)));
+        const ins = grp(onR.filter((l) => l.side === 'bought' && l.type === 'put')), soldP = grp(onR.filter((l) => l.side === 'sold' && l.type === 'put'));
+        const net = { now: Math.round(soldCalls.now + (leaps?.now ?? 0) + (hedgeC?.now ?? 0) + (ins?.now ?? 0) + (soldP?.now ?? 0) + sh),
+                      at: Math.round(netR(pxR)) };
+        let low = { px: spot, d: Infinity };
+        for (const S of gridR) { const n0 = netR(S); if (n0 < low.d) low = { px: S, d: n0 }; }
+        const need = low.d < 0 ? Math.ceil(-low.d) : 0;
+        /* Each monthly's call walls above the price (the tape's view, else open interest), the two highest ranked
+           within twice the target's move; per call, its delta at the low and at the target, and the count that
+           keeps every price from today to the target at or above zero. */
+        const exps = [...new Set(rungQuotes.filter((r) => r.ticker === t).map((r) => String(r.expiry)))].sort();
+        const months = exps.map((exp) => {
+          const qs = rungQuotes.filter((r) => r.ticker === t && String(r.expiry) === exp && Number(r.mid) > 0);
+          const quote = (k: number) => qs.find((r) => Math.abs(Number(r.strike) - k) < 1e-6) ?? null;
+          const gv = gviews.get(`${t}|${exp}`);
+          const ws = (gv
+            ? ((gv.walls ?? []) as Row[]).filter((w) => w.side === 'call' && w.k > spot).sort((a, b) => a.rank - b.rank)
+                .map((w) => ({ k: Number(w.k), label: (w.label ?? null) as string | null, conf: num(w.conf), rank: Number(w.rank) }))
+            : (() => { const o = wallsAt(t, exp).now; return [o?.cw, o?.cw2].filter((k): k is number => k != null && k > spot)
+                .map((k, i) => ({ k, label: null as string | null, conf: null as number | null, rank: i + 1 })); })())
+            .filter((w) => w.k - spot <= 2 * (pxR - spot) && quote(w.k)).slice(0, 2);
+          const walls = ws.map((w) => {
+            const q0 = quote(w.k)!, iv = num(q0.iv), mid = Number(q0.mid);
+            let n = 0;
+            for (const S of gridR) { const n0 = netR(S), dq = dR(S, w.k, exp, iv, true);
+              if (n0 < 0 && dq > 0) n = Math.max(n, Math.ceil(-n0 / (100 * dq))); }
+            return { ...w, mid: r2(mid), d_now: Math.round(100 * (num(q0.delta) ?? 0)), d_low: Math.round(100 * dR(low.px, w.k, exp, iv, true)),
+                     d_at: Math.round(100 * dR(pxR, w.k, exp, iv, true)), n, cost: Math.round(n * mid * 100) };
+          });
+          const held = ls.filter((l) => l.side === 'bought' && l.type === 'call' && upside.has(l) && l.expiry === exp).map((l) => ({ k: l.strike, n: l.n }));
+          return { exp, days: Math.round((Date.parse(exp) - Date.parse(today)) / 864e5), walls, held, oi_only: !gv };
+        }).filter((m) => m.walls.length || m.held.length);
+        return { week: R, by: byR, earnings: earnR, target: { sd: sdR, px: r2(pxR), pct: r2((pxR / spot - 1) * 100) },
+          accel: accR ? { k: accR.k } : null, spot: r2(spot),
+          sold_calls: soldCalls, sold_puts: soldP, leaps, hedge_calls: hedgeC, insurance: ins, shares: sh || null, net,
+          low: { px: r2(low.px), d: Math.round(low.d) }, need, months,
+          by_shares: { n: need, cost: Math.round(need * spot) } };
+      })(targetExp);
       return {
+        story,
         week: W, by: byW, sd: sdW == null ? null : r2(sdW), earnings: earnW,
         sell: { n: nCalls, sold: soldW, left: leftW, done: doneW, pick: 'atm', ways: ways2,
                 wall: atmW ? wallAt(atmW.k) : null, accel: accelAbove ? { k: accelAbove.k, conf: accelAbove.conf } : null },

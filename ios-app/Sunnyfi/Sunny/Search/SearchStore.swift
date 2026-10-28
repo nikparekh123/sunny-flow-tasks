@@ -8,8 +8,8 @@
 //  that starts with And, What about or How about, adds to the thread;
 //  anything else starts fresh. Answers and threads clear each morning at
 //  9:00 AM New York time; the last 10 stay, and tapping one asks again with
-//  today's numbers. Back steps out one level at a time: voice, typing, the
-//  answer, your searches, then the tab you came from.
+//  today's numbers. Back steps out one level at a time: the microphone sheet,
+//  voice, the conversation, Recent, then the tab you came from.
 //
 
 import Foundation
@@ -159,39 +159,11 @@ final class SearchStore {
 
     var listening = false
 
-    /// One level back: typing, then the answers, then your searches. False when there is nothing left (go to the tab).
+    /// One level back from the conversation to Recent. False when there is nothing left (go to the tab).
     func back() -> Bool {
-        if typing || !query.isEmpty { query = ""; typing = false; return true }
         if !entries.isEmpty { entries = []; threadDay = nil; jump = nil; jumpTick += 1; return true }
         return false
     }
-
-    // MARK: Suggestions while typing
-
-    struct Suggestion: Identifiable { let id: String; let recent: SXRecent?; let a: String, b: String, c: String }
-
-    /// The first row asks exactly what was typed; then past searches that match (up to 3), then questions that work,
-    /// six rows at most, the typed words split out so they show in gray.
-    func suggestions() -> (rows: [Suggestion], noMatch: Bool) {
-        let q = query.trimmingCharacters(in: .whitespaces)
-        let nq = norm(q), words = nq.split(separator: " ").map(String.init)
-        let hit = { (t: String) in words.allSatisfy { self.norm(t).contains($0) } }
-        func seg(_ t: String) -> (String, String, String) {
-            guard let r = norm(t).range(of: nq) else { return (t, "", "") }
-            let lo = norm(t).distance(from: norm(t).startIndex, to: r.lowerBound), n = q.count
-            let s = Array(t)
-            return (String(s[..<lo]), String(s[lo..<min(s.count, lo + n)]), String(s[min(s.count, lo + n)...]))
-        }
-        let rec = recents.filter { hit($0.q) }.prefix(3)
-        let seen = Set(rec.map { norm($0.q) })
-        let sug = questions.filter { hit($0) && !seen.contains(norm($0)) }.prefix(6 - rec.count)
-        var rows = [Suggestion(id: "ask", recent: nil, a: "", b: "", c: q)]
-        rows += rec.map { let (a, b, c) = seg($0.q); return Suggestion(id: "r\($0.id)", recent: $0, a: a, b: b, c: c) }
-        rows += sug.map { let (a, b, c) = seg($0); return Suggestion(id: "q" + $0, recent: nil, a: a, b: b, c: c) }
-        return (rows, rec.isEmpty && sug.isEmpty)
-    }
-
-    private func norm(_ s: String) -> String { s.lowercased().replacingOccurrences(of: "’", with: "'").replacingOccurrences(of: "‘", with: "'") }
 
     private struct RecentsReply: Decodable { let recents: [SXRecent] }
     private struct QuestionsReply: Decodable { let questions: [String]; let tries: [String] }

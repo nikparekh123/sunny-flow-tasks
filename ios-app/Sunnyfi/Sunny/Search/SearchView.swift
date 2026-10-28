@@ -2,13 +2,14 @@
 //  SearchView.swift
 //  Sunny
 //
-//  The Search page (handoff "Search for launch", block 27, SunnySearch with
-//  nav="tab"): your last 10, suggestions while typing, voice with live
-//  words, and the thread of text answers, each with Go deeper, Read aloud,
-//  thumbs, Not what I asked and (under the last) two follow-ups.
-//  The bottom: the tab you came from waits as one circle, the field beside
-//  it. Opening folds the tab bar into that circle (288 to 62 in 0.5 s);
-//  tapping the circle plays it back and returns to the tab.
+//  The Search page (handoff "Search for launch", block 27, final: SunnySearch
+//  with nav="tab" chat home="top", Oct 28): a page of its own over the tab you
+//  came from. Recent, your last 10; a chat box the full width of the screen
+//  that grows to five lines; each question a bubble on the right with its text
+//  answer under it, Go deeper, Read aloud, thumbs, Not what I asked and (under
+//  the last) two follow-ups. A back button top left, or a swipe from the left
+//  edge, steps out one level at a time: the microphone sheet, voice, the
+//  conversation, Recent, then the tab.
 //
 
 import SwiftUI
@@ -23,45 +24,50 @@ struct SunnySearchPage: View {
     let listenTick: Int
 
     @Environment(\.accessibilityReduceMotion) private var reduce
+    @Environment(\.dynamicTypeSize) private var dts
     @State private var speaker = SXSpeaker()
-    @State private var open = false
+    /// Open: the page fades in (0.3 s) and rises 18 pt (0.5 s); the back button and the chat box follow from 0.24 s.
+    @State private var shown = false
+    @State private var risen = false
+    @State private var chrome = false
     @FocusState private var focused: Bool
 
     private var thread: Bool { !search.entries.isEmpty }
-    private var typingNow: Bool { focused && !search.query.trimmingCharacters(in: .whitespaces).isEmpty }
-    private var showBack: Bool { thread || typingNow || voice.on }
-    private var foldEase: Animation { .timingCurve(0.32, 0.72, 0, 1, duration: 0.5) }
+    private var ease: Animation { .timingCurve(0.32, 0.72, 0, 1, duration: 0.5) }
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            SXBackground()
-            page
-                .opacity(open || reduce ? 1 : 0)
-                .offset(y: open || reduce ? 0 : 18)
-            fades
-            topBar
-            // The field sits 28 pt from the bottom of the screen (8 above the keyboard); the voice hint and the
-            // microphone sheet 10 above the field.
-            GeometryReader { g in
-                let sb = g.safeAreaInsets.bottom, gap = sb > 60 ? 8 : 28 - sb
-                VStack(spacing: 10) {
-                    Spacer(minLength: 0)
-                    if voice.denied { micSheet.transition(.opacity.combined(with: .offset(y: 6))) }
-                    else if voice.on { hint }
-                    bottomBar
-                }
-                .frame(maxWidth: .infinity)
-                .offset(y: -gap)
-                .animation(.easeOut(duration: 0.2), value: voice.on)
-                .animation(.easeOut(duration: 0.3), value: voice.denied)
+            ZStack {
+                SXBackground()
+                page.offset(y: risen || reduce ? 0 : 18)
+                fades
             }
+            .opacity(shown ? 1 : 0)
+            Group {
+                topBar
+                // The chat box sits 28 pt from the bottom of the screen (8 above the keyboard); the microphone
+                // sheet 10 above it.
+                GeometryReader { g in
+                    let sb = g.safeAreaInsets.bottom, gap = sb > 60 ? 8 : 28 - sb
+                    VStack(spacing: 10) {
+                        Spacer(minLength: 0)
+                        if voice.denied { micSheet.transition(.opacity.combined(with: .offset(y: 6))) }
+                        chatBox.padding(.horizontal, max(8, (g.size.width - 358) / 2))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .offset(y: -gap)
+                    .animation(.easeOut(duration: 0.3), value: voice.denied)
+                }
+            }
+            .opacity(chrome ? 1 : 0)
+            edge
         }
-        .toolbarVisibility(.hidden, for: .tabBar)
         .onAppear {
             search.open()
-            if reduce { open = true } else {
-                withAnimation(.easeOut(duration: 0.3)) { open = true }
-            }
+            if reduce { withAnimation(.easeOut(duration: 0.25)) { shown = true; risen = true; chrome = true }; return }
+            withAnimation(.easeOut(duration: 0.3)) { shown = true }
+            withAnimation(ease) { risen = true }
+            withAnimation(.easeOut(duration: 0.25).delay(0.24)) { chrome = true }
         }
         .onChange(of: listenTick, initial: true) { _, t in
             guard t != search.listenSeen else { return }
@@ -78,14 +84,12 @@ struct SunnySearchPage: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    if typingNow { suggestions }
-                    else if thread { answers }
-                    else { recents }
+                    if thread { answers } else { recents }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 // From the top of the screen, as the design measures it (the status bar is inside it).
-                .padding(.top, showBack ? 108 : 62)
-                .padding(.bottom, 150)
+                .padding(.top, 108)
+                .padding(.bottom, 196)
                 .id("top")
             }
             .ignoresSafeArea(.container, edges: .top)
@@ -100,11 +104,11 @@ struct SunnySearchPage: View {
         .contentMargins(.top, 0, for: .scrollContent)
     }
 
-    // MARK: Your last 10
+    // MARK: Recent, your last 10
 
     private var recents: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Search").sx(.title).foregroundStyle(SX.ink).accessibilityAddTraits(.isHeader).padding(.horizontal, 20)
+            Text("Recent").sx(.title).foregroundStyle(SX.ink).accessibilityAddTraits(.isHeader).padding(.horizontal, 20)
             if search.recents.isEmpty && search.recentsLoaded { firstTime }
             ForEach(groups(), id: \.0) { g in
                 VStack(alignment: .leading, spacing: 10) {
@@ -172,42 +176,13 @@ struct SunnySearchPage: View {
         return f.string(from: d)
     }
 
-    // MARK: Typing
-
-    private var suggestions: some View {
-        let s = search.suggestions()
-        return VStack(alignment: .leading, spacing: 0) {
-            ForEach(s.rows) { row in
-                Button { go(row.recent?.q ?? (row.a + row.b + row.c), cont: row.id == "ask" ? nil : false) } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: row.recent == nil ? "magnifyingglass" : "clock")
-                            .font(.system(size: 15, weight: .semibold)).foregroundStyle(SX.muted).frame(width: 20)
-                        (Text(row.a).fontWeight(.semibold) + Text(row.b).foregroundColor(SX.muted) + Text(row.c).fontWeight(.semibold))
-                            .sx(.field).foregroundStyle(SX.ink).frame(maxWidth: .infinity, alignment: .leading).multilineTextAlignment(.leading)
-                        if let r = row.recent { Text(when(r.at)).sx(.time).foregroundStyle(SX.muted) }
-                    }
-                    .padding(.vertical, 4)
-                    .frame(minHeight: 52)
-                    .overlay(alignment: .bottom) { Rectangle().fill(SX.line).frame(height: 1) }
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-            }
-            if s.noMatch {
-                Text("Nothing you’ve asked matches yet. Sunny will still look.").sx(.small).foregroundStyle(SX.muted).padding(.top, 14)
-            }
-        }
-        .padding(.horizontal, 20)
-    }
-
-    // MARK: The thread
+    // MARK: The conversation
 
     private var answers: some View {
         VStack(alignment: .leading, spacing: 20) {
             ForEach(Array(search.entries.enumerated()), id: \.element.id) { i, e in
                 entry(e, last: i == search.entries.count - 1)
-                    .padding(.top, i == 0 ? 0 : 20)
-                    .overlay(alignment: .top) { if i > 0 { Rectangle().fill(SX.line).frame(height: 1) } }
+                    .padding(.top, i == 0 ? 0 : 12)
                     .padding(.horizontal, 20)
                     .id(e.id)
             }
@@ -216,7 +191,7 @@ struct SunnySearchPage: View {
 
     @ViewBuilder private func entry(_ e: SearchStore.Entry, last: Bool) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(e.q).sx(.question).foregroundStyle(SX.muted)
+            bubble(e.q)
             switch e.phase {
             case .loading: SXSkeleton()
             case .working(let step): SXWorking(step: step, since: e.bar)
@@ -231,6 +206,19 @@ struct SunnySearchPage: View {
             }
         }
         .sxRise(0)
+    }
+
+    /// Your question, a bubble on the right (17 / 23, 500, on the fill color), at most 84% of the width.
+    private func bubble(_ q: String) -> some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 56)
+            Text(q).sx(.row.weighted(.medium)).foregroundStyle(SX.ink).multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, 10).padding(.horizontal, 16)
+                .background(SX.fill, in: UnevenRoundedRectangle(topLeadingRadius: 22, bottomLeadingRadius: 22, bottomTrailingRadius: 6, topTrailingRadius: 22))
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("You asked: \(q)")
     }
 
     @ViewBuilder private func deeper(_ e: SearchStore.Entry) -> some View {
@@ -301,27 +289,25 @@ struct SunnySearchPage: View {
     private var fades: some View {
         VStack(spacing: 0) {
             LinearGradient(stops: [.init(color: SX.fadeTop, location: 0.52), .init(color: SX.fadeTop.opacity(0), location: 1)], startPoint: .top, endPoint: .bottom)
-                .frame(height: showBack ? 112 : 58)
+                .frame(height: 112)
             Spacer(minLength: 0)
             LinearGradient(stops: [.init(color: SX.fadeBottom, location: 0.4), .init(color: SX.fadeBottom.opacity(0), location: 1)], startPoint: .bottom, endPoint: .top)
-                .frame(height: 120)
+                .frame(height: 150)
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
     }
 
+    /// The back button top left: it names where it goes.
     private var topBar: some View {
         VStack {
             HStack {
-                if showBack {
-                    Button(action: back) {
-                        Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold)).foregroundStyle(SX.ink)
-                            .frame(width: 44, height: 44)
-                    }
-                    .glassEffect(.regular.interactive(), in: .circle)
-                    .accessibilityLabel(thread || typingNow ? "Back to search" : "Back")
-                    .transition(.opacity)
+                Button(action: back) {
+                    Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold)).foregroundStyle(SX.ink)
+                        .frame(width: 44, height: 44)
                 }
+                .glassEffect(.regular.interactive(), in: .circle)
+                .accessibilityLabel(backLabel)
                 Spacer()
             }
             .padding(.horizontal, 16)
@@ -329,125 +315,104 @@ struct SunnySearchPage: View {
             Spacer()
         }
         .ignoresSafeArea(.container, edges: .top)
-        .animation(.easeOut(duration: 0.2), value: showBack)
     }
 
+    private var backLabel: String {
+        voice.denied ? "Close" : thread ? "Back to Recent" : "Back to \(from.title)"
+    }
+
+    /// A swipe from the left edge (the first 18 pt, 60 pt to the right) steps back like the button.
+    private var edge: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: 18).contentShape(.rect)
+                .gesture(DragGesture(minimumDistance: 8).onEnded { v in if v.translation.width > 60 { back() } })
+                .accessibilityHidden(true)
+            Spacer(minLength: 0)
+        }
+        .ignoresSafeArea()
+    }
+
+    /// One level back: the microphone sheet, voice, the conversation (to Recent), then the tab.
     private func back() {
+        if voice.denied { voice.denied = false; return }
         if voice.on { voice.stop(); return }
-        if typingNow || focused { search.query = ""; focused = false; return }
-        if search.back() { return }
+        if thread { focused = false; _ = search.back(); return }
         close()
     }
 
-    // MARK: The bottom
+    // MARK: The chat box
 
-    @State private var folded = false
-
-    private var bottomBar: some View {
-        HStack(spacing: 8) {
-            tabCircle
-            field
-        }
-        .frame(width: 358)
-        .onAppear {
-            if reduce { folded = true; return }
-            withAnimation(foldEase) { folded = true }
-        }
-    }
-
-    /// The tab you came from, as one circle (folded from the whole tab bar when Search opens).
-    private var tabCircle: some View {
-        Button(action: close) {
-            ZStack(alignment: .leading) {
-                HStack(spacing: 0) {
-                    ForEach(HomeRouter.Tab.bar, id: \.self) { t in
-                        VStack(spacing: 1) {
-                            Image(systemName: t.icon).font(.system(size: 19, weight: .medium)).frame(height: 24)
-                            Text(t.title).font(.system(size: 10, weight: .semibold))
-                        }
-                        .foregroundStyle(t == from ? SX.ink : SX.muted)
-                        .frame(width: 70, height: 54)
-                    }
-                }
-                .padding(.leading, 4)
-                .opacity(folded ? 0 : 1)
-                .animation(folded ? .easeOut(duration: 0.16) : .easeIn(duration: 0.24).delay(0.18), value: folded)
-                Image(systemName: from.icon).font(.system(size: 19, weight: .medium)).foregroundStyle(SX.ink)
-                    .frame(width: 62, height: 62)
-                    .opacity(folded ? 1 : 0)
-                    .animation(folded ? .easeOut(duration: 0.25).delay(0.22) : .easeIn(duration: 0.1), value: folded)
-            }
-            .frame(width: folded ? 62 : 288, height: 62, alignment: .leading)
-            .clipShape(.capsule)
-        }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: .capsule)
-        .accessibilityLabel("Back to \(from.title)")
-    }
-
-    private var field: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .semibold)).foregroundStyle(SX.muted)
-                .opacity(folded ? 1 : 0)
-                .animation(.easeOut(duration: 0.25).delay(folded ? 0.22 : 0), value: folded)
+    /// The full width of the screen: your words wrap and the box grows to five lines (110 pt), then scrolls
+    /// inside. Mic when it is empty, send once there are words; Return adds a line.
+    private var chatBox: some View {
+        VStack(alignment: .leading, spacing: 0) {
             Group {
                 if voice.on {
-                    Button { search.query = voice.stop(); focused = true } label: {
-                        HStack(spacing: 8) {
-                            SXWave()
-                            Text(voice.words.isEmpty ? " " : voice.words).sx(.field).foregroundStyle(SX.ink).lineLimit(1).truncationMode(.head)
-                            SXCaret()
-                            Spacer(minLength: 0)
-                        }
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Edit what you said")
+                    Button { search.query = voice.stop(); focused = true } label: { heard.frame(maxWidth: .infinity, alignment: .leading).contentShape(.rect) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Edit what you said")
                 } else {
                     TextField("", text: Binding(get: { search.query }, set: { search.query = $0 }),
-                              prompt: Text(thread ? "Ask a follow-up" : "Ask about your book").foregroundStyle(SX.muted))
+                              prompt: Text(thread ? "Ask a follow-up" : "Ask about your book").foregroundStyle(SX.muted), axis: .vertical)
+                        .lineLimit(1...5)
                         .sx(.field)
                         .foregroundStyle(SX.ink)
                         .focused($focused)
-                        .submitLabel(.search)
-                        .onSubmit { send() }
                         .accessibilityLabel("Ask Sunny")
                 }
             }
-            .opacity(folded ? 1 : 0)
-            .animation(.easeOut(duration: 0.25).delay(folded ? 0.24 : 0), value: folded)
-            trailing
+            .padding(.leading, 18).padding(.trailing, 13)
+            HStack(spacing: 4) {
+                if voice.on {
+                    HStack(spacing: 8) {
+                        SXWave()
+                        Text(voice.ending ? "Asking in a moment" : "Listening · tap to edit").sx(.time.weighted(.semibold)).foregroundStyle(SX.muted)
+                            .accessibilityAddTraits(.updatesFrequently)
+                    }
+                    .allowsHitTesting(false)
+                }
+                Spacer(minLength: 0)
+                trailing
+            }
+            .frame(minHeight: 44)
+            .padding(.top, 4)
+            .padding(.leading, 18)
         }
-        .padding(.leading, 20)
-        .padding(.trailing, 6)
-        .frame(height: 62)
-        .frame(maxWidth: .infinity)
-        .glassEffect(.regular, in: .capsule)
+        .padding(.top, 14).padding(.trailing, 5).padding(.bottom, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: 28))
+        .animation(.easeOut(duration: 0.2), value: voice.on)
+    }
+
+    /// What has been heard, wrapping like typed text, the caret after it (blinks once a second).
+    private var heard: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { tl in
+            let on = Int(tl.date.timeIntervalSinceReferenceDate * 2) % 2 == 0
+            (Text(voice.words) + Text(" |").foregroundColor(on ? SX.web : .clear))
+                .sx(.field).foregroundStyle(SX.ink).lineLimit(5).truncationMode(.head)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     @ViewBuilder private var trailing: some View {
         if voice.on {
-            Button { voice.stop() } label: {
-                Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(SX.muted)
-                    .frame(width: 40, height: 40).background(SX.fill, in: .circle)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Stop listening")
-        } else if !search.query.trimmingCharacters(in: .whitespaces).isEmpty {
-            Button(action: send) {
-                Image(systemName: "arrow.up").font(.system(size: 14, weight: .bold)).foregroundStyle(S.chipOnInk)
-                    .frame(width: 40, height: 40).background(SX.ink, in: .circle)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Ask")
+            Button { voice.stop() } label: { circle(SX.fill) { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(SX.muted) } }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Stop listening")
+        } else if !search.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Button(action: send) { circle(SX.ink) { Image(systemName: "arrow.up").font(.system(size: 14, weight: .bold)).foregroundStyle(S.chipOnInk) } }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Ask")
         } else {
-            Button(action: listen) {
-                Image(systemName: "mic.fill").font(.system(size: 17, weight: .medium)).foregroundStyle(SX.ink).frame(width: 40, height: 44)
-            }
-            .buttonStyle(.plain)
-            .opacity(folded ? 1 : 0)
-            .accessibilityLabel("Ask by voice")
+            Button(action: listen) { circle(SX.ink) { Image(systemName: "mic.fill").font(.system(size: 16, weight: .medium)).foregroundStyle(S.chipOnInk) } }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Ask by voice")
         }
+    }
+
+    /// A 36 pt circle inside a 44 pt button.
+    private func circle(_ fill: Color, @ViewBuilder _ icon: () -> some View) -> some View {
+        icon().frame(width: 36, height: 36).background(fill, in: .circle).frame(width: 44, height: 44).contentShape(.rect)
     }
 
     /// Asks and puts the keyboard away.
@@ -468,23 +433,17 @@ struct SunnySearchPage: View {
         voice.start { q in search.ask(q) }
     }
 
+    /// The same as opening, backwards: the page goes in 0.22 s after a 0.08 s wait, then the tab takes over.
     private func close() {
         focused = false
         voice.stop()
-        if reduce { leave(); return }
-        withAnimation(.timingCurve(0.32, 0.72, 0, 1, duration: 0.42)) { folded = false }
-        withAnimation(.easeIn(duration: 0.22).delay(0.08)) { open = false }
-        // The real tab bar takes over after 0.48 s.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.48) { leave() }
-    }
-
-    private var hint: some View {
-        Text(voice.ending ? "Asking in a moment · tap the words to change them" : "Listening · tap the words to edit")
-            .sx(.time.weighted(.semibold)).foregroundStyle(SX.ink)
-            .padding(.horizontal, 14).frame(height: 30)
-            .glassEffect(.regular, in: .capsule)
-            .allowsHitTesting(false)
-            .transition(.opacity)
+        speaker.stop()
+        if reduce { withAnimation(.easeOut(duration: 0.25)) { shown = false; chrome = false } }
+        else {
+            withAnimation(.easeIn(duration: 0.22).delay(0.08)) { shown = false; chrome = false }
+            withAnimation(.easeIn(duration: 0.3)) { risen = false }
+        }
+        leave()
     }
 
     private var micSheet: some View {
@@ -584,17 +543,6 @@ struct SXWave: View {
                 }
             }
             .frame(height: 20)
-        }
-        .accessibilityHidden(true)
-    }
-}
-
-/// The caret blinks once a second.
-struct SXCaret: View {
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.5)) { tl in
-            Capsule().fill(SX.web).frame(width: 2, height: 22)
-                .opacity(Int(tl.date.timeIntervalSinceReferenceDate * 2) % 2 == 0 ? 1 : 0)
         }
         .accessibilityHidden(true)
     }

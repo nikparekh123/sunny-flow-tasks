@@ -160,6 +160,7 @@ export const MENU: Row[] = [
       view: { type: 'string', description: "'weeklies' (default), 'all', or an expiry date like 2027-01-15" } }, required: ['ticker'] },
   { name: 'walls_live', shows: 'Walls worked out now from live option prices, for any ticker and expiry (open interest only, no tape labels). Only when gamma has no view for that ticker or expiry', args: { ...TICKER,
       expiry: { type: 'string', description: 'An expiry date like 2027-01-15; leave out for the next 45 days' } }, required: ['ticker'] },
+  { name: 'roll', shows: "Rolling one name's calls to next Friday, as delta in shares: the calls sold now and what they could be at +1.5 SD by Thursday, what is bought, what insurance takes away, the net, the delta still needed, and each month's call walls (Ceiling, Accelerator) with what one call adds and how many would cover it. Read this for rolling, or how much delta a name needs", args: TICKER, required: ['ticker'] },
   { name: 'hedges', shows: 'Hedge calls and insurance puts: held, needed, strike, cost; one name or a list of the names that need some', args: TICKER },
   { name: 'hedge_rungs', shows: 'Every hedge call and insurance put with days left; rolls are due at 45 days left', args: {} },
   { name: 'put_gates', shows: 'Whether weekly puts can sell: above the 50-day, a Floor below, no Accelerator between; one name or all', args: TICKER },
@@ -269,15 +270,47 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
       return card('walls_live', tagOf(k, 'Walls'), { kind: 'live', at: new Date().toISOString(), note: 'OI only' }, {
         price: j.spot, flip: j.flip, expiries: j.expiries, call_walls: j.call_wall, put_walls: j.put_wall, strikes: j.strikes });
     }
+    case 'roll': {
+      /* sunny-home's plan.story (28 Oct 2026): the roll to next Friday on the hedge rule's terms. Signed deltas
+         in shares; the story words the sign (short, takes away). */
+      const k = need(t, 'roll'), s = c.p.plan?.[k]?.story;
+      if (!s) throw new Error(`no roll for ${k}`);
+      const leg = (g: Row | null) => (g ? { contracts: g.n, delta_now: g.now, delta_at_target: g.at } : null);
+      const bought = [s.leaps, s.hedge_calls].filter(Boolean) as Row[];
+      const sc = s.sold_calls;
+      return card('roll', tagOf(k, 'Roll'), sunny(c), {
+        units: 'Delta in shares. Negative takes delta away (calls sold, insurance puts). delta_now is today at the price; ' +
+          'delta_at_target is at the target price as of Thursday\'s close.',
+        ticker: k, price: s.spot, rolls_to_expiry: s.week, thursday: s.by, earnings_week: s.earnings,
+        target: { price: s.target.px, sd: s.target.sd, move_pct: s.target.pct,
+          accelerator_above_strike: s.accel ? s.accel.k : null },
+        calls_sold: { contracts: sc.n, already_sold: sc.held, to_sell: sc.sale?.n ?? 0, strike: sc.sale?.k ?? null,
+          delta_now: sc.now, delta_at_target: sc.at },
+        puts_sold: leg(s.sold_puts),
+        bought: { leaps: leg(s.leaps), hedge_calls: leg(s.hedge_calls), shares: s.shares,
+          delta_now: bought.reduce((a, g) => a + g.now, 0) + (s.shares ?? 0), delta_at_target: bought.reduce((a, g) => a + g.at, 0) + (s.shares ?? 0) },
+        insurance_puts: leg(s.insurance),
+        net: { delta_now: s.net.now, delta_at_target: s.net.at },
+        lowest_on_the_way: { price: s.low.px, delta: s.low.d },
+        delta_needed: s.need,
+        months: (s.months as Row[]).map((m) => ({ expiry: m.exp, days_left: m.days, open_interest_only: m.oi_only,
+          hedge_calls_held_here: m.held.map((h: Row) => ({ strike: h.k, contracts: h.n })),
+          walls: (m.walls as Row[]).map((w) => ({ strike: w.k, label: w.label, confidence: w.conf, call_price: w.mid,
+            delta_per_call_now: w.d_now, delta_per_call_at_low: w.d_low, delta_per_call_at_target: w.d_at,
+            calls_to_cover: w.n, cost_usd: w.cost })) })),
+        shares: { to_cover: s.by_shares.n, cost_usd: s.by_shares.cost } });
+    }
     case 'hedges': {
       const names = t ? [t] : bookNames(c);
       const rows = names.map((k) => {
         const p = c.p.plan?.[k] ?? {}, h = p.hedge, i = p.insurance;
+        // What is held is listed with its own strikes: a held count beside the strike to buy read as "15 held at 40".
+        const held = (kind: string) => boughtRows(c, k).filter((r) => r.kind === kind).map((r) => ({ strike: r.strike, expiry: r.expiry, contracts: r.n }));
         return { ticker: k,
-          calls: h ? { expiry: h.exp, strike: h.k, held: h.held, add: h.add, cost_usd: Math.round(h.cost), label: h.label ?? null,
+          calls: h ? { expiry: h.exp, strike_to_buy: h.k, held: held('hedge'), add: h.add, cost_usd: Math.round(h.cost), label: h.label ?? null,
             strike_from: h.pick === 'sd' ? 'nearest SD' : '1st call wall', target: h.target ?? null, lowest_delta: h.low ?? null,
             lowest_after: h.lowAfter ?? null } : null,
-          puts: i ? { expiry: i.exp, strike: i.k, held: i.held, add: i.add, ratio: i.ratio, cost_usd: i.cost, weeks_of_premium: i.weeks,
+          puts: i ? { expiry: i.exp, strike_to_buy: i.k, held: held('insurance'), add: i.add, ratio: i.ratio, cost_usd: i.cost, weeks_of_premium: i.weeks,
             strike_from: i.pick === 'sd' ? 'nearest SD' : '1st put wall' } : null };
       }).filter((r) => t || (r.calls?.add ?? 0) > 0 || (r.puts?.add ?? 0) > 0);
       return card('hedges', tagOf(t, t ? 'Hedges' : 'Hedge list'), sunny(c), { rows });

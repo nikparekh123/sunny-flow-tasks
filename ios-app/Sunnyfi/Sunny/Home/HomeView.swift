@@ -65,6 +65,11 @@ struct HomeView: View {
             .frame(maxHeight: .infinity, alignment: .top)
             .animation(.easeOut(duration: 0.3), value: store.toast)
             .zIndex(8)
+            // Block 27: Search, a page of its own over the tab you came from.
+            if store.home != nil, router.searchOpen {
+                SunnySearchPage(search: search, voice: voice, from: router.searchFrom, leave: closeSearch, listenTick: router.listenTick)
+                    .zIndex(9)
+            }
             if let home = store.home, let r = router.receipt {
                 receipt(r, home)
                     .transition(reduce ? .opacity : .move(edge: .bottom))
@@ -104,8 +109,8 @@ struct HomeView: View {
     private func tabs(_ home: HomePayload) -> some View {
         // A tap on the open tab comes through as the same value: that tab scrolls to the top.
         let pick = Binding(get: { router.tab }, set: { t in
+            if t == .search { openSearch(listening: false); return }
             if t == router.tab { router.topTick[t, default: 0] += 1; return }
-            if t == .search { router.searchFrom = router.tab }
             router.tab = t
         })
         return TabView(selection: pick) {
@@ -128,20 +133,29 @@ struct HomeView: View {
             Tab("Insights", systemImage: "lightbulb", value: HomeRouter.Tab.insights) {
                 NavigationStack { SunnyInsightsTab(store: store) }
             }
-            // Block 27: the round glass search button right of the four tabs. Tap opens Search; press and hold
-            // (0.45 s) opens it listening.
-            Tab(value: HomeRouter.Tab.search, role: .search) {
-                NavigationStack {
-                    SunnySearchPage(search: search, voice: voice, from: router.searchFrom,
-                                    leave: { router.tab = router.searchFrom }, listenTick: router.listenTick)
-                        .toolbar(.hidden, for: .navigationBar)
-                }
-            }
+            // Block 27: the round glass search button right of the four tabs, drawn by the system. It is only the
+            // button: the tab never changes to it. Tap opens Search as a page of its own over this tab; press and
+            // hold (0.45 s) opens it listening.
+            Tab(value: HomeRouter.Tab.search, role: .search) { Color.clear }
         }
-        .background(SXHoldToTalk { router.searchFrom = router.tab == .search ? router.searchFrom : router.tab
-                                   router.tab = .search; router.listenTick += 1 })
+        .background(SXHoldToTalk { openSearch(listening: true) })
         // The bar stays as it is while scrolling (Nik, 26 Oct 2026: do not minimise it).
         .tabBarMinimizeBehavior(.never)
+    }
+
+    /// Search opens over the tab you are on; the tab bar and the search button slide away.
+    private func openSearch(listening: Bool) {
+        guard !router.searchOpen else { return }
+        router.searchFrom = router.tab
+        if listening { router.listenTick += 1 }
+        router.searchOpen = true
+        SXTabBar.slide(away: true, reduce: reduce)
+    }
+
+    /// The page has started fading out (0.22 s after a 0.08 s wait); the tab bar slides back from 0.05 s.
+    private func closeSearch() {
+        SXTabBar.slide(away: false, reduce: reduce)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { router.searchOpen = false }
     }
 
     private func page(_ home: HomePayload) -> some View {
