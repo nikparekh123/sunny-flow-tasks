@@ -2,7 +2,7 @@
  * Sunny search test page · sunnyfi.co/ask (step 3, Nik 27 Oct 2026). A plain page for judging the search's answers
  * while Claude Design draws the real screens: type or speak a question, see the short answer, the big number, each
  * card's data as plain tables, and follow-ups. Answers in one session form a thread ("and for BABA?" carries on);
- * "Go deeper" re-asks the same question with the stronger model. No link anywhere; type the URL.
+ * "Go deeper" asks the same question again with more thinking. No link anywhere; type the URL.
  * Self-gated like /payoff. Local dev: ?fixture answers every question from public/dev/ask-sample.json, without auth.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -189,7 +189,7 @@ export default function AskPage() {
           {t.a && (
             <>
               <div className="ak-meta">
-                {t.a.route === 'advice' ? 'Advice' : 'Lookup'} · {modelName(t.a.model)} · {(t.a.ms / 1000).toFixed(1)} s · {cost(t.a)}
+                {modelName(t.a.model)}{t.a.route === 'deeper' ? ' · deeper' : ''} · {(t.a.ms / 1000).toFixed(1)} s · {cost(t.a)}
                 {!t.a.can_answer && ' · could not answer'}
               </div>
               {t.a.big && (
@@ -202,7 +202,7 @@ export default function AskPage() {
               {t.a.cards.map((c, j) => <CardBox key={j} c={c} />)}
               <div className="ak-follow">
                 {t.a.follow_ups.map((f) => <button key={f} type="button" className="ak-chip" disabled={busy} onClick={() => void ask(f)}>{f}</button>)}
-                {t.a.route !== 'advice' && i === turns.length - 1 && (
+                {t.a.route !== 'deeper' && i === turns.length - 1 && (
                   <button type="button" className="ak-chip ak-chip-deep" disabled={busy} onClick={() => void ask(t.q, true)}>Go deeper</button>
                 )}
               </div>

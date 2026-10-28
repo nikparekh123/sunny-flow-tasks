@@ -3,17 +3,19 @@
  *   POST { list: true }                     ->  the card menu (19 lookups with their arguments)
  *   POST { lookup, args? }                  ->  { card }: one lookup on its own (step 1)
  *   POST { ask, thread?, deep? }            ->  { answer, big, cards, follow_ups, can_answer }: a question (step 2)
- * Asking: Claude Haiku 5.5 sorts the question (a lookup, or advice that needs judgment); a lookup is answered by
- * Haiku, advice by Claude Opus 5.5 (deep: true always takes Opus: the "Go deeper" button). Either one reads only
- * through the lookups, so every number comes from Sunny's data, and writes one or two plain lines, an optional big
- * number and the cards to show. It never writes and never trades.
+ * Asking: Claude Opus 5.5 answers every question at low effort; "Go deeper" (deep: true) asks again at medium effort.
+ * (27 Oct 2026, step 4: Opus alone was as fast as Haiku sorting and answering, with better answers at about 2.8 cents
+ * a question; Nik chose it.) It reads only through the lookups, so every number comes from Sunny's data, and writes
+ * one or two plain lines, an optional big number and the cards to show. It never writes and never trades.
  * Who may call: the scheduler's x-cron-key, the service-role key, or a signed-in member of a book (only that book).
  */
 import Anthropic from 'npm:@anthropic-ai/sdk@1.3.0';
 import { caller, context, lookup, MENU, type Ctx, type Row } from './lookups.ts';
 
-const BUILD = '2026-10-27.7';
-const FAST = 'claude-haiku-5-5', DEEP = 'claude-opus-5-5';
+const BUILD = '2026-10-27.11';
+const MODEL = 'claude-opus-5-5';
+/** Test runs may still try Haiku on its own (step 4). */
+const HAIKU = 'claude-haiku-5-5';
 const MAX_STEPS = 6;
 const client = new Anthropic();
 
@@ -57,6 +59,12 @@ How to answer:
 - Always read with the lookups first, then answer. Never answer from memory, and never say you need to look something
   up: look it up. Use the lookups for every figure; never state a number, strike, date or count you did not read.
 - Answer in one or two short, plain sentences. Lead with the answer. No jargon he did not use, no em dashes, no hedging.
+- Quote dates, expiries and strikes exactly as the data gives them, year included (the LEAPS expire in 2028, the
+  hedges in 2027: never mix them up). Write dates the way people say them: 30 Oct, or 21 Jan 2028 when the year
+  is not this one; never 2028-01-21.
+- Use the same figure, rounded the same way, in "big" and in the answer.
+- For walls, read gamma first: it has the tape's labels (Ceiling, Floor, Accelerator). Use walls_live only when gamma
+  has no view for that ticker or expiry, and never give both sets of walls in one answer.
 - "big" is only for a question that asks for exactly one figure (how much, how many, what is X's price or delta).
   For anything else, including a name's gamma, walls or position, big is null.
 - Choose the cards that show the answer: usually one to three, at most five when he asks several things at once.
@@ -77,26 +85,6 @@ The flip is the price where dealer gamma turns from calming to amplifying. Net a
 was paid to close options, less this week's share of hedge costs. Insurance puts are long puts; hedge calls are long
 calls that are not LEAPS.`;
 
-// ── Sorting the question: a lookup, or advice ────────────────────────────────────────────────────────────
-
-async function route(question: string, before?: string): Promise<'lookup' | 'advice'> {
-  try {
-    const r = await client.messages.create({
-      model: FAST, max_tokens: 2000, output_config: { effort: 'low', format: { type: 'json_schema', schema: {
-        type: 'object', additionalProperties: false, required: ['kind'], properties: { kind: { type: 'string', enum: ['lookup', 'advice'] } } } } },
-      system: 'Sort a question about an options portfolio. "lookup": it asks for facts or figures that can be read or listed ' +
-        '(prices, positions, walls, yield, what changed, which names match a filter, explain a term). "advice": it asks what to do, ' +
-        'whether to do something, which choice is better, or why something happened in a way that needs judgment. ' +
-        'A short follow-up ("and for BABA?") takes the kind of the earlier question.',
-      messages: [{ role: 'user', content: before ? `Earlier question: ${before}\nThis question: ${question}` : question }],
-    } as any);
-    const text = (r.content as Row[]).find((b) => b.type === 'text')?.text ?? '';
-    return JSON.parse(text).kind === 'advice' ? 'advice' : 'lookup';
-  } catch {
-    return 'advice';   // when unsure, the stronger model answers
-  }
-}
-
 // ── Asking ───────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The answer object from the model's last text: plain JSON, or JSON inside a code fence. */
@@ -108,10 +96,14 @@ function parseAnswer(text: string): Row | null {
 
 interface Ran { name: string; args: Row; ok: boolean; ms: number; card?: Row; error?: string }
 
-async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner: boolean) {
+/** Test runs only (step 4): force one model and effort for every question, and return everything each answer read. */
+interface Test { model?: 'haiku' | 'opus'; effort?: 'low' | 'medium' | 'high'; trace?: boolean }
+
+async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner: boolean, test: Test = {}) {
   const t0 = Date.now();
-  const kind = deep ? 'advice' : await route(question, thread.length ? String(thread.at(-1)!.q ?? '') : undefined);
-  const model = kind === 'advice' ? DEEP : FAST;
+  const kind = deep ? 'deeper' : 'quick';
+  const model = test.model === 'haiku' ? HAIKU : MODEL;
+  const effort = test.effort ?? (deep ? 'medium' : 'low');
   const ran: Ran[] = [];
   const usage = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
   const names = Object.keys(c.p.plan ?? {}).sort().join(', ');
@@ -127,10 +119,10 @@ async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner
       model, max_tokens: 16000, system: SYSTEM, tools: TOOLS, messages,
       cache_control: { type: 'ephemeral' },
       // No answer format while it reads: with one, Haiku answered before looking anything up (27 Oct 2026).
-      output_config: { effort: kind === 'advice' ? 'medium' : 'low' },
+      output_config: { effort },
     };
     // Opus answers with Anthropic's server-side fallback on, so a declined answer is retried on another model.
-    const r: Row = model === DEEP
+    const r: Row = model === MODEL
       ? await client.beta.messages.create({ ...req, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } as any)
       : await client.messages.create(req as any);
     usage.input += r.usage?.input_tokens ?? 0; usage.output += r.usage?.output_tokens ?? 0;
@@ -163,7 +155,7 @@ async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner
   // Not valid JSON at the end: one more short call puts what it wrote into the answer format.
   if (!final && (stop === 'end_turn' || stop === 'tool_use')) {
     try {
-      const r: Row = await client.messages.create({ model: FAST, max_tokens: 4000, system: SYSTEM,
+      const r: Row = await client.messages.create({ model, max_tokens: 4000, system: SYSTEM,
         messages: [...messages, { role: 'user', content: 'Give your final answer now, in the answer format.' }],
         output_config: { effort: 'low', format: { type: 'json_schema', schema: ANSWER_SCHEMA } } } as any);
       usage.input += r.usage?.input_tokens ?? 0; usage.output += r.usage?.output_tokens ?? 0;
@@ -192,7 +184,8 @@ async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner
     follow_ups: answered ? (final!.follow_ups ?? []).slice(0, 3) : [],
     can_answer: answered ? final!.can_answer !== false : false,
     lookups: ran.map(({ card: _c, ...x }) => x),
-    usage, stop, ms: Date.now() - t0,
+    ...(test.trace ? { read: ran.map((x) => ({ name: x.name, args: x.args, data: x.card?.data ?? null })) } : {}),
+    usage, stop, effort, ms: Date.now() - t0,
   };
 }
 
@@ -212,7 +205,7 @@ Deno.serve(async (req) => {
     const book = who.system && body.book ? String(body.book) : who.book;
     if (body.lookup === '_key_check') {
       if (!who.owner) return json({ ok: false, error: 'not allowed' }, 401);
-      const m = await client.models.retrieve(FAST);
+      const m = await client.models.retrieve(MODEL);
       return json({ ok: true, build: BUILD, model: m.id });
     }
     const c = await context(book);
@@ -220,7 +213,8 @@ Deno.serve(async (req) => {
     if (body.ask) {
       const q = String(body.ask).trim().slice(0, 1000);
       if (!q) return json({ ok: false, error: 'empty question' }, 400);
-      return json(await ask(q, Array.isArray(body.thread) ? body.thread.slice(-6) : [], !!body.deep, c, who.owner));
+      // Test settings only for the scheduler and service keys (the step 4 runs), never from the app.
+      return json(await ask(q, Array.isArray(body.thread) ? body.thread.slice(-6) : [], !!body.deep, c, who.owner, who.system ? body.test ?? {} : {}));
     }
     return json({ ok: false, error: 'send { ask }, { lookup }, or { list: true }' }, 400);
   } catch (e) {
