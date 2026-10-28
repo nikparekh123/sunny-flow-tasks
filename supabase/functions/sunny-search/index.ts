@@ -2,7 +2,11 @@
  * sunny-search · Sunny search (Nik, 27 Oct 2026; brief: https://claude.ai/artifact/9SbMGjPUaMpw1hvo4gSjo6).
  *   POST { list: true }                     ->  the card menu (19 lookups with their arguments)
  *   POST { lookup, args? }                  ->  { card }: one lookup on its own (step 1)
- *   POST { ask, thread?, deep? }            ->  { answer, big, cards, follow_ups, can_answer }: a question (step 2)
+ *   POST { ask, thread?, deep? }            ->  { id, answer, big, cards, follow_ups, can_answer, check, cost_usd }
+ *   POST { feedback: { id, value } }       ->  thumbs on an answer: up, down or not_asked (step 5)
+ * Step 5: every figure in an answer is checked against the data it read (check.ts); one that fails gets one retry, then
+ * the words are withheld and only the cards show. Every question is logged (search_log; the weekly misses are the view
+ * search_misses), and a book's search spend is capped per day (SEARCH_DAILY_USD, default $5).
  * Asking: Claude Opus 5.5 answers every question at low effort; "Go deeper" (deep: true) asks again at medium effort.
  * (27 Oct 2026, step 4: Opus alone was as fast as Haiku sorting and answering, with better answers at about 2.8 cents
  * a question; Nik chose it.) It reads only through the lookups, so every number comes from Sunny's data, and writes
@@ -10,9 +14,10 @@
  * Who may call: the scheduler's x-cron-key, the service-role key, or a signed-in member of a book (only that book).
  */
 import Anthropic from 'npm:@anthropic-ai/sdk@1.3.0';
-import { caller, context, lookup, MENU, type Ctx, type Row } from './lookups.ts';
+import { caller, context, lookup, MENU, SB_KEY, SB_URL, type Ctx, type Row } from './lookups.ts';
+import { checkAnswer } from './check.ts';
 
-const BUILD = '2026-10-27.11';
+const BUILD = '2026-10-27.12';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';
@@ -87,6 +92,9 @@ calls that are not LEAPS.`;
 
 // ── Asking ───────────────────────────────────────────────────────────────────────────────────────────────
 
+const answerText = (f: Row) => String(f.answer ?? '') + (f.big?.value ? ` ${f.big.value}` : '');
+const readData = (ran: Ran[]) => ran.filter((x) => x.ok && x.card).map((x) => x.card!.data);
+
 /** The answer object from the model's last text: plain JSON, or JSON inside a code fence. */
 function parseAnswer(text: string): Row | null {
   const m = text.match(/\{[\s\S]*\}/);
@@ -113,7 +121,7 @@ async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner
     { role: 'user', content: `Today is ${c.today}. Names in the book: ${names}. Watchlist: ${
       (c.p.watchlist ?? []).map((w: Row) => w.ticker).join(', ') || 'none'}.\n\nQuestion: ${question}` },
   ];
-  let final: Row | null = null, stop = '';
+  let final: Row | null = null, stop = '', retried = false, firstMiss: string[] = [];
   for (let step = 0; step < MAX_STEPS; step++) {
     const req: Row = {
       model, max_tokens: 16000, system: SYSTEM, tools: TOOLS, messages,
@@ -134,6 +142,17 @@ async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner
     const calls = (r.content as Row[]).filter((b) => b.type === 'tool_use');
     if (!calls.length) {
       final = parseAnswer((r.content as Row[]).filter((b) => b.type === 'text').map((b) => b.text).join(''));
+      // THE NUMBER CHECK (rule 9): a figure not in the data it read, and not worked out from it, gets one retry.
+      if (final && !retried) {
+        const ck = checkAnswer(answerText(final), readData(ran), question);
+        if (!ck.ok) {
+          retried = true; firstMiss = ck.unverified;
+          messages.push({ role: 'user', content: `These figures are not in the data you read and cannot be worked out from it: ${
+            ck.unverified.join(', ')}. Answer again using only figures from the lookups (read more if you need to), in the same JSON.` });
+          final = null;
+          continue;
+        }
+      }
       break;
     }
     // All of this turn's lookups at once, their results back in one message.
@@ -176,17 +195,51 @@ async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner
   // No card named, but it read something: show what it read (at most three), so an answer is never bare.
   if (!cards.length) for (const x of okRan.slice(0, 3)) if (!cards.includes(x.card!)) cards.push(x.card!);
   const answered = !!final && stop !== 'refusal';
+  // Still a figure it cannot back after the retry: the words are withheld, the cards (plain data) still show.
+  const check = answered ? checkAnswer(answerText(final!), readData(ran), question) : { ok: true, checked: 0, unverified: [] as string[] };
+  const withheld = answered && !check.ok;
   return {
     ok: true, build: BUILD, route: kind, model,
-    answer: answered ? final!.answer : "I can't answer that from your data.",
-    big: answered ? final!.big ?? null : null,
+    answer: !answered ? "I can't answer that from your data."
+      : withheld ? "I couldn't check every figure in that answer against your data, so I've left it out. Here is what I read." : final!.answer,
+    big: answered && !withheld ? final!.big ?? null : null,
+    check: { ok: check.ok, checked: check.checked, unverified: check.unverified, retried, first_try_unverified: firstMiss },
     cards,
     follow_ups: answered ? (final!.follow_ups ?? []).slice(0, 3) : [],
-    can_answer: answered ? final!.can_answer !== false : false,
+    can_answer: answered && !withheld ? final!.can_answer !== false : false,
     lookups: ran.map(({ card: _c, ...x }) => x),
     ...(test.trace ? { read: ran.map((x) => ({ name: x.name, args: x.args, data: x.card?.data ?? null })) } : {}),
     usage, stop, effort, ms: Date.now() - t0,
   };
+}
+
+// ── The log, the cost and the daily guard (step 5) ──────────────────────────────────────────────────────
+
+/** Dollars per million tokens, input and output (cache reads 0.1x input, cache writes 1.25x input). */
+const PRICE: Record<string, [number, number]> = { 'claude-opus-5-5': [4, 20], 'claude-haiku-5-5': [0.1, 0.5] };
+const costOf = (model: string, u: Row) => {
+  const p = PRICE[model] ?? PRICE[MODEL];
+  return (u.input * p[0] + u.cache_read * p[0] * 0.1 + u.cache_write * p[0] * 1.25 + u.output * p[1]) / 1e6;
+};
+/** A day's ceiling on search spend for a book, on top of the console's monthly cap: a loop or a stuck page can never
+    run up more than this. SEARCH_DAILY_USD overrides the $5 default. */
+const DAILY_USD = Number(Deno.env.get('SEARCH_DAILY_USD') ?? '5');
+const rest = (path: string, init: RequestInit = {}) => fetch(`${SB_URL}/rest/v1/${path}`, { ...init,
+  headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) } });
+async function spentToday(book: string): Promise<number> {
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+  const r = await rest(`search_log?book_id=eq.${book}&at=gte.${day}T04:00:00Z&select=cost_usd`);
+  const rows = r.ok ? (await r.json()) as Row[] : [];
+  return rows.reduce((s, x) => s + Number(x.cost_usd ?? 0), 0);
+}
+async function logAsk(book: string, user: string | undefined, q: string, threadLen: number, deep: boolean, a: Row): Promise<number | null> {
+  const r = await rest('search_log?select=id', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify([{
+    book_id: book, user_id: user ?? null, question: q, thread_len: threadLen, deep, model: a.model, effort: a.effort,
+    answer: a.answer, big: a.big, cards: (a.cards as Row[]).map((x) => x.type), lookups: a.lookups,
+    can_answer: a.can_answer, check_ok: a.check?.ok ?? null, unverified: a.check?.unverified ?? [], retried: a.check?.retried ?? false,
+    ms: a.ms, tokens: a.usage, cost_usd: Number(costOf(a.model, a.usage).toFixed(5)) }]) });
+  if (!r.ok) { await r.body?.cancel(); return null; }
+  return Number(((await r.json()) as Row[])[0]?.id ?? null);
 }
 
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'Content-Type': 'application/json' } });
@@ -213,8 +266,23 @@ Deno.serve(async (req) => {
     if (body.ask) {
       const q = String(body.ask).trim().slice(0, 1000);
       if (!q) return json({ ok: false, error: 'empty question' }, 400);
+      const spent = await spentToday(book);
+      if (spent >= DAILY_USD) return json({ ok: true, build: BUILD, answer: `Today's search limit ($${DAILY_USD}) is reached. It resets at midnight.`,
+        big: null, cards: [], follow_ups: [], can_answer: false, limit: { daily_usd: DAILY_USD, spent_usd: Number(spent.toFixed(2)) } });
+      const thread = Array.isArray(body.thread) ? body.thread.slice(-6) : [];
       // Test settings only for the scheduler and service keys (the step 4 runs), never from the app.
-      return json(await ask(q, Array.isArray(body.thread) ? body.thread.slice(-6) : [], !!body.deep, c, who.owner, who.system ? body.test ?? {} : {}));
+      const a = await ask(q, thread, !!body.deep, c, who.owner, who.system ? body.test ?? {} : {});
+      const id = body.test ? null : await logAsk(book, who.user, q, thread.length, !!body.deep, a);
+      return json({ ...a, id, cost_usd: Number(costOf(a.model, a.usage).toFixed(4)) });
+    }
+    // Thumbs on an answer: up, down, or "not what I asked"; only on the caller's own book.
+    if (body.feedback) {
+      const f = body.feedback as Row, value = String(f.value ?? '');
+      if (!['up', 'down', 'not_asked'].includes(value) || !Number.isFinite(Number(f.id))) return json({ ok: false, error: 'bad feedback' }, 400);
+      const r = await rest(`search_log?id=eq.${Number(f.id)}&book_id=eq.${book}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ feedback: value, feedback_at: new Date().toISOString() }) });
+      await r.body?.cancel();
+      return json({ ok: r.ok, build: BUILD });
     }
     return json({ ok: false, error: 'send { ask }, { lookup }, or { list: true }' }, 400);
   } catch (e) {

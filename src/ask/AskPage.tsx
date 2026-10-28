@@ -16,20 +16,21 @@ const DEV_FIXTURE = import.meta.env.DEV && new URLSearchParams(window.location.s
 type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 interface Card { type: string; tag: string; source: { kind: string; at?: string; day?: string; note?: string; asof?: string }; data: Json }
 interface Answer {
+  id?: number | null; cost_usd?: number; check?: { ok: boolean; unverified: string[]; retried: boolean };
   ok: boolean; error?: string; route: string; model: string; answer: string; big: { value: string; label: string } | null;
   cards: Card[]; follow_ups: string[]; can_answer: boolean; ms: number;
   usage: { input: number; output: number; cache_read: number; cache_write: number };
   lookups: { name: string; args: Record<string, Json>; ok: boolean; ms: number; error?: string }[];
 }
-interface Turn { q: string; deep: boolean; a?: Answer; err?: string }
+interface Turn { q: string; deep: boolean; a?: Answer; err?: string; fb?: 'up' | 'down' | 'not_asked' }
 
 /** Dollars per million tokens: input, output (cache reads 0.1x input, cache writes 1.25x input). */
 const PRICE: Record<string, [number, number]> = { 'claude-haiku-5-5': [0.1, 0.5], 'claude-opus-5-5': [4, 20] };
 function cost(a: Answer): string {
   const p = PRICE[a.model];
-  if (!p) return '';
+  if (!p || !a.usage) return '';
   const u = a.usage;
-  const usd = (u.input * p[0] + u.cache_read * p[0] * 0.1 + u.cache_write * p[0] * 1.25 + u.output * p[1]) / 1e6;
+  const usd = a.cost_usd ?? (u.input * p[0] + u.cache_read * p[0] * 0.1 + u.cache_write * p[0] * 1.25 + u.output * p[1]) / 1e6;
   return usd < 0.01 ? 'under 1 cent' : `about ${(usd * 100).toFixed(1)} cents`;
 }
 const modelName = (m: string) => (m.includes('haiku') ? 'Haiku' : m.includes('opus') ? 'Opus' : m);
@@ -121,6 +122,14 @@ export default function AskPage() {
 
   useEffect(() => { end.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [turns.length, busy]);
 
+  /* Thumbs on an answer (step 5): saved against the answer in the search log for the weekly review. */
+  async function feedback(i: number, value: 'up' | 'down' | 'not_asked') {
+    const id = turns[i]?.a?.id;
+    setTurns((ts) => ts.map((t, j) => (j === i ? { ...t, fb: value } : t)));
+    if (!id || DEV_FIXTURE) return;
+    await supabase.functions.invoke('sunny-search', { body: { feedback: { id, value } } });
+  }
+
   async function ask(question: string, deep = false) {
     const text = question.trim();
     if (!text || busy) return;
@@ -191,6 +200,7 @@ export default function AskPage() {
               <div className="ak-meta">
                 {modelName(t.a.model)}{t.a.route === 'deeper' ? ' · deeper' : ''} · {(t.a.ms / 1000).toFixed(1)} s · {cost(t.a)}
                 {!t.a.can_answer && ' · could not answer'}
+                {t.a.check?.retried && (t.a.check.ok ? ' · figures checked after one retry' : ' · figures did not check')}
               </div>
               {t.a.big && (
                 <div className="ak-big">
@@ -206,6 +216,13 @@ export default function AskPage() {
                   <button type="button" className="ak-chip ak-chip-deep" disabled={busy} onClick={() => void ask(t.q, true)}>Go deeper</button>
                 )}
               </div>
+              {t.a.id != null && (
+                <div className="ak-fb" role="group" aria-label="Was this answer right?">
+                  {([['up', 'Right'], ['down', 'Wrong'], ['not_asked', 'Not what I asked']] as const).map(([v, label]) => (
+                    <button key={v} type="button" className={t.fb === v ? 'ak-fb-on' : ''} onClick={() => void feedback(i, v)}>{label}</button>
+                  ))}
+                </div>
+              )}
               <details className="ak-details">
                 <summary>What it read ({t.a.lookups.length})</summary>
                 <ul>

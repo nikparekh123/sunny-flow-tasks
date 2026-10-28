@@ -45,3 +45,6 @@ supabase/.temp/
 
 # local dev fixtures
 public/dev/
+
+# Research Nik adds for Sunny search (licensed data, never published)
+research-inbox/

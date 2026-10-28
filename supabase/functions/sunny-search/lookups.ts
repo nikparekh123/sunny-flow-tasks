@@ -14,7 +14,7 @@ export async function db(path: string): Promise<Row[]> {
 }
 
 /** Who is asking and which book they may see: the scheduler and the service key read Nik's book (S). */
-export async function caller(req: Request): Promise<{ book: string; owner: boolean; system: boolean } | null> {
+export async function caller(req: Request): Promise<{ book: string; owner: boolean; system: boolean; user?: string } | null> {
   const cron = Deno.env.get('CRON_SECRET');
   if (cron && (req.headers.get('x-cron-key') === cron || req.headers.get('x-admin-key') === cron)) return { book: 'S', owner: true, system: true };
   const auth = req.headers.get('authorization') ?? '';
@@ -25,7 +25,7 @@ export async function caller(req: Request): Promise<{ book: string; owner: boole
   const u = await r.json();
   const m = await db(`book_members?user_id=eq.${u.id}&select=book_id,role`);
   const own = m.find((x) => x.role === 'owner') ?? m[0];
-  return own ? { book: String(own.book_id), owner: own.role === 'owner', system: false } : null;
+  return own ? { book: String(own.book_id), owner: own.role === 'owner', system: false, user: String(u.id) } : null;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────────────────────────

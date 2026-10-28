@@ -62,3 +62,6 @@
 .ak-mic { width: 42px; background: var(--ak-chip); }
 .ak-mic-on { background: var(--ak-accent); color: #fff !important; }
 .ak-go { padding: 0 18px; background: var(--ak-ink); color: var(--ak-bg) !important; font-weight: 600; }
+.ak-fb { display: flex; flex-wrap: wrap; gap: 6px; }
+.ak-fb button { background: none; border: 1px solid var(--ak-line); border-radius: 999px; padding: 4px 11px; font-size: 13px; color: var(--ak-muted); }
+.ak-fb button.ak-fb-on { border-color: var(--ak-accent); color: var(--ak-accent); font-weight: 600; }
