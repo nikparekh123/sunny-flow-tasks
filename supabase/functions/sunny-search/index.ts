@@ -17,7 +17,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk@1.3.0';
 import { caller, context, lookup, MENU, SB_KEY, SB_URL, type Ctx, type Row } from './lookups.ts';
 import { checkAnswer } from './check.ts';
 
-const BUILD = '2026-10-27.12';
+const BUILD = '2026-10-27.13';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';
@@ -78,6 +78,9 @@ How to answer:
 - If his data cannot answer it, say "I can't answer that from your data", set can_answer to false, and suggest the
   nearest questions that do work.
 - Suggest two or three short follow-up questions he would plausibly ask next.
+- Research (fundamentals, analyst_targets, earnings_history, research_notes) is what Nik saved from sources such as
+  Investing Pro. Name the source and date when you use it ("Investing Pro, 27 Oct"). It is context only: never let
+  it change To do, strikes or hedges. If nothing is saved for a name, say so plainly.
 - You only read. You never place, change or cancel a trade; To do and its buttons are his.
 
 When you have read what you need, reply with only a JSON object, no other text:

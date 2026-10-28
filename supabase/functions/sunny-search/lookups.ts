@@ -125,6 +125,22 @@ function dgFor(c: Ctx, t: string) {
   return { units: DG_UNITS, price: dg.px, delta_turns_thin_above_pct: dg.thin25 ?? null, now: rowAt(rows, 0), rows };
 }
 
+/** Research Nik saved (research_numbers, checked by him): the latest date per topic, as plain figures. */
+async function researchFigures(t: string, topics: string[]) {
+  const rows = await db(`research_numbers?ticker=eq.${t}&topic=in.(${topics.join(',')})&checked_at=not.is.null` +
+    '&select=topic,metric,label,period,value,value_text,unit,source,asof&order=asof.desc,topic.asc,metric.asc,period.desc');
+  const latest = new Map<string, string>();
+  for (const r of rows) if (!latest.has(r.topic)) latest.set(r.topic, String(r.asof));
+  const keep = rows.filter((r) => String(r.asof) === latest.get(r.topic));
+  if (!keep.length) throw new Error(`no research saved for ${t} yet (${topics.join(', ')})`);
+  const src = { kind: 'research', source: [...new Set(keep.map((r) => String(r.source)))].join(', '),
+                asof: [...new Set(keep.map((r) => String(r.asof)))].sort().at(-1) };
+  const fig = (r: Row) => ({ label: r.label, value: r.value == null ? null : Number(r.value), text: r.value_text ?? null, unit: r.unit ?? null });
+  return { rows: keep, src, fig };
+}
+const RESEARCH_UNITS = 'Research Nik saved, with its source and date: context only, never for To do, strikes or hedges. ' +
+  'unit usd is dollars (revenue and market cap in full dollars), pct is percent, x is a multiple.';
+
 // ── The menu ───────────────────────────────────────────────────────────────────────────────────────────
 
 const TICKER = { ticker: { type: 'string', description: 'A ticker, for example BABA' } };
@@ -157,6 +173,10 @@ export const MENU: Row[] = [
   { name: 'what_changed', shows: 'What changed across the names since the first read of the day, most pressing first', args: {} },
   { name: 'labels_held', shows: 'How well the Ceilings, Floors and Accelerators of one name held over the stored sessions', args: TICKER, required: ['ticker'] },
   { name: 'insights', shows: "One name's insights: the verdict and the points that help, need watching or hurt", args: TICKER, required: ['ticker'] },
+  { name: 'fundamentals', shows: 'Research Nik saved for one name (Investing Pro and others): P/E, revenue, net income, dividend, payout, and how it compares with peers and its sector', args: TICKER, required: ['ticker'] },
+  { name: 'analyst_targets', shows: "Research Nik saved for one name: analysts' target and range, Investing Pro fair value and its models, the 52-week range", args: TICKER, required: ['ticker'] },
+  { name: 'earnings_history', shows: 'Research Nik saved for one name: last reported earnings with surprises, and how the price moved the day after each report', args: TICKER, required: ['ticker'] },
+  { name: 'research_notes', shows: 'Writing Nik saved for one name: analyst notes, management news, his own notes, latest first', args: TICKER, required: ['ticker'] },
 ];
 
 // ── The lookups ────────────────────────────────────────────────────────────────────────────────────────
@@ -319,6 +339,36 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
       const [g] = await db(`gamma_view_day?ticker=eq.${k}&view=eq.weeklies&data->track=not.is.null&select=day,built_at,track:data->track&order=day.desc&limit=1`);
       if (!g) throw new Error(`no track record for ${k} yet`);
       return card('labels_held', tagOf(k, 'How labels held'), { kind: 'sunny', at: g.built_at ?? c.at, day: g.day }, g.track);
+    }
+    case 'fundamentals': {
+      const k = need(t, 'fundamentals'), { rows, src, fig } = await researchFigures(k, ['valuation', 'dividend', 'peers']);
+      const peers: Row = {};
+      for (const r of rows.filter((x) => x.topic === 'peers')) (peers[r.label] ??= {})[r.period] = r.value_text ?? Number(r.value);
+      return card('fundamentals', tagOf(k, 'Fundamentals'), src, { units: RESEARCH_UNITS,
+        valuation: rows.filter((x) => x.topic === 'valuation').map(fig), dividend: rows.filter((x) => x.topic === 'dividend').map(fig),
+        against_peers_and_sector: peers });
+    }
+    case 'analyst_targets': {
+      const k = need(t, 'analyst_targets'), { rows, src, fig } = await researchFigures(k, ['fair_value']);
+      return card('analyst_targets', tagOf(k, 'Analyst targets'), src, { units: RESEARCH_UNITS, figures: rows.map(fig) });
+    }
+    case 'earnings_history': {
+      const k = need(t, 'earnings_history'), { rows, src, fig } = await researchFigures(k, ['earnings', 'earnings_reactions']);
+      const by = new Map<string, Row>();
+      for (const r of rows.filter((x) => x.topic === 'earnings_reactions')) (by.get(r.period) ?? by.set(r.period, { report: r.period }).get(r.period)!)[r.metric] = Number(r.value);
+      const reactions = [...by.values()].sort((x, y) => String(y.report).localeCompare(String(x.report)));
+      const moves = reactions.map((r) => Number(r.change_pct)).filter(Number.isFinite);
+      return card('earnings_history', tagOf(k, 'Earnings history'), src, { units: RESEARCH_UNITS,
+        last_reported: rows.filter((x) => x.topic === 'earnings').map(fig), reactions,
+        summary: moves.length ? { reports: moves.length, up: moves.filter((m) => m > 0).length, down: moves.filter((m) => m < 0).length,
+          average_move_pct: Math.round(moves.reduce((s2, m) => s2 + Math.abs(m), 0) / moves.length * 100) / 100,
+          biggest_drop_pct: Math.min(...moves), biggest_rise_pct: Math.max(...moves) } : null });
+    }
+    case 'research_notes': {
+      const k = need(t, 'research_notes');
+      const notes = await db(`research_notes?ticker=eq.${k}&checked_at=not.is.null&select=asof,source,title,body&order=asof.desc&limit=10`);
+      if (!notes.length) throw new Error(`no notes saved for ${k} yet`);
+      return card('research_notes', tagOf(k, 'Research notes'), { kind: 'research', source: notes[0].source, asof: notes[0].asof }, { notes });
     }
     case 'insights': {
       const k = need(t, 'insights'), v2 = nameRow(c, k)?.insights?.v2;
