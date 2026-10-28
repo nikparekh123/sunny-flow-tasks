@@ -115,28 +115,28 @@ struct SunnySearchPage: View {
     // MARK: Suggestions
 
     private var suggestions: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             Text("Suggestions").sx(.title).foregroundStyle(SX.ink).accessibilityAddTraits(.isHeader)
-                .padding(.bottom, 10)
-            ForEach(search.suggestions) { s in suggestionCard(s) }
+                .padding(.bottom, 12)
+            ForEach(Array(search.suggestions.enumerated()), id: \.element.id) { i, s in
+                suggestionRow(s, last: i == search.suggestions.count - 1)
+            }
         }
         .padding(.horizontal, 20)
         .animation(reduce ? nil : .easeOut(duration: 0.25), value: search.suggestions)
     }
 
-    /// The question, and under it why Sunny suggests it now.
-    private func suggestionCard(_ s: SXSuggestion) -> some View {
+    /// The question alone, plain text, a hairline between (Nik, 28 Oct 2026: "just text looks neater", then no
+    /// second line).
+    private func suggestionRow(_ s: SXSuggestion, last: Bool) -> some View {
         Button { go(s.q, cont: false) } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(s.q).sx(.recent).foregroundStyle(SX.ink).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
-                Text(s.why).sx(.small.weighted(.medium)).foregroundStyle(SX.muted).multilineTextAlignment(.leading)
-            }
-            .padding(EdgeInsets(top: 14, leading: 16, bottom: 16, trailing: 16))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .modifier(SXPaper())
+            Text(s.q).sx(.recent).foregroundStyle(SX.ink).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, 15)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .bottom) { if !last { Rectangle().fill(SX.line).frame(height: 1) } }
+                .contentShape(.rect)
         }
-        .buttonStyle(SPressStyle(scale: 0.985))
-        .accessibilityHint(s.why)
+        .buttonStyle(SXTextPress())
     }
 
     // MARK: The conversation
@@ -533,5 +533,12 @@ struct SXFlow: Layout {
             s.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(z))
             x += z.width + spacing; row = max(row, z.height)
         }
+    }
+}
+
+/// A plain text row pressed: it dims a little.
+struct SXTextPress: ButtonStyle {
+    func makeBody(configuration c: Configuration) -> some View {
+        c.label.opacity(c.isPressed ? 0.5 : 1).animation(.easeOut(duration: 0.15), value: c.isPressed)
     }
 }
