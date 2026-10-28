@@ -28,6 +28,9 @@ struct HomeView: View {
     // Search (block 27): its thread and your last 10 live as long as the app, so a tab switch keeps them.
     @State private var search = SearchStore()
     @State private var voice = SXVoice()
+    /// While Search is open the tab bar and the search button are 120 pt down and faded out.
+    @State private var barDown = false
+    @State private var barGone = false
 
     var body: some View {
         ZStack {
@@ -105,15 +108,11 @@ struct HomeView: View {
         }
     }
 
-    /// The native tab bar (block 12a): iOS draws the floating glass bar, its lens and labels. Opens on Home.
+    /// The four tabs (block 12a, 12c). The system's bar is hidden: Sunny draws its own (SunnyTabBar), so Search
+    /// sits apart on every iOS (iOS 27 put the system search tab inside the bar). Each tab keeps the 49 pt the
+    /// system bar held under it, so nothing moves. Opens on Home.
     private func tabs(_ home: HomePayload) -> some View {
-        // A tap on the open tab comes through as the same value: that tab scrolls to the top.
-        let pick = Binding(get: { router.tab }, set: { t in
-            if t == .search { openSearch(listening: false); return }
-            if t == router.tab { router.topTick[t, default: 0] += 1; return }
-            router.tab = t
-        })
-        return TabView(selection: pick) {
+        TabView(selection: Binding(get: { router.tab }, set: { router.tab = $0 })) {
             Tab("Home", systemImage: "house.fill", value: HomeRouter.Tab.home) {
                 NavigationStack {
                     ZStack {
@@ -122,39 +121,52 @@ struct HomeView: View {
                     }
                     .toolbar(.hidden, for: .navigationBar)
                 }
+                .modifier(OwnTabBar())
             }
             Tab("Positions", systemImage: "rectangle.stack.fill", value: HomeRouter.Tab.positions) {
-                NavigationStack { SunnyPositionsTab(store: store) }
+                NavigationStack { SunnyPositionsTab(store: store) }.modifier(OwnTabBar())
             }
             // Handoff 32 (12c): Gamma and Insights, one name at a time, the name carried between them.
             Tab("Gamma", systemImage: "chart.bar.doc.horizontal", value: HomeRouter.Tab.gamma) {
-                NavigationStack { SunnyGammaTab(store: store) }
+                NavigationStack { SunnyGammaTab(store: store) }.modifier(OwnTabBar())
             }
             Tab("Insights", systemImage: "lightbulb", value: HomeRouter.Tab.insights) {
-                NavigationStack { SunnyInsightsTab(store: store) }
+                NavigationStack { SunnyInsightsTab(store: store) }.modifier(OwnTabBar())
             }
-            // Block 27: the round glass search button right of the four tabs, drawn by the system. It is only the
-            // button: the tab never changes to it. Tap opens Search as a page of its own over this tab; press and
-            // hold (0.45 s) opens it listening.
-            Tab(value: HomeRouter.Tab.search, role: .search) { Color.clear }
         }
-        .background(SXHoldToTalk { openSearch(listening: true) })
-        // The bar stays as it is while scrolling (Nik, 26 Oct 2026: do not minimise it).
-        .tabBarMinimizeBehavior(.never)
+        .overlay {
+            SunnyTabBar(tab: router.tab, pick: pickTab, search: openSearch)
+                .offset(y: barDown ? 120 : 0)
+                .opacity(barGone ? 0 : 1)
+                .allowsHitTesting(!router.searchOpen)
+        }
     }
 
-    /// Search opens over the tab you are on; the tab bar and the search button slide away.
+    /// A tap on the open tab scrolls it to the top.
+    private func pickTab(_ t: HomeRouter.Tab) {
+        if t == router.tab { router.topTick[t, default: 0] += 1; return }
+        router.tab = t
+    }
+
+    /// Search opens over the tab you are on; the tab bar and the search button slide down 120 pt (0.45 s) and
+    /// fade (0.3 s). Reduce Motion cross-fades.
     private func openSearch(listening: Bool) {
         guard !router.searchOpen else { return }
         router.searchFrom = router.tab
         if listening { router.listenTick += 1 }
         router.searchOpen = true
-        SXTabBar.slide(away: true, reduce: reduce)
+        if reduce { withAnimation(.easeOut(duration: 0.25)) { barGone = true }; return }
+        withAnimation(.timingCurve(0.32, 0.72, 0, 1, duration: 0.45)) { barDown = true }
+        withAnimation(.easeOut(duration: 0.3)) { barGone = true }
     }
 
-    /// The page has started fading out (0.22 s after a 0.08 s wait); the tab bar slides back from 0.05 s.
+    /// The page has started fading out (0.22 s after a 0.08 s wait); the tab bar slides back up from 0.05 s.
     private func closeSearch() {
-        SXTabBar.slide(away: false, reduce: reduce)
+        if reduce { withAnimation(.easeOut(duration: 0.25)) { barGone = false } }
+        else {
+            withAnimation(.timingCurve(0.32, 0.72, 0, 1, duration: 0.45).delay(0.05)) { barDown = false }
+            withAnimation(.easeIn(duration: 0.3).delay(0.05)) { barGone = false }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { router.searchOpen = false }
     }
 
@@ -355,5 +367,14 @@ struct HomeUnavailable: View {
             .buttonStyle(SPressStyle())
         }
         .padding(S.margin)
+    }
+}
+
+/// A tab's content without the system's tab bar, keeping the 49 pt it held so the pages sit where they did.
+private struct OwnTabBar: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .toolbar(.hidden, for: .tabBar)
+            .safeAreaPadding(.bottom, 49)
     }
 }
