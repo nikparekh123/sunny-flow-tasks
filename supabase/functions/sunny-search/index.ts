@@ -21,11 +21,11 @@
  * member of a book (only that book; a member of two reads the one they own).
  */
 import Anthropic from 'npm:@anthropic-ai/sdk@1.3.0';
-import { caller, context, lookup, MENU, SB_KEY, SB_URL, type Ctx, type Row } from './lookups.ts';
+import { caller, context, db, lookup, MENU, SB_KEY, SB_URL, type Ctx, type Row } from './lookups.ts';
 import { checkAnswer } from './check.ts';
 import { COUNTS, fmt, SLOT, Slots } from './slots.ts';
 
-const BUILD = '2026-10-28.8';
+const BUILD = '2026-10-28.13';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';
@@ -120,7 +120,8 @@ The shape: pick what fits, never more than the question needs.
   while the market is open), close (a price after the close), research (saved research), web.
 - follow_ups: exactly two, short, the way he asks: "BABA's walls this week", "And for LULU?".
 - Leave out any key whose value would be null.
-- recap: one short line for his history list, slots allowed, no {b:} marks. With a big number: the few words that go
+- recap: one short line for his history list, slots allowed, no {b:} marks. It repeats the answer's own figures with
+  the answer's own words: a figure that is below in the answer is never above in the recap. With a big number: the few words that go
   under it ("collected · [r4|$] kept so far"). Otherwise the gist in one or two short sentences.
 
 When you have read what you need, reply with only this JSON, no other text (parts in the order shown on screen):
@@ -145,6 +146,14 @@ The flip is the price where dealer gamma turns from calming to amplifying. Net a
 was paid to close options, less this week's share of hedge costs. Insurance puts are long puts; hedge calls are long
 calls that are not LEAPS. Delta figures are in shares unless a field says dollars. The value of calls (or puts) sold
 is the premium collected for them; what they would cost to buy back is what is left, and the difference is kept.`;
+
+/* A spoken question (28 Oct 2026, Nik: the phone's listening struggles with accents): the phone's words, which
+   Claude reads for what he most likely meant. */
+const SPOKEN = `This question was spoken and turned into text by the phone, so words may be misheard: a ticker said as
+its company name or its sounds (Nike or "any key" for NKE, Ali Baba or "baba" for BABA, Lulu for LULU, "F I S" for FIS),
+or a term (LEAPS as "leaps" or "leeps", Ceiling as "sealing"). Read it for what he most likely meant from his book.
+When you read a word as something other than what was heard, begin the say with how you read it, in a few words:
+"Reading that as NKE."`;
 
 const DEEP = `This is "Go deeper": Nik has the first answer (above) and wants the why behind it. Read more if it helps, then
 answer with a "body" of two to four sentences that adds what the first answer left out, rows only if a list is the
@@ -264,11 +273,15 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
     if (p.say) parts.push({ type: 'say', text: S(p.say) });
     else if (p.body) parts.push({ type: 'body', text: S(p.body) });
     else if (p.big) {
-      const m = String(p.big.value ?? '').match(/^\s*\[([^\]|]+)(?:\|([^\]]*))?\]\s*$/);
+      /* The big number is drawn plain, its colour from tone: a colour mark around it ("{r:[r5|$]}") becomes the
+         tone, never text on screen (28 Oct 2026: "{r:$60,223}" showed on the phone). */
+      const raw = String(p.big.value ?? '').trim(), mk = raw.match(/^\{([gbro]):([\s\S]*)\}$/);
+      const inner = mk ? mk[2] : raw, markTone = mk ? ({ g: 'up', r: 'down', o: 'thin', b: null } as Record<string, string | null>)[mk[1]] : null;
+      const m = inner.match(/^\s*\[([^\]|]+)(?:\|([^\]]*))?\]\s*$/);
       let n: number | null = null, value: string | null = null, f2 = '';
       if (m) { try { n = Math.abs(sl.value(m[1])); f2 = (m[2] ?? '').trim(); value = fmt(n, f2); } catch (e) { bad.push(`${p.big.value}: ${(e as Error).message}`); } }
-      else value = S(p.big.value);
-      parts.push({ type: 'big', label: S(p.big.label), value, n, count: n != null && COUNTS.has(f2), fmt: f2, sub: S(p.big.sub), tone: tone(p.big.tone) });
+      else { const v = S(inner); value = v == null ? null : plain(v); }
+      parts.push({ type: 'big', label: S(p.big.label), value, n, count: n != null && COUNTS.has(f2), fmt: f2, sub: S(p.big.sub), tone: tone(p.big.tone) ?? markTone });
     } else if (p.trio) parts.push({ type: 'trio', items: trio(p.trio) });
     else if (p.rows) parts.push({ type: 'rows', head: S(p.rows.head), rows: rows(p.rows.rows) });
     else if (p.panel) {
@@ -339,7 +352,7 @@ function stepOf(name: string, a: Row): { step: string; work: boolean } {
 interface Test { model?: 'haiku' | 'opus'; effort?: 'low' | 'medium' | 'high'; trace?: boolean }
 type Emit = (e: Row) => void;
 
-async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner: boolean, test: Test = {}, emit: Emit = () => {}) {
+async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner: boolean, test: Test = {}, emit: Emit = () => {}, spoken = false) {
   const t0 = Date.now();
   const model = test.model === 'haiku' ? HAIKU : MODEL;
   const effort = test.effort ?? (deep ? 'medium' : 'low');
@@ -352,7 +365,7 @@ async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner
     ...thread.flatMap((x) => [{ role: 'user', content: String(x.q ?? '') }, { role: 'assistant', content: String(x.a ?? '') }]),
     { role: 'user', content: `Today is ${c.today}, ${clock(now)} New York time; the market is ${marketOpen(now) ? 'open' : 'closed'}. ` +
       `Names in the book: ${names}. Watchlist: ${(c.p.watchlist ?? []).map((w: Row) => w.ticker).join(', ') || 'none'}.\n\n` +
-      `${deep ? DEEP + '\n\n' : ''}Question: ${question}` },
+      `${deep ? DEEP + '\n\n' : ''}${spoken ? SPOKEN + '\n\n' : ''}Question: ${question}` },
   ];
   let final: Row | null = null, built: ReturnType<typeof build> | null = null, stop = '', retried = false, firstMiss: string[] = [];
   let steps = 0;
@@ -529,6 +542,47 @@ function questions(c: Ctx): Row {
   return { questions: all, tries: [`Give me an update on ${first}`, 'What’s the value of my calls sold?', 'What do I need to do today?', 'What’s my delta right now?'] };
 }
 
+/** Suggestions in place of Recent (Nik, 28 Oct 2026): up to six questions picked from the book each time Search
+    opens, each with the reason it is there. To do first; then rolls for the names most short of delta by Thursday;
+    names reporting in the next two weeks; the newest saved research; then what changed and the delta. */
+async function suggest(c: Ctx, owner: boolean): Promise<Row[]> {
+  const out: Row[] = [], seen = new Set<string>();
+  const add = (q: string, why: string, t?: string) => { if (out.length < 6 && !out.some((x) => x.q === q)) { out.push({ q, why }); if (t) seen.add(t); } };
+  const todo = (await lookup('todo', {}, c, owner).catch(() => null))?.data?.to_do ?? 0;
+  add('What do I need to do today?', todo ? `${todo} order${todo === 1 ? '' : 's'} in To do` : 'Nothing left in To do');
+  const plan = (c.p.plan ?? {}) as Record<string, Row>;
+  const short = Object.entries(plan).map(([t, p]) => ({ t, s: p.story })).filter((x) => x.s && !x.s.earnings && x.s.need > 0)
+    .sort((a, b) => b.s.need - a.s.need).slice(0, 2);
+  for (const { t, s } of short) add(`I want to roll my ${t} calls`, `About ${fmt(Math.round(s.need / 10) * 10, '#')} delta short by Thursday`, t);
+  const soon = ((c.p.writes?.names ?? []) as Row[]).filter((n) => n.next_earnings?.date && n.next_earnings.date >= c.today)
+    .map((n) => ({ t: String(n.ticker), d: String(n.next_earnings.date) }))
+    .filter((x) => (Date.parse(x.d) - Date.parse(c.today)) / 864e5 <= 14).sort((a, b) => a.d.localeCompare(b.d));
+  const reacted = new Set((await db('research_numbers?topic=eq.earnings_reactions&checked_at=not.is.null&select=ticker').catch(() => [])).map((r) => String(r.ticker)));
+  const day = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  for (const { t, d } of soon.slice(0, 2)) {
+    add(reacted.has(t) ? `How did ${t} move after its last earnings?` : `Give me an update on ${t}`, `${t} reports ${day(d)}`, t);
+  }
+  const fresh = await db('research_numbers?topic=eq.fair_value&metric=eq.fair_value_average&checked_at=not.is.null&select=ticker,asof,source&order=asof.desc,created_at.desc&limit=20').catch(() => []);
+  const mine = fresh.filter((x) => plan[String(x.ticker)]);   // research on this book's names only
+  const r = mine.find((x) => !seen.has(String(x.ticker))) ?? mine[0];
+  if (r) add(`What’s ${r.ticker}’s fair value?`, `${r.source} report from ${day(String(r.asof))}`, String(r.ticker));
+  add('What changed today?', 'Since the first read this morning');
+  add('What’s my delta right now?', 'Across the book, in shares');
+  return out;
+}
+
+/** Words the phone's listening should expect (its contextual strings): the book's and watchlist's tickers, the
+    names said for them, and the book's own terms. */
+const SAID: Record<string, string[]> = { BABA: ['Alibaba'], FIS: ['Fidelity National'], LULU: ['Lululemon'], NFLX: ['Netflix'],
+  NKE: ['Nike'], PEP: ['PepsiCo', 'Pepsi'], UBER: ['Uber'], TSLA: ['Tesla'], APP: ['AppLovin'], INTU: ['Intuit'], ADBE: ['Adobe'],
+  PYPL: ['PayPal'], VZ: ['Verizon'], TMUS: ['T-Mobile'], SPCX: ['SpaceX'] };
+function hints(c: Ctx): string[] {
+  const tickers = [...Object.keys(c.p.plan ?? {}), ...((c.p.watchlist ?? []) as Row[]).map((w) => String(w.ticker)), 'SPY', 'QQQ', 'IWM'];
+  return [...new Set([...tickers, ...tickers.flatMap((t) => SAID[t] ?? []), 'LEAPS', 'delta', 'gamma', 'theta', 'Ceiling', 'Floor',
+    'Accelerator', 'flip', 'walls', 'To do', 'hedge calls', 'insurance puts', 'roll', 'strike', 'premium', 'time value', 'fair value',
+    'Investing Pro', 'earnings', 'expiry', 'standard deviation'])];
+}
+
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'Content-Type': 'application/json' } });
 
 Deno.serve(async (req) => {
@@ -551,6 +605,7 @@ Deno.serve(async (req) => {
     if (body.recents) return json({ ok: true, build: BUILD, recents: await recents(book, who.user) });
     const c = await context(book);
     if (body.questions) return json({ ok: true, build: BUILD, ...questions(c) });
+    if (body.suggest) return json({ ok: true, build: BUILD, suggestions: await suggest(c, who.owner), hints: hints(c) });
     if (body.lookup) return json({ ok: true, build: BUILD, card: await lookup(String(body.lookup), body.args ?? {}, c, who.owner) });
     if (body.ask) {
       const q = String(body.ask).trim().slice(0, 1000);
@@ -562,7 +617,7 @@ Deno.serve(async (req) => {
       const thread = Array.isArray(body.thread) ? body.thread.slice(-6) : [];
       // Test settings only for the scheduler and service keys (the step 4 runs), never from the app.
       const run = async (emit?: Emit) => {
-        const a = await ask(q, thread, !!body.deep, c, who.owner, who.system ? body.test ?? {} : {}, emit);
+        const a = await ask(q, thread, !!body.deep, c, who.owner, who.system ? body.test ?? {} : {}, emit, !!body.voice);
         const id = body.test ? null : await logAsk(book, who.user, q, thread.length, !!body.deep, a);
         return { ...a, id, cost_usd: Number(costOf(a.model, a.usage).toFixed(4)) };
       };

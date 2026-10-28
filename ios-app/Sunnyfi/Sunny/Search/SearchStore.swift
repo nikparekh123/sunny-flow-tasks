@@ -2,14 +2,13 @@
 //  SearchStore.swift
 //  Sunny
 //
-//  What Search has open (block 27): your last 10 (kept on the server per
-//  login, so they follow you across days and devices), what you are typing,
-//  the voice, and the thread of answers. A follow-up chip, or a question
-//  that starts with And, What about or How about, adds to the thread;
-//  anything else starts fresh. Answers and threads clear each morning at
-//  9:00 AM New York time; the last 10 stay, and tapping one asks again with
-//  today's numbers. Back steps out one level at a time: the microphone sheet,
-//  voice, the conversation, Recent, then the tab you came from.
+//  What Search has open (block 27): the suggestions (Nik, 28 Oct 2026: in
+//  place of your last 10, picked from the book each time Search opens), what
+//  you are typing, the voice, and the thread of answers. A follow-up chip, or
+//  a question that starts with And, What about or How about, adds to the
+//  thread; anything else starts fresh. Back (or a swipe from the left edge)
+//  leaves Search for the tab you came from, after closing the microphone sheet
+//  or stopping the voice; Search opens fresh on the suggestions next time.
 //
 
 import Foundation
@@ -30,10 +29,9 @@ final class SearchStore {
         var bar = 0.0           // the Working it out bar's start, for its fill
     }
 
-    private(set) var recents: [SXRecent] = []
-    private(set) var recentsLoaded = false
-    private(set) var questions: [String] = []
-    private(set) var tries: [String] = []
+    private(set) var suggestions: [SXSuggestion] = []
+    /// Words the listening should expect: the book's tickers, their names, its terms.
+    private(set) var hints: [String] = []
     private(set) var entries: [Entry] = []
     var query = ""
     var typing = false
@@ -42,38 +40,22 @@ final class SearchStore {
     /// Scroll to this entry when an answer starts (nil scrolls to the top).
     private(set) var jump: UUID?
     private(set) var jumpTick = 0
-    private var threadDay: Date?
     /// The last press and hold on the search button that opened listening.
     var listenSeen = 0
 
     // MARK: Loading
 
+    /// Search opens fresh on the suggestions each time (Nik, 28 Oct 2026: back leaves Search, so the last
+    /// conversation does not wait behind it).
     func open() {
-        clearIfMorningPassed()
-        Task { await loadRecents() }
-        if questions.isEmpty { Task { await loadQuestions() } }
-    }
-
-    func loadRecents() async {
-        if let r: RecentsReply = try? await SXClient.post(["recents": true]) { recents = r.recents }
-        recentsLoaded = true
-    }
-
-    private func loadQuestions() async {
-        if let r: QuestionsReply = try? await SXClient.post(["questions": true]) { questions = r.questions; tries = r.tries }
-    }
-
-    /// Threads clear each morning at 9:00 AM New York: an answer from before the latest 9:00 AM goes.
-    private func clearIfMorningPassed() {
-        guard let born = threadDay, born < Self.lastNineAM() else { return }
         entries = []
-        threadDay = nil
+        jump = nil
+        Task { await loadSuggestions() }
     }
-    static func lastNineAM(_ now: Date = .now) -> Date {
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "America/New_York")!
-        let nine = cal.date(bySettingHour: 9, minute: 0, second: 0, of: now)!
-        return nine <= now ? nine : cal.date(byAdding: .day, value: -1, to: nine)!
+
+    /// Up to six questions picked from the book now, each with why it is there.
+    func loadSuggestions() async {
+        if let r: SuggestReply = try? await SXClient.post(["suggest": true]) { suggestions = r.suggestions; hints = r.hints ?? [] }
     }
 
     // MARK: Asking
@@ -83,19 +65,20 @@ final class SearchStore {
         !entries.isEmpty && q.range(of: #"^(and|what about|how about|also)\b"#, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
-    func ask(_ raw: String, cont: Bool? = nil) {
+    /// spoken: the words came from the voice, so Sunny reads a misheard word for what was meant.
+    func ask(_ raw: String, cont: Bool? = nil, spoken: Bool = false) {
         let q = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
         let keep = cont ?? continues(q)
         let thread = keep ? threadText() : []
         let e = Entry(q: q)
-        if keep { entries.append(e) } else { entries = [e]; threadDay = .now }
+        if keep { entries.append(e) } else { entries = [e] }
         query = ""
         typing = false
         jump = keep ? e.id : nil
         jumpTick += 1
         // The question moves to the top of your searches at once; the server keeps the real list.
-        Task { await run(e.id, q, thread, deep: false) }
+        Task { await run(e.id, q, thread, deep: false, spoken: spoken) }
     }
 
     func goDeeper(_ id: UUID) {
@@ -117,9 +100,9 @@ final class SearchStore {
         if deep { entries[i].deep = p } else { entries[i].phase = p }
     }
 
-    private func run(_ id: UUID, _ q: String, _ thread: [[String: String]], deep: Bool) async {
+    private func run(_ id: UUID, _ q: String, _ thread: [[String: String]], deep: Bool, spoken: Bool = false) async {
         do {
-            let a = try await SXClient.ask(q, thread: thread, deep: deep) { [weak self] step, work in
+            let a = try await SXClient.ask(q, thread: thread, deep: deep, spoken: spoken) { [weak self] step, work in
                 guard let self, let i = self.entries.firstIndex(where: { $0.id == id }) else { return }
                 let cur = deep ? self.entries[i].deep : self.entries[i].phase
                 // Sunny's own data shows the soft pulse; live data, research and the web say what they are doing.
@@ -129,7 +112,6 @@ final class SearchStore {
                 }
             }
             set(id, deep: deep, .done(a))
-            if !deep { await loadRecents() }
         } catch {
             set(id, deep: deep, .done(SXAnswer(parts: [.none(why: "Sunny couldn't reach your data just now. Try again in a moment.", didYouMean: nil)])))
         }
@@ -159,14 +141,7 @@ final class SearchStore {
 
     var listening = false
 
-    /// One level back from the conversation to Recent. False when there is nothing left (go to the tab).
-    func back() -> Bool {
-        if !entries.isEmpty { entries = []; threadDay = nil; jump = nil; jumpTick += 1; return true }
-        return false
-    }
-
-    private struct RecentsReply: Decodable { let recents: [SXRecent] }
-    private struct QuestionsReply: Decodable { let questions: [String]; let tries: [String] }
+    private struct SuggestReply: Decodable { let suggestions: [SXSuggestion]; let hints: [String]? }
     private struct OkReply: Decodable { let ok: Bool }
 }
 
@@ -221,9 +196,9 @@ enum SXClient {
     }
 
     /// Asks, streamed: one line per step while it reads, the answer last.
-    static func ask(_ q: String, thread: [[String: String]], deep: Bool,
+    static func ask(_ q: String, thread: [[String: String]], deep: Bool, spoken: Bool = false,
                     step: @escaping @MainActor (String, Bool) -> Void) async throws -> SXAnswer {
-        let (bytes, _) = try await URLSession.shared.bytes(for: try await request(["ask": q, "thread": thread, "deep": deep, "stream": true]))
+        let (bytes, _) = try await URLSession.shared.bytes(for: try await request(["ask": q, "thread": thread, "deep": deep, "voice": spoken, "stream": true]))
         for try await line in bytes.lines {
             guard let data = line.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             if let s = o["step"] as? String { await step(s, o["work"] as? Bool ?? false) }

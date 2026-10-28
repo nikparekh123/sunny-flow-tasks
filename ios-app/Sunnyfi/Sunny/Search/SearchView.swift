@@ -4,12 +4,13 @@
 //
 //  The Search page (handoff "Search for launch", block 27, final: SunnySearch
 //  with nav="tab" chat home="top", Oct 28): a page of its own over the tab you
-//  came from. Recent, your last 10; a chat box the full width of the screen
+//  came from. Suggestions picked from the book (in place of your last 10, Nik,
+//  28 Oct 2026); a chat box the full width of the screen
 //  that grows to five lines; each question a bubble on the right with its text
 //  answer under it, Go deeper, Read aloud, thumbs, Not what I asked and (under
 //  the last) two follow-ups. A back button top left, or a swipe from the left
-//  edge, steps out one level at a time: the microphone sheet, voice, the
-//  conversation, Recent, then the tab.
+//  edge, closes the microphone sheet or stops the voice, then leaves Search
+//  for the tab.
 //
 
 import SwiftUI
@@ -31,6 +32,8 @@ struct SunnySearchPage: View {
     @State private var risen = false
     @State private var chrome = false
     @FocusState private var focused: Bool
+    /// Opened by a press and hold: it listens, so the keyboard stays down.
+    @State private var openedListening = false
 
     private var thread: Bool { !search.entries.isEmpty }
     private var ease: Animation { .timingCurve(0.32, 0.72, 0, 1, duration: 0.5) }
@@ -64,6 +67,10 @@ struct SunnySearchPage: View {
         }
         .onAppear {
             search.open()
+            // The chat box is ready to type in the moment Search opens (Nik, 28 Oct 2026), once it has faded in.
+            DispatchQueue.main.asyncAfter(deadline: .now() + (reduce ? 0.1 : 0.3)) {
+                if !openedListening && !voice.on && !voice.denied { focused = true }
+            }
             if reduce { withAnimation(.easeOut(duration: 0.25)) { shown = true; risen = true; chrome = true }; return }
             withAnimation(.easeOut(duration: 0.3)) { shown = true }
             withAnimation(ease) { risen = true }
@@ -72,6 +79,7 @@ struct SunnySearchPage: View {
         .onChange(of: listenTick, initial: true) { _, t in
             guard t != search.listenSeen else { return }
             search.listenSeen = t
+            openedListening = true
             listen()
         }
         .onChange(of: focused) { _, f in search.typing = f }
@@ -84,7 +92,7 @@ struct SunnySearchPage: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    if thread { answers } else { recents }
+                    if thread { answers } else { suggestions }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 // From the top of the screen, as the design measures it (the status bar is inside it).
@@ -104,76 +112,31 @@ struct SunnySearchPage: View {
         .contentMargins(.top, 0, for: .scrollContent)
     }
 
-    // MARK: Recent, your last 10
+    // MARK: Suggestions
 
-    private var recents: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Recent").sx(.title).foregroundStyle(SX.ink).accessibilityAddTraits(.isHeader).padding(.horizontal, 20)
-            if search.recents.isEmpty && search.recentsLoaded { firstTime }
-            ForEach(groups(), id: \.0) { g in
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(g.0).sx(.group).foregroundStyle(SX.ink).accessibilityAddTraits(.isHeader)
-                    ForEach(g.1) { r in recentCard(r) }
-                }
-                .padding(.horizontal, 20)
-            }
-        }
-    }
-
-    private var firstTime: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Ask anything about your book. Your last 10 searches wait here, each with the answer it gave.")
-                .sx(.say).foregroundStyle(SX.ink).fixedSize(horizontal: false, vertical: true)
-            Text("Try asking").sx(.question).foregroundStyle(SX.muted).padding(.top, 6)
-            SXFlow(spacing: 8) {
-                ForEach(search.tries, id: \.self) { t in chip(t) { go(t, cont: false) } }
-            }
+    private var suggestions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Suggestions").sx(.title).foregroundStyle(SX.ink).accessibilityAddTraits(.isHeader)
+                .padding(.bottom, 10)
+            ForEach(search.suggestions) { s in suggestionCard(s) }
         }
         .padding(.horizontal, 20)
+        .animation(reduce ? nil : .easeOut(duration: 0.25), value: search.suggestions)
     }
 
-    private func recentCard(_ r: SXRecent) -> some View {
-        Button { go(r.q, cont: false) } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text(r.q).sx(.question).foregroundStyle(SX.muted).frame(maxWidth: .infinity, alignment: .leading).multilineTextAlignment(.leading)
-                    Text(when(r.at)).sx(.time).foregroundStyle(SX.muted)
-                }
-                if let big = r.preview?.big {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(big).sx(.recentBig).foregroundStyle(SX.tone(r.preview?.tone, SX.ink)).lineLimit(1).minimumScaleFactor(0.6)
-                        if let l = r.preview?.line { Text(l).sx(.small.weighted(.medium)).foregroundStyle(SX.muted).multilineTextAlignment(.leading) }
-                    }
-                } else if let l = r.preview?.line, !l.isEmpty {
-                    Text(l).sx(.recent).foregroundStyle(SX.ink).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
-                }
+    /// The question, and under it why Sunny suggests it now.
+    private func suggestionCard(_ s: SXSuggestion) -> some View {
+        Button { go(s.q, cont: false) } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(s.q).sx(.recent).foregroundStyle(SX.ink).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                Text(s.why).sx(.small.weighted(.medium)).foregroundStyle(SX.muted).multilineTextAlignment(.leading)
             }
             .padding(EdgeInsets(top: 14, leading: 16, bottom: 16, trailing: 16))
             .frame(maxWidth: .infinity, alignment: .leading)
             .modifier(SXPaper())
         }
         .buttonStyle(SPressStyle(scale: 0.985))
-    }
-
-    /// Today, Yesterday, Earlier, newest first (New York days).
-    private func groups() -> [(String, [SXRecent])] {
-        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "America/New_York")!
-        var out: [(String, [SXRecent])] = []
-        for r in search.recents {
-            let g = cal.isDateInToday(r.at) ? "Today" : cal.isDateInYesterday(r.at) ? "Yesterday" : "Earlier"
-            if let i = out.firstIndex(where: { $0.0 == g }) { out[i].1.append(r) } else { out.append((g, [r])) }
-        }
-        return out
-    }
-
-    /// 4:30 PM today and yesterday; the weekday this week; Oct 20 before that.
-    private func when(_ d: Date) -> String {
-        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "America/New_York")!
-        let f = DateFormatter(); f.timeZone = cal.timeZone; f.locale = Locale(identifier: "en_US")
-        if cal.isDateInToday(d) || cal.isDateInYesterday(d) { f.dateFormat = "h:mm a" }
-        else if let days = cal.dateComponents([.day], from: d, to: .now).day, days < 6 { f.dateFormat = "EEE" }
-        else { f.dateFormat = "MMM d" }
-        return f.string(from: d)
+        .accessibilityHint(s.why)
     }
 
     // MARK: The conversation
@@ -318,7 +281,7 @@ struct SunnySearchPage: View {
     }
 
     private var backLabel: String {
-        voice.denied ? "Close" : thread ? "Back to Recent" : "Back to \(from.title)"
+        voice.denied ? "Close" : "Back to \(from.title)"
     }
 
     /// A swipe from the left edge (the first 18 pt, 60 pt to the right) steps back like the button.
@@ -332,11 +295,11 @@ struct SunnySearchPage: View {
         .ignoresSafeArea()
     }
 
-    /// One level back: the microphone sheet, voice, the conversation (to Recent), then the tab.
+    /// Back: the microphone sheet or the voice first, then out of Search to the tab (Nik, 28 Oct 2026: back after
+    /// a conversation leaves Search, it does not stop on the suggestions).
     private func back() {
         if voice.denied { voice.denied = false; return }
         if voice.on { voice.stop(); return }
-        if thread { focused = false; _ = search.back(); return }
         close()
     }
 
@@ -430,7 +393,7 @@ struct SunnySearchPage: View {
     private func listen() {
         focused = false
         search.query = ""
-        voice.start { q in search.ask(q) }
+        voice.start(hints: search.hints) { q in search.ask(q, spoken: true) }
     }
 
     /// The same as opening, backwards: the page goes in 0.22 s after a 0.08 s wait, then the tab takes over.

@@ -125,17 +125,20 @@ function dgFor(c: Ctx, t: string) {
   return { units: DG_UNITS, price: dg.px, delta_turns_thin_above_pct: dg.thin25 ?? null, now: rowAt(rows, 0), rows };
 }
 
-/** Research Nik saved (research_numbers, checked by him): the latest date per topic, as plain figures. */
+/** Research Nik saved (research_numbers, checked by him): the latest date per figure, as plain figures. A newer
+    report replaces only the figures it has (28 Oct 2026): the Pro Report's fair value does not wipe the model range
+    an earlier screenshot gave. */
 async function researchFigures(t: string, topics: string[]) {
   const rows = await db(`research_numbers?ticker=eq.${t}&topic=in.(${topics.join(',')})&checked_at=not.is.null` +
     '&select=topic,metric,label,period,value,value_text,unit,source,asof&order=asof.desc,topic.asc,metric.asc,period.desc');
-  const latest = new Map<string, string>();
-  for (const r of rows) if (!latest.has(r.topic)) latest.set(r.topic, String(r.asof));
-  const keep = rows.filter((r) => String(r.asof) === latest.get(r.topic));
+  const latest = new Map<string, string>(), key = (r: Row) => `${r.topic}|${r.metric}`;
+  for (const r of rows) if (!latest.has(key(r))) latest.set(key(r), String(r.asof));
+  const keep = rows.filter((r) => String(r.asof) === latest.get(key(r)));
   if (!keep.length) throw new Error(`no research saved for ${t} yet (${topics.join(', ')})`);
   const src = { kind: 'research', source: [...new Set(keep.map((r) => String(r.source)))].join(', '),
                 asof: [...new Set(keep.map((r) => String(r.asof)))].sort().at(-1) };
-  const fig = (r: Row) => ({ label: r.label, value: r.value == null ? null : Number(r.value), text: r.value_text ?? null, unit: r.unit ?? null });
+  const fig = (r: Row) => ({ label: r.label, ...(r.period ? { period: r.period } : {}), value: r.value == null ? null : Number(r.value),
+    text: r.value_text ?? null, unit: r.unit ?? null });
   return { rows: keep, src, fig };
 }
 const RESEARCH_UNITS = 'Research Nik saved, with its source and date: context only, never for To do, strikes or hedges. ' +
@@ -175,7 +178,7 @@ export const MENU: Row[] = [
   { name: 'labels_held', shows: 'How well the Ceilings, Floors and Accelerators of one name held over the stored sessions', args: TICKER, required: ['ticker'] },
   { name: 'insights', shows: "One name's insights: the verdict and the points that help, need watching or hurt", args: TICKER, required: ['ticker'] },
   { name: 'fundamentals', shows: 'Research Nik saved for one name (Investing Pro and others): P/E, revenue, net income, dividend, payout, and how it compares with peers and its sector', args: TICKER, required: ['ticker'] },
-  { name: 'analyst_targets', shows: "Research Nik saved for one name: analysts' target and range, Investing Pro fair value and its models, the 52-week range", args: TICKER, required: ['ticker'] },
+  { name: 'analyst_targets', shows: "Research Nik saved for one name: analysts' target and range, Investing Pro fair value and its models, the 52-week range, and analysts' EPS forecasts for the next three years", args: TICKER, required: ['ticker'] },
   { name: 'earnings_history', shows: 'Research Nik saved for one name: last reported earnings with surprises, and how the price moved the day after each report', args: TICKER, required: ['ticker'] },
   { name: 'research_notes', shows: 'Writing Nik saved for one name: analyst notes, management news, his own notes, latest first', args: TICKER, required: ['ticker'] },
 ];
@@ -382,8 +385,9 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
         against_peers_and_sector: peers });
     }
     case 'analyst_targets': {
-      const k = need(t, 'analyst_targets'), { rows, src, fig } = await researchFigures(k, ['fair_value']);
-      return card('analyst_targets', tagOf(k, 'Analyst targets'), src, { units: RESEARCH_UNITS, figures: rows.map(fig) });
+      const k = need(t, 'analyst_targets'), { rows, src, fig } = await researchFigures(k, ['fair_value', 'estimates']);
+      return card('analyst_targets', tagOf(k, 'Analyst targets'), src, { units: RESEARCH_UNITS,
+        figures: rows.filter((x) => x.topic === 'fair_value').map(fig), eps_forecasts: rows.filter((x) => x.topic === 'estimates').map(fig) });
     }
     case 'earnings_history': {
       const k = need(t, 'earnings_history'), { rows, src, fig } = await researchFigures(k, ['earnings', 'earnings_reactions']);

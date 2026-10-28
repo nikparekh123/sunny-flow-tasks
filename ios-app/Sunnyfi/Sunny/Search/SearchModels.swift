@@ -111,13 +111,11 @@ enum SXPart: Decodable, Equatable {
     }
 }
 
-/// One of your last 10 (stored per login on the server, so it follows you across days and devices).
-struct SXRecent: Decodable, Equatable, Identifiable {
-    struct Preview: Decodable, Equatable { let big: String?; let tone: String?; let line: String? }
-    let id: Int
+/// A question Search suggests, and why it is there ("NKE reports Nov 4").
+struct SXSuggestion: Decodable, Equatable, Identifiable {
     let q: String
-    let at: Date
-    let preview: Preview?
+    let why: String
+    var id: String { q }
 }
 
 // MARK: - Text marks
