@@ -36,6 +36,7 @@ struct SXAnswerView: View {
         case .panel(let title, let say, let trio, let rows, let table, let note, let source):
             SXPanel(title: title, say: say, trio: trio, rows: rows, table: table, note: note, source: source)
         case .web(let summary, let sources, let line): SXWeb(summary: summary, sources: sources, line: line)
+        case .payoff(let p): SXPayoffCard(p: p)
         case .none(let why, let dym): SXNone(why: why, didYouMean: dym, ask: ask)
         }
     }

@@ -101,8 +101,10 @@ final class SearchStore {
     }
 
     private func run(_ id: UUID, _ q: String, _ thread: [[String: String]], deep: Bool, spoken: Bool = false) async {
+        // The request's id: the server keeps the answer under it, so one lost on the way is fetched again.
+        let rid = UUID().uuidString
         do {
-            let a = try await SXClient.ask(q, thread: thread, deep: deep, spoken: spoken) { [weak self] step, work in
+            let a = try await SXClient.ask(q, thread: thread, deep: deep, spoken: spoken, rid: rid) { [weak self] step, work in
                 guard let self, let i = self.entries.firstIndex(where: { $0.id == id }) else { return }
                 let cur = deep ? self.entries[i].deep : self.entries[i].phase
                 // Sunny's own data shows the soft pulse; live data, research and the web say what they are doing.
@@ -113,9 +115,20 @@ final class SearchStore {
             }
             set(id, deep: deep, .done(a))
         } catch {
+            // The connection dropped while the server finished (29 Oct 2026): ask for the saved answer every 2 s for
+            // up to 40 s, telling the server what went wrong here so it is on record.
+            let why = (error as NSError).localizedDescription + " [\((error as NSError).domain) \((error as NSError).code)]"
+            for _ in 0..<20 {
+                if let r: RecoverReply = try? await SXClient.post(["answer_for": rid, "client_error": why]), let a = r.answer {
+                    set(id, deep: deep, .done(a)); return
+                }
+                try? await Task.sleep(for: .seconds(2))
+            }
             set(id, deep: deep, .done(SXAnswer(parts: [.none(why: "Sunny couldn't reach your data just now. Try again in a moment.", didYouMean: nil)])))
         }
     }
+
+    private struct RecoverReply: Decodable { let answer: SXAnswer? }
 
     // MARK: Feedback
 
@@ -196,9 +209,9 @@ enum SXClient {
     }
 
     /// Asks, streamed: one line per step while it reads, the answer last.
-    static func ask(_ q: String, thread: [[String: String]], deep: Bool, spoken: Bool = false,
+    static func ask(_ q: String, thread: [[String: String]], deep: Bool, spoken: Bool = false, rid: String = UUID().uuidString,
                     step: @escaping @MainActor (String, Bool) -> Void) async throws -> SXAnswer {
-        let (bytes, _) = try await URLSession.shared.bytes(for: try await request(["ask": q, "thread": thread, "deep": deep, "voice": spoken, "stream": true]))
+        let (bytes, _) = try await URLSession.shared.bytes(for: try await request(["ask": q, "thread": thread, "deep": deep, "voice": spoken, "rid": rid, "stream": true]))
         for try await line in bytes.lines {
             guard let data = line.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             if let s = o["step"] as? String { await step(s, o["work"] as? Bool ?? false) }

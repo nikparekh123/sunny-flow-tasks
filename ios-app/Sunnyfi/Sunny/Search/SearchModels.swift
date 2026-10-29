@@ -69,6 +69,8 @@ enum SXPart: Decodable, Equatable {
     case rows(head: String?, rows: [SXRow])
     case panel(title: String?, say: String?, trio: [SXItem]?, rows: [SXRow]?, table: SXTable?, note: String?, source: SXSource?)
     case web(summary: String, sources: [SXWebSource], line: String)
+    /// The payoff card (block 28): one name, what was sold, or the book by Friday.
+    case payoff(SXPayoff)
     case none(why: String?, didYouMean: String?)
 
     private enum K: String, CodingKey {
@@ -93,6 +95,9 @@ enum SXPart: Decodable, Equatable {
                           note: s(.note), source: try? c.decodeIfPresent(SXSource.self, forKey: .source))
         case "web":
             self = .web(summary: s(.summary) ?? "", sources: (try? c.decode([SXWebSource].self, forKey: .sources)) ?? [], line: s(.line) ?? "From the web")
+        case "payoff":
+            // A card that will not read is left out; the sentence above it still stands.
+            self = (try? SXPayoff(from: d)).map { .payoff($0) } ?? .rows(head: nil, rows: [])
         default: self = .none(why: s(.why), didYouMean: s(.didYouMean))
         }
     }
@@ -106,6 +111,7 @@ enum SXPart: Decodable, Equatable {
         case .rows: return ""
         case .panel(let title, let say, _, _, _, _, _): return say.map { "\(title ?? ""). \(p($0))" } ?? ""
         case .web(let summary, _, _): return "From the web: " + summary
+        case .payoff: return ""
         case .none(let why, _): return "I can't answer that from your data. " + (why ?? "")
         }
     }

@@ -66,6 +66,7 @@ function soldRows(c: Ctx, t?: string) {
       captured_pct: mark == null || !l.avg ? null : Math.round((1 - mark / l.avg) * 100),
       in_the_money_usd: Math.round(itm), premium_usd: Math.round(l.avg * l.n * 100),
       left_to_earn_usd: mark == null ? null : Math.round(mark * l.n * 100), delta: num(l.delta) == null ? null : r2(l.delta),
+      theta_per_day_usd: num(l.theta) == null ? null : Math.round(-Number(l.theta) * l.n * 100),
     };
   });
 }
@@ -79,6 +80,7 @@ function boughtRows(c: Ctx, t?: string) {
       paid: r2(l.avg), mark: r2(mark), price: r2(s), change_pct: l.avg ? Math.round((mark / l.avg - 1) * 100) : null,
       value_usd: Math.round(mark * l.n * 100), cost_usd: Math.round(l.avg * l.n * 100),
       time_value_usd: Math.round(Math.max(0, mark - intrinsic) * l.n * 100), delta: num(l.delta) == null ? null : r2(l.delta),
+      theta_per_day_usd: num(l.theta) == null ? null : Math.round(Number(l.theta) * l.n * 100),
     };
   });
 }
@@ -144,6 +146,172 @@ async function researchFigures(t: string, topics: string[]) {
 const RESEARCH_UNITS = 'Research Nik saved, with its source and date: context only, never for To do, strikes or hedges. ' +
   'unit usd is dollars (revenue and market cap in full dollars), pct is percent, x is a multiple.';
 
+// ── Payoff by Friday (block 28, handoff Oct 29 2026) ─────────────────────────────────────────────────────
+
+/* What each price by Friday adds or costs: every leg re-priced with Black-Scholes at its own IV, held where it is
+   today, rate 4%, time in days to each close. From today (zero is where the position stands now); what was sold
+   alone is from the sale (zero is what was collected). The phone draws the card from card.chart with the same sums
+   (SearchPayoff.swift), so the line and the sentence agree. Asked, 29 Oct: each contract's own IV; the book moves
+   every name by the same %; the card ends when this week's calls expire; earnings hold IV (the source line names
+   the report); open orders stay off; one chip per kind of leg. */
+const RATE = 0.04;
+function ncdf(x: number): number {
+  const t = 1 / (1 + 0.2316419 * Math.abs(x)), d = 0.3989423 * Math.exp(-x * x / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return x > 0 ? 1 - p : p;
+}
+function bs(S: number, K: number, days: number, v: number, cp: 'c' | 'p'): number {
+  if (days <= 0) return cp === 'c' ? Math.max(0, S - K) : Math.max(0, K - S);
+  const T = days / 365, sq = v * Math.sqrt(T), d1 = (Math.log(S / K) + (RATE + v * v / 2) * T) / sq, d2 = d1 - sq, df = Math.exp(-RATE * T);
+  return cp === 'c' ? S * ncdf(d1) - K * df * ncdf(d2) : K * df * ncdf(-d2) - S * ncdf(-d1);
+}
+/** A New York wall time on a day, in epoch ms. */
+function nyMs(day: string, hm = '16:00'): number {
+  const g = Date.parse(`${day}T${hm}:00Z`);
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23', year: 'numeric',
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(g)).map((x) => [x.type, x.value]));
+  return g + (g - Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute));
+}
+const fridayFrom = (iso: string) => addDays(iso, (5 - new Date(iso + 'T12:00:00Z').getUTCDay() + 7) % 7);
+/** Where the card ends: this week's expiry (the plan's week), the next once its close has passed; the Thursday before
+    when the market is shut that Friday; 1 PM on a half day. */
+function fridayOf(c: Ctx, now: number): { day: string; close: number } {
+  const cal = (c.p.calendar ?? []) as Row[];
+  const closeOf = (d: string) => {
+    const e = cal.find((x) => x.date === d && x.kind === 'early_close' && x.closes);
+    return nyMs(d, e ? String(e.closes).slice(0, 5) : '16:00');
+  };
+  const wk = Object.values((c.p.plan ?? {}) as Record<string, Row>).map((p) => String(p.week ?? '')).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x)).sort()[0];
+  let fri = fridayFrom(wk ?? c.today);
+  for (let i = 0; i < 6; i++, fri = addDays(fri, 7)) {
+    const d = cal.some((e) => e.date === fri && e.kind === 'closed') ? addDays(fri, -1) : fri;
+    if (closeOf(d) > now) return { day: d, close: closeOf(d) };
+  }
+  return { day: fri, close: closeOf(fri) };
+}
+const KINDS = ['sc', 'sp', 'lp', 'hc', 'ip'] as const;
+type Kind = typeof KINDS[number];
+interface PLeg { g: Kind; cp: 'c' | 'p'; k: number; exp: string; T: number; n: number; v: number; now: number; paid: number }
+const kf = (k: number) => (Number.isInteger(k) ? String(k) : k.toFixed(2));
+const chipOf = (g: Kind, ls: PLeg[]) => {
+  const ks = [...new Set(ls.map((l) => l.k))].sort((a, b) => a - b).map(kf).join(' · ');
+  return g === 'sc' ? `Sold ${ks} calls` : g === 'sp' ? `Sold ${ks} puts` : g === 'lp' ? `LEAPS ${ks}` : g === 'hc' ? `Hedge ${ks}` : `Insurance ${ks}`;
+};
+const LEG_WORD: Record<Kind, string> = { sc: 'calls sold', sp: 'puts sold', lp: 'LEAPS', hc: 'hedge calls', ip: 'insurance puts' };
+/** P&L at a price by Friday: from today, or from the sale. */
+function pnlAt(L: PLeg[], S: number, d0: number, fromSale = false): number {
+  return L.reduce((s, l) => s + l.n * 100 * (bs(S, l.k, l.T - d0, l.v, l.cp) - (fromSale ? l.paid : l.now)), 0);
+}
+/** The chart's price range, as the design draws it: at least 5% and 1.9 priced moves either side, every sold strike
+    in with 2.5% to spare, never more than 15%. */
+const spanOf = (px: number, m: number, L: PLeg[]) =>
+  Math.min(0.15, Math.max(0.05, 1.9 * m, ...L.filter((l) => l.n < 0).map((l) => Math.abs(l.k / px - 1) + 0.025)));
+function zeros(fn: (s: number) => number, lo: number, hi: number): number[] {
+  const out: number[] = [], n = 240;
+  let ps = lo, pv = fn(lo);
+  for (let i = 1; i <= n; i++) { const s = lo + (hi - lo) * i / n, v = fn(s); if ((pv < 0) !== (v < 0)) out.push(ps + (s - ps) * (pv / (pv - v))); pv = v; ps = s; }
+  return out;
+}
+const tens = (v: number) => Math.round(v / 10) * 10;
+/* Every input is cut to 4 places before any sum, and the phone gets exactly these: the sentence and the card then
+   work from the same numbers and round to the same $10 (29 Oct 2026: $7,280 in the words, $7,290 on the line). */
+const r4 = (x: number) => Math.round(x * 1e4) / 1e4;
+
+/** One name's legs and what the card needs to draw it. The name's IV (the band, and "IV held at") is the one the
+    weekly chain prices: the move priced to this week's expiry by the strike nearest the price (gamma's weeklies). */
+function payName(c: Ctx, t: string, g: Row | undefined, now: number, d0: number) {
+  const px = r4(spotOf(c, t));
+  let L: PLeg[] = ((c.p.legs ?? []) as Row[]).filter((l) => l.ticker === t && Number(l.n) > 0).map((l) => {
+    const cp: 'c' | 'p' = l.type === 'call' ? 'c' : 'p';
+    const kind: Kind = l.side === 'sold' ? (cp === 'c' ? 'sc' : 'sp') : cp === 'p' ? 'ip' : l.up ? 'hc' : 'lp';
+    const v = num(l.iv);
+    return { g: kind, cp, k: Number(l.strike), exp: String(l.expiry), T: r4((nyMs(String(l.expiry)) - now) / 864e5),
+      n: (l.side === 'sold' ? -1 : 1) * Number(l.n), v: v != null && v > 0.02 && v < 5 ? r4(v) : NaN, now: 0, paid: r4(num(l.avg) ?? 0) };
+  }).filter((l) => l.T > 0);
+  const pr = g?.priced, ty = pr?.exp && g?.built_at ? (nyMs(String(pr.exp)) - Date.parse(String(g.built_at))) / (365 * 864e5) : 0;
+  const fromChain = pr?.sd1 && g?.spot && ty > 2 / (24 * 365) ? Number(pr.sd1) / Number(g.spot) / Math.sqrt(ty) : null;
+  const near = L.filter((l) => Number.isFinite(l.v)).sort((a, b) => a.T - b.T || Math.abs(a.k - px) - Math.abs(b.k - px))[0];
+  const iv = r4(fromChain ?? near?.v ?? 0.35);
+  L = L.map((l) => { const v = Number.isFinite(l.v) ? l.v : iv; return { ...l, v, now: r4(bs(px, l.k, l.T, v, l.cp)) }; });
+  const m = iv * Math.sqrt(Math.max(0, d0) / 365);
+  // The walls on the price line: the first Ceiling, the first Floor, and the Accelerator nearest the price.
+  const ws = ((g?.walls ?? []) as Row[]), lab = (w: Row) => String(w.label ?? '').toLowerCase(), rk = (a: Row, b: Row) => (a.rank ?? 9) - (b.rank ?? 9);
+  const ceil = ws.filter((w) => w.side === 'call' && lab(w) === 'ceiling').sort(rk)[0];
+  const floor = ws.filter((w) => w.side === 'put' && lab(w) === 'floor').sort(rk)[0];
+  const acc = ws.filter((w) => lab(w) === 'accelerator').sort((a, b) => Math.abs(a.k - px) - Math.abs(b.k - px))[0];
+  const walls = [ceil && { k: Number(ceil.k), side: 'call', label: 'Ceiling', conf: ceil.conf ?? null, dash: false },
+    floor && { k: Number(floor.k), side: 'put', label: 'Floor', conf: floor.conf ?? null, dash: false },
+    acc && { k: Number(acc.k), side: acc.side === 'call' ? 'call' : 'put', label: 'Accelerator', conf: null, dash: true }].filter(Boolean) as Row[];
+  const ne = nameRow(c, t)?.next_earnings?.date;
+  return { t, px, iv, m, L, walls, reports: ne && ne >= c.today ? String(ne) : null };
+}
+
+/** The phone's copy: every number it needs to draw and redraw the card, rounded. */
+const chartName = (x: ReturnType<typeof payName>, fri: string) => ({
+  t: x.t, px: x.px, iv: x.iv,
+  reports: x.reports && x.reports <= fri ? monDay(x.reports) : null,
+  chips: KINDS.filter((g) => x.L.some((l) => l.g === g)).map((g) => ({ g, t: chipOf(g, x.L.filter((l) => l.g === g)) })),
+  walls: x.walls,
+  legs: x.L.map((l) => ({ g: l.g, cp: l.cp, k: l.k, T: l.T, n: l.n, v: l.v, now: l.now, paid: l.paid })),
+});
+const monDay = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+const dayLabel = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).replace(',', '');
+
+async function payoff(c: Ctx, t: string | undefined, sold: boolean) {
+  const now = Date.now(), fri = fridayOf(c, now), d0 = r4((fri.close - now) / 864e5);
+  const names = t ? [t] : bookNames(c);
+  const gv = await db(`gamma_view_day?view=eq.weeklies&ticker=in.(${names.join(',')})&select=ticker,day,built_at,spot:data->spot,` +
+    `priced:data->priced,walls:data->walls&order=day.desc&limit=${names.length * 3}`).catch(() => [] as Row[]);
+  const gOf = (k: string) => gv.find((r) => r.ticker === k);
+  const word = new Date(fri.day + 'T12:00:00Z').getUTCDay() === 4 ? 'Thursday' : 'Friday';
+  const head = { by: fri.day, by_word: word, days_to_close: Math.round(d0 * 100) / 100 };
+  const chart = (mode: string, xs: ReturnType<typeof payName>[]) => ({ mode, by: dayLabel(fri.day), word, d0,
+    names: xs.map((x) => chartName(x, fri.day)) });
+  const UNITS = `pnl_usd is what each price at ${word}'s close adds (positive) or costs (negative), every leg re-priced with ` +
+    'Black-Scholes at its own IV held where it is today, rounded to $10 as the card shows it. ';
+
+  if (!t) {
+    // The book: every name moved by the same %, added up.
+    const xs = names.map((k) => payName(c, k, gOf(k), now, d0)).filter((x) => x.L.length && Number.isFinite(x.px));
+    if (!xs.length) throw new Error('nothing held in the book');
+    const at = (x: ReturnType<typeof payName>, mv: number) => pnlAt(x.L, x.px * (1 + mv), d0);
+    const tot = (mv: number) => xs.reduce((s, x) => s + at(x, mv), 0);
+    return { ...card('payoff', `Book · Payoff by ${word}`, sunny(c), { units: UNITS + 'From today. Every name moves by the same %.', ...head,
+      book: Object.fromEntries([[-10, 'down_10_pct'], [-5, 'down_5_pct'], [0, 'flat'], [5, 'up_5_pct'], [10, 'up_10_pct']]
+        .map(([mv, k]) => [k, { pnl_usd: tens(tot(Number(mv) / 100)) }])),
+      names: xs.map((x) => ({ ticker: x.t, flat_usd: tens(at(x, 0)), down_5_pct_usd: tens(at(x, -0.05)), up_5_pct_usd: tens(at(x, 0.05)) })) }),
+      chart: chart('book', xs) };
+  }
+
+  const x = payName(c, t, gOf(t), now, d0);
+  if (!Number.isFinite(x.px)) throw new Error(`${t} is not in the book`);
+  if (!x.L.length) throw new Error(`nothing held on ${t}`);
+  const L = sold ? x.L.filter((l) => l.n < 0) : x.L;
+  if (!L.length) throw new Error(`nothing sold on ${t} right now`);
+  const fn = (s: number) => pnlAt(L, s, d0, sold), r = spanOf(x.px, x.m, L);
+  const dn = x.px * (1 - x.m), up = x.px * (1 + x.m);
+  const byLeg = (s: number) => KINDS.filter((g) => L.some((l) => l.g === g)).map((g) => ({ leg: LEG_WORD[g],
+    pnl_usd: tens(pnlAt(L.filter((l) => l.g === g), s, d0, sold)) }));
+  const legs = KINDS.filter((g) => L.some((l) => l.g === g)).map((g) => {
+    const ls = L.filter((l) => l.g === g);
+    return { leg: LEG_WORD[g], chip: chipOf(g, ls), contracts: ls.reduce((s, l) => s + Math.abs(l.n), 0),
+      strikes: [...new Set(ls.map((l) => l.k))].sort((a, b) => a - b), expiries: [...new Set(ls.map((l) => l.exp))].sort(),
+      ...(g === 'sc' || g === 'sp' ? { ends_by_then: ls.every((l) => l.exp <= fri.day) } : {}) };
+  });
+  const premium = sold ? Math.round(L.reduce((s, l) => s + Math.abs(l.n) * 100 * l.paid, 0)) : undefined;
+  return { ...card('payoff', tagOf(t, sold ? 'Sold' : `Payoff by ${word}`), sunny(c), {
+    units: UNITS + (sold ? 'From the sale: zero is what was collected, so a positive figure is what is kept.' : 'From today: zero is where the position stands now.'),
+    ticker: t, price: r2(x.px), ...head, move_priced_pct: r2(x.m * 100), legs,
+    ...(sold ? { premium_collected_usd: premium } : {}),
+    one_sd_down: { price: r2(dn), pnl_usd: tens(fn(dn)), by_leg: byLeg(dn) },
+    flat: { price: r2(x.px), pnl_usd: tens(fn(x.px)), by_leg: byLeg(x.px) },
+    one_sd_up: { price: r2(up), pnl_usd: tens(fn(up)), by_leg: byLeg(up) },
+    breakevens: zeros(fn, x.px * (1 - r), x.px * (1 + r)).slice(0, 2).map(r2),
+    walls: x.walls.map((w) => ({ label: w.label, strike: w.k, ...(w.conf != null ? { confidence: w.conf } : {}) })),
+    ...(x.reports && x.reports <= fri.day ? { reports_before_then: x.reports } : {}) }),
+    chart: { ...chart(sold ? 'sold' : 'one', [x]) } };
+}
+
 // ── The menu ───────────────────────────────────────────────────────────────────────────────────────────
 
 const TICKER = { ticker: { type: 'string', description: 'A ticker, for example BABA' } };
@@ -151,10 +319,10 @@ export const MENU: Row[] = [
   { name: 'account', shows: "Account: value, today's move, realized and unrealized, time value left in what is sold, margin, interest, fees", args: {} },
   { name: 'movers', shows: "Today's moves: each name in the book, SPY, QQQ, IWM and the futures", args: {} },
   { name: 'position', shows: 'Position summary for one name: price, what is sold and bought, the week plan, delta, next earnings, who trades it', args: TICKER, required: ['ticker'] },
-  { name: 'sold', shows: 'Sold options with captured %, days left and how far in the money; one name or all', args: { ...TICKER,
+  { name: 'sold', shows: 'Sold options with captured %, days left, how far in the money, and theta: what time decay earns a day in dollars; one name or all', args: { ...TICKER,
       filter: { type: 'string', enum: ['all', 'in_the_money', 'captured'], description: 'in_the_money: only those in the money; captured: only those at or past min_captured' },
       min_captured: { type: 'number', description: 'Captured % threshold for filter captured, default 80' } } },
-  { name: 'bought', shows: 'Bought options (LEAPS, hedge calls, insurance puts) with delta, value, time value and days left; one name or all', args: { ...TICKER,
+  { name: 'bought', shows: 'Bought options (LEAPS, hedge calls, insurance puts) with delta, value, time value, days left, and theta: what time decay costs a day in dollars (negative); one name or all', args: { ...TICKER,
       kind: { type: 'string', enum: ['all', 'leaps', 'hedge', 'insurance'] } } },
   { name: 'todo', shows: "This week's orders: the call sale, hedge calls, insurance puts, weekly puts; one name or all", args: TICKER },
   { name: 'delta_gamma', shows: 'Delta and the P&L of a move from -10% to +10%; one name, or the whole book', args: { ...TICKER,
@@ -164,6 +332,8 @@ export const MENU: Row[] = [
   { name: 'walls_live', shows: 'Walls worked out now from live option prices, for any ticker and expiry (open interest only, no tape labels). Only when gamma has no view for that ticker or expiry', args: { ...TICKER,
       expiry: { type: 'string', description: 'An expiry date like 2027-01-15; leave out for the next 45 days' } }, required: ['ticker'] },
   { name: 'roll', shows: "Rolling one name's calls to next Friday, as delta in shares: the calls sold now and what they could be at +1.5 SD by Thursday, what is bought, what insurance takes away, the net, the delta still needed, and each month's call walls (Ceiling, Accelerator) with what one call adds and how many would cover it. Read this for rolling, or how much delta a name needs", args: TICKER, required: ['ticker'] },
+  { name: 'payoff', shows: "Payoff by Friday: what each price at this week's expiry adds or costs, every leg re-priced at its own IV: 1 SD down, flat and 1 SD up, with what each leg (calls sold, LEAPS, hedge calls, insurance puts) carries, the breakevens and the walls. legs 'sold' for what is sold alone, from the sale. No ticker for the whole book, every name moving the same %", args: { ...TICKER,
+      legs: { type: 'string', enum: ['all', 'sold'], description: "'sold' for what is sold alone (how are my calls doing?); default all" } } },
   { name: 'hedges', shows: 'Hedge calls and insurance puts: held, needed, strike, cost; one name or a list of the names that need some', args: TICKER },
   { name: 'hedge_rungs', shows: 'Every hedge call and insurance put with days left; rolls are due at 45 days left', args: {} },
   { name: 'put_gates', shows: 'Whether weekly puts can sell: above the 50-day, a Floor below, no Accelerator between; one name or all', args: TICKER },
@@ -303,6 +473,8 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
             calls_to_cover: w.n, cost_usd: w.cost })) })),
         shares: { to_cover: s.by_shares.n, cost_usd: s.by_shares.cost } });
     }
+    case 'payoff':
+      return await payoff(c, t, a.legs === 'sold');
     case 'hedges': {
       const names = t ? [t] : bookNames(c);
       const rows = names.map((k) => {

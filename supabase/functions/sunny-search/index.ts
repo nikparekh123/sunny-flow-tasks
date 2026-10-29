@@ -25,7 +25,7 @@ import { caller, context, db, lookup, MENU, SB_KEY, SB_URL, type Ctx, type Row }
 import { checkAnswer } from './check.ts';
 import { COUNTS, fmt, SLOT, Slots } from './slots.ts';
 
-const BUILD = '2026-10-28.13';
+const BUILD = '2026-10-29.4';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';
@@ -106,6 +106,21 @@ The shape: pick what fits, never more than the question needs.
   4. Then {"roll_months": true}: Sunny adds one panel per month (its walls, the calls that would cover the delta
      needed and their cost) and a last one for shares. Write nothing about the months yourself.
   follow_ups such as "NKE's walls in January", "And for BABA?".
+- Payoff by Friday, only when the answer depends on where the price ends up by Friday (What's the payoff on my Nike
+  position? How does BABA look by Friday? How are my BABA calls doing? What does Friday look like across my book?): read
+  payoff (legs "sold" when he asks how what he sold is doing; no ticker for the whole book). Then one "say" of two or
+  three short sentences, written with every leg on, then {"payoff": true}: Sunny draws the card. Nothing else: no rows,
+  no body, no trio. Never pick or suggest.
+  One name: "By Friday, NKE flat adds {g:$180}. A drop to {b:34.16} costs {r:$4,270}, most of it the LEAPS. Tap a leg to
+  take it out." Use the 1 SD price on the side that matters most, the leg that carries most of it (by_leg), a sold strike
+  that caps or adds to it when one does. What he sold: what he keeps if the price is flat and where he keeps all of it
+  (ends_by_then: under the call strike, over the put strike); when the sold legs end after Friday, say what is kept
+  flat and where it starts to cost (breakevens). The book: "If every name moves the same % by Friday, flat adds
+  {g:$1,640}, a 5% rise adds {g:$21,090} and a 5% drop costs {r:$31,650}. Tap a name for its own chart."
+  Prices plain, as the card's axis shows them ({b:[r3|#2]}, never $). At most three sentences.
+  Use the word in by_word for Friday. Adds is green, costs is red. When reports_before_then is there, say the report
+  falls before then and IV is held. A name not in the book, or with nothing held, is text only.
+  follow_ups such as "How are my NKE calls doing?", "And for BABA?", "What does Friday look like across my book?".
 - Panels only for an update on one name (give me an update on Nike, catch me up on BABA): a "say", a "trio" of three
   numbers, then one "panel" per topic, each with its own source: Your position, Walls this week, Fair value and
   targets, Valuation and dividend, Against peers and sector, The day after earnings. Leave out a panel when its data
@@ -303,6 +318,10 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
     else if (p.roll_months) {
       const card = ran.filter((x) => x.ok && x.name === 'roll').at(-1)?.card;
       if (card) parts.push(...rollPanels(card, sourceLine('sunny', ran, c, seen, 0)));
+    } else if (p.payoff) {
+      // The payoff card (block 28): drawn on the phone from the lookup's own figures; its source line is its own.
+      const card = ran.filter((x) => x.ok && x.name === 'payoff').at(-1)?.card;
+      if (card?.chart) parts.push({ type: 'payoff', ...card.chart, at: marketOpen() ? clock(new Date(c.at)) : `${lastClose()} close` });
     }
   }
   // A big number leads (block 27): a sentence the model put above it moves under it, as body text.
@@ -315,7 +334,7 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
   const recap = f.recap ? plain(S(f.recap) ?? '') : null;
   // The source line ends every answer, unless its last part is a panel with a source of its own.
   const last = parts.at(-1);
-  const source = last?.type === 'panel' || last?.type === 'none' ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
+  const source = last?.type === 'panel' || last?.type === 'none' || last?.type === 'payoff' ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
   return { parts, source, follow_ups, recap, can_answer: f.can_answer !== false && !parts.some((x) => x.type === 'none'),
     bad, literal: lit.join(' \n '), webLiteral: webLit.join(' \n ') };
 }
@@ -333,6 +352,7 @@ function stepOf(name: string, a: Row): { step: string; work: boolean } {
     case 'todo': return s('Reading To do');
     case 'delta_gamma': return s(t ? `Working out ${t}'s delta` : "Working out the book's delta");
     case 'roll': return s(`Working out ${t}'s roll`);
+    case 'payoff': return s(t ? `Working out ${t} by Friday` : 'Working out the book by Friday');
     case 'gamma': return s(`Reading ${t}'s walls`, true);
     case 'walls_live': return s(`Reading ${t}'s live chain`, true);
     case 'yield': return s('Reading your yield');
@@ -423,7 +443,8 @@ async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner
       try {
         const card = await lookup(String(b.name), args, c, owner);
         ran.push({ name: b.name, args, ok: true, ms: Date.now() - s0, card });
-        return { type: 'tool_result', tool_use_id: b.id, content: JSON.stringify({ ...card, data: sl.tag(card.data) }) };
+        // The payoff's chart is the phone's (every leg, to redraw the card), never the model's.
+        return { type: 'tool_result', tool_use_id: b.id, content: JSON.stringify({ ...card, chart: undefined, data: sl.tag(card.data) }) };
       } catch (e) {
         const error = (e as Error).message;
         ran.push({ name: b.name, args, ok: false, ms: Date.now() - s0, error });
@@ -499,9 +520,11 @@ function preview(a: Row): Row {
   const line = a.recap ?? a.answer ?? '';
   return big ? { big: big.value, tone: big.tone, line } : { big: null, line };
 }
-async function logAsk(book: string, user: string | undefined, q: string, threadLen: number, deep: boolean, a: Row): Promise<number | null> {
+async function logAsk(book: string, user: string | undefined, q: string, threadLen: number, deep: boolean, a: Row, rid?: string): Promise<number | null> {
   const r = await rest('search_log?select=id', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify([{
     book_id: book, user_id: user ?? null, question: q, thread_len: threadLen, deep, model: a.model, effort: a.effort,
+    // The phone's request id and what it is sent: an answer lost on the way is fetched again by the id (29 Oct 2026).
+    rid: rid ?? null, reply: { parts: a.parts, source: a.source, follow_ups: a.follow_ups, recap: a.recap, can_answer: a.can_answer },
     answer: a.answer, big: a.big, cards: (a.parts as Row[]).map((x) => x.type), lookups: a.lookups,
     parts: a.parts, source: a.source, recap: a.recap, preview: preview(a),
     can_answer: a.can_answer, check_ok: a.check?.ok ?? null, unverified: a.check?.unverified ?? [], retried: a.check?.retried ?? false,
@@ -535,9 +558,10 @@ function questions(c: Ctx): Row {
     'What do I need to do today?', 'How much time value is left in what I sold?', 'Which calls are 80% captured?',
     'How much did I make this week?', 'What did I pay for each LEAPS?', 'What is a Ceiling?', 'What is the flip?',
     'What’s the value of my calls sold?', 'What’s my delta right now?', 'Show all my sold positions', 'What changed today?',
-    'Which hedges roll soon?', 'What earnings are coming up?', 'How is payback going?',
+    'Which hedges roll soon?', 'What earnings are coming up?', 'How is payback going?', 'What does Friday look like across my book?',
     ...names.flatMap((t) => [`How’s ${t}?`, `${t}’s walls this week`, `Give me an update on ${t}`, `What’s my sold position on ${t}?`,
-      `What did ${t}’s bought legs cost?`, `How much time value is left on ${t}?`, `Why did ${t} move today?`, `Who is trading ${t}?`]),
+      `What did ${t}’s bought legs cost?`, `How much time value is left on ${t}?`, `Why did ${t} move today?`, `Who is trading ${t}?`,
+      `What’s the payoff on my ${t} position?`, `How are my ${t} calls doing?`]),
   ];
   return { questions: all, tries: [`Give me an update on ${first}`, 'What’s the value of my calls sold?', 'What do I need to do today?', 'What’s my delta right now?'] };
 }
@@ -605,6 +629,16 @@ Deno.serve(async (req) => {
     if (body.recents) return json({ ok: true, build: BUILD, recents: await recents(book, who.user) });
     const c = await context(book);
     if (body.questions) return json({ ok: true, build: BUILD, ...questions(c) });
+    if (typeof body.answer_for === 'string') {
+      const rid = encodeURIComponent(body.answer_for.slice(0, 64));
+      const who2 = who.user ? `user_id=eq.${who.user}` : 'user_id=is.null';
+      const r = await rest(`search_log?rid=eq.${rid}&book_id=eq.${book}&${who2}&select=id,reply&limit=1`);
+      const row = r.ok ? ((await r.json()) as Row[])[0] : null;
+      if (!row?.reply) return json({ ok: true, pending: true });
+      if (body.client_error) await rest(`search_log?id=eq.${row.id}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ client_error: String(body.client_error).slice(0, 500) }) }).then((x) => x.body?.cancel());
+      return json({ ok: true, answer: { ...row.reply, id: row.id } });
+    }
     if (body.suggest) return json({ ok: true, build: BUILD, suggestions: await suggest(c, who.owner), hints: hints(c) });
     if (body.lookup) return json({ ok: true, build: BUILD, card: await lookup(String(body.lookup), body.args ?? {}, c, who.owner) });
     if (body.ask) {
@@ -618,7 +652,8 @@ Deno.serve(async (req) => {
       // Test settings only for the scheduler and service keys (the step 4 runs), never from the app.
       const run = async (emit?: Emit) => {
         const a = await ask(q, thread, !!body.deep, c, who.owner, who.system ? body.test ?? {} : {}, emit, !!body.voice);
-        const id = body.test ? null : await logAsk(book, who.user, q, thread.length, !!body.deep, a);
+        const rid = typeof body.rid === 'string' ? body.rid.slice(0, 64) : undefined;
+        const id = body.test ? null : await logAsk(book, who.user, q, thread.length, !!body.deep, a, rid);
         return { ...a, id, cost_usd: Number(costOf(a.model, a.usage).toFixed(4)) };
       };
       if (!body.stream) return json(limited ?? await run());
