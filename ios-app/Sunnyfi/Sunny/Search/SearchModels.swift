@@ -75,6 +75,8 @@ enum SXPart: Decodable, Equatable {
     case chart(SXChart)
     /// Your book (block 29): every name at once, a list or small charts.
     case book(SXBook)
+    /// What if · Delta and Gamma (block 29): what a move does to a name's delta, on a slider.
+    case whatif(SXWhatIf)
     case none(why: String?, didYouMean: String?)
 
     private enum K: String, CodingKey {
@@ -106,6 +108,8 @@ enum SXPart: Decodable, Equatable {
             self = (try? SXChart(from: d)).map { .chart($0) } ?? .rows(head: nil, rows: [])
         case "book":
             self = (try? SXBook(from: d)).map { .book($0) } ?? .rows(head: nil, rows: [])
+        case "whatif":
+            self = (try? SXWhatIf(from: d)).map { .whatif($0) } ?? .rows(head: nil, rows: [])
         default: self = .none(why: s(.why), didYouMean: s(.didYouMean))
         }
     }
@@ -119,7 +123,7 @@ enum SXPart: Decodable, Equatable {
         case .rows: return ""
         case .panel(let title, let say, _, _, _, _, _): return say.map { "\(title ?? ""). \(p($0))" } ?? ""
         case .web(let summary, _, _): return "From the web: " + summary
-        case .payoff, .chart, .book: return ""
+        case .payoff, .chart, .book, .whatif: return ""
         case .none(let why, _): return "I can't answer that from your data. " + (why ?? "")
         }
     }

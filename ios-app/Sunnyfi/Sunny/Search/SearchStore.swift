@@ -211,7 +211,7 @@ enum SXClient {
     /// Asks, streamed: one line per step while it reads, the answer last.
     static func ask(_ q: String, thread: [[String: String]], deep: Bool, spoken: Bool = false, rid: String = UUID().uuidString,
                     step: @escaping @MainActor (String, Bool) -> Void) async throws -> SXAnswer {
-        let (bytes, _) = try await URLSession.shared.bytes(for: try await request(["ask": q, "thread": thread, "deep": deep, "voice": spoken, "rid": rid, "stream": true]))
+        let (bytes, _) = try await URLSession.shared.bytes(for: try await request(["ask": q, "thread": thread, "deep": deep, "voice": spoken, "rid": rid, "stream": true, "draws": ["whatif"]]))
         for try await line in bytes.lines {
             guard let data = line.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             if let s = o["step"] as? String { await step(s, o["work"] as? Bool ?? false) }

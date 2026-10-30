@@ -30,7 +30,8 @@ export async function caller(req: Request): Promise<{ book: string; owner: boole
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────────────────────────
 
-export interface Ctx { p: Row; at: string; book: string; today: string }
+/** draws: the newer cards the phone says it can draw (build 32 on); an older build gets the sentence without them. */
+export interface Ctx { p: Row; at: string; book: string; today: string; draws?: string[] }
 export async function context(book: string): Promise<Ctx> {
   const [s] = await db(`home_snapshot?book_id=eq.${book}&select=payload&limit=1`);
   if (!s) throw new Error(`no Home data for book ${book}`);
@@ -128,6 +129,80 @@ function dgFor(c: Ctx, t: string) {
   const rows = ((dg.ser2 ?? []) as number[][]).map((r) => ({ move_pct: r[0], bought_delta_shares: r[1], sold_delta_shares: r[2],
     net_delta_shares: r[3], pnl_usd: r[5] }));
   return { units: DG_UNITS, price: dg.px, delta_turns_thin_above_pct: dg.thin25 ?? null, now: rowAt(rows, 0), rows };
+}
+
+/* What if · Delta and Gamma (block 29, card 3): sunny-home's Δ Γ model widened to 15% either way for the slider
+   (Nik, 30 Oct 2026: the slider stays at 15%). Every open leg at its own IV, an instant jump of m% from today's price
+   with each leg's time left unchanged, held shares at one delta each; the P&L is every leg re-priced at once. Thin is
+   net delta under 25% of TODAY's long delta, short under zero (Nik, 25 Oct 2026: a stable base, as Home reads it).
+   The tip is the To do hedge, told as a story: one function sizes the hedge calls for Gamma, To do and Δ Γ (Nik, 25
+   Oct 2026), so it is the plan's count, strike and cost, held to zero at the target by Thursday's close. */
+const WI_UNITS = 'Delta figures are in shares. Every figure is an instant move from today: each option re-priced at its own IV ' +
+  'with its time left unchanged, pnl_usd the P&L of that move. Thin is net delta under 25% of long_delta_today; short is ' +
+  'under zero. hedge is the To do hedge: the calls that keep net delta at or above zero from today up to the target by ' +
+  "Thursday's close.";
+function bsDelta(S: number, K: number, years: number, v: number, cp: 'c' | 'p'): number {
+  const d1 = (Math.log(S / K) + (RATE + v * v / 2) * years) / (v * Math.sqrt(years));
+  return cp === 'c' ? ncdf(d1) : ncdf(d1) - 1;
+}
+const usdK = (v: number) => {
+  const a = Math.abs(v), k = a / 1000;
+  return a >= 1000 ? '$' + (k >= 10 || Math.abs(k - Math.round(k)) < 0.05 ? String(Math.round(k)) : k.toFixed(1)) + 'K' : '$' + tens(a);
+};
+const stateOf = (d: number, long: number) => (d < 0 ? 'Short' : d < 0.25 * long ? 'Thin' : 'On target');
+
+function whatIf(c: Ctx, t: string, g: Row | undefined, ask: number | null) {
+  const dg = nameRow(c, t)?.dg, spot = Number(dg?.px);
+  if (!dg || !(spot > 0)) return null;
+  const today = c.today, ivA = num(dg.sd) ? Number(dg.sd) / 100 / Math.sqrt(5 / 252) : 0.4;
+  const yr = (e: string) => Math.max(0.5 / 365, (Date.parse(e) - Date.parse(today)) / 864e5 / 365);
+  const lg = ((c.p.legs ?? []) as Row[]).filter((l) => l.ticker === t && l.expiry >= today && Number(l.n) > 0).map((l) => ({
+    sg: l.side === 'sold' ? -1 : 1, cp: (l.type === 'call' ? 'c' : 'p') as 'c' | 'p', K: Number(l.strike), q: Number(l.n),
+    T: yr(String(l.expiry)), v: (num(l.iv) ?? 0) > 0 ? Number(l.iv) : ivA }));
+  const opt = (S: number, x: typeof lg[number]) => ({ p: bs(S, x.K, x.T * 365, x.v, x.cp), d: bsDelta(S, x.K, x.T, x.v, x.cp) });
+  const o0 = lg.map((x) => opt(spot, x));
+  const sh = Number(c.p.plan?.[t]?.story?.shares ?? 0) || 0;
+  const at = (m: number) => {
+    const S = spot * (1 + m / 100);
+    let b = sh, s = 0, pl = sh * (S - spot);
+    lg.forEach((x, i) => { const o1 = opt(S, x), dd = x.sg * x.q * 100 * o1.d; if (x.sg < 0) s += dd; else b += dd; pl += x.sg * x.q * 100 * (o1.p - o0[i].p); });
+    return { b, s, d: b + s, pl };
+  };
+  const long = Math.round(at(0).b);
+  if (!(long > 0)) return null;
+  // [move %, bought, sold, net, P&L $] every 0.5% from 15% down to 15% up: the slider's steps.
+  const rows = Array.from({ length: 61 }, (_, i) => { const m = -15 + i / 2, a = at(m); return [m, Math.round(a.b), Math.round(a.s), Math.round(a.d), Math.round(a.pl)]; });
+  const sd = num(dg.sd);
+  const mv = Math.max(-15, Math.min(15, Math.round((ask ?? 10) * 2) / 2));
+  const read = (r: number[]) => ({ move_pct: r[0], price: r2(spot * (1 + r[0] / 100)), net_delta: r[3], bought_delta: r[1], sold_delta: r[2],
+    pct_of_long: Math.round(Math.abs(r[3]) / long * 100), state: stateOf(r[3], long), pnl_usd: tens(r[4]),
+    ...(sd && r[0] ? { sd_of_move: r2(Math.abs(r[0]) / sd) } : {}) });
+  const first = (st: string, dir: 1 | -1) => rows.filter((r) => r[0] * dir > 0).sort((a, b) => Math.abs(a[0]) - Math.abs(b[0]))
+    .find((r) => (st === 'Short' ? r[3] < 0 : r[3] < 0.25 * long))?.[0] ?? null;
+  // The tip: the To do hedge, as a story (Nik, 30 Oct 2026, answer 9), never an order.
+  const P = c.p.plan?.[t], h = P?.hedge;
+  const byWd = P?.by ? new Date(String(P.by) + 'T12:00:00Z').toLocaleString('en-US', { weekday: 'long', timeZone: 'UTC' }) : 'Thursday';
+  let tip: { a: string; b: string } | null = null, hedge: Row | null = null;
+  if (h?.target?.pct != null) {
+    const thru = `through ${h.target.sd} SD up (${Number(h.target.pct).toFixed(1)}%) by ${byWd}`, calls = (n: number) => `${n} ${monDay(String(h.exp))} $${kf(Number(h.k))} call${n === 1 ? '' : 's'}`;
+    const need = Math.max(0, -Number(h.low?.d ?? 0));
+    hedge = { target_sd: h.target.sd, target_pct: h.target.pct, by: P.by, lowest_net_delta: h.low?.d ?? null, delta_needed: need,
+      calls_to_add: h.add, strike: h.k, expiry: h.exp, cost_usd: h.cost, weeks_of_premium: h.weeks, calls_held: h.held };
+    tip = h.add > 0
+      ? { a: `Needs ${need.toLocaleString('en-US')} shares of delta more to stay above zero ${thru}.`,
+          b: `${calls(h.add)} would cover it: ${usdK(Number(h.cost))}` + (h.weeks != null ? `, about ${Number(h.weeks).toFixed(1)} weeks of premium.` : '.') }
+      : { a: `Delta stays above zero ${thru}.`, b: h.held > 0 ? `The ${calls(h.held)} held ${h.held === 1 ? 'covers' : 'cover'} it. Nothing to add.` : 'Nothing to add.' };
+  }
+  const walls = weekWalls(g, spot).filter((w) => Math.abs(w.k / spot - 1) <= 0.15);
+  const data = { units: WI_UNITS, ticker: t, price: r2(spot), one_sd_week_pct: sd, long_delta_today: long, thin_line_delta: Math.round(0.25 * long),
+    now: read(rows[30]), at: read(rows[(mv + 15) * 2]),
+    turns_thin_up_pct: first('Thin', 1), turns_short_up_pct: first('Short', 1), turns_thin_down_pct: first('Thin', -1), turns_short_down_pct: first('Short', -1),
+    ...(hedge ? { hedge } : {}),
+    walls: walls.map((w) => ({ label: w.label, strike: w.k })),
+    rows: rows.filter((r) => Number.isInteger(r[0])).map((r) => ({ move_pct: r[0], net_delta: r[3], bought_delta: r[1], sold_delta: r[2], pnl_usd: tens(r[4]) })) };
+  const chart = { t, px: r2(spot), sd, long, mv, rows, tip,
+    walls: walls.map((w) => ({ k: w.k, lb: w.label === 'Accelerator' ? 'Accel.' : w.label, side: w.side, dash: !!w.dash })) };
+  return { data, chart };
 }
 
 /** Research Nik saved (research_numbers, checked by him): the latest date per figure, as plain figures. A newer
@@ -237,16 +312,19 @@ function payName(c: Ctx, t: string, g: Row | undefined, now: number, d0: number)
   const iv = r4(fromChain ?? near?.v ?? 0.35);
   L = L.map((l) => { const v = Number.isFinite(l.v) ? l.v : iv; return { ...l, v, now: r4(bs(px, l.k, l.T, v, l.cp)) }; });
   const m = iv * Math.sqrt(Math.max(0, d0) / 365);
-  // The walls on the price line: the first Ceiling, the first Floor, and the Accelerator nearest the price.
+  const ne = nameRow(c, t)?.next_earnings?.date;
+  return { t, px, iv, m, L, walls: weekWalls(g, px), reports: ne && ne >= c.today ? String(ne) : null };
+}
+
+/** The walls on the price line: the first Ceiling, the first Floor, and the Accelerator nearest the price. */
+function weekWalls(g: Row | undefined, px: number): Row[] {
   const ws = ((g?.walls ?? []) as Row[]), lab = (w: Row) => String(w.label ?? '').toLowerCase(), rk = (a: Row, b: Row) => (a.rank ?? 9) - (b.rank ?? 9);
   const ceil = ws.filter((w) => w.side === 'call' && lab(w) === 'ceiling').sort(rk)[0];
   const floor = ws.filter((w) => w.side === 'put' && lab(w) === 'floor').sort(rk)[0];
   const acc = ws.filter((w) => lab(w) === 'accelerator').sort((a, b) => Math.abs(a.k - px) - Math.abs(b.k - px))[0];
-  const walls = [ceil && { k: Number(ceil.k), side: 'call', label: 'Ceiling', conf: ceil.conf ?? null, dash: false },
+  return [ceil && { k: Number(ceil.k), side: 'call', label: 'Ceiling', conf: ceil.conf ?? null, dash: false },
     floor && { k: Number(floor.k), side: 'put', label: 'Floor', conf: floor.conf ?? null, dash: false },
     acc && { k: Number(acc.k), side: acc.side === 'call' ? 'call' : 'put', label: 'Accelerator', conf: null, dash: true }].filter(Boolean) as Row[];
-  const ne = nameRow(c, t)?.next_earnings?.date;
-  return { t, px, iv, m, L, walls, reports: ne && ne >= c.today ? String(ne) : null };
 }
 
 /** The phone's copy: every number it needs to draw and redraw the card, rounded. */
@@ -527,8 +605,8 @@ export const MENU: Row[] = [
   { name: 'bought', shows: 'Bought options (LEAPS, hedge calls, insurance puts) with delta, value, time value, days left, and theta: what time decay costs a day in dollars (negative); one name or all', args: { ...TICKER,
       kind: { type: 'string', enum: ['all', 'leaps', 'hedge', 'insurance'] } } },
   { name: 'todo', shows: "This week's orders: the call sale, hedge calls, insurance puts, weekly puts; one name or all", args: TICKER },
-  { name: 'delta_gamma', shows: 'Delta and the P&L of a move from -10% to +10%; one name, or the whole book', args: { ...TICKER,
-      move_pct: { type: 'number', description: 'A move to read, for example -10' } } },
+  { name: 'delta_gamma', shows: 'Delta and the P&L of a move: one name from -15% to +15% (the What if card: net, bought and sold delta in shares, thin or short, and the To do hedge), or the whole book from -10% to +10%', args: { ...TICKER,
+      move_pct: { type: 'number', description: 'The move the question names, for example -10 for a 10% drop; 10 when it names none' } } },
   { name: 'gamma', shows: "Gamma ladder for one name: walls with the tape's labels and confidence, the flip, the regime, the priced move. Read this first for walls; it covers the book names and TSLA", args: { ...TICKER,
       view: { type: 'string', description: "'weeklies' (default), 'all', or an expiry date like 2027-01-15" } }, required: ['ticker'] },
   { name: 'walls_live', shows: 'Walls worked out now from live option prices, for any ticker and expiry (open interest only, no tape labels). Only when gamma has no view for that ticker or expiry', args: { ...TICKER,
@@ -610,10 +688,11 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
     }
     case 'delta_gamma': {
       if (t) {
-        const d = dgFor(c, t);
-        if (!d) throw new Error(`no delta and gamma for ${t}`);
-        const m = num(a.move_pct);
-        return card('delta_gamma', tagOf(t, 'Δ Γ'), sunny(c), { ...d, at: m == null ? null : rowAt(d.rows, m) });
+        // One name: the What if card's figures (15% either way), the card itself for the phone.
+        const [g] = await db(`gamma_view_day?view=eq.weeklies&ticker=eq.${t}&select=walls:data->walls&order=day.desc&limit=1`).catch(() => [] as Row[]);
+        const w = whatIf(c, t, g, num(a.move_pct));
+        if (!w) throw new Error(`no delta and gamma for ${t}`);
+        return { ...card('delta_gamma', tagOf(t, 'What if'), sunny(c), w.data), chart: w.chart };
       }
       // The book: deltas in shares, and the dollar P&L of a move with every name moving by the same %.
       const x = c.p.risk?.delta ?? {};

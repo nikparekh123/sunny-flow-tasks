@@ -25,7 +25,7 @@ import { caller, context, db, lookup, MENU, SB_KEY, SB_URL, type Ctx, type Row }
 import { checkAnswer } from './check.ts';
 import { COUNTS, fmt, SLOT, Slots } from './slots.ts';
 
-const BUILD = '2026-10-30.7';
+const BUILD = '2026-10-30.10';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';
@@ -140,6 +140,15 @@ The shape: pick what fits, never more than the question needs.
   under its 74 calls, then LULU {o:1.0%} under the Ceiling." For the 50-day: how many are under it and the furthest.
   This is not "all my sold positions" or "what I bought": those stay rows. follow_ups such as "Show them as small
   charts", "Which names are under their 50-day?".
+- What if, when he asks what a move does to a name's delta, or whether its delta is safe (Is my BABA delta safe if it
+  moves 10%? What does a 10% drop do to my Nike delta?): read delta_gamma with the ticker and move_pct (the move named,
+  negative for a drop, 10 when none). Then one "say" of two short sentences and {"whatif": true}: Sunny draws the card
+  with a slider and the hedge. Nothing else, and nothing about the hedge (the card tells it). First sentence, from at:
+  "If BABA rises 10%, its delta falls to {o:206}, {o:19%} of long: thin." (the state in its tone: {o:} thin, {g:} on
+  target). When at.state is Short, the net is below zero: "If LULU rises 10%, its delta turns short by {r:235}." and
+  never "falls to" that figure. Second: "Slide to try any move up to 15%." A question without the
+  word delta or safe that asks what a move does goes to the payoff. Only the book's names; the whole book stays rows.
+  follow_ups such as "What does a 10% drop do to my BABA delta?", "And for NKE?".
 - Panels only for an update on one name (give me an update on Nike, catch me up on BABA): a "say", a "trio" of three
   numbers, then one "panel" per topic, each with its own source: Your position, Walls this week, Fair value and
   targets, Valuation and dividend, Against peers and sector, The day after earnings. Leave out a panel when its data
@@ -349,6 +358,10 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
       // Your book (block 29): a row per name, drawn on the phone; its source line is its own.
       const card = ran.filter((x) => x.ok && x.name === 'book').at(-1)?.card;
       if (card?.chart) parts.push({ type: 'book', ...card.chart, at: marketOpen() ? clock(new Date()) : `${lastClose()} close` });
+    } else if (p.whatif) {
+      // What if · Delta and Gamma (block 29): the slider's every step, drawn on the phone; its source line is its own.
+      const card = ran.filter((x) => x.ok && x.name === 'delta_gamma' && x.card?.chart).at(-1)?.card;
+      if (card?.chart && c.draws?.includes('whatif')) parts.push({ type: 'whatif', ...card.chart, at: marketOpen() ? clock(new Date(c.at)) : `${lastClose()} close` });
     }
   }
   // A big number leads (block 27): a sentence the model put above it moves under it, as body text.
@@ -361,7 +374,7 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
   const recap = f.recap ? plain(S(f.recap) ?? '') : null;
   // The source line ends every answer, unless its last part is a panel with a source of its own.
   const last = parts.at(-1);
-  const source = last?.type === 'panel' || last?.type === 'none' || last?.type === 'payoff' || last?.type === 'chart' || last?.type === 'book' ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
+  const source = last?.type === 'panel' || last?.type === 'none' || last?.type === 'payoff' || last?.type === 'chart' || last?.type === 'book' || last?.type === 'whatif' ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
   return { parts, source, follow_ups, recap, can_answer: f.can_answer !== false && !parts.some((x) => x.type === 'none'),
     bad, literal: lit.join(' \n '), webLiteral: webLit.join(' \n ') };
 }
@@ -592,7 +605,8 @@ function questions(c: Ctx): Row {
     ...names.flatMap((t) => [`How’s ${t}?`, `${t}’s walls this week`, `Give me an update on ${t}`, `What’s my sold position on ${t}?`,
       `What did ${t}’s bought legs cost?`, `How much time value is left on ${t}?`, `Why did ${t} move today?`, `Who is trading ${t}?`,
       `What’s the payoff on my ${t} position?`, `How are my ${t} calls doing?`, `How’s ${t} doing this week?`,
-      `How’s ${t} doing this quarter?`, `Is ${t} in an uptrend?`, `Did ${t} cross its 50-day?`]),
+      `How’s ${t} doing this quarter?`, `Is ${t} in an uptrend?`, `Did ${t} cross its 50-day?`,
+      `Is my ${t} delta safe if it moves 10%?`, `What does a 10% drop do to my ${t} delta?`]),
   ];
   return { questions: all, tries: [`Give me an update on ${first}`, 'What’s the value of my calls sold?', 'What do I need to do today?', 'What’s my delta right now?'] };
 }
@@ -659,6 +673,7 @@ Deno.serve(async (req) => {
     }
     if (body.recents) return json({ ok: true, build: BUILD, recents: await recents(book, who.user) });
     const c = await context(book);
+    if (Array.isArray(body.draws)) c.draws = body.draws.map(String).slice(0, 20);
     if (body.questions) return json({ ok: true, build: BUILD, ...questions(c) });
     if (typeof body.answer_for === 'string') {
       const rid = encodeURIComponent(body.answer_for.slice(0, 64));
