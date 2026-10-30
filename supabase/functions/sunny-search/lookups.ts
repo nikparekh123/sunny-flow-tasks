@@ -437,6 +437,9 @@ async function priceChart(c: Ctx, t: string, range: string, mark: string | null)
       contracts: Number(l.n), strike: Number(l.strike), expiry: l.expiry, price_from_strike_pct: pct1(px, Number(l.strike)) })),
       // Calls worth more than they were sold for have captured nothing: the strike they sit over is the fact then.
       ...(cap != null && cap >= 0 ? { captured_pct: cap, pace: tag } : { worth_more_than_sold: true }) } : {}),
+    // Nothing left this week (a Friday after the sale): the open sold strike nearest the price, as the card reads it.
+    ...(!sold.length && legs.some((l) => l.side === 'sold') ? { open_sold: legs.filter((l) => l.side === 'sold').map((l) => ({
+      label: `Your ${kf(Number(l.strike))} ${l.type === 'call' ? 'calls' : 'puts'}`, expiry: l.expiry, price_from_strike_pct: pct1(px, Number(l.strike)) })) } : {}),
     walls: walls.map((w) => ({ label: w.lb, strike: w.k, price_from_wall_pct: pct1(px, w.k) })),
     ma50: r2(m50), price_from_ma50_pct: pct1(px, m50), ...(m200 != null ? { ma200: r2(m200), price_from_ma200_pct: pct1(px, m200) } : {}),
     rsi14: rsi == null ? null : Math.round(rsi), rsi_reads: rsi == null ? null : rsi > 70 ? 'overbought' : rsi < 30 ? 'oversold' : 'neutral',
@@ -455,11 +458,61 @@ async function priceChart(c: Ctx, t: string, range: string, mark: string | null)
     week: { days: week.map((w) => ({ lab: `${WDAY[new Date(w.d + 'T12:00:00Z').getUTCDay()]} ${Number(w.d.slice(8))}`, closed: w.closed })),
       today: started ? gday : week.findIndex((w) => w.d === today && !w.closed), exp: week.findIndex((w) => w.d === expDay), pts },
     sold: sold.map((l) => ({ k: Number(l.strike), cp: l.type === 'call' ? 'c' : 'p' })), cap: cap == null ? null : { pct: cap, tag },
+    // Every open sold strike, next week's too (a Friday's new sale): the book's status line reads the nearest.
+    soldAll: [...new Map(legs.filter((l) => l.side === 'sold').map((l) => [`${l.type}${l.strike}`, { k: Number(l.strike), cp: l.type === 'call' ? 'c' : 'p' }])).values()],
     legs: bought.map(({ g, k }) => ({ g, k })), leapsK: leaps?.k ?? null, walls, res: research,
   };
   return { ...card('chart', tagOf(t, RNG[rg]), sunny(c), data), chart };
 }
 const WDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/* Your book (block 29): every name at once, a row each, one range control for all; the list first, small charts when
+   asked. Each name's line is the price chart's own (priceChart), cut to what a row draws. The row's status line is the
+   nearest thing that needs him: on Week the closest sold strike (else the Ceiling), on Month and Quarter the 50-day, on
+   Year the 52-week high; the order follows it, closest first. Worked out here for the sentence, again on the phone for
+   the range he switches to. */
+async function bookChart(c: Ctx, range: string, view: string) {
+  const RNG: Record<string, string> = { w: 'Week', m: 'Month', q: 'Quarter', y: 'Year' }, rg = RNG[range] ? range : 'w';
+  const xs = (await Promise.all(bookNames(c).map((t) => priceChart(c, t, rg, null).catch(() => null)))).filter(Boolean) as
+    Awaited<ReturnType<typeof priceChart>>[];
+  if (!xs.length) throw new Error('no prices for the book yet');
+  const pc = (v: number) => Math.abs(v * 100).toFixed(1) + '%';
+  const status = (ch: Row) => {
+    const n = ch.c.length, px = ch.c[n - 1];
+    if (rg === 'w') {
+      const near = (ch.soldAll as Row[]).map((s): Row => ({ ...s, d: s.cp === 'c' ? (s.k - px) / px : (px - s.k) / px })).sort((a, b) => a.d - b.d)[0];
+      const nm = (s: Row) => `${kf(s.k)} ${s.cp === 'c' ? 'calls' : 'puts'}`;
+      if (near) return { ord: near.d, text: near.d < 0 ? `${near.cp === 'c' ? 'Above' : 'Below'} your ${nm(near)}` : `${pc(near.d)} ${near.cp === 'c' ? 'under' : 'over'} ${nm(near)}`,
+        tone: near.d < 0 ? 'down' : near.d < 0.015 ? 'thin' : 'muted' };
+      const ce = (ch.walls as Row[]).find((w) => w.lb === 'Ceiling');
+      if (ce) { const d = (ce.k - px) / px; return { ord: d, text: d < 0 ? 'Above the Ceiling' : `${pc(d)} under the Ceiling`, tone: d < 0.015 ? 'thin' : 'muted' }; }
+      return { ord: 1, text: 'Nothing sold', tone: 'muted' };
+    }
+    if (rg === 'y') {
+      const hi = Math.max(...ch.c), dn = 1 - px / hi;
+      return { ord: px / ch.c[0] - 1, text: dn < 0.05 ? 'Near the 52-week high' : `${Math.round(dn * 100)}% under 52-week high`, tone: 'muted' };
+    }
+    const m = ch.ma50[n - 1], d = px / m - 1;
+    return { ord: d, text: `${pc(d)} ${d >= 0 ? 'above' : 'below'} the 50-day`, tone: 'muted' };
+  };
+  const rows = xs.map((x) => ({ x, s: status(x.chart) })).sort((a, b) => a.s.ord - b.s.ord);
+  const mvKey = { w: 'this_week', m: 'over_the_month', q: 'over_the_quarter', y: 'over_the_year' }[rg] as 'this_week';
+  const data = {
+    units: 'Percent figures are already percents; a move is from the start of the range to today, positive is up.',
+    range: RNG[rg], view: view === 'grid' ? 'small charts' : 'list', order: { w: 'closest to a strike first', m: 'furthest under the 50-day first',
+      q: 'furthest under the 50-day first', y: 'biggest drop first' }[rg],
+    names: rows.map(({ x, s }) => { const xd = x.data as Row; return { ticker: xd.ticker, price: xd.price, move_pct: xd.moves_pct[mvKey], status: s.text,
+      ...(rg === 'm' || rg === 'q' ? { price_from_ma50_pct: xd.price_from_ma50_pct } : {}),
+      ...(rg === 'y' ? { under_the_high_pct: xd.under_the_high_pct } : {}) }; }),
+  };
+  // The phone's copy: each row's year of closes, the 50-day, this week's line, the sold strikes and the Ceiling.
+  const chart = { view: view === 'grid' ? 'grid' : 'list', range: rg, names: rows.map(({ x }) => {
+    const ch = x.chart;
+    return { t: ch.t, co: ch.co, d: ch.d, c: ch.c, ma50: ch.ma50, ix: ch.ix, week: { today: ch.week.today, pts: ch.week.pts },
+      sold: ch.soldAll, ceil: ch.walls.find((w) => w.lb === 'Ceiling')?.k ?? null };
+  }) };
+  return { ...card('book', tagOf(undefined, `Your book · ${xs.length} names`), sunny(c), data), chart };
+}
 
 // ── The menu ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -486,6 +539,9 @@ export const MENU: Row[] = [
   { name: 'chart', shows: "Price chart for a name in the book over a Week, Month, Quarter or Year: the move over each range, this week's sold strikes with captured % and pace, this week's Ceiling and Floor, the 50 and 200-day averages and how far the price sits from them, RSI, the last cross of the 50-day this quarter (and of the 200-day this year), the 52-week high and low from closes, how far the LEAPS are in the money, and the analysts' target and fair value where research is saved", args: { ...TICKER,
       range: { type: 'string', enum: ['w', 'm', 'q', 'y'], description: 'The range the question names: w week (the default), m month, q quarter, y year' },
       mark: { type: 'string', enum: ['cross'], description: "'cross' when he asks whether it crossed its 50-day, or for its 50-day chart" } }, required: ['ticker'] },
+  { name: 'book', shows: "Your book: every name at once, each with its price, its move over the range and the nearest thing that needs him (Week: the closest sold strike or the Ceiling; Month and Quarter: how far from the 50-day; Year: how far under the 52-week high), in that order", args: {
+      range: { type: 'string', enum: ['w', 'm', 'q', 'y'], description: 'w week (the default), m month (under their 50-day), q quarter, y year' },
+      view: { type: 'string', enum: ['list', 'grid'], description: "'grid' only when he asks for charts (small charts); default list" } } },
   { name: 'hedges', shows: 'Hedge calls and insurance puts: held, needed, strike, cost; one name or a list of the names that need some', args: TICKER },
   { name: 'hedge_rungs', shows: 'Every hedge call and insurance put with days left; rolls are due at 45 days left', args: {} },
   { name: 'put_gates', shows: 'Whether weekly puts can sell: above the 50-day, a Floor below, no Accelerator between; one name or all', args: TICKER },
@@ -629,6 +685,8 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
       return await payoff(c, t, a.legs === 'sold');
     case 'chart':
       return await priceChart(c, need(t, 'chart'), String(a.range ?? 'w'), a.mark ? String(a.mark) : null);
+    case 'book':
+      return await bookChart(c, String(a.range ?? 'w'), String(a.view ?? 'list'));
     case 'hedges': {
       const names = t ? [t] : bookNames(c);
       const rows = names.map((k) => {

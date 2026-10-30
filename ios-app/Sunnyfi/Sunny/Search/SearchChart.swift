@@ -39,6 +39,8 @@ struct SXChart: Decodable, Equatable {
     let ix: Ix
     let week: Week
     let sold: [Sold], cap: Cap?, legs: [Leg], leapsK: Double?, walls: [Wall], res: Research?
+    /// Every open sold strike, next week's too: on a Friday the new sale is the line that matters.
+    let soldAll: [Sold]?
     /// "1:52 PM" while the market is open, else "Thu 4:00 PM close".
     let at: String
     let live: Bool?
@@ -411,7 +413,7 @@ struct SXChartBuild {
         let H: CGFloat = 200, pos = on("pos"), walls = on("walls")
         let pts = p.week.pts.map { (x: CGFloat($0[0]), p: $0[1]) }
         let px = p.c.last ?? p.px, xT = pts.last?.x ?? 0
-        let sold = pos ? p.sold : []
+        let sold = pos ? (p.soldAll ?? p.sold) : []
         let W = walls ? p.walls : []
         let sc = scale(pts.map(\.p) + sold.map(\.k) + W.map(\.k), H, 14, 8), Y = sc.y
         if p.week.today >= 0 { o.boxes.append(.init(x0: xT, x1: 1, c: SX.left)) }
@@ -437,14 +439,20 @@ struct SXChartBuild {
             return .init(x: (CGFloat(i) + 0.5) / 5, t: d.lab, t2: t2, w: today ? .bold : .medium, c: today ? SX.ink : SX.muted, edge: 0)
         }
         // Under the chart: what is captured against the pace, or where the price sits between the walls.
-        if !sold.isEmpty, let cap = p.cap {
+        if pos, !p.sold.isEmpty, let cap = p.cap {
             if cap.pct >= 0 {
                 let tag = cap.tag ?? "on pace"
                 o.foot.append([Run(t: "\(cap.pct)% captured", c: SX.ink, w: .bold), Run(t: "· " + tag, c: tag == "behind pace" ? SX.thin : SX.up, w: .semibold)])
-            } else if let s = sold.max(by: { abs(px - $0.k) > abs(px - $1.k) }) {
+            } else if let s = p.sold.max(by: { abs(px - $0.k) > abs(px - $1.k) }) {
                 // Worth more than sold: how far through the strike the price sits (not in the design, 30 Oct).
                 o.foot.append([Run(t: SXC.pc(abs(px / s.k - 1)) + (s.cp == "c" ? " over" : " under") + " your \(SXC.k(s.k)) " + (s.cp == "c" ? "calls" : "puts"), c: SX.down, w: .bold)])
             }
+        } else if let near = sold.map({ (s: $0, d: $0.cp == "c" ? ($0.k - px) / px : (px - $0.k) / px) }).min(by: { $0.d < $1.d }) {
+            // Nothing left this week (a Friday after the sale): the nearest sold strike, as the book's row reads it.
+            let nm = SXC.k(near.s.k) + (near.s.cp == "c" ? " calls" : " puts")
+            o.foot.append([Run(t: near.d < 0 ? (near.s.cp == "c" ? "Above your " : "Below your ") + nm
+                                : SXC.pc(near.d) + (near.s.cp == "c" ? " under your " : " over your ") + nm,
+                               c: near.d < 0 ? SX.down : near.d < 0.015 ? SX.thin : SX.ink, w: .bold)])
         } else if !W.isEmpty {
             let ce = W.first { $0.lb == "Ceiling" }, fl = W.first { $0.lb == "Floor" }
             let t = ce.map { px > $0.k } == true ? "Above the Ceiling" : fl.map { px < $0.k } == true ? "Below the Floor"

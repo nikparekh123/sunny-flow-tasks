@@ -73,6 +73,8 @@ enum SXPart: Decodable, Equatable {
     case payoff(SXPayoff)
     /// The price chart (block 29): one name over a Week, Month, Quarter or Year.
     case chart(SXChart)
+    /// Your book (block 29): every name at once, a list or small charts.
+    case book(SXBook)
     case none(why: String?, didYouMean: String?)
 
     private enum K: String, CodingKey {
@@ -102,6 +104,8 @@ enum SXPart: Decodable, Equatable {
             self = (try? SXPayoff(from: d)).map { .payoff($0) } ?? .rows(head: nil, rows: [])
         case "chart":
             self = (try? SXChart(from: d)).map { .chart($0) } ?? .rows(head: nil, rows: [])
+        case "book":
+            self = (try? SXBook(from: d)).map { .book($0) } ?? .rows(head: nil, rows: [])
         default: self = .none(why: s(.why), didYouMean: s(.didYouMean))
         }
     }
@@ -115,7 +119,7 @@ enum SXPart: Decodable, Equatable {
         case .rows: return ""
         case .panel(let title, let say, _, _, _, _, _): return say.map { "\(title ?? ""). \(p($0))" } ?? ""
         case .web(let summary, _, _): return "From the web: " + summary
-        case .payoff, .chart: return ""
+        case .payoff, .chart, .book: return ""
         case .none(let why, _): return "I can't answer that from your data. " + (why ?? "")
         }
     }

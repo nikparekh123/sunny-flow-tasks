@@ -38,6 +38,7 @@ struct SXAnswerView: View {
         case .web(let summary, let sources, let line): SXWeb(summary: summary, sources: sources, line: line)
         case .payoff(let p): SXPayoffCard(p: p)
         case .chart(let c): SXChartCard(p: c)
+        case .book(let b): SXBookCard(p: b, ask: ask)
         case .none(let why, let dym): SXNone(why: why, didYouMean: dym, ask: ask)
         }
     }

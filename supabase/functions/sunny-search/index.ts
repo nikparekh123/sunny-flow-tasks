@@ -25,7 +25,7 @@ import { caller, context, db, lookup, MENU, SB_KEY, SB_URL, type Ctx, type Row }
 import { checkAnswer } from './check.ts';
 import { COUNTS, fmt, SLOT, Slots } from './slots.ts';
 
-const BUILD = '2026-10-30.5';
+const BUILD = '2026-10-30.7';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';
@@ -133,6 +133,13 @@ The shape: pick what fits, never more than the question needs.
   A cross: "NKE crossed above its 50-day on Sep 30 and has stayed above since." When there is no cross this quarter,
   say it stayed above (or below) all quarter. Only the book's names have a chart; any other name is text only.
   follow_ups such as "NKE this quarter", "Did NKE cross its 50-day?".
+- Your book, when he asks about all his positions at once (Show me all my positions. Which names are under their
+  50-day? Show my positions as small charts): read book (range m for the 50-day, else the range named, w when none;
+  view grid only when he asks for charts). Then one "say" of ONE sentence and {"book": true}: Sunny draws a row per
+  name. The sentence names the one or two names that need him most, from the first rows: "NFLX is closest, {o:0.8%}
+  under its 74 calls, then LULU {o:1.0%} under the Ceiling." For the 50-day: how many are under it and the furthest.
+  This is not "all my sold positions" or "what I bought": those stay rows. follow_ups such as "Show them as small
+  charts", "Which names are under their 50-day?".
 - Panels only for an update on one name (give me an update on Nike, catch me up on BABA): a "say", a "trio" of three
   numbers, then one "panel" per topic, each with its own source: Your position, Walls this week, Fair value and
   targets, Valuation and dividend, Against peers and sector, The day after earnings. Leave out a panel when its data
@@ -338,6 +345,10 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
       // The price chart (block 29): every range at once, drawn on the phone; its source line is its own.
       const card = ran.filter((x) => x.ok && x.name === 'chart').at(-1)?.card;
       if (card?.chart) parts.push({ type: 'chart', ...card.chart, at: marketOpen() ? clock(new Date()) : `${lastClose()} close`, live: marketOpen() });
+    } else if (p.book) {
+      // Your book (block 29): a row per name, drawn on the phone; its source line is its own.
+      const card = ran.filter((x) => x.ok && x.name === 'book').at(-1)?.card;
+      if (card?.chart) parts.push({ type: 'book', ...card.chart, at: marketOpen() ? clock(new Date()) : `${lastClose()} close` });
     }
   }
   // A big number leads (block 27): a sentence the model put above it moves under it, as body text.
@@ -350,7 +361,7 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
   const recap = f.recap ? plain(S(f.recap) ?? '') : null;
   // The source line ends every answer, unless its last part is a panel with a source of its own.
   const last = parts.at(-1);
-  const source = last?.type === 'panel' || last?.type === 'none' || last?.type === 'payoff' || last?.type === 'chart' ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
+  const source = last?.type === 'panel' || last?.type === 'none' || last?.type === 'payoff' || last?.type === 'chart' || last?.type === 'book' ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
   return { parts, source, follow_ups, recap, can_answer: f.can_answer !== false && !parts.some((x) => x.type === 'none'),
     bad, literal: lit.join(' \n '), webLiteral: webLit.join(' \n ') };
 }
@@ -370,6 +381,7 @@ function stepOf(name: string, a: Row): { step: string; work: boolean } {
     case 'roll': return s(`Working out ${t}'s roll`);
     case 'payoff': return s(t ? `Working out ${t} by Friday` : 'Working out the book by Friday');
     case 'chart': return s(`Drawing ${t}'s chart`);
+    case 'book': return s('Drawing your book');
     case 'gamma': return s(`Reading ${t}'s walls`, true);
     case 'walls_live': return s(`Reading ${t}'s live chain`, true);
     case 'yield': return s('Reading your yield');
@@ -576,6 +588,7 @@ function questions(c: Ctx): Row {
     'How much did I make this week?', 'What did I pay for each LEAPS?', 'What is a Ceiling?', 'What is the flip?',
     'What’s the value of my calls sold?', 'What’s my delta right now?', 'Show all my sold positions', 'What changed today?',
     'Which hedges roll soon?', 'What earnings are coming up?', 'How is payback going?', 'What does Friday look like across my book?',
+    'Show me all my positions', 'Which names are under their 50-day?', 'Show my positions as small charts',
     ...names.flatMap((t) => [`How’s ${t}?`, `${t}’s walls this week`, `Give me an update on ${t}`, `What’s my sold position on ${t}?`,
       `What did ${t}’s bought legs cost?`, `How much time value is left on ${t}?`, `Why did ${t} move today?`, `Who is trading ${t}?`,
       `What’s the payoff on my ${t} position?`, `How are my ${t} calls doing?`, `How’s ${t} doing this week?`,
