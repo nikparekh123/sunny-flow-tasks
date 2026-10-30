@@ -25,7 +25,7 @@ import { caller, context, db, lookup, MENU, SB_KEY, SB_URL, type Ctx, type Row }
 import { checkAnswer } from './check.ts';
 import { COUNTS, fmt, SLOT, Slots } from './slots.ts';
 
-const BUILD = '2026-10-29.4';
+const BUILD = '2026-10-30.5';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';
@@ -81,11 +81,13 @@ The shape: pick what fits, never more than the question needs.
   question asks for exactly one number; it then comes first, with a "body" sentence after it.
 - "rows" for a list: a is the name or label, b the detail (start it with a space), r the number on the right.
 - "body" for an explanation after the lead.
-- A name's position (How's BABA?): a "say", then rows in this order. Sold: b " 104 calls ×15 · Oct 30", r captured %
-  (up tone at 80% or more). LEAPS: b " 100 ×15 · Jan ’28", r "Δ .62" (thin tone under .70). Hedge: b " 110 calls ×10 ·
+- A name's position (How's BABA?): a "say", then {"chart": true} (read chart, range w), then rows in this order. Sold: b " 104 calls ×15 · Oct 30", r captured %
+  (up tone at 80% or more); when worth_more_than_sold_pct is there instead, the calls are worth more than they were sold
+  for: r is that % in down tone, b ends " · worth more than sold", and nothing calls it captured. LEAPS: b " 100 ×15 · Jan ’28", r "Δ .62" (thin tone under .70). Hedge: b " 110 calls ×10 ·
   Jan 15". Insurance: b " 95 puts ×5 · Jan 15". Delta: b " 19% of long · Thin", r "240 Δ" (tone by state). One row per
   To do order: a "To do" in thin tone, b " Buy 3 Jan 15 110 calls", r the amount (up tone when it comes in).
-- A name's walls (BABA's walls this week): a "say", then rows from the highest strike down: a the strike (call or
+- A name's walls (BABA's walls this week): a "say", then {"chart": true} (read chart, range w), then rows from the
+  highest strike down: a the strike (call or
   put tone), b " Ceiling ●●● · 0.4% above" (the label, its confidence as ●●● for 3, ●●○ for 2, ●○○ for 1, how far
   from the price, and "· your calls" when a sold strike sits there), r the gamma in $k with muted tone. In price
   order among them, a row with a the price and b " Today" (plain), and one with a the flip (muted) and b " Flip ·
@@ -121,6 +123,16 @@ The shape: pick what fits, never more than the question needs.
   Use the word in by_word for Friday. Adds is green, costs is red. When reports_before_then is there, say the report
   falls before then and IV is held. A name not in the book, or with nothing held, is text only.
   follow_ups such as "How are my NKE calls doing?", "And for BABA?", "What does Friday look like across my book?".
+- The price chart, when he asks how a name is doing over time, or about a trend or an event on the chart (How's Nike
+  doing this week / this month / this quarter / this year? Is Nike in an uptrend? Did Nike cross its 50-day? Show me
+  Nike's 50-day chart): read chart with the range the question names (w when it names none; an uptrend is q), mark
+  "cross" for a cross or a 50-day chart (range q). Then one "say" of ONE sentence and {"chart": true}: Sunny draws the
+  card. Nothing else, and never a second sentence: one full stop. The sentence answers the question from the range asked: the move over it, then the one fact that
+  matters most there. Week: "NKE is down {r:[r5|%]} this week at {b:[r1|$2]}, {b:[r9|%]} under your 36 calls with
+  {g:[r12|%0]} captured." When worth_more_than_sold, say how far over the strike it sits instead. Month or quarter: where it sits against its 50-day. Year: against the 52-week high and low.
+  A cross: "NKE crossed above its 50-day on Sep 30 and has stayed above since." When there is no cross this quarter,
+  say it stayed above (or below) all quarter. Only the book's names have a chart; any other name is text only.
+  follow_ups such as "NKE this quarter", "Did NKE cross its 50-day?".
 - Panels only for an update on one name (give me an update on Nike, catch me up on BABA): a "say", a "trio" of three
   numbers, then one "panel" per topic, each with its own source: Your position, Walls this week, Fair value and
   targets, Valuation and dividend, Against peers and sector, The day after earnings. Leave out a panel when its data
@@ -322,6 +334,10 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
       // The payoff card (block 28): drawn on the phone from the lookup's own figures; its source line is its own.
       const card = ran.filter((x) => x.ok && x.name === 'payoff').at(-1)?.card;
       if (card?.chart) parts.push({ type: 'payoff', ...card.chart, at: marketOpen() ? clock(new Date(c.at)) : `${lastClose()} close` });
+    } else if (p.chart) {
+      // The price chart (block 29): every range at once, drawn on the phone; its source line is its own.
+      const card = ran.filter((x) => x.ok && x.name === 'chart').at(-1)?.card;
+      if (card?.chart) parts.push({ type: 'chart', ...card.chart, at: marketOpen() ? clock(new Date()) : `${lastClose()} close`, live: marketOpen() });
     }
   }
   // A big number leads (block 27): a sentence the model put above it moves under it, as body text.
@@ -334,7 +350,7 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
   const recap = f.recap ? plain(S(f.recap) ?? '') : null;
   // The source line ends every answer, unless its last part is a panel with a source of its own.
   const last = parts.at(-1);
-  const source = last?.type === 'panel' || last?.type === 'none' || last?.type === 'payoff' ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
+  const source = last?.type === 'panel' || last?.type === 'none' || last?.type === 'payoff' || last?.type === 'chart' ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
   return { parts, source, follow_ups, recap, can_answer: f.can_answer !== false && !parts.some((x) => x.type === 'none'),
     bad, literal: lit.join(' \n '), webLiteral: webLit.join(' \n ') };
 }
@@ -353,6 +369,7 @@ function stepOf(name: string, a: Row): { step: string; work: boolean } {
     case 'delta_gamma': return s(t ? `Working out ${t}'s delta` : "Working out the book's delta");
     case 'roll': return s(`Working out ${t}'s roll`);
     case 'payoff': return s(t ? `Working out ${t} by Friday` : 'Working out the book by Friday');
+    case 'chart': return s(`Drawing ${t}'s chart`);
     case 'gamma': return s(`Reading ${t}'s walls`, true);
     case 'walls_live': return s(`Reading ${t}'s live chain`, true);
     case 'yield': return s('Reading your yield');
@@ -561,7 +578,8 @@ function questions(c: Ctx): Row {
     'Which hedges roll soon?', 'What earnings are coming up?', 'How is payback going?', 'What does Friday look like across my book?',
     ...names.flatMap((t) => [`How’s ${t}?`, `${t}’s walls this week`, `Give me an update on ${t}`, `What’s my sold position on ${t}?`,
       `What did ${t}’s bought legs cost?`, `How much time value is left on ${t}?`, `Why did ${t} move today?`, `Who is trading ${t}?`,
-      `What’s the payoff on my ${t} position?`, `How are my ${t} calls doing?`]),
+      `What’s the payoff on my ${t} position?`, `How are my ${t} calls doing?`, `How’s ${t} doing this week?`,
+      `How’s ${t} doing this quarter?`, `Is ${t} in an uptrend?`, `Did ${t} cross its 50-day?`]),
   ];
   return { questions: all, tries: [`Give me an update on ${first}`, 'What’s the value of my calls sold?', 'What do I need to do today?', 'What’s my delta right now?'] };
 }

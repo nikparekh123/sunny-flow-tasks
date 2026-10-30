@@ -6,6 +6,12 @@ Deno.test('numbers are named, small counts stay plain', () => {
   assertEquals(s.tag({ price: 99.63, n: 15, left: 2822, rows: [{ pct: -2.1 }] }), { price: 'r1=99.63', n: 15, left: 'r2=2822', rows: [{ pct: 'r3=-2.1' }] });
 });
 
+Deno.test('small money is named, small counts are not', () => {
+  const s = new Slots();
+  assertEquals(s.tag({ n: 9, days_left: 3, theta_per_day_usd: -13, strikes: [15, 17.5], captured_pct: 12 }),
+    { n: 9, days_left: 3, theta_per_day_usd: 'r1=-13', strikes: ['r2=15', 'r3=17.5'], captured_pct: 'r4=12' });
+});
+
 Deno.test('slots are written out in the design formats, signs dropped', () => {
   const s = new Slots();
   s.tag({ a: 99.63, b: -2.1, c: 5550, d: 2731, e: 0.62, f: 46300000000, g: 18.04, h: 104, i: 0.19 });

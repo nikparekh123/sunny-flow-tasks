@@ -40,20 +40,24 @@ export const COUNTS = new Set(['$', '#']);
 /** Literal numbers a slot may use besides its names: small counts and 100 (for a percent). */
 const LITERAL_OK = (n: number) => n === 100 || (Number.isInteger(n) && n >= 0 && n <= 20);
 
+/* Money, prices, rates and greeks are named however small: they are never counts. A hedge's $13 a day of theta
+   stayed plain like "15 calls", so the model could not write it and left seven of ten hedges blank (30 Oct 2026). */
+const MEASURE = /usd|pct|price|strike|theta|delta|gamma|vega|mark|paid|cost|premium|pnl|value|iv/i;
+
 export class Slots {
   readonly vals = new Map<string, number>();
   private n = 0;
 
-  /** A copy of the data with every number named. */
-  tag(v: Json): Json {
+  /** A copy of the data with every number named; a small whole number stays plain only when it is a count. */
+  tag(v: Json, key = ''): Json {
     if (typeof v === 'number') {
-      if (!Number.isFinite(v) || (Number.isInteger(v) && Math.abs(v) <= 20)) return v;
+      if (!Number.isFinite(v) || (Number.isInteger(v) && Math.abs(v) <= 20 && !MEASURE.test(key))) return v;
       const k = `r${++this.n}`;
       this.vals.set(k, v);
       return `${k}=${v}`;
     }
-    if (Array.isArray(v)) return v.map((x) => this.tag(x));
-    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, this.tag(x)]));
+    if (Array.isArray(v)) return v.map((x) => this.tag(x, key));
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, this.tag(x, k)]));
     return v;
   }
 

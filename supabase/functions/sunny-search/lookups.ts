@@ -63,7 +63,10 @@ function soldRows(c: Ctx, t?: string) {
     return {
       ticker: l.ticker, type: l.type, n: l.n, strike: l.strike, expiry: l.expiry, days_left: daysTo(l.expiry, c.today),
       sold_at: r2(l.avg), mark: mark == null ? null : r2(mark), price: r2(s),
-      captured_pct: mark == null || !l.avg ? null : Math.round((1 - mark / l.avg) * 100),
+      // Worth more than sold has captured nothing (30 Oct 2026: NKE's 38 calls read "35% captured" in red when they were
+      // worth 35% more than they were sold for); that figure goes under its own name.
+      captured_pct: mark == null || !l.avg || mark > l.avg ? null : Math.round((1 - mark / l.avg) * 100),
+      ...(mark != null && l.avg && mark > l.avg ? { worth_more_than_sold_pct: Math.round((mark / l.avg - 1) * 100) } : {}),
       in_the_money_usd: Math.round(itm), premium_usd: Math.round(l.avg * l.n * 100),
       left_to_earn_usd: mark == null ? null : Math.round(mark * l.n * 100), delta: num(l.delta) == null ? null : r2(l.delta),
       theta_per_day_usd: num(l.theta) == null ? null : Math.round(-Number(l.theta) * l.n * 100),
@@ -173,16 +176,16 @@ function nyMs(day: string, hm = '16:00'): number {
   return g + (g - Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute));
 }
 const fridayFrom = (iso: string) => addDays(iso, (5 - new Date(iso + 'T12:00:00Z').getUTCDay() + 7) % 7);
-/** Where the card ends: this week's expiry (the plan's week), the next once its close has passed; the Thursday before
-    when the market is shut that Friday; 1 PM on a half day. */
+/** Where the card ends: this week's expiry, the Friday ahead (today on a Friday until its close), then the next; the
+    Thursday before when the market is shut that Friday; 1 PM on a half day. Not the plan's week: that moves to next
+    Friday on the sale day, and the card skipped a Friday's own close (30 Oct 2026). */
 function fridayOf(c: Ctx, now: number): { day: string; close: number } {
   const cal = (c.p.calendar ?? []) as Row[];
   const closeOf = (d: string) => {
     const e = cal.find((x) => x.date === d && x.kind === 'early_close' && x.closes);
     return nyMs(d, e ? String(e.closes).slice(0, 5) : '16:00');
   };
-  const wk = Object.values((c.p.plan ?? {}) as Record<string, Row>).map((p) => String(p.week ?? '')).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x)).sort()[0];
-  let fri = fridayFrom(wk ?? c.today);
+  let fri = fridayFrom(c.today);
   for (let i = 0; i < 6; i++, fri = addDays(fri, 7)) {
     const d = cal.some((e) => e.date === fri && e.kind === 'closed') ? addDays(fri, -1) : fri;
     if (closeOf(d) > now) return { day: d, close: closeOf(d) };
@@ -312,6 +315,152 @@ async function payoff(c: Ctx, t: string | undefined, sold: boolean) {
     chart: { ...chart(sold ? 'sold' : 'one', [x]) } };
 }
 
+// ── The price chart (block 29, handoff Oct 30 2026) ──────────────────────────────────────────────────
+
+/* How a name is doing over a Week, Month, Quarter or Year. The range control changes the card in place, so the phone
+   gets every range at once: a year of daily closes with the 50 and 200-day averages, this week's line every 15
+   minutes from the stored quotes, the sold strikes and how much is captured, the LEAPS, hedge and insurance strikes,
+   this week's Ceiling and Floor, and the saved research. The model gets the same facts worked out here, so the
+   sentence and the card agree. Asked, 30 Oct: averages are simple on closes and RSI is 14-day (ticker-technicals'
+   maths), the 52-week high and low come from closes, the Week line is the stored quotes, book names only. */
+const CO: Record<string, string> = { BABA: 'Alibaba', FIS: 'Fidelity National', KR: 'Kroger', LULU: 'Lululemon', NFLX: 'Netflix',
+  NKE: 'Nike', PEP: 'PepsiCo', UBER: 'Uber', TSLA: 'Tesla' };
+const nyDate = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+const addMonths = (iso: string, n: number) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); };
+function smaOf(c: number[], n: number): (number | null)[] {
+  let s = 0; return c.map((v, i) => { s += v; if (i >= n) s -= c[i - n]; return i >= n - 1 ? s / n : null; });
+}
+function rsiOf(c: number[], n = 14): number | null {
+  let g = 0, l = 0, out: number | null = null;
+  for (let i = 1; i < c.length; i++) {
+    const ch = c[i] - c[i - 1], up = Math.max(0, ch), dn = Math.max(0, -ch);
+    if (i <= n) { g += up / n; l += dn / n; if (i < n) continue; } else { g = (g * (n - 1) + up) / n; l = (l * (n - 1) + dn) / n; }
+    out = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+  }
+  return out;
+}
+const pct1 = (a: number, b: number) => r2((a / b - 1) * 100);
+const dayMon = (iso: string) => { const d = new Date(iso + 'T12:00:00Z'); return `${d.getUTCDate()} ${d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })}`; };
+
+async function priceChart(c: Ctx, t: string, range: string, mark: string | null) {
+  const now = Date.now(), today = nyDate(now), spot = spotOf(c, t);
+  if (!Number.isFinite(spot) || !bookNames(c).includes(t)) throw new Error(`${t} is not in the book; the price chart covers the book's names for now`);
+  const cal = (c.p.calendar ?? []) as Row[];
+  // This week, Monday to Friday; on a weekend the week just ended.
+  const dow = new Date(today + 'T12:00:00Z').getUTCDay(), mon = addDays(today, dow === 0 ? -6 : dow === 6 ? -5 : 1 - dow);
+  const week = [0, 1, 2, 3, 4].map((i) => {
+    const d = addDays(mon, i), e = cal.find((x) => x.date === d);
+    return { d, closed: e?.kind === 'closed', open: nyMs(d, '09:30'), close: nyMs(d, e?.kind === 'early_close' && e.closes ? String(e.closes).slice(0, 5) : '16:00') };
+  });
+  const gday = week.findIndex((w) => w.d === today), started = gday >= 0 && !week[gday].closed && now >= week[gday].open;
+
+  const [[bar], gv, quotes, res] = await Promise.all([
+    db(`ticker_bars?ticker=eq.${t}&select=bars`),
+    db(`gamma_view_day?view=eq.weeklies&ticker=eq.${t}&select=day,walls:data->walls&order=day.desc&limit=1`).catch(() => [] as Row[]),
+    // A quote every 15 s or so: each open day in two halves, so no read reaches PostgREST's 1,000 rows.
+    Promise.all(week.filter((w) => !w.closed && w.open <= now).flatMap((w) => {
+      const mid = (w.open + w.close) / 2;
+      return [[w.open, mid], [mid, w.close]].map(([a, b]) => db(`ticker_quotes?ticker=eq.${t}&captured_at=gte.${new Date(a).toISOString()}` +
+        `&captured_at=lt.${new Date(b).toISOString()}&select=spot,captured_at&order=captured_at.asc&limit=1000`).catch(() => [] as Row[]));
+    })).then((x) => x.flat()),
+    researchFigures(t, ['fair_value']).catch(() => null),
+  ]);
+  if (!bar?.bars?.length) throw new Error(`no daily prices for ${t} yet`);
+
+  // Daily closes, today's price as today's close once the session has started.
+  const days: { d: string; c: number }[] = (bar.bars as number[][]).map((b) => ({ d: nyDate(b[0]), c: Number(b[4]) })).filter((x) => x.d < today);
+  if (started) days.push({ d: today, c: spot });
+  const cs = days.map((x) => x.c), n = cs.length, px = r4(cs[n - 1]);
+  const ma50 = smaOf(cs, 50), ma200 = smaOf(cs, 200), rsi = rsiOf(cs);
+  const at = (iso: string) => Math.max(0, days.findIndex((x) => x.d >= iso));
+  const lastBefore = (iso: string) => { let i = n - 1; while (i > 0 && days[i].d >= iso) i--; return i; };
+  const ix = { w: lastBefore(mon), m: Math.max(0, n - 22), q: at(addMonths(today, -3)), y: at(addMonths(today, -12)) };
+  const mv = (k: keyof typeof ix) => pct1(cs[n - 1], cs[ix[k]]);
+
+  // This week's line: the last quote in each 15 minutes, a day's own close where a stretch is missing.
+  const pts: number[][] = [[0, r4(cs[ix.w])]];
+  week.forEach((w, i) => {
+    if (w.closed || w.open > now) return;
+    const end = Math.min(now, w.close), span = w.close - w.open, b = new Map<number, number[]>();
+    for (const q of quotes) {
+      const ms = Date.parse(String(q.captured_at));
+      if (ms >= w.open && ms <= end && Number(q.spot) > 0) b.set(Math.floor((ms - w.open) / 9e5), [ms, Number(q.spot)]);
+    }
+    for (const [, [ms, p]] of [...b.entries()].sort((x, y) => x[0] - y[0])) pts.push([r4((i + (ms - w.open) / span) / 5), r4(p)]);
+    const dc = days.find((x) => x.d === w.d)?.c;
+    if (w.d !== today && dc != null && pts.at(-1)![0] < (i + 1) / 5 - 1e-6) pts.push([(i + 1) / 5, r4(dc)]);
+  });
+  if (started) pts.push([r4(Math.min(1, (gday + Math.min(1, (now - week[gday].open) / (week[gday].close - week[gday].open))) / 5)), px]);
+  for (let i = 1; i < pts.length; i++) if (pts[i][0] < pts[i - 1][0]) pts[i][0] = pts[i - 1][0];
+
+  // What is held: the week's sold strikes, and the LEAPS, hedge and insurance strikes.
+  const legs = ((c.p.legs ?? []) as Row[]).filter((l) => l.ticker === t && Number(l.n) > 0 && l.expiry >= today);
+  const expDay = [...week].reverse().find((w) => !w.closed)!.d;
+  const sold = legs.filter((l) => l.side === 'sold' && l.expiry <= week[4].d);
+  const col = sold.reduce((s, l) => s + Number(l.avg ?? 0) * l.n, 0), left = sold.reduce((s, l) => s + Number(l.mark ?? l.avg ?? 0) * l.n, 0);
+  // Pace: 1 less the square root of the share of the week's trading time still ahead.
+  const open = week.filter((w) => !w.closed && w.d <= expDay), tot = open.reduce((s, w) => s + w.close - w.open, 0);
+  const ahead = open.reduce((s, w) => s + Math.max(0, w.close - Math.max(w.open, now)), 0);
+  const cap = sold.length && col > 0 ? Math.round((1 - left / col) * 100) : null, pace = Math.round((1 - Math.sqrt(ahead / tot)) * 100);
+  const tag = cap == null ? null : cap >= pace + 5 ? 'ahead of pace' : cap <= pace - 5 ? 'behind pace' : 'on pace';
+  const word = { leaps: 'LEAPS', hedge: 'Hedge', insurance: 'Insurance' } as const;
+  const bought = [...new Map(legs.filter((l) => l.side === 'bought').map((l) => [`${kindOf(l)}${l.strike}`,
+    { g: word[kindOf(l) as keyof typeof word], k: Number(l.strike), n: Number(l.n) }])).values()];
+  const leaps = bought.filter((l) => l.g === 'LEAPS').sort((a, b) => b.n - a.n)[0];
+
+  // This week's walls (gamma's weeklies): the first Ceiling and the first Floor within 12% of the price.
+  const ws = ((gv[0]?.walls ?? []) as Row[]), lab = (w: Row) => String(w.label ?? '').toLowerCase(), rk = (a: Row, b: Row) => (a.rank ?? 9) - (b.rank ?? 9);
+  const walls = [['Ceiling', ws.filter((w) => w.side === 'call' && lab(w) === 'ceiling').sort(rk)[0]],
+    ['Floor', ws.filter((w) => w.side === 'put' && lab(w) === 'floor').sort(rk)[0]]]
+    .filter(([, w]) => w && Math.abs(Number((w as Row).k) / px - 1) < 0.12).map(([lb, w]) => ({ lb: lb as string, k: Number((w as Row).k) }));
+
+  // The averages, the last cross of the one the range uses, and the 52-week high and low from closes.
+  const cross = (k: 50 | 200, from: number) => {
+    const A = k === 50 ? ma50 : ma200;
+    for (let i = n - 1; i > from; i--) {
+      if (A[i - 1] == null || A[i] == null) break;
+      if ((cs[i] > A[i]!) !== (cs[i - 1] > A[i - 1]!)) return { date: monDay(days[i].d), crossed: cs[i] > A[i]! ? 'above' : 'below' };
+    }
+    return null;
+  };
+  const yr = cs.slice(ix.y), hi = Math.max(...yr), lo = Math.min(...yr);
+  const fig = (m: string) => res?.rows.find((r) => r.metric === m)?.value, an = num(fig('analyst_target')), fv = num(fig('fair_value_average'));
+  const research = an != null && fv != null && res ? { an, fv, src: `${res.src.source} · ${dayMon(String(res.src.asof))}` } : null;
+
+  const RNG: Record<string, string> = { w: 'Week', m: 'Month', q: 'Quarter', y: 'Year' };
+  const rg = RNG[range] ? range : 'w', m50 = ma50[n - 1]!, m200 = ma200[n - 1];
+  const data = {
+    units: 'Percent figures are already percents. A move is from the start of the range to today; positive is up.',
+    ticker: t, company: CO[t] ?? t, price: r2(px), range: RNG[rg],
+    moves_pct: { this_week: mv('w'), over_the_month: mv('m'), over_the_quarter: mv('q'), over_the_year: mv('y') },
+    ...(sold.length ? { sold_this_week: sold.map((l) => ({ label: `Your ${kf(Number(l.strike))} ${l.type === 'call' ? 'calls' : 'puts'}`,
+      contracts: Number(l.n), strike: Number(l.strike), expiry: l.expiry, price_from_strike_pct: pct1(px, Number(l.strike)) })),
+      // Calls worth more than they were sold for have captured nothing: the strike they sit over is the fact then.
+      ...(cap != null && cap >= 0 ? { captured_pct: cap, pace: tag } : { worth_more_than_sold: true }) } : {}),
+    walls: walls.map((w) => ({ label: w.lb, strike: w.k, price_from_wall_pct: pct1(px, w.k) })),
+    ma50: r2(m50), price_from_ma50_pct: pct1(px, m50), ...(m200 != null ? { ma200: r2(m200), price_from_ma200_pct: pct1(px, m200) } : {}),
+    rsi14: rsi == null ? null : Math.round(rsi), rsi_reads: rsi == null ? null : rsi > 70 ? 'overbought' : rsi < 30 ? 'oversold' : 'neutral',
+    last_cross_of_50day_this_quarter: cross(50, ix.q), last_cross_of_200day_this_year: cross(200, ix.y),
+    high_52w: r2(hi), low_52w: r2(lo), under_the_high_pct: Math.round((1 - px / hi) * 100), over_the_low_pct: Math.round((px / lo - 1) * 100),
+    ...(leaps ? { leaps_in_the_money_pct: Math.round((px / leaps.k - 1) * 100) } : {}),
+    ...(research ? { analysts_average_target: research.an, price_to_analysts_pct: pct1(research.an, px),
+      fair_value: research.fv, price_to_fair_value_pct: pct1(research.fv, px), research_source: research.src } : {}),
+  };
+  const y0 = ix.y, sl = <T,>(a: T[]) => a.slice(y0);
+  const chart = {
+    t, co: CO[t] ?? t, px, range: rg, mark: mark === 'cross' ? 'cross' : null,
+    d: sl(days.map((x) => x.d)), c: sl(cs.map(r4)), ma50: sl(ma50.map((x) => (x == null ? null : r4(x)))),
+    ma200: sl(ma200.map((x) => (x == null ? null : r4(x)))), rsi: rsi == null ? null : r4(rsi),
+    ix: { w: ix.w - y0, m: ix.m - y0, q: ix.q - y0 },
+    week: { days: week.map((w) => ({ lab: `${WDAY[new Date(w.d + 'T12:00:00Z').getUTCDay()]} ${Number(w.d.slice(8))}`, closed: w.closed })),
+      today: started ? gday : week.findIndex((w) => w.d === today && !w.closed), exp: week.findIndex((w) => w.d === expDay), pts },
+    sold: sold.map((l) => ({ k: Number(l.strike), cp: l.type === 'call' ? 'c' : 'p' })), cap: cap == null ? null : { pct: cap, tag },
+    legs: bought.map(({ g, k }) => ({ g, k })), leapsK: leaps?.k ?? null, walls, res: research,
+  };
+  return { ...card('chart', tagOf(t, RNG[rg]), sunny(c), data), chart };
+}
+const WDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 // ── The menu ───────────────────────────────────────────────────────────────────────────────────────────
 
 const TICKER = { ticker: { type: 'string', description: 'A ticker, for example BABA' } };
@@ -334,6 +483,9 @@ export const MENU: Row[] = [
   { name: 'roll', shows: "Rolling one name's calls to next Friday, as delta in shares: the calls sold now and what they could be at +1.5 SD by Thursday, what is bought, what insurance takes away, the net, the delta still needed, and each month's call walls (Ceiling, Accelerator) with what one call adds and how many would cover it. Read this for rolling, or how much delta a name needs", args: TICKER, required: ['ticker'] },
   { name: 'payoff', shows: "Payoff by Friday: what each price at this week's expiry adds or costs, every leg re-priced at its own IV: 1 SD down, flat and 1 SD up, with what each leg (calls sold, LEAPS, hedge calls, insurance puts) carries, the breakevens and the walls. legs 'sold' for what is sold alone, from the sale. No ticker for the whole book, every name moving the same %", args: { ...TICKER,
       legs: { type: 'string', enum: ['all', 'sold'], description: "'sold' for what is sold alone (how are my calls doing?); default all" } } },
+  { name: 'chart', shows: "Price chart for a name in the book over a Week, Month, Quarter or Year: the move over each range, this week's sold strikes with captured % and pace, this week's Ceiling and Floor, the 50 and 200-day averages and how far the price sits from them, RSI, the last cross of the 50-day this quarter (and of the 200-day this year), the 52-week high and low from closes, how far the LEAPS are in the money, and the analysts' target and fair value where research is saved", args: { ...TICKER,
+      range: { type: 'string', enum: ['w', 'm', 'q', 'y'], description: 'The range the question names: w week (the default), m month, q quarter, y year' },
+      mark: { type: 'string', enum: ['cross'], description: "'cross' when he asks whether it crossed its 50-day, or for its 50-day chart" } }, required: ['ticker'] },
   { name: 'hedges', shows: 'Hedge calls and insurance puts: held, needed, strike, cost; one name or a list of the names that need some', args: TICKER },
   { name: 'hedge_rungs', shows: 'Every hedge call and insurance put with days left; rolls are due at 45 days left', args: {} },
   { name: 'put_gates', shows: 'Whether weekly puts can sell: above the 50-day, a Floor below, no Accelerator between; one name or all', args: TICKER },
@@ -475,6 +627,8 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
     }
     case 'payoff':
       return await payoff(c, t, a.legs === 'sold');
+    case 'chart':
+      return await priceChart(c, need(t, 'chart'), String(a.range ?? 'w'), a.mark ? String(a.mark) : null);
     case 'hedges': {
       const names = t ? [t] : bookNames(c);
       const rows = names.map((k) => {
