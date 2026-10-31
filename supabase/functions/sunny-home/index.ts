@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours and
  * while the index futures trade, 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-28.1';
+const BUILD = '2026-10-31.1';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -276,23 +276,25 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   const winStart = [monthsBack(today, 2), '2026-09-01'].sort().at(-1)!;
   const marksFrom = [addDays(today, -45), addDays(winStart, -10), addDays(BOOK_START, -5)].sort()[0];
 
+  /* ⚠ BOOK S ONLY (31 Oct 2026). Book N (Nik's cousin) syncs into the same ledgers, tagged book_id N; this row is
+     Nik's Home, so every ledger read here names book S until Home is built per book. */
   const [trades, greeks, quotes, market, acctDays, cal, earn, seasons, closes, runs, sells, lots, savedReports, macro,
          openChecks, divs, posAll, lmd, chainRows, savedHistory, divPast, upQuotes, rungQuotes] = await Promise.all([
-    page('option_trades?voided_at=is.null&order=id.asc&select=id,ticker,trade_date,action,option_type,'
+    page('option_trades?voided_at=is.null&book_id=eq.S&order=id.asc&select=id,ticker,trade_date,action,option_type,'
       + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl,realized_pl_source,note'),
     /* One row per leg ever marked: grows with every trade, so paged. */
     page('option_greeks_live?order=option_trade_id.asc&select=option_trade_id,last_mark,iv,delta,gamma,theta,vega,underlying,captured_at'),
     get('ticker_quotes_live?select=ticker,spot,day_change_pct,captured_at'),
     get('market_live?select=*'),
-    get(`account_value_daily?report_date=gte.${addDays(BOOK_START, -5)}&order=report_date.desc`),
+    get(`account_value_daily?book_id=eq.S&report_date=gte.${addDays(BOOK_START, -5)}&order=report_date.desc`),
     get(`market_calendar?date=gte.${addDays(BOOK_START, -40)}&date=lte.${addDays(today, 120)}&order=date.asc`),
     get(`earnings_events?report_date=gte.${addDays(today, -1)}&report_date=lte.${addDays(today, 70)}`
       + '&select=ticker,report_date,report_time,date_estimated,source&order=report_date.asc'),
     get('earnings_season?select=*&order=starts.desc&limit=6'),
     page(`daily_closes?date=gte.${[addDays(today, -45), addDays(BOOK_START, -7)].sort()[0]}&order=date.asc,ticker.asc&select=ticker,date,close_price`),
-    get('ibkr_sync_runs?status=eq.success&order=finished_at.desc&limit=1&select=finished_at'),
-    get(`share_sells?voided_at=is.null&trade_date=gte.${BOOK_START}&select=ticker,trade_date,quantity,price,realized_pl`),
-    get(`share_lots?voided_at=is.null&acquired_date=gte.${BOOK_START}&select=ticker,acquired_date,qty_original,cost_per_share,realized_pl`),
+    get('ibkr_sync_runs?status=eq.success&book_id=eq.S&order=finished_at.desc&limit=1&select=finished_at'),
+    get(`share_sells?voided_at=is.null&book_id=eq.S&trade_date=gte.${BOOK_START}&select=ticker,trade_date,quantity,price,realized_pl`),
+    get(`share_lots?voided_at=is.null&book_id=eq.S&acquired_date=gte.${BOOK_START}&select=ticker,acquired_date,qty_original,cost_per_share,realized_pl`),
     get(`reports?shown_on=gte.${addDays(today, -1)}&select=kind,period_start,payload`),
     get(`macro_events?event_date=gte.${today}&event_date=lte.${addDays(today, 21)}&importance=gte.3`
       + '&category=in.(inflation,jobs,rates)&order=event_date.asc&select=event_date,event_time,name'),
@@ -301,7 +303,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     /* ⚠ ONE ROUND TRIP (audit, 13 Oct 2026). These used to wait their turn
        mid-build and cost ~0.3 s of a 0.55 s build. IBKR's daily positions
        cover both the live value's anchor and the value side's history. */
-    page(`account_positions_daily?report_date=gte.${[addDays(winStart, -10), addDays(BOOK_START, -3)].sort()[0]}&order=report_date.asc,account_id.asc,conid.asc`
+    page(`account_positions_daily?book_id=eq.S&report_date=gte.${[addDays(winStart, -10), addDays(BOOK_START, -3)].sort()[0]}&order=report_date.asc,account_id.asc,conid.asc`
       + '&select=report_date,account_id,conid,symbol,underlying,asset_category,put_call,strike,expiry,multiplier,position,'
       + 'mark_price,position_value,cost_basis_money'),
     page(`leg_marks_daily?day=gte.${marksFrom}&order=day.asc,option_trade_id.asc`

@@ -138,11 +138,14 @@ Deno.serve(async (req) => {
   // 4) ibkr-flex-sync — most recent successful run during market hours.
   //    Skipped outside market hours since cron only runs Mon-Fri 13:00-21:59
   //    UTC; alerting at midnight ET would be noise.
+  //    Book S's runs only (31 Oct 2026): book N's sync succeeds every 5 min
+  //    too, and its runs must never hide a stalled S feed.
   if (inMarket) {
     const { data: ibkr, error: ibkrErr } = await supabase
       .from('ibkr_sync_runs')
       .select('finished_at, status')
       .eq('status', 'success')
+      .eq('book_id', 'S')
       .order('finished_at', { ascending: false })
       .limit(1);
     if (ibkrErr) {
@@ -212,6 +215,7 @@ Deno.serve(async (req) => {
     { feed: 'earnings-sync',        warnHours: 30,  critHours: 50 },
     /* The new app's daily feeds (12-13 Oct 2026). */
     { feed: 'ibkr-account-sync',    warnHours: 30,  critHours: 50 },
+    { feed: 'ibkr-account-sync-N',  warnHours: 30,  critHours: 50 },   // book N, the cousin's (31 Oct 2026)
     { feed: 'market-calendar',      warnHours: 30,  critHours: 50 },
     { feed: 'macro-sync',           warnHours: 30,  critHours: 50 },
     { feed: 'dividends-sync',       warnHours: 30,  critHours: 50 },

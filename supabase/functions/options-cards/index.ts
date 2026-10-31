@@ -105,6 +105,7 @@ async function bookSCaller(req: Request): Promise<boolean> {
     { headers: { apikey: sr, Authorization: `Bearer ${sr}` } });
   return m.ok && ((await m.json()) as unknown[]).length > 0;
 }
+/* And it reads book S's ledgers only (31 Oct 2026): book N syncs into the same tables, tagged book_id N. */
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -164,7 +165,7 @@ Deno.serve(async (req) => {
     };
 
     const [legs, allShorts, allPuts, quotes, greeks, names, closes, ivHist] = await Promise.all([
-      time('legs', () => D.get(`option_trades?voided_at=is.null&expiry=gte.${today}`
+      time('legs', () => D.get(`option_trades?voided_at=is.null&book_id=eq.S&expiry=gte.${today}`
         + '&select=id,ticker,option_type,direction,action,contracts,strike,expiry,premium,trade_date,'
         + 'executed_at,realized_pl,realized_pl_source')),
       /* ⚠ SHORT PUTS COUNT HERE TOO. Nik, 2026-09-08: "short calls only shuold
@@ -177,7 +178,7 @@ Deno.serve(async (req) => {
          paid off, this asks what the week returned on capital. The rule the
          ring does keep is the one that matters, that CALL premium never
          funds the puts. */
-      time('allShorts', () => P('option_trades?voided_at=is.null&direction=eq.short'
+      time('allShorts', () => P('option_trades?voided_at=is.null&book_id=eq.S&direction=eq.short'
         + '&select=ticker,option_type,action,contracts,premium,strike,trade_date,expiry'
         + '&order=trade_date.asc,ticker.asc,expiry.asc')),
       /* ⚠ SHORT PUTS ARE A SEPARATE SERIES AND MUST STAY SEPARATE. They fund the
@@ -190,7 +191,7 @@ Deno.serve(async (req) => {
          and its funding week still counted. Filtering to live legs the way the
          `legs` query does would quietly shrink the cost every time a tranche
          ran off, and the ring would climb for no reason. */
-      time('allPuts', () => P('option_trades?voided_at=is.null&option_type=eq.put'
+      time('allPuts', () => P('option_trades?voided_at=is.null&book_id=eq.S&option_type=eq.put'
         + '&select=ticker,direction,action,contracts,strike,premium,trade_date,expiry'
         + '&order=trade_date.asc,ticker.asc,strike.asc')),
       time('quotes', () => D.get('ticker_quotes_latest?select=ticker,spot')),
@@ -1324,7 +1325,7 @@ Deno.serve(async (req) => {
       dir: string; type: string; n: number; exp: string; ticker: string;
     }>();
     for (const t of await time('thetaLegs', () =>
-      P(`option_trades?voided_at=is.null&expiry=gte.${thWeeks[0]}`
+      P(`option_trades?voided_at=is.null&book_id=eq.S&expiry=gte.${thWeeks[0]}`
         + '&select=id,ticker,direction,option_type,contracts,expiry&order=id.asc'))) {
       thLegs.set(String(t.id), {
         dir: String(t.direction), type: String(t.option_type),
@@ -2511,7 +2512,7 @@ Deno.serve(async (req) => {
     }
     /* Every long trade ever, for the capacity a past week had. `legs` only
        carries what is open today. */
-    const longAll = await time('longAll', () => P('option_trades?voided_at=is.null'
+    const longAll = await time('longAll', () => P('option_trades?voided_at=is.null&book_id=eq.S'
       + '&direction=eq.long&select=ticker,option_type,contracts,action,trade_date,expiry'
       + '&order=trade_date.asc'));
     const invWeeks = invWeekKeys.map((w) => {
@@ -2595,9 +2596,9 @@ Deno.serve(async (req) => {
        newest lots that cover it (FIFO sold the oldest). A name below 0 is a
        seed gap from before the book, not a short, and holds nothing. */
     const [allocLots, allocSells] = await Promise.all([
-      time('allocLots', () => P('share_lots?voided_at=is.null'
+      time('allocLots', () => P('share_lots?voided_at=is.null&book_id=eq.S'
         + '&select=ticker,qty_original,cost_per_share,acquired_date&order=acquired_date.asc,id.asc')),
-      time('allocSells', () => P('share_sells?voided_at=is.null'
+      time('allocSells', () => P('share_sells?voided_at=is.null&book_id=eq.S'
         + '&select=ticker,quantity&order=id.asc')),
     ]);
     const alloc = new Map<string, { inv: number; now: number; sh: number }>();

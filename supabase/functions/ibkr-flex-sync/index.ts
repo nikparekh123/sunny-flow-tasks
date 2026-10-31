@@ -57,6 +57,16 @@ const VOID_WINDOW_DAYS = 7;
 const IBKR_BASE = 'https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService';
 const IBKR_GET_BASE = 'https://gdcdyn.interactivebrokers.com/AccountManagement/FlexWebService';
 
+/* ⚠ ONE BOOK PER RUN (31 Oct 2026). Body {"book":"N"} syncs Nik's cousin's account (U29584055) with his own Flex
+   token and Trade Confirmation query; no book is book S, Nik's, exactly as before. Every row written carries the
+   book, and every read that decides a write (voids, close matching, FIFO order, positions, the audit) stays inside
+   it: the void rule run across both books would void S's trades on any day N traded. A report for an account the
+   book does not list writes nothing. The nightly backfill passes the book's own Daily query as query_id. */
+const BOOKS: Record<string, { token: string; tcf: () => string | undefined }> = {
+  S: { token: 'IBKR_FLEX_TOKEN', tcf: () => Deno.env.get('IBKR_FLEX_QUERY_ID') },
+  N: { token: 'IBKR_FLEX_TOKEN_N', tcf: () => '1691893' },
+};
+
 interface TradeConfirm {
   accountId: string;
   currency: string;
@@ -127,12 +137,15 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-  const token = Deno.env.get('IBKR_FLEX_TOKEN');
   const supabase = createClient(supabaseUrl, serviceKey);
 
   // Trigger annotation for the audit row
   const body = await req.json().catch(() => ({}));
   const trigger: 'cron' | 'manual' | 'backfill' = body.trigger ?? 'cron';
+  const book: string = typeof body.book === 'string' ? body.book : 'S';
+  const cfg = BOOKS[book];
+  if (!cfg) return jsonText(400, JSON.stringify({ ok: false, error: `unknown book ${book}` }));
+  const token = Deno.env.get(cfg.token);
   // Query ID resolution:
   //   • Cron / manual triggers use the env-configured TCF query
   //     (`IBKR_FLEX_QUERY_ID` = 1535729 = the primary "Today" feed).
@@ -143,7 +156,7 @@ Deno.serve(async (req) => {
   //     changed (see CLAUDE.md "NEVER suggest changing query
   //     1535729's Period"). The override is ignored for cron so a
   //     misuse can't accidentally divert the cron's 15-min feed.
-  const envQueryId = Deno.env.get('IBKR_FLEX_QUERY_ID');
+  const envQueryId = cfg.tcf();
   const queryId: string | undefined =
     (trigger === 'backfill' && typeof body.query_id === 'string' && body.query_id.length > 0)
       ? body.query_id
@@ -198,7 +211,7 @@ Deno.serve(async (req) => {
 
   // ── 1. Validate secrets ─────────────────────────────────────
   if (!token || !queryId) {
-    return jsonError(supabase, 'IBKR_FLEX_TOKEN or IBKR_FLEX_QUERY_ID not set', trigger);
+    return jsonError(supabase, `${cfg.token} or the book's query id not set`, trigger, book);
   }
 
   // ── 2. Advisory lock (serial cron) ──────────────────────────
@@ -215,7 +228,7 @@ Deno.serve(async (req) => {
   // ── 3. Open ibkr_sync_runs row ──────────────────────────────
   const { data: run, error: runErr } = await supabase
     .from('ibkr_sync_runs')
-    .insert({ status: 'running', trigger })
+    .insert({ status: 'running', trigger, book_id: book })
     .select()
     .single();
 
@@ -262,6 +275,13 @@ Deno.serve(async (req) => {
     }
 
     accountId = matchAttr(reportXml, 'FlexStatement', 'accountId');
+
+    // Every statement in the report must be one of the book's accounts, or nothing is written.
+    const { data: bookRow } = await supabase.from('books').select('ibkr_accounts').eq('id', book).maybeSingle();
+    const allowed = new Set<string>((bookRow?.ibkr_accounts ?? []) as string[]);
+    const stranger = [...reportXml.matchAll(/<FlexStatement\s[^>]*accountId="([^"]+)"/g)].map((m) => m[1])
+      .find((a) => !allowed.has(a));
+    if (stranger) throw new Error(`report is for ${stranger}, which is not an account of book ${book}`);
 
     // ── 5. Parse TradeConfirm rows ────────────────────────────
     const trades = parseTradeConfirms(reportXml);
@@ -329,7 +349,7 @@ Deno.serve(async (req) => {
       seenIds.push(t.tradeID);
       try {
         if (t.assetCategory === 'OPT') {
-          const result = await upsertOption(supabase, t);
+          const result = await upsertOption(supabase, t, book);
           if (result === 'inserted') rowsInserted++;
           else if (result === 'updated') rowsUpdated++;
           else if (result === 'skipped') {
@@ -342,7 +362,7 @@ Deno.serve(async (req) => {
             });
           }
         } else if (t.assetCategory === 'STK') {
-          const result = await upsertStock(supabase, t);
+          const result = await upsertStock(supabase, t, book);
           if (result === 'inserted') rowsInserted++;
           else if (result === 'updated') rowsUpdated++;
           else if (result === 'skipped') {
@@ -412,6 +432,7 @@ Deno.serve(async (req) => {
         const { data: existing } = await supabase
           .from(table)
           .select(`id, ibkr_trade_id, ${dateColumn}`)
+          .eq('book_id', book)
           .eq('source', 'ibkr_flex')
           .is('voided_at', null)
           .in(dateColumn, reportDatesArr);
@@ -437,7 +458,7 @@ Deno.serve(async (req) => {
     // Makes the share-position summary self-correct from IBKR's
     // authoritative holdings every night (see reconcilePositions).
     const openPositions = parseOpenPositions(reportXml);
-    posReconcile = await reconcilePositions(supabase, openPositions);
+    posReconcile = await reconcilePositions(supabase, openPositions, book);
 
     /* ── 7c. Audit the option book ─────────────────────────────────────
        Runs on EVERY trigger, because two of its three checks need no
@@ -450,7 +471,9 @@ Deno.serve(async (req) => {
        adjusted — and guessing which, then writing trades to match, is how
        a reconciler invents positions. Nik decides what to do about it. */
     try {
-      audit = await auditBook(supabase, parseOptionPositions(reportXml));
+      audit = await auditBook(supabase, parseOptionPositions(reportXml), book);
+      // Book S keeps its alert code; another book's has its own, so one never clears the other's.
+      const alertCode = book === 'S' ? 'book.option_drift' : `book.option_drift.${book}`;
       const bad = audit.drift.length + audit.overClosed.length + audit.expiredOpen.length;
       if (bad > 0) {
         const parts: string[] = [];
@@ -458,9 +481,9 @@ Deno.serve(async (req) => {
         if (audit.overClosed.length) parts.push(`${audit.overClosed.length} closed more than opened`);
         if (audit.expiredOpen.length) parts.push(`${audit.expiredOpen.length} expired but still open`);
         await supabase.rpc('raise_system_alert', {
-          p_code: 'book.option_drift',
+          p_code: alertCode,
           p_severity: audit.drift.length ? 'critical' : 'warning',
-          p_title: 'The option book does not reconcile',
+          p_title: book === 'S' ? 'The option book does not reconcile' : `Book ${book}'s option book does not reconcile`,
           p_detail: parts.join('; '),
           p_meta: audit as unknown as Record<string, unknown>,
         });
@@ -468,7 +491,7 @@ Deno.serve(async (req) => {
         /* Only clear on a run that actually COMPARED. Clearing after a TCF
            run would resolve the alert using evidence that was never
            gathered, which is worse than never raising it. */
-        await supabase.rpc('clear_system_alert', { p_code: 'book.option_drift' });
+        await supabase.rpc('clear_system_alert', { p_code: alertCode });
       }
     } catch (e) {
       errors.push({ reason: `audit: ${e instanceof Error ? e.message : String(e)}` });
@@ -524,6 +547,7 @@ Deno.serve(async (req) => {
   return jsonText(200, JSON.stringify({
     ok: status !== 'failed',
     run_id: run.id,
+    book,
     status,
     rows_seen: rowsSeen,
     rows_inserted: rowsInserted,
@@ -767,6 +791,7 @@ function parseOptionPositions(xml: string): { asOf: string; rows: OptPos[] } {
 async function auditBook(
   supabase: ReturnType<typeof createClient>,
   ibkr: { asOf: string; rows: OptPos[] },
+  bookId: string,
 ): Promise<{
   asOf: string; drift: unknown[]; overClosed: unknown[];
   expiredOpen: unknown[]; preHistory: unknown[]; compared: boolean;
@@ -779,6 +804,7 @@ async function auditBook(
     const { data: pg, error: pgErr } = await supabase
       .from('option_trades')
       .select('id,ticker,option_type,direction,strike,expiry,action,contracts,trade_date')
+      .eq('book_id', bookId)
       .is('voided_at', null)
       .order('id', { ascending: true })
       .range(from, from + 999);
@@ -894,6 +920,7 @@ async function auditBook(
 async function reconcilePositions(
   supabase: ReturnType<typeof createClient>,
   openPositions: OpenPos[],
+  book: string,
 ): Promise<{ updated: number; inserted: number; closed: number; closedTickers: string[] }> {
   if (openPositions.length === 0) {
     return { updated: 0, inserted: 0, closed: 0, closedTickers: [] };
@@ -919,6 +946,7 @@ async function reconcilePositions(
     const { data: existing } = await supabase
       .from('positions')
       .select('id')
+      .eq('book_id', book)
       .eq('ticker', p.symbol)
       .limit(1)
       .maybeSingle();
@@ -934,10 +962,12 @@ async function reconcilePositions(
           status: 'open',
           reconciled_through: reconciledThrough,
         })
+        .eq('book_id', book)
         .eq('ticker', p.symbol);
       updated++;
     } else {
       await supabase.from('positions').insert({
+        book_id: book,
         ticker: p.symbol,
         name: p.symbol,
         quantity: p.quantity,
@@ -956,6 +986,7 @@ async function reconcilePositions(
   const { data: openRows } = await supabase
     .from('positions')
     .select('ticker')
+    .eq('book_id', book)
     .eq('status', 'open');
   const closedTickers = (openRows ?? [])
     .map((r: any) => r.ticker as string)
@@ -963,6 +994,7 @@ async function reconcilePositions(
   if (closedTickers.length > 0) {
     await supabase.from('positions')
       .update({ quantity: 0, status: 'closed' })
+      .eq('book_id', book)
       .in('ticker', closedTickers);
   }
 
@@ -1135,6 +1167,7 @@ function inferOptionDirection(buySell: string, code: string): 'long' | 'short' {
 async function upsertOption(
   supabase: ReturnType<typeof createClient>,
   t: TradeConfirm,
+  book: string,
 ): Promise<'inserted' | 'updated' | 'skipped'> {
 
   // Code mapping:
@@ -1170,6 +1203,7 @@ async function upsertOption(
   const premium = isLifecycle ? 0 : Math.abs(Number(t.price));
 
   const row: Record<string, unknown> = {
+    book_id: book,
     ticker: t.underlyingSymbol,
     trade_date: ymdToDate(t.tradeDate),
     action,
@@ -1223,6 +1257,7 @@ async function upsertOption(
     const { data: openMatch } = await supabase
       .from('option_trades')
       .select('id')
+      .eq('book_id', book)
       .eq('ticker', row.ticker as string)
       .eq('option_type', row.option_type as string)
       .eq('direction', row.direction as string)
@@ -1245,6 +1280,7 @@ async function upsertOption(
   const { data: existing } = await supabase
     .from('option_trades')
     .select('id')
+    .eq('book_id', book)
     .eq('ibkr_trade_id', t.tradeID)
     .maybeSingle();
 
@@ -1274,6 +1310,7 @@ async function upsertOption(
     const { data: manual } = await supabase
       .from('option_trades')
       .select('id')
+      .eq('book_id', book)
       .is('ibkr_trade_id', null)
       .is('voided_at', null)
       .eq('source', 'manual')
@@ -1315,6 +1352,7 @@ async function upsertOption(
 async function upsertStock(
   supabase: ReturnType<typeof createClient>,
   t: TradeConfirm,
+  book: string,
 ): Promise<'inserted' | 'updated' | 'skipped'> {
 
   const isBuy = t.buySell === 'BUY';
@@ -1332,6 +1370,7 @@ async function upsertStock(
     const { data: maxRow } = await supabase
       .from('share_lots')
       .select('fifo_order')
+      .eq('book_id', book)
       .eq('ticker', t.underlyingSymbol)
       .order('fifo_order', { ascending: false })
       .limit(1)
@@ -1340,6 +1379,7 @@ async function upsertStock(
     const nextFifo = (maxRow?.fifo_order ?? 0) + 1;
 
     const row = {
+      book_id: book,
       ticker: t.underlyingSymbol,
       acquired_date: ymdToDate(t.tradeDate),
       fifo_order: nextFifo,
@@ -1357,6 +1397,7 @@ async function upsertStock(
     const { data: existing } = await supabase
       .from('share_lots')
       .select('id')
+      .eq('book_id', book)
       .eq('ibkr_trade_id', t.tradeID)
       .maybeSingle();
 
@@ -1392,6 +1433,7 @@ async function upsertStock(
   const hasIbkrPnl = Number.isFinite(ibkrPnl);
 
   const row = {
+    book_id: book,
     ticker: t.underlyingSymbol,
     quantity: Math.abs(Number(t.quantity)),
     price: Math.abs(Number(t.price)),
@@ -1421,6 +1463,7 @@ async function upsertStock(
   const { data: existing } = await supabase
     .from('share_sells')
     .select('id')
+    .eq('book_id', book)
     .eq('ibkr_trade_id', t.tradeID)
     .maybeSingle();
 
@@ -1459,10 +1502,12 @@ async function jsonError(
   supabase: ReturnType<typeof createClient>,
   reason: string,
   trigger: string,
+  book: string,
 ): Promise<Response> {
   await supabase.from('ibkr_sync_runs').insert({
     status: 'failed',
     trigger,
+    book_id: book,
     finished_at: new Date().toISOString(),
     duration_ms: 0,
     errors: [{ reason }],

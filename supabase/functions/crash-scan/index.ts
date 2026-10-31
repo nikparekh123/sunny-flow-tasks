@@ -177,8 +177,9 @@ async function scan(date: string, dry: boolean, closed: Set<string>) {
   const d2 = await day2(date, (t) => today.get(t), dry);
   let marked = 0;
   if (!dry) {
-    for (const e of await get(`crash_events?entry_day=gte.${addDays(date, -7)}&entry_day=lte.${date}&or=(taken.is.null,taken.eq.false)&select=id,ticker,entry_day`)) {
-      const t = await get(`option_trades?ticker=ilike.${e.ticker}&option_type=eq.put&direction=eq.short&action=eq.open&trade_date=eq.${e.entry_day}&voided_at=is.null&select=id&limit=1`);
+    // Taken in the event's own book (31 Oct 2026: book N syncs into option_trades too).
+    for (const e of await get(`crash_events?entry_day=gte.${addDays(date, -7)}&entry_day=lte.${date}&or=(taken.is.null,taken.eq.false)&select=id,ticker,entry_day,book_id`)) {
+      const t = await get(`option_trades?book_id=eq.${e.book_id ?? 'S'}&ticker=ilike.${e.ticker}&option_type=eq.put&direction=eq.short&action=eq.open&trade_date=eq.${e.entry_day}&voided_at=is.null&select=id&limit=1`);
       if (t.length) { await send('PATCH', `crash_events?id=eq.${e.id}`, { taken: true }); marked++; }
     }
   }

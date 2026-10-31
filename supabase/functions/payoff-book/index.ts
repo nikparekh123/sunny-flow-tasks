@@ -96,6 +96,7 @@ async function bookSCaller(req: Request): Promise<boolean> {
     { headers: { apikey: sr, Authorization: `Bearer ${sr}` } });
   return m.ok && ((await m.json()) as unknown[]).length > 0;
 }
+/* And it reads book S's ledgers only (31 Oct 2026): book N syncs into the same tables, tagged book_id N. */
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -121,10 +122,10 @@ Deno.serve(async (req) => {
          nets wrong and nothing anywhere reports an error. Found 2026-09-11
          auditing the page, after the same cap was caught truncating two of the
          Options cards that morning. */
-      P('option_trades?voided_at=is.null'
+      P('option_trades?voided_at=is.null&book_id=eq.S'
         + '&select=id,ticker,option_type,direction,action,contracts,strike,expiry,premium,trade_date,note,source'
         + '&order=trade_date.asc,id.asc'),
-      D.get('share_lots?voided_at=is.null&qty_remaining=gt.0&select=ticker,qty_remaining,cost_per_share'),
+      D.get('share_lots?voided_at=is.null&book_id=eq.S&qty_remaining=gt.0&select=ticker,qty_remaining,cost_per_share'),
       D.get('ticker_quotes_latest?select=ticker,spot'),
       D.get('option_greeks_latest?select=option_trade_id,delta,iv,last_mark'),
       D.get('ticker_names?select=ticker,name'),

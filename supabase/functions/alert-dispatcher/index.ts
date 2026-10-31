@@ -78,11 +78,14 @@ Deno.serve(async (req) => {
   /* ⚠ PAGED (12 Oct 2026). PostgREST returns at most 1,000 rows a request,
    silently, and option_trades crossed 1,000 on 9 Oct: the newest legs fell
    off the end of every whole-table read. */
+  /* ⚠ BOOK S ONLY (31 Oct 2026). Book N (Nik's cousin) syncs into the same tables; its alerts wait until pushes
+     are sent per book, so a leg of his never reaches Nik's phone as Nik's. */
   const tradeAll: Record<string, any>[] = [];
   for (let from = 0; from < 50_000; from += 1000) {
     const { data: pg, error: pgErr } = await supabase
       .from('option_trades')
       .select('id, ticker, action, option_type, direction, contracts, strike, expiry, closes_trade_id, voided_at')
+      .eq('book_id', 'S')
       .order('id', { ascending: true })
       .range(from, from + 999);
     if (pgErr) throw pgErr;
@@ -95,7 +98,7 @@ Deno.serve(async (req) => {
     /* Held positions only. Without the filter this warned about earnings for
        every ticker ever entered, INTU included, which Nik has not owned since
        July. A print only matters if there is exposure to it. */
-    supabase.from('positions').select('ticker, earnings_date').eq('status', 'open').gt('quantity', 0),
+    supabase.from('positions').select('ticker, earnings_date').eq('book_id', 'S').eq('status', 'open').gt('quantity', 0),
   ]);
   const allTrades = (trades ?? []) as OptionTradeRow[];
   const spotByTicker: Record<string, number> = {};

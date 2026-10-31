@@ -21,6 +21,11 @@
  *
  * Body: { dry_run?: true } parses and returns the summary without writing.
  *
+ * ⚠ ONE BOOK PER RUN (31 Oct 2026). { book: 'N' } reads Nik's cousin's account
+ * (U29584055) with his own token and query "Sunny N account" (1691900); no book
+ * is book S, as before. Rows carry book_id, account_value_daily adds them up per
+ * book, and a statement for an account the book does not list stops the run.
+ *
  * ⚠ DEPLOY WITH verify_jwt = false, like every cron-called function here.
  * pg_cron's cron_invoke_function sends the vault's sb_secret key, which is
  * not a JWT, so a verify_jwt function answers 401 to every scheduled call
@@ -28,8 +33,11 @@
  */
 const IBKR_BASE = 'https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService';
 const IBKR_GET_BASE = 'https://gdcdyn.interactivebrokers.com/AccountManagement/FlexWebService';
-const QUERY_ID = '1670350';
-const BUILD = '2026-10-13.2';
+const BOOKS: Record<string, { token: string; query: string; feed: string }> = {
+  S: { token: 'IBKR_FLEX_TOKEN', query: '1670350', feed: 'ibkr-account-sync' },
+  N: { token: 'IBKR_FLEX_TOKEN_N', query: '1691900', feed: 'ibkr-account-sync-N' },
+};
+const BUILD = '2026-10-31.1';
 
 function matchTag(xml: string, tag: string): string | null {
   const m = xml.match(new RegExp(`<${tag}>([^<]+)</${tag}>`));
@@ -88,7 +96,7 @@ Deno.serve(async (req) => {
   const url = Deno.env.get('SUPABASE_URL')!;
   const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const h = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
-  let body: { dry_run?: boolean; from?: string; to?: string } = {};
+  let body: { dry_run?: boolean; from?: string; to?: string; book?: string } = {};
   /* ⚠ FIGURES ONLY FOR THE SERVICE-ROLE KEY (audit, 13 Oct 2026). verify_jwt
      is off for pg_cron, so the reply to anyone else carries no account data. */
   const isAdmin = req.headers.get('authorization') === `Bearer ${key}`
@@ -97,7 +105,14 @@ Deno.serve(async (req) => {
   try {
     /* A window is admin-only: it is a backfill, not the morning run. */
     const win = isAdmin && /^\d{8}$/.test(body.from ?? '') && /^\d{8}$/.test(body.to ?? '') ? [body.from!, body.to!] : [];
-    const xml = await fetchReport(Deno.env.get('IBKR_FLEX_TOKEN')!, QUERY_ID, win[0], win[1]);
+    const book = typeof body.book === 'string' ? body.book : 'S';
+    const cfg = BOOKS[book];
+    if (!cfg) throw new Error(`unknown book ${book}`);
+    const token = Deno.env.get(cfg.token);
+    if (!token) throw new Error(`${cfg.token} not set`);
+    const allowed = new Set<string>(((await (await fetch(`${url}/rest/v1/books?id=eq.${book}&select=ibkr_accounts`,
+      { headers: h })).json())[0]?.ibkr_accounts ?? []) as string[]);
+    const xml = await fetchReport(token, cfg.query, win[0], win[1]);
 
     const days: Record<string, unknown>[] = [];
     const positions: Record<string, unknown>[] = [];
@@ -107,6 +122,7 @@ Deno.serve(async (req) => {
       const acct = st.accountId;
       const date = iso(st.toDate);
       if (!acct || !date) continue;
+      if (!allowed.has(acct)) throw new Error(`report is for ${acct}, which is not an account of book ${book}`);
       /* Broken out by day, each statement carries the day before and the day
          itself; the row dated toDate is that day's close. */
       const eq = rows(block, 'EquitySummaryByReportDateInBase').find((r) => r.reportDate === st.toDate);
@@ -115,7 +131,7 @@ Deno.serve(async (req) => {
       const cash = rows(block, 'CashReportCurrency').find((r) => r.currency === 'BASE_SUMMARY') ?? {};
       const acc = rows(block, 'InterestAccrualsCurrency').find((r) => r.currency === 'BASE_SUMMARY') ?? {};
       days.push({
-        account_id: acct, report_date: date,
+        book_id: book, account_id: acct, report_date: date,
         nav: num(eq.total), cash: num(eq.cash), stock: num(eq.stock), options: num(eq.options),
         interest_accruals: num(eq.interestAccruals),
         starting_value: num(nav.startingValue), mtm: num(nav.mtm), realized: num(nav.realized),
@@ -132,7 +148,7 @@ Deno.serve(async (req) => {
         if (p.levelOfDetail && p.levelOfDetail !== 'SUMMARY') continue;
         if (p.reportDate !== st.toDate || !p.conid) continue;
         positions.push({
-          account_id: acct, report_date: date, conid: p.conid,
+          book_id: book, account_id: acct, report_date: date, conid: p.conid,
           symbol: p.symbol ?? null, underlying: p.underlyingSymbol ?? null,
           asset_category: p.assetCategory ?? null, put_call: p.putCall || null,
           strike: num(p.strike), expiry: iso(p.expiry), multiplier: num(p.multiplier),
@@ -185,7 +201,7 @@ Deno.serve(async (req) => {
       method: 'POST',
       headers: { ...h, Prefer: 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify([{
-        feed: 'ibkr-account-sync', ran_at: new Date().toISOString(), rows_written: days.length,
+        feed: cfg.feed, ran_at: new Date().toISOString(), rows_written: days.length,
         /* No figures here: sync_heartbeat is readable by the app's signed-in
            user and was, until 13 Oct, by anyone. */
         detail: `${summary.accounts.length} accounts · ${summary.days} days to ${last}`,
