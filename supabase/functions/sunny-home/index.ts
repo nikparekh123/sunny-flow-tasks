@@ -18,11 +18,23 @@
  * Daily Flex, both accounts), market_calendar, earnings_events,
  * earnings_season, daily_closes, and Theta for an earnings card's priced move.
  *
- * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours and
- * while the index futures trade, 30 s apart, a quiet pass every 10 minutes otherwise).
+ * Body: { passes?: 1|2, book?: 'S'|'N' } (cron sends nothing: two passes in market hours and
+ * while the index futures trade, 30 s apart, a quiet pass every 10 minutes otherwise;
+ * the sunny-home-N cron sends {"book":"N"} for the cousin's book, BOOKS below).
  */
-const BUILD = '2026-10-31.2';
-const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
+const BUILD = '2026-10-31.3';
+/* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
+   names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
+   by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
+   home_snapshot id; accounts: how many IBKR accounts make a full day (a day counts once all have reported).
+   Book N is the cousin's account (U29584055): $1,000 from 20 Oct 2026, funded with $49,000 on 29 Oct, so it
+   starts on 29 Oct (the change line is value less the range's first close, so a deposit inside it reads as a gain). */
+const BOOKS: Record<string, { start: string; chart: string; id: number; accounts: number }> = {
+  S: { start: '2026-08-31', chart: '2026-09-01', id: 1, accounts: 2 },   // PNL_GLOSSARY: the stock-replacement shift
+  N: { start: '2026-10-29', chart: '2026-10-29', id: 2, accounts: 1 },
+};
+/* A book's heartbeat feed: book S keeps the old names, others add theirs (sunny-home-N). */
+const feedOf = (feed: string, book: string) => (book === 'S' ? feed : `${feed}-${book}`);
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
    A name here does not take the roll sheet: its calls are `cover` of its LEAPs,
@@ -258,7 +270,8 @@ async function rollFor(l: LegLite, oldTh: number, ratioNow: number | null, ratio
    theta_checks or the heartbeat; opts.price prices the roll for that ticker's
    LEAPs (or '*' for all) whether or not they flag. For checking the check. */
 async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 'tick',
-                     opts: { dry?: boolean; price?: string } = {}): Promise<{ payload: Row; ms: number; steps: Record<string, number> }> {
+                     opts: { dry?: boolean; price?: string; book?: string } = {}): Promise<{ payload: Row; ms: number; steps: Record<string, number> }> {
+  const bookId = opts.book ?? 'S', BOOK_START = BOOKS[bookId].start, accountsN = BOOKS[bookId].accounts;
   let checkSummary: Row[] | null = null;
   /* Where the build's time goes, returned with the timings (no data). */
   const steps: Record<string, number> = {};
@@ -274,44 +287,45 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   };
   /* Rolling 3 calendar months (block 15), never before the book: Nik took the
      proposal to start the charts on 1 Sep 2026. */
-  const winStart = [monthsBack(today, 2), '2026-09-01'].sort().at(-1)!;
+  const winStart = [monthsBack(today, 2), BOOKS[bookId].chart].sort().at(-1)!;
   const marksFrom = [addDays(today, -45), addDays(winStart, -10), addDays(BOOK_START, -5)].sort()[0];
 
-  /* ⚠ BOOK S ONLY (31 Oct 2026). Book N (Nik's cousin) syncs into the same ledgers, tagged book_id N; this row is
-     Nik's Home, so every ledger read here names book S until Home is built per book. */
+  /* ⚠ THIS BOOK ONLY (31 Oct 2026). Book N (Nik's cousin) syncs into the same ledgers as book S, tagged book_id;
+     every ledger read here names the book being built, or one book's trades land in the other's Home. Greeks and
+     marks follow option_trades by id; quotes, chains, closes and the calendar are everyone's. */
   const [trades, greeks, quotes, market, acctDays, cal, earn, seasons, closes, runs, sells, lots, savedReports, macro,
          openChecks, divs, posAll, lmd, chainRows, savedHistory, divPast, upQuotes, rungQuotes] = await Promise.all([
-    page('option_trades?voided_at=is.null&book_id=eq.S&order=id.asc&select=id,ticker,trade_date,action,option_type,'
+    page(`option_trades?voided_at=is.null&book_id=eq.${bookId}&order=id.asc&select=id,ticker,trade_date,action,option_type,`
       + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl,realized_pl_source,note'),
     /* One row per leg ever marked: grows with every trade, so paged. */
     page('option_greeks_live?order=option_trade_id.asc&select=option_trade_id,last_mark,iv,delta,gamma,theta,vega,underlying,captured_at'),
     get('ticker_quotes_live?select=ticker,spot,day_change_pct,captured_at'),
     get('market_live?select=*'),
-    get(`account_value_daily?book_id=eq.S&report_date=gte.${addDays(BOOK_START, -5)}&order=report_date.desc`),
+    get(`account_value_daily?book_id=eq.${bookId}&report_date=gte.${addDays(BOOK_START, -5)}&order=report_date.desc`),
     get(`market_calendar?date=gte.${addDays(BOOK_START, -40)}&date=lte.${addDays(today, 120)}&order=date.asc`),
     get(`earnings_events?report_date=gte.${addDays(today, -1)}&report_date=lte.${addDays(today, 70)}`
       + '&select=ticker,report_date,report_time,date_estimated,source&order=report_date.asc'),
     get('earnings_season?select=*&order=starts.desc&limit=6'),
     page(`daily_closes?date=gte.${[addDays(today, -45), addDays(BOOK_START, -7)].sort()[0]}&order=date.asc,ticker.asc&select=ticker,date,close_price`),
-    get('ibkr_sync_runs?status=eq.success&book_id=eq.S&order=finished_at.desc&limit=1&select=finished_at'),
-    get(`share_sells?voided_at=is.null&book_id=eq.S&trade_date=gte.${BOOK_START}&select=ticker,trade_date,quantity,price,realized_pl`),
-    get(`share_lots?voided_at=is.null&book_id=eq.S&acquired_date=gte.${BOOK_START}&select=ticker,acquired_date,qty_original,cost_per_share,realized_pl`),
-    get(`reports?shown_on=gte.${addDays(today, -1)}&select=kind,period_start,payload`),
+    get(`ibkr_sync_runs?status=eq.success&book_id=eq.${bookId}&order=finished_at.desc&limit=1&select=finished_at`),
+    get(`share_sells?voided_at=is.null&book_id=eq.${bookId}&trade_date=gte.${BOOK_START}&select=ticker,trade_date,quantity,price,realized_pl`),
+    get(`share_lots?voided_at=is.null&book_id=eq.${bookId}&acquired_date=gte.${BOOK_START}&select=ticker,acquired_date,qty_original,cost_per_share,realized_pl`),
+    get(`reports?book_id=eq.${bookId}&shown_on=gte.${addDays(today, -1)}&select=kind,period_start,payload`),
     get(`macro_events?event_date=gte.${today}&event_date=lte.${addDays(today, 21)}&importance=gte.3`
       + '&category=in.(inflation,jobs,rates)&order=event_date.asc&select=event_date,event_time,name'),
-    get('theta_checks?status=eq.open&select=*&order=found_on.asc'),
+    get(`theta_checks?book_id=eq.${bookId}&status=eq.open&select=*&order=found_on.asc`),
     get(`dividends?ex_date=gte.${today}&ex_date=lte.${addDays(today, 45)}&select=ticker,ex_date,pay_date,cash_amount&order=ex_date.asc`),
     /* ⚠ ONE ROUND TRIP (audit, 13 Oct 2026). These used to wait their turn
        mid-build and cost ~0.3 s of a 0.55 s build. IBKR's daily positions
        cover both the live value's anchor and the value side's history. */
-    page(`account_positions_daily?book_id=eq.S&report_date=gte.${[addDays(winStart, -10), addDays(BOOK_START, -3)].sort()[0]}&order=report_date.asc,account_id.asc,conid.asc`
+    page(`account_positions_daily?book_id=eq.${bookId}&report_date=gte.${[addDays(winStart, -10), addDays(BOOK_START, -3)].sort()[0]}&order=report_date.asc,account_id.asc,conid.asc`
       + '&select=report_date,account_id,conid,symbol,underlying,asset_category,put_call,strike,expiry,multiplier,position,'
       + 'mark_price,position_value,cost_basis_money'),
     page(`leg_marks_daily?day=gte.${marksFrom}&order=day.asc,option_trade_id.asc`
       + '&select=option_trade_id,day,mark,delta,theta,underlying'),
     page('option_chain_next?select=ticker,expiry,side,strike,mid,delta,iv,oi,spot'
       + '&order=ticker.asc,expiry.asc,side.asc,strike.asc'),
-    page('account_history?order=day.asc&select=day,nav,cash,margin,interest_cum,commission_cum,dividends_cum,'
+    page(`account_history?book_id=eq.${bookId}&order=day.asc&select=day,nav,cash,margin,interest_cum,commission_cum,dividends_cum,`
       + 'realized_cum,unrealized,time_value,capital_long,shares_value,groups'),
     get(`dividends?pay_date=gt.${BOOK_START}&pay_date=lte.${today}&select=ticker,ex_date,pay_date&order=pay_date.asc,ticker.asc`),
     /* The 3- and 12-month upside calls the Planner sizes (chain-next, 15 min). */
@@ -511,7 +525,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
 
   step('legs+realized');
   // ── Account: IBKR's last close, moved by today's prices and fills ──
-  const anchor = acctDays.find((d) => Number(d.accounts) >= 2) ?? null;
+  const anchor = acctDays.find((d) => Number(d.accounts) >= accountsN) ?? null;
   let account: Row = { ok: false, why: 'no IBKR daily statement yet' };
   if (anchor) {
     const D = String(anchor.report_date);
@@ -552,7 +566,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const tradingToday = isTrading(today);
     let base = navD, baseDate = D, stale = false;
     if (!tradingToday) {
-      const before = acctDays.find((d) => String(d.report_date) < D && Number(d.accounts) >= 2);
+      const before = acctDays.find((d) => String(d.report_date) < D && Number(d.accounts) >= accountsN);
       if (before) { base = Number(before.nav); baseDate = String(before.report_date); }
     } else if (D !== prevClose) stale = true;
     const sum = (from: string, f: string) => acctDays
@@ -1267,7 +1281,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const have = savedReports.find((x) => x.kind === r.kind && String(x.period_start) === r.from);
     if (have) { reportsOut.push({ kind: r.kind, label: r.label, mark: r.mark, borrowed: borrowedAt(r.to), ...have.payload }); continue; }
     const lastDay = lastTradingOnOrBefore(r.to);
-    if (!acctDays.some((d) => String(d.report_date) >= lastDay && Number(d.accounts) >= 2)) {
+    if (!acctDays.some((d) => String(d.report_date) >= lastDay && Number(d.accounts) >= accountsN)) {
       reportsOut.push({ kind: r.kind, label: r.label, mark: r.mark, pending: 'waiting for IBKR statement' });
       continue;
     }
@@ -1319,9 +1333,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       },
       built_from: { ibkr_close: lastDay },
     };
-    await fetch(`${URL_}/rest/v1/reports?on_conflict=kind,period_start`, {
+    await fetch(`${URL_}/rest/v1/reports?on_conflict=book_id,kind,period_start`, {
       method: 'POST', headers: { ...H, Prefer: 'resolution=ignore-duplicates,return=minimal' },
-      body: JSON.stringify([{ kind: r.kind, period_start: r.from, period_end: r.to, shown_on: today, payload: payloadR }]),
+      body: JSON.stringify([{ book_id: bookId, kind: r.kind, period_start: r.from, period_end: r.to, shown_on: today, payload: payloadR }]),
     });
     reportsOut.push({ kind: r.kind, label: r.label, mark: r.mark, borrowed: borrowedAt(r.to), ...payloadR });
   }
@@ -1416,7 +1430,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   /* DONE FOR THIS WEEK (Nik, 26 Oct 2026): a name whose week's call sale he finished on purpose with fewer calls
      than one per LEAPS (the app's button, sale_done). That week sells nothing more and the hedge is sized on what
      is sold. */
-  const saleDone = new Set((await get(`sale_done?book_id=eq.S&week=gte.${addDays(today, -7)}&select=ticker,week`))
+  const saleDone = new Set((await get(`sale_done?book_id=eq.${bookId}&week=gte.${addDays(today, -7)}&select=ticker,week`))
     .map((r) => `${r.ticker}|${r.week}`));
   const flowProfile: Record<string, Row> = {};
   for (const r of await get('flow_profile?select=ticker,asof,sessions,universe,retail,profile,inputs')) {
@@ -2450,7 +2464,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
      20:25 and 21:25 to cover EDT and EST; whichever lands after 4:15 New York
      runs, and only once (the heartbeat says whether today already ran). */
   const ranToday = mode === 'theta_check'
-    ? (await get("sync_heartbeat?feed=eq.theta-check&select=ran_at"))[0]?.ran_at : null;
+    ? (await get(`sync_heartbeat?feed=eq.${feedOf('theta-check', bookId)}&select=ran_at`))[0]?.ran_at : null;
   const dry = mode === 'theta_check' && !!opts.dry;
   const checkDue = dry || (mode === 'theta_check' && isTrading(today) && now.mins >= 16 * 60 + 15
     && !(ranToday && ny(new Date(String(ranToday))).date === today));
@@ -2533,7 +2547,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       if (dry) { priced.push({ leg: `${l.ticker} ${l.strike}C ${l.expiry}`, roll }); continue; }
       await fetch(`${URL_}/rest/v1/theta_checks`, {
         method: 'POST', headers: { ...H, Prefer: 'return=minimal' },
-        body: JSON.stringify([{ ticker: l.ticker, option_type: 'call', strike: l.strike, expiry: l.expiry, contracts: l.n,
+        body: JSON.stringify([{ book_id: bookId, ticker: l.ticker, option_type: 'call', strike: l.strike, expiry: l.expiry, contracts: l.n,
           trigger: f.trigger, found_on: today, card_on: today, theta_now: r2(f.nowTh), theta_then: f.thenTh && r2(f.thenTh),
           then_date: f.thenDay, growth_pct: f.growth == null ? null : Math.round(f.growth * 100),
           ratio_now: ratioNow, ratio_without: f.without && r2(f.without), ratio_at_card: ratioNow, roll, last_checked: today }]),
@@ -2541,7 +2555,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     }
     if (!dry) await fetch(`${URL_}/rest/v1/sync_heartbeat?on_conflict=feed`, {
       method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify([{ feed: 'theta-check', ran_at: new Date().toISOString(),
+      body: JSON.stringify([{ feed: feedOf('theta-check', bookId), ran_at: new Date().toISOString(),
         rows_written: found.filter((x) => x.trigger).length,
         detail: `${found.length} LEAPs · ${found.filter((x) => x.trigger).length} dragging` }]),
     });
@@ -2552,7 +2566,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   }
 
   // ── Theta check (block 07): what the after-close run found ──
-  const checksNow = mode === 'theta_check' ? await get('theta_checks?status=eq.open&select=*&order=found_on.asc') : openChecks;
+  const checksNow = mode === 'theta_check' ? await get(`theta_checks?book_id=eq.${bookId}&status=eq.open&select=*&order=found_on.asc`) : openChecks;
   const thetaChecks = checksNow.map((c) => ({
     ticker: c.ticker, leg: `${c.ticker} ${String(c.expiry).slice(0, 7)} ${Number(c.strike)}${c.option_type === 'call' ? 'C' : 'P'}`,
     trigger: c.trigger, found_on: c.found_on, card_today: String(c.card_on) === today,
@@ -2575,7 +2589,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   // value of what it holds plus the cash its trades moved. Only differences
   // are ever shown, so the base cancels out of every range.
   // ════════════════════════════════════════════════════════════════════════
-  const CHART_START = '2026-09-01';
+  const CHART_START = BOOKS[bookId].chart;
   type GK = 'cs' | 'ps' | 'cb' | 'pb' | 'sh';
   const GK_LIST: GK[] = ['cs', 'ps', 'cb', 'pb', 'sh'];
   const zero = (): Record<GK, number> => ({ cs: 0, ps: 0, cb: 0, pb: 0, sh: 0 });
@@ -2643,11 +2657,15 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     }
     return { mv, un, tv, capLong, shVal, tickers: tick.size, has: posByDay.has(d) };
   };
-  const navDays = acctDays.filter((d) => Number(d.accounts) >= 2).map((d) => String(d.report_date)).sort();
+  const navDays = acctDays.filter((d) => Number(d.accounts) >= accountsN).map((d) => String(d.report_date)).sort();
   const lastClose = navDays.at(-1) ?? null;
   const baseDay = [...navDays].reverse().find((d) => d < CHART_START) ?? null;
   const base = baseDay ? snapOf(baseDay) : null;
   const navOf = new Map(acctDays.map((d) => [String(d.report_date), d]));
+  /* A day's row waits for IBKR's positions that day; a day with nothing held has none to send, and its NAV is
+     its cash and accrued interest (book N while it is all cash, 31 Oct 2026). */
+  const nothingHeld = (d: string) => { const a = navOf.get(d);
+    return !!a && a.nav != null && Math.abs(Number(a.nav) - Number(a.cash ?? 0) - Number(a.interest_accruals ?? 0)) < 1; };
   const cum = (f: string, upTo: string) => acctDays
     .filter((d) => String(d.report_date) > BOOK_START && String(d.report_date) <= upTo)
     .reduce((s, d) => s + Number(d[f] ?? 0), 0);
@@ -2668,18 +2686,18 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   };
   let chartRows: Row[] = savedHistory;
   if (mode === 'history') {
-    const built = navDays.filter((d) => d >= CHART_START && isTrading(d) && posByDay.has(d)).map(rowFor);
+    const built = navDays.filter((d) => d >= CHART_START && isTrading(d) && (posByDay.has(d) || nothingHeld(d))).map(rowFor);
     if (built.length) {
-      const w = await fetch(`${URL_}/rest/v1/account_history?on_conflict=day`, {
+      const w = await fetch(`${URL_}/rest/v1/account_history?on_conflict=book_id,day`, {
         method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify(built.map((b) => ({ ...b, built_at: new Date().toISOString() }))) });
+        body: JSON.stringify(built.map((b) => ({ ...b, book_id: bookId, built_at: new Date().toISOString() }))) });
       if (!w.ok) throw new Error(`account_history ${w.status} ${(await w.text()).slice(0, 160)}`);
     }
     chartRows = built;
     checkSummary = [{ history_days: built.length, from: built[0]?.day ?? null, to: built.at(-1)?.day ?? null }];
     await fetch(`${URL_}/rest/v1/sync_heartbeat?on_conflict=feed`, {
       method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify([{ feed: 'account-history', ran_at: new Date().toISOString(), rows_written: built.length,
+      body: JSON.stringify([{ feed: feedOf('account-history', bookId), ran_at: new Date().toISOString(), rows_written: built.length,
         detail: `${built.length} days to ${built.at(-1)?.day ?? 'none'}` }]) });
   }
   /* Today's point, live until IBKR's statement replaces it next morning. */
@@ -2794,7 +2812,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     get('crash_universe?select=ticker'),
     get('crash_scans?order=day.desc&limit=3&select=day,scanned_at,universe,crashes'),
     get(`crash_events?day=gte.${addDays(today, -14)}&order=day.desc,drop_pct.asc&select=ticker,day,prev_close,close,drop_pct,entry_day,day2_close,day2_pct`),
-    get('crash_events?taken=eq.true&select=ticker,entry_day&order=entry_day.desc'),
+    get(`crash_events?taken=eq.true&book_id=eq.${bookId}&select=ticker,entry_day&order=entry_day.desc`),
   ]);
   const aftershock = {
     universe: aUni.length,
@@ -2979,8 +2997,11 @@ async function hasViewer(book: string): Promise<boolean> {
 
 Deno.serve(async (req) => {
   if (req.method !== 'OPTIONS' && !(await callerOk(req, false))) return refused();
-  let body: { passes?: number; mode?: 'theta_check' | 'history' | 'last_week'; dry?: boolean; price?: string } = {};
+  let body: { passes?: number; mode?: 'theta_check' | 'history' | 'last_week'; dry?: boolean; price?: string; book?: string } = {};
   try { if (req.method === 'POST') body = await req.json(); } catch { /* cron sends {} */ }
+  /* One book per call: the cron sends nothing for book S and {"book":"N"} for the cousin's (sunny-home-N). */
+  const book = body.book ?? 'S';
+  if (!BOOKS[book]) return new Response(JSON.stringify({ ok: false, error: `no book ${book}` }), { status: 400, headers: { 'Content-Type': 'application/json' } });
   try {
     const n = ny();
     /* Every 30 s while the index futures trade too (Sunday 18:00 to Friday 17:00, less 17:00-18:00):
@@ -2995,7 +3016,7 @@ Deno.serve(async (req) => {
     const regular = live && n.mins >= 9 * 60 + 30 && n.mins < 16 * 60;
     const passes = body.mode ? 1 : body.passes ?? (regular ? 4 : live ? 2 : (n.mins % 10 === 0 ? 1 : 0));
     const out: Row[] = [];
-    const strip = passes > 0 && await hasViewer('S');
+    const strip = passes > 0 && await hasViewer(book);
     for (let i = 0; i < passes; i++) {
       /* mp-refresh writes on its pass and takes 2-4 s; build just after. */
       if (live && !body.passes && !body.mode) {
@@ -3003,18 +3024,18 @@ Deno.serve(async (req) => {
         const wait = (at - (Date.now() % 60_000) + 60_000) % 60_000;
         if (wait < (passes === 4 ? 16_000 : 40_000)) await new Promise((r) => setTimeout(r, wait));
       }
-      const { payload, ms, steps } = await build(body.mode ?? 'tick', { dry: body.dry, price: body.price });
+      const { payload, ms, steps } = await build(body.mode ?? 'tick', { dry: body.dry, price: body.price, book });
       const { open, owner } = forOwners(payload);
       /* The owners' part first, so a phone that reads between the two writes never lays an older plan
          over a newer snapshot for long; both carry built_at. */
       const wt = await fetch(`${URL_}/rest/v1/home_todo?on_conflict=book_id`, {
         method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify([{ book_id: 'S', payload: owner, built_at: payload.built_at, build: BUILD }]),
+        body: JSON.stringify([{ book_id: book, payload: owner, built_at: payload.built_at, build: BUILD }]),
       });
       if (!wt.ok) throw new Error(`home_todo ${wt.status} ${(await wt.text()).slice(0, 160)}`);
       const w = await fetch(`${URL_}/rest/v1/home_snapshot?on_conflict=id`, {
         method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify([{ id: 1, payload: strip ? open : payload, built_at: payload.built_at, build: BUILD, ms }]),
+        body: JSON.stringify([{ id: BOOKS[book].id, book_id: book, payload: strip ? open : payload, built_at: payload.built_at, build: BUILD, ms }]),
       });
       if (!w.ok) throw new Error(`home_snapshot ${w.status} ${(await w.text()).slice(0, 160)}`);
       out.push({ ms, steps, legs: (payload.legs as unknown[]).length, value: (payload.account as Row).value ?? null });
@@ -3022,7 +3043,7 @@ Deno.serve(async (req) => {
     if (out.length) {
       await fetch(`${URL_}/rest/v1/sync_heartbeat?on_conflict=feed`, {
         method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify([{ feed: 'sunny-home', ran_at: new Date().toISOString(), rows_written: out.length,
+        body: JSON.stringify([{ feed: feedOf('sunny-home', book), ran_at: new Date().toISOString(), rows_written: out.length,
           detail: out.map((o) => `${o.ms}ms`).join(' / ') }]),
       });
     }

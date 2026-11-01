@@ -2,8 +2,8 @@
 //  HomeModels.swift
 //  Sunny
 //
-//  The Home payload, as `sunny-home` builds it into `home_snapshot` (one row,
-//  rebuilt every 30 s). Snake-case keys decode with .convertFromSnakeCase;
+//  The Home payload, as `sunny-home` builds it into `home_snapshot` (one row
+//  per book, rebuilt every 30 s). Snake-case keys decode with .convertFromSnakeCase;
 //  anything the app does not use yet is simply not declared. Grows block by
 //  block.
 //
@@ -36,7 +36,8 @@ struct HomePayload: Decodable {
     let yield: [YieldWeek]
     let history: History
     let risk: Risk
-    let payback: Payback
+    /// Nil for a book with no LEAPs (nothing to pay back; book N while it is all cash, 31 Oct 2026).
+    let payback: Payback?
     let soldVsBought: SoldVsBought
     let performance: Performance
     let allocation: Allocation
@@ -518,7 +519,8 @@ struct History: Decodable {
     let theta: Series
     let delta: Series
     struct Series: Decodable {
-        let avg2w: [Double]
+        /// Nil on a day with nothing to average (a book with no options).
+        let avg2w: [Double?]
         let now: Double?
         let trend: String?
         /// Delta only: the hedge puts' delta each day (16 Oct 2026).

@@ -49,8 +49,8 @@ struct SunnyMountain: View {
     private var BOT: CGFloat { kind == .theta ? 172 : 174 }
 
     private var V: [Double] {
-        kind == .theta ? home.history.theta.avg2w
-                       : (home.history.delta.netPct?.map { $0 ?? 0 } ?? home.history.delta.avg2w)
+        kind == .theta ? home.history.theta.avg2w.map { $0 ?? 0 }
+                       : (home.history.delta.netPct?.map { $0 ?? 0 } ?? home.history.delta.avg2w.map { $0 ?? 0 })
     }
     /// The Theta warning line. 3×, not the design's 2× (Nik, 13 Oct 2026: the
     /// backtest had 2× firing on under 1% of weeks; below 3× most months lost).

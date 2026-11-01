@@ -211,7 +211,10 @@ struct HomeView: View {
 
                     SunnySectionTitle(title: "Income").id(HomeRouter.Section.income)
                     SunnyYield(home: home, words: words).padding(.horizontal, S.margin).id("yield")
-                    SunnyPayback(home: home, words: words).padding(.horizontal, S.margin).id("payback")
+                    // No LEAPs, nothing to pay back: no card (a book that is all cash, 31 Oct 2026).
+                    if home.payback != nil && words.payback != nil {
+                        SunnyPayback(home: home, words: words).padding(.horizontal, S.margin).id("payback")
+                    }
 
                     SunnySectionTitle(title: "Results").id(HomeRouter.Section.results)
                     SunnySoldBought(home: home).padding(.horizontal, S.margin).id("svb")

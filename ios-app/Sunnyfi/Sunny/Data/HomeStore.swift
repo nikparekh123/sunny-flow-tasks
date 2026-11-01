@@ -2,7 +2,8 @@
 //  HomeStore.swift
 //  Sunny
 //
-//  Reads the one Home row and keeps it live (block 25, Refresh):
+//  Reads the Home row of the login's book (one per book since 31 Oct 2026)
+//  and keeps it live (block 25, Refresh):
 //  · every 30 s while a session runs (4:00 to 20:00 New York, trading days),
 //    every 15 s from 9:30 to 16:00 (Nik, 14 Oct 2026), each fetch timed just
 //    after the server's rebuild; closed, nothing ticks and the numbers are the
@@ -52,6 +53,8 @@ final class HomeStore {
     private(set) var loadError: String?
 
     private var inFlight: Task<Void, Never>?
+    /// The book this login's Home shows, looked up once per login (31 Oct 2026).
+    private var book: (user: UUID, id: String)?
     private var lastAttemptFailedOffline = false
     private let path = NWPathMonitor()
 
@@ -103,7 +106,7 @@ final class HomeStore {
 
     private func fetch(_ reason: Reason) async {
         do {
-            let data = try await Self.source()
+            let data = try await Self.source(book: try await bookID())
             #if DEBUG && targetEnvironment(simulator)
             let t0 = CFAbsoluteTimeGetCurrent()
             #endif
@@ -152,6 +155,23 @@ final class HomeStore {
         }
     }
 
+    /// ⚠ ONE HOME PER BOOK (31 Oct 2026): sunny-home writes a home_snapshot row per book, and RLS lets a login
+    /// read its own books' only. Nik's login owns book S; his cousin's is a viewer of book N. An owned book comes
+    /// first (the S|N switch picks between two later).
+    private func bookID() async throws -> String {
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-fixture") { return "S" }
+        #endif
+        let user = try await SupabaseService.client.auth.session.user.id
+        if let b = book, b.user == user { return b.id }
+        struct Member: Decodable { let book_id: String; let role: String }
+        let ms: [Member] = try await SupabaseService.client.from("book_members").select("book_id,role").execute().value
+        guard let m = ms.sorted(by: { ($0.role == "owner" ? 0 : 1, $0.book_id) < ($1.role == "owner" ? 0 : 1, $1.book_id) }).first
+        else { throw URLError(.userAuthenticationRequired) }
+        book = (user, m.book_id)
+        return m.book_id
+    }
+
     /// The row, or in a DEBUG simulator run with `-fixture <path>` a saved copy
     /// of it, so screens can be checked without signing in (`-fixtureTodo <path>`
     /// lays a saved home_todo read over it, as an owner's phone does).
@@ -159,7 +179,7 @@ final class HomeStore {
     /// ⚠ TO DO IS AN OWNER'S (31 Oct 2026): sunny-home keeps what to trade in
     /// `home_todo`, which RLS gives only to the book's owners, so a viewer's read
     /// comes back empty and their Home never carries an order.
-    private static func source() async throws -> Data {
+    private static func source(book: String) async throws -> Data {
         #if DEBUG && targetEnvironment(simulator)
         let a = ProcessInfo.processInfo.arguments
         if let i = a.firstIndex(of: "-fixture"), i + 1 < a.count {
@@ -169,11 +189,10 @@ final class HomeStore {
             return try await Task.detached(priority: .userInitiated) { try layOver(row: row, todo: todo) }.value
         }
         #endif
-        // Both at once: RLS returns the To do rows of the books this login owns, and the one for the
-        // snapshot's book is laid over it.
+        // Both at once: the book's snapshot, and its To do row, which RLS returns only to an owner.
         async let snap = SupabaseService.client.from("home_snapshot")
-            .select("payload,built_at,book_id").eq("id", value: 1).single().execute()
-        async let owned = SupabaseService.client.from("home_todo").select("book_id,payload").execute()
+            .select("payload,built_at,book_id").eq("book_id", value: book).single().execute()
+        async let owned = SupabaseService.client.from("home_todo").select("book_id,payload").eq("book_id", value: book).execute()
         let (row, todo) = try await (snap.data, owned.data)
         return try await Task.detached(priority: .userInitiated) { try layOver(row: row, todo: todo) }.value
     }

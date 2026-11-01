@@ -67,7 +67,7 @@ struct GalleryHost: View {
         case "yield":
             SunnyYield(home: home, words: words).padding(.horizontal, S.margin)
         case "payback":
-            SunnyPayback(home: home, words: words).padding(.horizontal, S.margin)
+            if home.payback != nil && words.payback != nil { SunnyPayback(home: home, words: words).padding(.horizontal, S.margin) }
         case "svb":
             SunnySoldBought(home: home).padding(.horizontal, S.margin)
         case "performance":

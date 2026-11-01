@@ -220,6 +220,7 @@ Deno.serve(async (req) => {
     { feed: 'macro-sync',           warnHours: 30,  critHours: 50 },
     { feed: 'dividends-sync',       warnHours: 30,  critHours: 50 },
     { feed: 'account-history',      warnHours: 30,  critHours: 50 },
+    { feed: 'account-history-N',    warnHours: 30,  critHours: 50 },   // book N's Home history (31 Oct 2026)
     // weekday only — the grace has to clear a weekend, and a long one
     { feed: 'ticker-iv-snapshot',   warnHours: 80,  critHours: 110 },
     { feed: 'theta-check',          warnHours: 80,  critHours: 110 },
@@ -267,6 +268,7 @@ Deno.serve(async (req) => {
   const LIVE: Array<{ feed: string; warnMin: number; critMin: number; offWarnMin?: number; offCritMin?: number }> = [
     { feed: 'market-tape', warnMin: 5, critMin: 15 },
     { feed: 'sunny-home',  warnMin: 5, critMin: 15, offWarnMin: 30, offCritMin: 60 },
+    { feed: 'sunny-home-N', warnMin: 5, critMin: 15, offWarnMin: 30, offCritMin: 60 },   // book N's Home (31 Oct 2026)
   ];
   for (const f of LIVE) {
     const code = `feed.${f.feed.replace(/-/g, '_')}_stale`;

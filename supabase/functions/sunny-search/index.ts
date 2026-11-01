@@ -598,7 +598,8 @@ async function recents(book: string, user: string | undefined): Promise<Row[]> {
 /** The questions that work, for suggestions while typing, filled in with the book's names; and the four Try chips. */
 function questions(c: Ctx, owner: boolean): Row {
   const names = bookNames(c);
-  const first = names.includes('NKE') ? 'NKE' : names[0] ?? 'BABA';
+  // A book with no names yet (book N while it is all cash) asks about the market, not someone else's name.
+  const first = names.includes('NKE') ? 'NKE' : names[0] ?? 'SPY';
   const all = [
     'What do I need to do today?', 'How much time value is left in what I sold?', 'Which calls are 80% captured?',
     'How much did I make this week?', 'What did I pay for each LEAPS?', 'What is a Ceiling?', 'What is the flip?',

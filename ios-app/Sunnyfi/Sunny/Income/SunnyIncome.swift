@@ -100,7 +100,7 @@ struct SunnyYield: View {
         let net = r(tot.sold) - r(tot.back) - r(tot.hg)
         let col = pick.flatMap { i in cs.first { $0.id == i } }
         let lastRow = shown.flatMap(\.rows).max { $0.fri < $1.fri }
-        let base = lastRow.map(Self.base) ?? home.payback.base ?? 0
+        let base = lastRow.map(Self.base) ?? home.payback?.base ?? 0
         let pace = yearPace(upTo: col?.last ?? Periods.thisFriday(home.today))
         // Scale: the tallest sale above the line, the deepest loss below, inside 116 pt.
         let all = cs.map { sums($0.rows) }
@@ -193,7 +193,8 @@ struct SunnyPayback: View {
                    open: p.open ?? (p.now.held ?? 0), closing: p.closing ?? 0, hedges: p.hedges ?? 0,
                    start: p.paceStart ?? p.paceMade ?? p.paceTv, last4: p.paceRecent, value: p.leapsValue ?? 0)
     }
-    private var pb: Payback { home.payback }
+    /// Shown only when both payloads have one (HomeView).
+    private var pb: Payback { home.payback! }
     private func dateIn(_ weeks: Int) -> String { MarketClock.addDays(home.today, weeks * 7).iso }
     /// "Aug 20, 2027"
     static func long(_ iso: String) -> String { "\(PF.monthDay(iso)), \(iso.prefix(4))" }
@@ -444,7 +445,7 @@ struct SunnyPayback: View {
     }
 
     private var insight: (lead: String, rest: String) {
-        let a = Self.all(words.payback)
+        let a = Self.all(words.payback!)
         guard a.base > 0 else { return ("Nothing to pay back yet.", "") }
         let lead = "\(F.moneyK(a.made)) made of \(F.moneyK(a.base)) in LEAPS."
         let rest = a.done ? "The LEAPs are paid for."
