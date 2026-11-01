@@ -10,7 +10,8 @@
  * ⚠ THE PAYLOAD IS NEVER RETURNED BY THIS FUNCTION. It is deployed with
  * verify_jwt = false (the scheduler sends an sb_secret key, not a JWT), so
  * anyone can call it; the account data only leaves through `home_snapshot`,
- * which RLS keeps to the signed-in app.
+ * which RLS keeps to the book's members, and To do through `home_todo`, which
+ * RLS keeps to the book's owners (31 Oct 2026, forOwners below).
  *
  * Sources: option_trades (paged), option_greeks_live, ticker_quotes_live,
  * market_live (Yahoo), account_value_daily / account_positions_daily (IBKR
@@ -20,7 +21,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours and
  * while the index futures trade, 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-31.1';
+const BUILD = '2026-10-31.2';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -2928,6 +2929,54 @@ async function callerOk(req: Request, users: boolean): Promise<boolean> {
 const refused = () => new Response(JSON.stringify({ ok: false, error: 'not allowed' }),
   { status: 401, headers: { 'Content-Type': 'application/json' } });
 
+/* ⚠ TO DO IS FOR OWNERS ONLY (Nik, 21 and 31 Oct 2026: his cousin views book N and must not see it).
+   Everything that says what to trade leaves `home_snapshot`, which every member of the book reads, for
+   `home_todo`, which RLS keeps to the book's owners: the To do face (this_week, todo, ways, plan), the
+   Insights verdict, chips, order counts and the hedge point that names a buy, the All page's verdict and
+   counts, and each name's write plan. The app (HomeStore.layOver) and sunny-search (lookups.ts layOver)
+   lay `owner` back over `open` (objects merge, anything else replaces, names matched by ticker), which
+   gives back this exact payload; a viewer's never carries an order. A new key that says what to trade
+   goes in here too. */
+const OWNER_TOP = ['this_week', 'todo', 'ways', 'plan'];
+const OWNER_NAME = ['plan', 'expected', 'calls', 'puts', 'written', 'delta', 'bar', 'split', 'thesis', 'read_rule'];
+const OWNER_V2 = ['verdict', 'chips', 'orders', 'acts'];
+/* A point or row that names an order: the thin hedge's "Buying N calls ... It is in To do." */
+const isOrder = (x: Row) => x.key === 'hedge' && (x.kind === 'thin' || x.tag === 'Watch');
+function forOwners(p: Row): { open: Row; owner: Row } {
+  const open: Row = { ...p }, top: Row = {}, names: Row = {};
+  for (const k of OWNER_TOP) if (k in open) { top[k] = open[k]; delete open[k]; }
+  if (p.insights_all) {
+    const { verdict: _v, todo: _t, ...rest } = p.insights_all as Row;
+    top.insights_all = p.insights_all;
+    open.insights_all = { ...rest, rows: ((rest.rows ?? []) as Row[]).filter((r) => !isOrder(r)).map(({ todo: _x, ...r }) => r) };
+  }
+  open.writes = { ...p.writes, names: ((p.writes?.names ?? []) as Row[]).map((n) => {
+    const o: Row = { ...n }, x: Row = {};
+    for (const k of OWNER_NAME) if (k in o) { x[k] = o[k]; delete o[k]; }
+    // The Walls screen tags the hedge calls held from `pkg.held`; the rest of the package is the Planner's.
+    if (o.pkg) { x.pkg = o.pkg; o.pkg = { held: o.pkg.held ?? [] }; }
+    const v2 = o.insights?.v2 as Row | undefined;
+    if (v2) {
+      const v: Row = { ...v2 }, xv: Row = {};
+      for (const k of OWNER_V2) if (k in v) { xv[k] = v[k]; delete v[k]; }
+      if (((v.points ?? []) as Row[]).some(isOrder)) { xv.points = v.points; v.points = (v.points as Row[]).filter((q) => !isOrder(q)); }
+      o.insights = { ...o.insights, v2: v };
+      x.insights = { v2: xv };
+    }
+    if (Object.keys(x).length) names[n.ticker] = x;
+    return o;
+  }) };
+  return { open, owner: { top, names } };
+}
+/* A book's snapshot loses its orders while the book has a viewer. Book S has only owners, so its row stays
+   whole for the phones on a build that reads home_snapshot alone (TestFlight 32 and older), which cannot read
+   a row without its orders; once those are gone this can strip every book. Unknown counts as a viewer. */
+async function hasViewer(book: string): Promise<boolean> {
+  const r = await fetch(`${URL_}/rest/v1/book_members?book_id=eq.${book}&role=neq.owner&select=user_id&limit=1`, { headers: H });
+  if (!r.ok) { await r.body?.cancel(); return true; }
+  return ((await r.json()) as Row[]).length > 0;
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'OPTIONS' && !(await callerOk(req, false))) return refused();
   let body: { passes?: number; mode?: 'theta_check' | 'history' | 'last_week'; dry?: boolean; price?: string } = {};
@@ -2946,6 +2995,7 @@ Deno.serve(async (req) => {
     const regular = live && n.mins >= 9 * 60 + 30 && n.mins < 16 * 60;
     const passes = body.mode ? 1 : body.passes ?? (regular ? 4 : live ? 2 : (n.mins % 10 === 0 ? 1 : 0));
     const out: Row[] = [];
+    const strip = passes > 0 && await hasViewer('S');
     for (let i = 0; i < passes; i++) {
       /* mp-refresh writes on its pass and takes 2-4 s; build just after. */
       if (live && !body.passes && !body.mode) {
@@ -2954,9 +3004,17 @@ Deno.serve(async (req) => {
         if (wait < (passes === 4 ? 16_000 : 40_000)) await new Promise((r) => setTimeout(r, wait));
       }
       const { payload, ms, steps } = await build(body.mode ?? 'tick', { dry: body.dry, price: body.price });
+      const { open, owner } = forOwners(payload);
+      /* The owners' part first, so a phone that reads between the two writes never lays an older plan
+         over a newer snapshot for long; both carry built_at. */
+      const wt = await fetch(`${URL_}/rest/v1/home_todo?on_conflict=book_id`, {
+        method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify([{ book_id: 'S', payload: owner, built_at: payload.built_at, build: BUILD }]),
+      });
+      if (!wt.ok) throw new Error(`home_todo ${wt.status} ${(await wt.text()).slice(0, 160)}`);
       const w = await fetch(`${URL_}/rest/v1/home_snapshot?on_conflict=id`, {
         method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify([{ id: 1, payload, built_at: payload.built_at, build: BUILD, ms }]),
+        body: JSON.stringify([{ id: 1, payload: strip ? open : payload, built_at: payload.built_at, build: BUILD, ms }]),
       });
       if (!w.ok) throw new Error(`home_snapshot ${w.status} ${(await w.text()).slice(0, 160)}`);
       out.push({ ms, steps, legs: (payload.legs as unknown[]).length, value: (payload.account as Row).value ?? null });

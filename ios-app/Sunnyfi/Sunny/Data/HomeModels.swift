@@ -64,6 +64,12 @@ struct HomePayload: Decodable {
     let daily: Lenient<[String: DailyCloses]>?
 }
 
+extension HomePayload {
+    /// To do is an owner's (31 Oct 2026): sunny-home keeps it in `home_todo`, which RLS gives only to the book's
+    /// owners, and HomeStore lays it over the snapshot. Without it no screen shows To do or points at it.
+    var seesTodo: Bool { plan != nil || thisWeek != nil || ways != nil }
+}
+
 /// One name's To do as two blocks (block 13c): Sell (next Friday's calls and puts) and Buy (the delta
 /// still needed; the quarterly's put walls as data). Every count is the server's, net of what IBKR shows.
 struct DailyCloses: Decodable, Hashable {
@@ -221,11 +227,12 @@ struct NameInsights: Decodable, Hashable {
     /// Handoff 32 (14d): the verdict, its chips, six tagged points in the design's order, and the long term.
     let v2: V2?
     struct V2: Decodable, Hashable {
-        let verdict: String
-        let chips: [Chip]
+        /// The verdict, its chips and the order count say what to trade: an owner's only (home_todo).
+        let verdict: String?
+        let chips: [Chip]?
         let points: [P]
         let longTerm: String?
-        let orders: Int
+        let orders: Int?
         struct Chip: Decodable, Hashable { let k: String; let v: String; let tone: String }
         struct P: Decodable, Hashable { let key: String; let kind: String; let tag: String; let lead: String; let body: String; let isNew: Bool? }
     }
@@ -245,14 +252,15 @@ struct FlowProfile: Decodable, Hashable {
 }
 
 /// Insights, the All page (14d): the verdict, the counts, what changed per name (most pressing first), the rest folded.
+/// The verdict, the To do count and each row's `todo` are an owner's (home_todo, 31 Oct 2026).
 struct InsightsAll: Decodable, Hashable {
-    let verdict: String
-    let todo: Int
+    let verdict: String?
+    let todo: Int?
     let watch: Int
     let quiet: Int
     let rows: [Row]
     let folded: [String]
-    struct Row: Decodable, Hashable { let t: String; let key: String; let tag: String; let lead: String; let body: String; let todo: Bool }
+    struct Row: Decodable, Hashable { let t: String; let key: String; let tag: String; let lead: String; let body: String; let todo: Bool? }
 }
 
 /// Aftershock: the universe, the last scans and the last two weeks of crashes,
@@ -422,15 +430,17 @@ struct Writes: Decodable {
         let expiry: String
         let spot: Double?
         let sd: Double?
-        let plan: [Plan]
-        let expected: Double
+        /// The write plan (plan, expected, calls, puts, written, delta, bar) and the package's suggestions are
+        /// an owner's (home_todo, 31 Oct 2026): a viewer's payload has none of them.
+        let plan: [Plan]?
+        let expected: Double?
         let already: [Already]
         let collected: Double
-        let calls: Count
-        let puts: PutCount
-        let written: Bool
-        let delta: Delta
-        let bar: Bar
+        let calls: Count?
+        let puts: PutCount?
+        let written: Bool?
+        let delta: Delta?
+        let bar: Bar?
         let earnings: Earn?
         /// The Planner (block 14b): LEAPs held, and the next report even when
         /// it falls after the expiry.
@@ -450,16 +460,17 @@ struct Writes: Decodable {
         let thesis: Lenient<ReadRule>?
         struct Pkg: Decodable {
             /// LEAP shares (contracts × 100): the denominator of every %.
-            let base: Double
+            let base: Double?
             /// 10 the week the name reports (every band edge moves up), else 0.
-            let e: Double
-            let now: Double
-            let nowPct: Double
+            let e: Double?
+            let now: Double?
+            let nowPct: Double?
+            /// What is held: a viewer gets this alone (the rest is the Planner's, an owner's).
             let held: [Held]
-            let sug: [Sug]
-            let fix: [Sug]
-            let after0: Double
-            let after0Pct: Double
+            let sug: [Sug]?
+            let fix: [Sug]?
+            let after0: Double?
+            let after0Pct: Double?
             let leapValue: Double?
             let budget: Double?
             let w: Double?

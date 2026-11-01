@@ -153,17 +153,53 @@ final class HomeStore {
     }
 
     /// The row, or in a DEBUG simulator run with `-fixture <path>` a saved copy
-    /// of it, so screens can be checked without signing in.
+    /// of it, so screens can be checked without signing in (`-fixtureTodo <path>`
+    /// lays a saved home_todo read over it, as an owner's phone does).
+    ///
+    /// ⚠ TO DO IS AN OWNER'S (31 Oct 2026): sunny-home keeps what to trade in
+    /// `home_todo`, which RLS gives only to the book's owners, so a viewer's read
+    /// comes back empty and their Home never carries an order.
     private static func source() async throws -> Data {
         #if DEBUG && targetEnvironment(simulator)
         let a = ProcessInfo.processInfo.arguments
         if let i = a.firstIndex(of: "-fixture"), i + 1 < a.count {
-            return try Data(contentsOf: URL(fileURLWithPath: a[i + 1]))
+            let row = try Data(contentsOf: URL(fileURLWithPath: a[i + 1]))
+            guard let j = a.firstIndex(of: "-fixtureTodo"), j + 1 < a.count else { return row }
+            let todo = try Data(contentsOf: URL(fileURLWithPath: a[j + 1]))
+            return try await Task.detached(priority: .userInitiated) { try layOver(row: row, todo: todo) }.value
         }
         #endif
-        let res = try await SupabaseService.client.from("home_snapshot")
-            .select("payload,built_at").eq("id", value: 1).single().execute()
-        return res.data
+        // Both at once: RLS returns the To do rows of the books this login owns, and the one for the
+        // snapshot's book is laid over it.
+        async let snap = SupabaseService.client.from("home_snapshot")
+            .select("payload,built_at,book_id").eq("id", value: 1).single().execute()
+        async let owned = SupabaseService.client.from("home_todo").select("book_id,payload").execute()
+        let (row, todo) = try await (snap.data, owned.data)
+        return try await Task.detached(priority: .userInitiated) { try layOver(row: row, todo: todo) }.value
+    }
+
+    /// sunny-home's owner part laid over the snapshot row: objects merge, anything else replaces, names
+    /// matched by ticker (sunny-home `forOwners`, which this gives back exactly). No row for the snapshot's
+    /// book (a viewer, or an older server): the snapshot as is.
+    nonisolated static func layOver(row: Data, todo: Data) throws -> Data {
+        guard let rows = try JSONSerialization.jsonObject(with: todo) as? [[String: Any]], !rows.isEmpty,
+              var r = try JSONSerialization.jsonObject(with: row) as? [String: Any],
+              var p = r["payload"] as? [String: Any],
+              let o = rows.first(where: { ($0["book_id"] as? String) == (r["book_id"] as? String ?? "S") })?["payload"] as? [String: Any]
+        else { return row }
+        if let top = o["top"] as? [String: Any] { p = lay(p, top) as? [String: Any] ?? p }
+        if let names = o["names"] as? [String: Any], var w = p["writes"] as? [String: Any], let ns = w["names"] as? [[String: Any]] {
+            w["names"] = ns.map { n in (n["ticker"] as? String).flatMap { names[$0] }.map { lay(n, $0) } ?? n }
+            p["writes"] = w
+        }
+        r["payload"] = p
+        return try JSONSerialization.data(withJSONObject: r)
+    }
+
+    private nonisolated static func lay(_ a: Any, _ b: Any) -> Any {
+        guard var x = a as? [String: Any], let y = b as? [String: Any] else { return b }
+        for (k, v) in y { x[k] = x[k].map { lay($0, v) } ?? v }
+        return x
     }
 
     private struct Row: Decodable { let payload: HomePayload }

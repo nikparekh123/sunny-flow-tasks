@@ -130,11 +130,14 @@ struct SunnyInsightsTab: View {
     private func all(_ home: HomePayload, _ book: [PName]) -> some View {
         let a = home.insightsAll?.value
         return LazyVStack(alignment: .leading, spacing: 16) {
-            verdictCard(label: "This week · all names", text: a?.verdict ?? "Every name is on plan this week.") {
-                if let a {
-                    pill("\(a.todo) to do", tone: "todo")
-                    pill("\(a.watch) to watch", tone: "quiet")
-                    pill("\(a.quiet) quiet", tone: "good")
+            // The verdict and its To do count are an owner's (31 Oct 2026); a viewer starts at what changed.
+            if home.seesTodo {
+                verdictCard(label: "This week · all names", text: a?.verdict ?? "Every name is on plan this week.") {
+                    if let a {
+                        pill("\(a.todo ?? 0) to do", tone: "todo")
+                        pill("\(a.watch) to watch", tone: "quiet")
+                        pill("\(a.quiet) quiet", tone: "good")
+                    }
                 }
             }
             SCard {
@@ -148,7 +151,7 @@ struct SunnyInsightsTab: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack(spacing: 8) {
                                     HStack(spacing: 5) {
-                                        if r.todo { Circle().fill(S.orange).frame(width: 7, height: 7) }
+                                        if r.todo == true { Circle().fill(S.orange).frame(width: 7, height: 7) }
                                         Text(r.t).sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false)
                                     }
                                     .foregroundStyle(S.ink).padding(.horizontal, 9).frame(height: 26).background(Capsule().fill(S.track))
@@ -188,8 +191,10 @@ struct SunnyInsightsTab: View {
                 .sType(SType(size: 20, weight: 700, line: 24, tracking: 0), tabular: false)
                 .padding(.horizontal, S.margin)
             if let v = ins?.v2 {
-                verdictCard(label: "This week", text: v.verdict) {
-                    ForEach(v.chips, id: \.k) { c in pill("\(c.k): \(c.v)", tone: c.tone) }
+                if let verdict = v.verdict {
+                    verdictCard(label: "This week", text: verdict) {
+                        ForEach(v.chips ?? [], id: \.k) { c in pill("\(c.k): \(c.v)", tone: c.tone) }
+                    }
                 }
                 SCard {
                     VStack(alignment: .leading, spacing: 0) {
@@ -257,11 +262,13 @@ struct SunnyInsightsTab: View {
                 .padding(.horizontal, S.margin)
             }
             VStack(spacing: 10) {
-                Button { router.openCard(n.t, face: "todo") } label: {
-                    Text("Go to To do" + (n.todoN > 0 ? " · \(PWords.n(n.todoN, "order"))" : "")).sType(SType(size: 17, weight: 600, line: 22, tracking: 0), tabular: false)
-                        .foregroundStyle(S.paper).frame(maxWidth: .infinity).frame(height: 50).background(Capsule().fill(S.ink)).contentShape(Capsule())
+                if home.seesTodo {
+                    Button { router.openCard(n.t, face: "todo") } label: {
+                        Text("Go to To do" + (n.todoN > 0 ? " · \(PWords.n(n.todoN, "order"))" : "")).sType(SType(size: 17, weight: 600, line: 22, tracking: 0), tabular: false)
+                            .foregroundStyle(S.paper).frame(maxWidth: .infinity).frame(height: 50).background(Capsule().fill(S.ink)).contentShape(Capsule())
+                    }
+                    .buttonStyle(SPressStyle(scale: 0.97))
                 }
-                .buttonStyle(SPressStyle(scale: 0.97))
                 button("Open Planner") { router.openGamma(n.t, view: nil, wall: nil) }
             }
             .padding(.horizontal, S.margin)

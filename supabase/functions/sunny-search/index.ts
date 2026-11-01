@@ -21,11 +21,11 @@
  * member of a book (only that book; a member of two reads the one they own).
  */
 import Anthropic from 'npm:@anthropic-ai/sdk@1.3.0';
-import { caller, context, db, lookup, MENU, SB_KEY, SB_URL, type Ctx, type Row } from './lookups.ts';
+import { bookNames, caller, context, db, lookup, MENU, OWNER_ONLY, SB_KEY, SB_URL, type Ctx, type Row } from './lookups.ts';
 import { checkAnswer } from './check.ts';
 import { COUNTS, fmt, SLOT, Slots } from './slots.ts';
 
-const BUILD = '2026-10-30.10';
+const BUILD = '2026-10-31.1';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';
@@ -35,7 +35,7 @@ const client = new Anthropic();
 // ── The tools: the lookups, and the web ──────────────────────────────────────────────────────────────────
 
 const TOOLS: Row[] = [
-  ...MENU.map((m) => ({
+  ...MENU.map((m) => ({ owner: OWNER_ONLY.has(m.name),
     name: m.name,
     description: m.shows,
     input_schema: { type: 'object', properties: m.args ?? {}, required: m.required ?? [], additionalProperties: false },
@@ -43,6 +43,8 @@ const TOOLS: Row[] = [
   { type: 'web_search_20260209', name: 'web_search', max_uses: 3,
     user_location: { type: 'approximate', country: 'US', timezone: 'America/New_York' } },
 ];
+/* A viewer of a book is never offered the lookups that say what to trade (To do is for owners, 31 Oct 2026). */
+const toolsFor = (owner: boolean) => TOOLS.filter((x) => owner || !x.owner).map(({ owner: _o, ...x }) => x);
 
 const SYSTEM = `You are the search in Sunny, Nik's options app. Nik runs an income book: deep in-the-money LEAPS calls on a
 few names, a weekly call sold against each LEAPS at the money, hedge calls bought to stay delta positive up to +1.5 SD by
@@ -420,13 +422,14 @@ async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner
   const effort = test.effort ?? (deep ? 'medium' : 'low');
   const ran: Ran[] = [], sl = new Slots(), seen: Seen = { pages: new Map(), cited: [], searches: 0 };
   const usage = { input: 0, output: 0, cache_read: 0, cache_write: 0, web_searches: 0 };
-  const names = Object.keys(c.p.plan ?? {}).sort().join(', ');
+  const names = bookNames(c).join(', ');
   const now = new Date();
   const messages: Row[] = [
     // Earlier questions in this thread, as plain text: "and for BABA?" carries on from them.
     ...thread.flatMap((x) => [{ role: 'user', content: String(x.q ?? '') }, { role: 'assistant', content: String(x.a ?? '') }]),
     { role: 'user', content: `Today is ${c.today}, ${clock(now)} New York time; the market is ${marketOpen(now) ? 'open' : 'closed'}. ` +
       `Names in the book: ${names}. Watchlist: ${(c.p.watchlist ?? []).map((w: Row) => w.ticker).join(', ') || 'none'}.\n\n` +
+      (owner ? '' : 'This login views the book only: it has no To do, so never say what to buy, sell, roll or hedge.\n\n') +
       `${deep ? DEEP + '\n\n' : ''}${spoken ? SPOKEN + '\n\n' : ''}Question: ${question}` },
   ];
   let final: Row | null = null, built: ReturnType<typeof build> | null = null, stop = '', retried = false, firstMiss: string[] = [];
@@ -434,7 +437,7 @@ async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner
   const step = (e: { step: string; work: boolean }) => { steps++; emit({ ...e, work: e.work || steps >= 3 }); };
   for (let i = 0; i < MAX_STEPS; i++) {
     const req: Row = {
-      model, max_tokens: 16000, system: SYSTEM, tools: TOOLS, messages,
+      model, max_tokens: 16000, system: SYSTEM, tools: toolsFor(owner), messages,
       cache_control: { type: 'ephemeral' },
       // No answer format while it reads: with one, Haiku answered before looking anything up (27 Oct 2026).
       output_config: { effort },
@@ -593,8 +596,8 @@ async function recents(book: string, user: string | undefined): Promise<Row[]> {
 }
 
 /** The questions that work, for suggestions while typing, filled in with the book's names; and the four Try chips. */
-function questions(c: Ctx): Row {
-  const names = Object.keys(c.p.plan ?? {}).sort();
+function questions(c: Ctx, owner: boolean): Row {
+  const names = bookNames(c);
   const first = names.includes('NKE') ? 'NKE' : names[0] ?? 'BABA';
   const all = [
     'What do I need to do today?', 'How much time value is left in what I sold?', 'Which calls are 80% captured?',
@@ -608,7 +611,10 @@ function questions(c: Ctx): Row {
       `How’s ${t} doing this quarter?`, `Is ${t} in an uptrend?`, `Did ${t} cross its 50-day?`,
       `Is my ${t} delta safe if it moves 10%?`, `What does a 10% drop do to my ${t} delta?`]),
   ];
-  return { questions: all, tries: [`Give me an update on ${first}`, 'What’s the value of my calls sold?', 'What do I need to do today?', 'What’s my delta right now?'] };
+  // A viewer has no To do (31 Oct 2026): its question and Try chip go.
+  const todoQ = 'What do I need to do today?';
+  return { questions: owner ? all : all.filter((q) => q !== todoQ),
+    tries: [`Give me an update on ${first}`, 'What’s the value of my calls sold?', owner ? todoQ : 'Show me all my positions', 'What’s my delta right now?'] };
 }
 
 /** Suggestions in place of Recent (Nik, 28 Oct 2026): up to six questions picked from the book each time Search
@@ -617,9 +623,12 @@ function questions(c: Ctx): Row {
 async function suggest(c: Ctx, owner: boolean): Promise<Row[]> {
   const out: Row[] = [], seen = new Set<string>();
   const add = (q: string, why: string, t?: string) => { if (out.length < 6 && !out.some((x) => x.q === q)) { out.push({ q, why }); if (t) seen.add(t); } };
-  const todo = (await lookup('todo', {}, c, owner).catch(() => null))?.data?.to_do ?? 0;
-  add('What do I need to do today?', todo ? `${todo} order${todo === 1 ? '' : 's'} in To do` : 'Nothing left in To do');
-  const plan = (c.p.plan ?? {}) as Record<string, Row>;
+  // To do and the rolls are an owner's (31 Oct 2026); a viewer's plan is empty, so no roll is suggested either.
+  if (owner) {
+    const todo = (await lookup('todo', {}, c, owner).catch(() => null))?.data?.to_do ?? 0;
+    add('What do I need to do today?', todo ? `${todo} order${todo === 1 ? '' : 's'} in To do` : 'Nothing left in To do');
+  }
+  const plan = (c.p.plan ?? {}) as Record<string, Row>, mineSet = new Set(bookNames(c));
   const short = Object.entries(plan).map(([t, p]) => ({ t, s: p.story })).filter((x) => x.s && !x.s.earnings && x.s.need > 0)
     .sort((a, b) => b.s.need - a.s.need).slice(0, 2);
   for (const { t, s } of short) add(`I want to roll my ${t} calls`, `About ${fmt(Math.round(s.need / 10) * 10, '#')} delta short by Thursday`, t);
@@ -632,7 +641,7 @@ async function suggest(c: Ctx, owner: boolean): Promise<Row[]> {
     add(reacted.has(t) ? `How did ${t} move after its last earnings?` : `Give me an update on ${t}`, `${t} reports ${day(d)}`, t);
   }
   const fresh = await db('research_numbers?topic=eq.fair_value&metric=eq.fair_value_average&checked_at=not.is.null&select=ticker,asof,source&order=asof.desc,created_at.desc&limit=20').catch(() => []);
-  const mine = fresh.filter((x) => plan[String(x.ticker)]);   // research on this book's names only
+  const mine = fresh.filter((x) => mineSet.has(String(x.ticker)));   // research on this book's names only
   const r = mine.find((x) => !seen.has(String(x.ticker))) ?? mine[0];
   if (r) add(`What’s ${r.ticker}’s fair value?`, `${r.source} report from ${day(String(r.asof))}`, String(r.ticker));
   add('What changed today?', 'Since the first read this morning');
@@ -646,7 +655,7 @@ const SAID: Record<string, string[]> = { BABA: ['Alibaba'], FIS: ['Fidelity Nati
   NKE: ['Nike'], PEP: ['PepsiCo', 'Pepsi'], UBER: ['Uber'], TSLA: ['Tesla'], APP: ['AppLovin'], INTU: ['Intuit'], ADBE: ['Adobe'],
   PYPL: ['PayPal'], VZ: ['Verizon'], TMUS: ['T-Mobile'], SPCX: ['SpaceX'] };
 function hints(c: Ctx): string[] {
-  const tickers = [...Object.keys(c.p.plan ?? {}), ...((c.p.watchlist ?? []) as Row[]).map((w) => String(w.ticker)), 'SPY', 'QQQ', 'IWM'];
+  const tickers = [...bookNames(c), ...((c.p.watchlist ?? []) as Row[]).map((w) => String(w.ticker)), 'SPY', 'QQQ', 'IWM'];
   return [...new Set([...tickers, ...tickers.flatMap((t) => SAID[t] ?? []), 'LEAPS', 'delta', 'gamma', 'theta', 'Ceiling', 'Floor',
     'Accelerator', 'flip', 'walls', 'To do', 'hedge calls', 'insurance puts', 'roll', 'strike', 'premium', 'time value', 'fair value',
     'Investing Pro', 'earnings', 'expiry', 'standard deviation'])];
@@ -672,9 +681,9 @@ Deno.serve(async (req) => {
       return json({ ok: true, build: BUILD, model: m.id });
     }
     if (body.recents) return json({ ok: true, build: BUILD, recents: await recents(book, who.user) });
-    const c = await context(book);
+    const c = await context(book, who.owner);
     if (Array.isArray(body.draws)) c.draws = body.draws.map(String).slice(0, 20);
-    if (body.questions) return json({ ok: true, build: BUILD, ...questions(c) });
+    if (body.questions) return json({ ok: true, build: BUILD, ...questions(c, who.owner) });
     if (typeof body.answer_for === 'string') {
       const rid = encodeURIComponent(body.answer_for.slice(0, 64));
       const who2 = who.user ? `user_id=eq.${who.user}` : 'user_id=is.null';

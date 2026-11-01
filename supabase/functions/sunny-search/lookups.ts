@@ -32,11 +32,31 @@ export async function caller(req: Request): Promise<{ book: string; owner: boole
 
 /** draws: the newer cards the phone says it can draw (build 32 on); an older build gets the sentence without them. */
 export interface Ctx { p: Row; at: string; book: string; today: string; draws?: string[] }
-export async function context(book: string): Promise<Ctx> {
-  const [s] = await db(`home_snapshot?book_id=eq.${book}&select=payload&limit=1`);
+/* ⚠ TO DO IS FOR OWNERS ONLY (31 Oct 2026). sunny-home keeps what to trade in `home_todo` (forOwners there);
+   an owner's Home is home_snapshot with it laid back over, a viewer's is home_snapshot alone. This reads with
+   the service key, so `owner` (caller's book_members role) is the gate, not RLS. */
+export async function context(book: string, owner = false): Promise<Ctx> {
+  const [[s], [o]] = await Promise.all([db(`home_snapshot?book_id=eq.${book}&select=payload&limit=1`),
+    owner ? db(`home_todo?book_id=eq.${book}&select=payload&limit=1`) : Promise.resolve([] as Row[])]);
   if (!s) throw new Error(`no Home data for book ${book}`);
-  return { p: s.payload, at: String(s.payload.built_at), book, today: String(s.payload.today) };
+  const p = o ? merged(s.payload, o.payload) : s.payload;
+  return { p, at: String(p.built_at), book, today: String(p.today) };
 }
+/* sunny-home's owner part laid over the snapshot: objects merge, anything else replaces, names by ticker
+   (the same rule as the app's HomeStore.layOver). */
+function layOver(a: unknown, b: unknown): unknown {
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) || Array.isArray(b)) return b;
+  const out: Row = { ...(a as Row) };
+  for (const [k, v] of Object.entries(b as Row)) out[k] = k in out ? layOver(out[k], v) : v;
+  return out;
+}
+function merged(open: Row, owner: Row): Row {
+  const p = layOver(open, owner.top ?? {}) as Row, names = (owner.names ?? {}) as Row;
+  if (p.writes?.names) p.writes = { ...p.writes, names: (p.writes.names as Row[]).map((n) => (names[n.ticker] ? layOver(n, names[n.ticker]) : n)) };
+  return p;
+}
+/** The lookups that say what to trade: an owner's only (a viewer is never offered them). */
+export const OWNER_ONLY = new Set(['todo', 'roll', 'hedges', 'put_gates']);
 const r2 = (x: number) => Math.round(x * 100) / 100;
 const num = (x: unknown) => (x == null || x === '' || !Number.isFinite(Number(x)) ? null : Number(x));
 const T = (t?: unknown) => (t ? String(t).trim().toUpperCase() : undefined);
@@ -48,7 +68,8 @@ const card = (type: string, tag: string, source: Row, data: unknown) => ({ type,
 const spotOf = (c: Ctx, t: string) =>
   num(c.p.portfolio?.find((x: Row) => x.ticker === t)?.spot) ?? num(c.p.legs?.find((l: Row) => l.ticker === t)?.underlying) ?? NaN;
 const nameRow = (c: Ctx, t: string): Row | undefined => c.p.writes?.names?.find((n: Row) => n.ticker === t);
-const bookNames = (c: Ctx) => Object.keys(c.p.plan ?? {}).sort();
+/** The book's names: the plan's for an owner, each open name's strategy for a viewer (the same names). */
+export const bookNames = (c: Ctx) => Object.keys(c.p.plan ?? c.p.strategies ?? {}).sort();
 function need(t: string | undefined, what: string): string {
   if (!t) throw new Error(`${what} needs a ticker`);
   return t;
@@ -161,7 +182,9 @@ function whatIf(c: Ctx, t: string, g: Row | undefined, ask: number | null) {
     T: yr(String(l.expiry)), v: (num(l.iv) ?? 0) > 0 ? Number(l.iv) : ivA }));
   const opt = (S: number, x: typeof lg[number]) => ({ p: bs(S, x.K, x.T * 365, x.v, x.cp), d: bsDelta(S, x.K, x.T, x.v, x.cp) });
   const o0 = lg.map((x) => opt(spot, x));
-  const sh = Number(c.p.plan?.[t]?.story?.shares ?? 0) || 0;
+  // Shares held: the plan's count, or for a viewer (no plan) the share value over the price.
+  const pf = c.p.portfolio?.find((x: Row) => x.ticker === t);
+  const sh = Number(c.p.plan?.[t]?.story?.shares ?? 0) || (num(pf?.share_value) && spot > 0 ? Math.round(Number(pf.share_value) / spot) : 0);
   const at = (m: number) => {
     const S = spot * (1 + m / 100);
     let b = sh, s = 0, pl = sh * (S - spot);
@@ -643,6 +666,7 @@ export const MENU: Row[] = [
 
 export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Promise<Row> {
   const t = T(a.ticker);
+  if (!owner && OWNER_ONLY.has(name)) throw new Error('This login views the book only; it has no To do.');
   switch (name) {
     case 'account': {
       const x = c.p.account ?? {};
@@ -665,7 +689,7 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
       return card('position', tagOf(k, 'Position'), sunny(c), {
         ticker: k, price: r2(spotOf(c, k)), day_pct: pf?.ranges?.d ?? null, strategy: c.p.strategies?.[k] ?? null,
         next_earnings: n?.next_earnings ?? null, flow: c.p.flow_profile?.[k]?.profile ?? null,
-        sold: soldRows(c, k), bought: boughtRows(c, k), orders: ordersFor(c, k),
+        sold: soldRows(c, k), bought: boughtRows(c, k), ...(owner ? { orders: ordersFor(c, k) } : {}),
         delta: c.p.risk?.delta?.by?.find((x: Row) => x.ticker === k) ?? null });
     }
     case 'sold': {
