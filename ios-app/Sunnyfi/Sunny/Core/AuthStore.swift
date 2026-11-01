@@ -7,6 +7,7 @@
 //  account (nik@sunnyfi.co). Standard Supabase email+password auth
 //  under the hood — no edge function needed. The session persists in
 //  Keychain so subsequent launches skip the sign-in screen.
+//  Since 31 Oct 2026 a second code opens book N's login (the cousin's).
 //
 //  See src/sunnyfi/lib/auth.ts in the web app for the canonical impl.
 //
@@ -25,6 +26,10 @@ final class AuthStore {
 
     /// Shared team account. Anyone with a valid 10-digit code signs in as this user.
     private static let sharedLoginEmail = "nik@sunnyfi.co"
+    /// Book N's login (31 Oct 2026): the cousin's own 10-digit code, on the same
+    /// screen. A viewer of book N only, so it never opens book S. A code is tried
+    /// here when it is not book S's; the database refuses the same code for both.
+    private static let bookNLoginEmail = "book-n@sunnyfi.co"
 
     var state: State = .loading
     var error: String?
@@ -64,14 +69,21 @@ final class AuthStore {
 
         isSigningIn = true
         defer { isSigningIn = false }
-        do {
-            _ = try await client.auth.signIn(email: Self.sharedLoginEmail, password: trimmed)
-            self.error = nil
-            // authStateChanges will push .signedIn
-        } catch {
-            print("[AuthStore] sign-in error: \(String(describing: error))")
-            self.error = Self.friendlyMessage(for: error)
+        var last: Error?
+        for email in [Self.sharedLoginEmail, Self.bookNLoginEmail] {
+            do {
+                _ = try await client.auth.signIn(email: email, password: trimmed)
+                self.error = nil
+                // authStateChanges will push .signedIn
+                return
+            } catch {
+                print("[AuthStore] sign-in error: \(String(describing: error))")
+                last = error
+                // Only a wrong code moves on to the next login; no network stops here.
+                guard Self.isWrongCode(error) else { break }
+            }
         }
+        if let last { self.error = Self.friendlyMessage(for: last) }
     }
 
     func signOut() async {
@@ -86,11 +98,13 @@ final class AuthStore {
 
     // MARK: - Errors
 
-    private static func friendlyMessage(for error: Error) -> String {
+    private static func isWrongCode(_ error: Error) -> Bool {
         let s = String(describing: error)
-        if s.contains("Invalid login credentials") || s.contains("invalid_credentials") {
-            return "Wrong code. Try again."
-        }
+        return s.contains("Invalid login credentials") || s.contains("invalid_credentials")
+    }
+
+    private static func friendlyMessage(for error: Error) -> String {
+        if isWrongCode(error) { return "Wrong code. Try again." }
         return error.localizedDescription
     }
 }
