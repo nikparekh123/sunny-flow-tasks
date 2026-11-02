@@ -22,7 +22,7 @@
  * while the index futures trade, 30 s apart, a quiet pass every 10 minutes otherwise;
  * the sunny-home-N cron sends {"book":"N"} for the cousin's book, BOOKS below).
  */
-const BUILD = '2026-10-31.3';
+const BUILD = '2026-11-02.1';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -32,6 +32,8 @@ const BUILD = '2026-10-31.3';
 const BOOKS: Record<string, { start: string; chart: string; id: number; accounts: number }> = {
   S: { start: '2026-08-31', chart: '2026-09-01', id: 1, accounts: 2 },   // PNL_GLOSSARY: the stock-replacement shift
   N: { start: '2026-10-29', chart: '2026-10-29', id: 2, accounts: 1 },
+  // The demo book (2 Nov 2026): made-up trades at real prices, no IBKR feed; its days come from demo_book_roll().
+  D: { start: '2026-10-29', chart: '2026-10-29', id: 3, accounts: 1 },
 };
 /* A book's heartbeat feed: book S keeps the old names, others add theirs (sunny-home-N). */
 const feedOf = (feed: string, book: string) => (book === 'S' ? feed : `${feed}-${book}`);
