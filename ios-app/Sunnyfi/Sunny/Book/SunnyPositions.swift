@@ -4,10 +4,11 @@
 //
 //  Blocks 12 and 13 (handoff 30, 22 Oct 2026) · the Position cards on the
 //  Positions tab: one glass card per name. The body swipes To do · Sold ·
-//  Bought · Δ Γ; one control above the cards, pinned under the title as you
-//  scroll, turns every card together, and a swipe on any card turns them all
-//  too (Nik, 2 Nov 2026: it was one control per card). To do comes first while the name has work and goes once IBKR shows the
-//  trades (nothing is ticked). The card is as tall as the face it is on and
+//  Bought · Δ Γ; one control above the cards turns every card together, and
+//  a swipe on any card turns them all too (Nik, 2 Nov 2026: it was one
+//  control per card; it scrolls with the page, not pinned). To do comes
+//  first while the name has work and goes once IBKR shows the trades
+//  (nothing is ticked); it lists only what is still to place. The card is as tall as the face it is on and
 //  blends between two faces mid-swipe (handoff 31). With ways (13c) the To do
 //  face is SunnyWays and the count badge is its number of trades. With the
 //  week's plan (handoff 32, 13e) the To do face is this week's orders
@@ -155,7 +156,7 @@ struct SunnyPositionCards: View {
     let home: HomePayload
     let names: [PName]
     /// Scrolls the page by this many points (the Positions tab's scroll): after a turn, the card you were on glides
-    /// to sit just under the control, so it reads from the top and the cards above changing height don't move it.
+    /// to the top of the screen, so it reads from the top and the cards above changing height don't move it.
     var glide: ((CGFloat) -> Void)? = nil
     @State private var seen = false
     /// The face every card is on (Nik, 2 Nov 2026: one control for all the cards, outside them).
@@ -175,7 +176,8 @@ struct SunnyPositionCards: View {
         // when all seven cards, four faces each, redrew every update; 26 Oct 2026).
         // Every face some card has, in the one order; each card carries them all, so a turn moves every card alike.
         let F = PFace.allCases.filter { f in names.contains { $0.has(f) } }
-        LazyVStack(alignment: .leading, spacing: 12, pinnedViews: [.sectionHeaders]) {
+        // The control scrolls with the page, not pinned (Nik, 2 Nov 2026: pinned "looks odd").
+        LazyVStack(alignment: .leading, spacing: 12) {
             Section {
                 ForEach(Array(names.enumerated()), id: \.element.id) { j, n in
                     PNameCard(n: n, faces: F, sw: sw, ringed: router.ring == n.t, width: width,
@@ -191,10 +193,6 @@ struct SunnyPositionCards: View {
                 if F.count > 1 {
                     PFaceTabs(faces: F.map(\.label), spoken: F.map(\.spoken), marks: F.map { f in PMark.sum(names.map { $0.mark(f) }) },
                               prog: sw.prog) { i in sw.select(F[i], in: F, reduce: reduce) }
-                        // Pinned over the cards as they scroll under it: a thick material behind the track keeps the
-                        // words readable over a card's text.
-                        .background(.thickMaterial, in: .capsule)
-                        .padding(.vertical, 4)
                         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .scrollView).maxY } action: { sw.bar = $0 }
                         .pEnter(seen || reduce, 0)
                 }
@@ -221,20 +219,23 @@ struct SunnyPositionCards: View {
         .onChange(of: keptOn) { _, on in if let f = on ? (F.contains(.sold) ? .sold : nil) : F.first { sw.select(f, in: F, reduce: reduce, haptic: false) } }
     }
 
-    /// The card a third of the way down the page under the control: the one being read.
+    /// The top of what shows of the page: under the control while it is on screen, else under the bars.
+    private var shownTop: CGFloat { max(sw.bar, 0) }
+
+    /// The card a third of the way down what shows: the one being read.
     private var reading: String? {
         let h = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.height ?? 852
-        let probe = sw.bar + (h - sw.bar) / 3
+        let probe = shownTop + (h - shownTop) / 3
         return names.first { (sw.frames[$0.t]?.maxY ?? -1) > probe && (sw.frames[$0.t]?.minY ?? .infinity) < h }?.t
     }
 
-    /// Once the faces have turned and the heights settled, scroll so the card's top sits just under the control. Not
-    /// when the control is still in its place under the totals and the card's top shows (nothing would move).
+    /// Once the faces have turned and the heights settled, scroll so the card's top sits 12 pt under the control, or
+    /// under the bars once the control has scrolled away. Not for the first card while its top shows (nothing moved).
     private func settle(on t: String, after s: Double) {
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(reduce ? 0.05 : s))
             guard let f = sw.frames[t] else { return }
-            let want = sw.bar + 12, d = f.minY - want
+            let want = shownTop + 12, d = f.minY - want
             if abs(d) < 1 || (t == names.first?.t && d > 0) { return }
             glide?(d)
         }

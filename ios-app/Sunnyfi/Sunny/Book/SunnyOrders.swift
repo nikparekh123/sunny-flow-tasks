@@ -210,17 +210,22 @@ struct POrdersFace: View {
     }
 
     var body: some View {
-        // Done orders leave the face (Nik, 2 Nov 2026): what is left is still to place, waiting, paused or skipped. A sale
+        // Only what is still to do (Nik, 2 Nov 2026): Done, Paused and Skipped orders and Watch this week are gone. A sale
         // marked placed or done for the week by hand keeps its Undo as one line at the foot.
         let all = POrders.build(t, p, legs: legs, dg: n.dg, earnings: earnings, placed: placed, done: done)
-        let os = all.filter { $0.status != .done }, done = all.filter { $0.status == .done }
-        // No counts or re-check line on top (Nik, 26 Oct 2026): the orders, Watch this week, the footer.
+        let os = all.filter { $0.status == .todo || $0.status == .waiting }, done = all.filter { $0.status == .done }
+        // No counts or re-check line on top (Nik, 26 Oct 2026): the orders, the footer.
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(os.enumerated()), id: \.element.id) { i, o in box(o, number: o.status == .todo || o.status == .waiting ? i + 1 : nil) }
-            watch()
+            if os.isEmpty {
+                Text("Nothing to do this week").sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
+                    .foregroundStyle(S.muted)
+            }
+            ForEach(Array(os.enumerated()), id: \.element.id) { i, o in box(o, number: i + 1) }
             if let u = done.first(where: { $0.undo || $0.unfinish }) { undoLine(done.count, u) }
-            Text("Orders clear on their own once IBKR shows the new position.")
-                .sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)
+            if !os.isEmpty {
+                Text("Orders clear on their own once IBKR shows the new position.")
+                    .sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
@@ -404,36 +409,6 @@ struct POrdersFace: View {
         }
         .padding(14).frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(S.surface))
-    }
-
-    // MARK: Watch this week
-
-    private func watch() -> some View {
-        var rows: [(String, String)] = []
-        let spot = n.px
-        if let a = p.recheck.above, let w = p.walls?.first(where: { $0.side == "call" && abs($0.k - a) < 1e-6 }) {
-            rows.append((PF.strike(a), "Call wall, \(GammaText.vs(a, spot)). " + (w.label == "ceiling" ? "A close over it means the Ceiling broke." : w.label == "accelerator" ? "A rally can speed up through it." : "No clear read.")))
-        }
-        if let b = p.recheck.below, let w = p.walls?.first(where: { $0.side == "put" && abs($0.k - b) < 1e-6 }) {
-            rows.append((PF.strike(b), "\(POrders.rank(w.rank)) put wall, \(GammaText.vs(b, spot)). " + (w.label == "accelerator" ? "Drops can speed up under it." : w.label == "floor" ? "Drops should slow there." : "No clear read.")))
-        }
-        if let th = n.dg?.thin25 { rows.append(("+\(F.trim(th))%", "Where your delta turns thin" + ((p.hedge?.add ?? 0) > 0 ? " until the hedge is added." : "."))) }
-        if let e = earnings { rows.append((PF.monthDay(e), "Earnings. No weeklies that week.")) }
-        return Group {
-            if !rows.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Watch this week").sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                    ForEach(rows, id: \.0) { r in
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text(r.0).sType(SType(size: 13, weight: 700, line: 18, tracking: 0)).foregroundStyle(S.ink).frame(width: 56, alignment: .leading)
-                            Text(r.1).sType(SType(size: 13, weight: 500, line: 18, tracking: 0)).foregroundStyle(S.ink).fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-                .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(S.line, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-            }
-        }
     }
 }
 
