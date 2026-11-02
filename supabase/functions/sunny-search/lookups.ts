@@ -443,6 +443,21 @@ function rsiOf(c: number[], n = 14): number | null {
 const pct1 = (a: number, b: number) => r2((a / b - 1) * 100);
 const dayMon = (iso: string) => { const d = new Date(iso + 'T12:00:00Z'); return `${d.getUTCDate()} ${d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })}`; };
 
+/** A name's daily closes, oldest first: Polygon's bars (ticker_bars), less any bar for a day that had not closed when it
+    was fetched, then Sunny's own saved close (daily_closes) for a later day the bars do not have yet. 1 Nov 2026:
+    Polygon's bar for a day arrives the next morning, so over a weekend the bars stopped at Thursday and the chart's last
+    close was a day old. */
+async function closesOf(t: string): Promise<{ d: string; c: number }[]> {
+  const [[bar], saved] = await Promise.all([db(`ticker_bars?ticker=eq.${t}&select=bars,fetched_at`),
+    db(`daily_closes?ticker=eq.${t}&select=date,close_price&order=date.desc&limit=10`).catch(() => [] as Row[])]);
+  if (!bar?.bars?.length) throw new Error(`no daily prices for ${t} yet`);
+  const got = Date.parse(String(bar.fetched_at));
+  const days = (bar.bars as number[][]).map((b) => ({ d: nyDate(b[0]), c: Number(b[4]) })).filter((x) => !(nyMs(x.d, '16:00') > got));
+  const last = days.at(-1)?.d ?? '';
+  for (const r of [...saved].reverse()) if (String(r.date) > last && Number(r.close_price) > 0) days.push({ d: String(r.date), c: Number(r.close_price) });
+  return days;
+}
+
 async function priceChart(c: Ctx, t: string, range: string, mark: string | null) {
   const now = Date.now(), today = nyDate(now), spot = spotOf(c, t);
   if (!Number.isFinite(spot) || !bookNames(c).includes(t)) throw new Error(`${t} is not in the book; the price chart covers the book's names for now`);
@@ -455,8 +470,8 @@ async function priceChart(c: Ctx, t: string, range: string, mark: string | null)
   });
   const gday = week.findIndex((w) => w.d === today), started = gday >= 0 && !week[gday].closed && now >= week[gday].open;
 
-  const [[bar], gv, quotes, res] = await Promise.all([
-    db(`ticker_bars?ticker=eq.${t}&select=bars`),
+  const [hist, gv, quotes, res] = await Promise.all([
+    closesOf(t),
     db(`gamma_view_day?view=eq.weeklies&ticker=eq.${t}&select=day,walls:data->walls&order=day.desc&limit=1`).catch(() => [] as Row[]),
     // A quote every 15 s or so: each open day in two halves, so no read reaches PostgREST's 1,000 rows.
     Promise.all(week.filter((w) => !w.closed && w.open <= now).flatMap((w) => {
@@ -466,10 +481,8 @@ async function priceChart(c: Ctx, t: string, range: string, mark: string | null)
     })).then((x) => x.flat()),
     researchFigures(t, ['fair_value']).catch(() => null),
   ]);
-  if (!bar?.bars?.length) throw new Error(`no daily prices for ${t} yet`);
-
   // Daily closes, today's price as today's close once the session has started.
-  const days: { d: string; c: number }[] = (bar.bars as number[][]).map((b) => ({ d: nyDate(b[0]), c: Number(b[4]) })).filter((x) => x.d < today);
+  const days = hist.filter((x) => x.d < today);
   if (started) days.push({ d: today, c: spot });
   const cs = days.map((x) => x.c), n = cs.length, px = r4(cs[n - 1]);
   const ma50 = smaOf(cs, 50), ma200 = smaOf(cs, 200), rsi = rsiOf(cs);
@@ -615,6 +628,116 @@ async function bookChart(c: Ctx, range: string, view: string) {
   return { ...card('book', tagOf(undefined, `Your book · ${xs.length} names`), sunny(c), data), chart };
 }
 
+// ── Technicals, and the payoff's names and Also helps (blocks 29 and 30, handoffs Oct 30 and Oct 31 2026) ──────
+
+/* Technicals: a name's averages, RSI and 52-week range from its daily closes alone (the last close, never the live
+   price), so a tile under the payoff and the card it opens show the same number. Simple averages and Wilder's 14-day
+   RSI, the price chart's maths. Four widgets, the one asked first: 50-day, 200-day, RSI, 52-week, and the 20-day in the
+   50-day's place when it is the one asked. Every percent is cut to one place here, and the phone prints these. */
+const TECH = ['ma50', 'ma200', 'rsi', 'range'];
+const pctAbs1 = (d: number) => Math.round(Math.abs(d) * 1000) / 10;
+async function technicals(t: string, asked: string) {
+  const days = await closesOf(t), cs = days.map((x) => x.c), n = cs.length, px = cs[n - 1], last = days[n - 1].d;
+  const i0 = Math.max(0, n - 22);
+  const avg = (k: number) => {
+    const A = smaOf(cs, k), v = A[n - 1];
+    return v == null ? null : { v: r2(v), p: pctAbs1(px / v - 1), up: px >= v, c: cs.slice(i0).map(r4), a: A.slice(i0).map((x) => (x == null ? null : r4(x))) };
+  };
+  const ma: Record<string, ReturnType<typeof avg>> = { ma20: avg(20), ma50: avg(50), ma200: avg(200) }, rsi = rsiOf(cs);
+  const y0 = Math.max(0, days.findIndex((x) => x.d >= addMonths(last, -12)));
+  const yr = cs.slice(y0), hi = Math.max(...yr), lo = Math.min(...yr), under = Math.round((1 - px / hi) * 100);
+  const first = ['ma20', 'ma50', 'ma200', 'rsi', 'range'].includes(asked) ? asked : 'ma50';
+  const order = [first, ...TECH.filter((k) => k !== first && !(first === 'ma20' && k === 'ma50'))].slice(0, 4);
+  const reads = rsi == null ? null : rsi > 70 ? 'overbought' : rsi < 30 ? 'oversold' : 'neutral';
+  const at = `${WDAY[new Date(last + 'T12:00:00Z').getUTCDay()]} close`;
+  const data = {
+    units: `From daily closes only: the last close (${monDay(last)}), never the live price. Percents are already percents; ` +
+      'price_vs says whether the price sits above or below the average.',
+    ticker: t, close: r2(px), close_day: last, asked: first,
+    ...Object.fromEntries(Object.entries(ma).filter(([, x]) => x).flatMap(([k, x]) => [[k, x!.v], [`price_vs_${k}`, x!.up ? 'above' : 'below'],
+      [`price_from_${k}_pct`, x!.p]])),
+    rsi14: rsi == null ? null : Math.round(rsi), rsi_reads: reads,
+    high_52w: r2(hi), low_52w: r2(lo), under_the_high_pct: under,
+  };
+  const chart = { t, at, order, n, px: r2(px), ma,
+    rsi: rsi == null ? null : { v: Math.round(rsi), x: r2(rsi), reads },
+    range: { under, lo: r2(lo), hi: r2(hi), x: hi > lo ? r4((px - lo) / (hi - lo)) : 0.5 } };
+  return { ...card('technicals', tagOf(t, 'Technicals'), { kind: 'close', at: last }, data), chart };
+}
+
+/** The next monthly expiry after a day: the third Friday of that month or the next, the Thursday before when the
+    market is shut that Friday. */
+function monthlyAfter(c: Ctx, after: string): string {
+  const cal = (c.p.calendar ?? []) as Row[], d = new Date(after + 'T12:00:00Z');
+  for (let i = 0; i < 3; i++) {
+    const first = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + i, 1, 12)), iso = first.toISOString().slice(0, 10);
+    const third = addDays(iso, (5 - first.getUTCDay() + 7) % 7 + 14);
+    const e = cal.some((x) => x.date === third && x.kind === 'closed') ? addDays(third, -1) : third;
+    if (e > after) return e;
+  }
+  return addDays(after, 28);
+}
+
+/** The first weekly expiry that closes after a report: on or after the day for a report before the open, after it
+    otherwise; the Thursday before when the market is shut that Friday. */
+function expiryAfter(c: Ctx, day: string, time: string | null): string {
+  const cal = (c.p.calendar ?? []) as Row[];
+  let f = fridayFrom(day);
+  for (let i = 0; i < 4; i++, f = addDays(f, 7)) {
+    const e = cal.some((x) => x.date === f && x.kind === 'closed') ? addDays(f, -1) : f;
+    if (time === 'bmo' ? e >= day : e > day) return e;
+  }
+  return f;
+}
+
+/** A day so many sessions on (weekdays), for "ready Nov 12". */
+const sessionsOn = (iso: string, k: number) => { let d = iso; while (k > 0) { d = addDays(d, 1); const w = new Date(d + 'T12:00:00Z').getUTCDay(); if (w && w < 6) k--; } return d; };
+/** How the questions name a company: Nike by name, as the design asks it, every other name by its ticker. */
+const said = (t: string) => (t === 'NKE' ? 'Nike' : t);
+
+/* Under a one-name payoff (block 30): every book name as a logo, in book order, each with its delta state (the What if
+   model: Thin is net delta under 25% of long, Short under zero), and four tiles with what the payoff cannot show. Each
+   tile carries the question it asks and its answer id, so the answer never depends on reading words. Read from the
+   same snapshot as the payoff; a tile with no data shows dashed with why. Asked, 1 Nov 2026: the monthly tile is the
+   next monthly's own walls (its Ceiling, or the first call wall under its own label when none reads as a Ceiling). */
+export async function moreFor(c: Ctx, t: string, weekCeiling: number | null): Promise<Row> {
+  const fri = fridayOf(c, Date.now()).day, mo = monthlyAfter(c, fri), md = monDay(mo), n = said(t);
+  const [tech, res, [gm]] = await Promise.all([
+    technicals(t, 'ma50').catch(() => null),
+    researchFigures(t, ['fair_value']).catch(() => null),
+    db(`gamma_view_day?ticker=eq.${t}&view=eq.${mo}&select=day,walls:data->walls&order=day.desc&limit=1`).catch(() => [] as Row[]),
+  ]);
+  const dashed = (k: string, l: string, d: string) => ({ k, l, v: 'Not yet', d, tone: null, pend: true });
+  const ch = tech?.chart, last = (tech?.data as Row | undefined)?.close_day as string | undefined;
+  const ready = (k: number) => (last && ch ? `Saving closes · ready ${monDay(sessionsOn(last, Math.max(1, k - ch.n)))}` : 'Saving closes');
+  const m50 = ch?.ma.ma50;
+  const tiles: Row[] = [
+    m50 ? { k: 'ma50', l: '50-day', v: m50.v.toFixed(2), d: `Price ${m50.p.toFixed(1)}% ${m50.up ? 'above' : 'below'}`, tone: m50.up ? 'up' : 'down',
+      id: `tech:${t}:ma50`, q: `What’s ${n}’s 50-day?` } : dashed('ma50', '50-day', ready(50)),
+  ];
+  const an = num(res?.rows.find((r) => r.metric === 'analyst_target')?.value), spot = spotOf(c, t);
+  if (an != null && spot > 0) {
+    const d = an / spot - 1;
+    tiles.push({ k: 'an', l: 'Analysts', v: `$${an.toFixed(2)}`, d: `${pctAbs1(d).toFixed(1)}% ${d >= 0 ? 'above' : 'below'} today`,
+      tone: Math.abs(d) < 0.05 ? null : d > 0 ? 'up' : 'down', id: `an:${t}`, q: `What do analysts say about ${n}?` });
+  } else tiles.push(dashed('an', 'Analysts', `No research for ${n} yet`));
+  tiles.push(ch && ch.n >= 252 ? { k: 'range', l: '52-week', v: `${ch.range.under}%`, d: `under the high · ${ch.range.lo.toFixed(2)} to ${ch.range.hi.toFixed(2)}`,
+    tone: 'muted', id: `tech:${t}:range`, q: `What’s ${n}’s 52-week range?` } : dashed('range', '52-week', ready(252)));
+  const ws = ((gm?.walls ?? []) as Row[]).filter((w) => w.side === 'call'), lab = (w: Row) => String(w.label ?? '').toLowerCase();
+  const rk = (a: Row, b: Row) => (a.rank ?? 9) - (b.rank ?? 9);
+  const top = ws.filter((w) => lab(w) === 'ceiling').sort(rk)[0] ?? ws.sort(rk)[0];
+  const word = !top ? 'Ceiling' : lab(top) === 'ceiling' ? 'Ceiling' : lab(top) === 'accelerator' ? 'Accelerator' : 'call wall';
+  tiles.push(top ? { k: 'month', l: `${md} ${word}`, v: kf(Number(top.k)),
+    d: weekCeiling != null && Number(top.k) === weekCeiling ? 'Same as this Friday' : 'The monthly, past this Friday', tone: 'muted',
+    id: `walls:${t}:${mo}`, q: `${t}’s walls on ${md}` } : dashed('month', `${md} Ceiling`, `No ${md} walls saved yet`));
+  // A report within 30 days takes the fourth place.
+  const e = nameRow(c, t)?.next_earnings, days = e?.date ? daysTo(String(e.date), c.today) : null;
+  if (days != null && days >= 0 && days <= 30) tiles[3] = { k: 'earn', l: 'Earnings', v: monDay(String(e.date)),
+    d: days === 0 ? 'Today' : `In ${days} day${days === 1 ? '' : 's'}`, tone: null, id: `earn:${t}`, q: `When does ${n} report?` };
+  const state = (k: string) => { try { const s = whatIf(c, k, undefined, 0)?.data.now.state; return s === 'Short' || s === 'Thin' ? s : null; } catch { return null; } };
+  return { t, names: bookNames(c).map((k) => ({ t: k, co: CO[k] ?? k, st: state(k) })), tiles };
+}
+
 // ── The menu ───────────────────────────────────────────────────────────────────────────────────────────
 
 const TICKER = { ticker: { type: 'string', description: 'A ticker, for example BABA' } };
@@ -640,6 +763,8 @@ export const MENU: Row[] = [
   { name: 'chart', shows: "Price chart for a name in the book over a Week, Month, Quarter or Year: the move over each range, this week's sold strikes with captured % and pace, this week's Ceiling and Floor, the 50 and 200-day averages and how far the price sits from them, RSI, the last cross of the 50-day this quarter (and of the 200-day this year), the 52-week high and low from closes, how far the LEAPS are in the money, and the analysts' target and fair value where research is saved", args: { ...TICKER,
       range: { type: 'string', enum: ['w', 'm', 'q', 'y'], description: 'The range the question names: w week (the default), m month, q quarter, y year' },
       mark: { type: 'string', enum: ['cross'], description: "'cross' when he asks whether it crossed its 50-day, or for its 50-day chart" } }, required: ['ticker'] },
+  { name: 'technicals', shows: "Technicals for a name from its daily closes (the last close, never the live price): the 20, 50 and 200-day averages and whether the price sits above or below each and by how much, RSI (14-day), and the 52-week high and low with how far under the high it is. Read this when he asks for one technical number (What's Nike's 50-day? NKE's RSI? What's Nike's 52-week range?)", args: { ...TICKER,
+      asked: { type: 'string', enum: ['ma50', 'ma20', 'ma200', 'rsi', 'range'], description: 'The number asked: ma50 (the default), ma20, ma200, rsi, or range for the 52-week high and low' } }, required: ['ticker'] },
   { name: 'book', shows: "Your book: every name at once, each with its price, its move over the range and the nearest thing that needs him (Week: the closest sold strike or the Ceiling; Month and Quarter: how far from the 50-day; Year: how far under the 52-week high), in that order", args: {
       range: { type: 'string', enum: ['w', 'm', 'q', 'y'], description: 'w week (the default), m month (under their 50-day), q quarter, y year' },
       view: { type: 'string', enum: ['list', 'grid'], description: "'grid' only when he asks for charts (small charts); default list" } } },
@@ -790,6 +915,8 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
       return await priceChart(c, need(t, 'chart'), String(a.range ?? 'w'), a.mark ? String(a.mark) : null);
     case 'book':
       return await bookChart(c, String(a.range ?? 'w'), String(a.view ?? 'list'));
+    case 'technicals':
+      return await technicals(need(t, 'technicals'), String(a.asked ?? 'ma50'));
     case 'hedges': {
       const names = t ? [t] : bookNames(c);
       const rows = names.map((k) => {
@@ -844,7 +971,10 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
     case 'events': {
       const days = num(a.days) ?? 14, end = addDays(c.today, days);
       const earn = ((c.p.writes?.names ?? []) as Row[]).filter((n) => n.next_earnings?.date && (!t || n.ticker === t))
-        .map((n) => ({ kind: 'earnings', ticker: n.ticker, date: n.next_earnings.date, time: n.next_earnings.time ?? null }))
+        .map((n) => ({ kind: 'earnings', ticker: n.ticker, date: n.next_earnings.date, time: n.next_earnings.time ?? null,
+          // One name (When does BABA report?): how far off it is, and the first expiry whose calls carry the report.
+          ...(t ? { days_to_report: daysTo(String(n.next_earnings.date), c.today),
+            first_expiry_after: expiryAfter(c, String(n.next_earnings.date), n.next_earnings.time ?? null) } : {}) }))
         .filter((e) => t || (e.date >= c.today && e.date <= end));
       const market = t ? [] : ((c.p.calendar ?? []) as Row[]).filter((e) => e.date >= c.today && e.date <= end)
         .map((e) => ({ kind: e.kind, name: e.name, date: e.date, closes: e.closes ?? null }));
@@ -873,7 +1003,11 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
     }
     case 'analyst_targets': {
       const k = need(t, 'analyst_targets'), { rows, src, fig } = await researchFigures(k, ['fair_value', 'estimates']);
+      // How far the average target sits from today's price, cut as the Analysts tile under the payoff cuts it (block 30).
+      const an = num(rows.find((r) => r.metric === 'analyst_target')?.value), px = spotOf(c, k);
       return card('analyst_targets', tagOf(k, 'Analyst targets'), src, { units: RESEARCH_UNITS,
+        ...(an != null && px > 0 ? { price_today: r2(px), average_target_vs_price: an >= px ? 'above' : 'below',
+          average_target_from_price_pct: pctAbs1(an / px - 1) } : {}),
         figures: rows.filter((x) => x.topic === 'fair_value').map(fig), eps_forecasts: rows.filter((x) => x.topic === 'estimates').map(fig) });
     }
     case 'earnings_history': {

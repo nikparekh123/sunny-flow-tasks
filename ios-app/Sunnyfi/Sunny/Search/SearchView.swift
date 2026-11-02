@@ -8,7 +8,9 @@
 //  28 Oct 2026); a chat box the full width of the screen
 //  that grows to five lines; each question a bubble on the right with its text
 //  answer under it, Go deeper, Read aloud, thumbs, Not what I asked and (under
-//  the last) two follow-ups. A back button top left, or a swipe from the left
+//  the last) two follow-ups, or under a one-name payoff the book's names and
+//  Also helps (block 30). A follow-up folds the answer it came from to one
+//  line; a tap opens it again. A back button top left, or a swipe from the left
 //  edge, closes the microphone sheet or stops the voice, then leaves Search
 //  for the tab.
 //
@@ -153,6 +155,17 @@ struct SunnySearchPage: View {
     }
 
     @ViewBuilder private func entry(_ e: SearchStore.Entry, last: Bool) -> some View {
+        if e.folded, !last, case .done(let a) = e.phase {
+            SXFolded(q: e.q, label: a.label, line: a.firstSentence) {
+                withAnimation(reduce ? nil : .easeOut(duration: 0.3)) { search.unfold(e.id) }
+            }
+            .transition(.opacity)
+        } else {
+            open(e, last: last)
+        }
+    }
+
+    private func open(_ e: SearchStore.Entry, last: Bool) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             bubble(e.q)
             switch e.phase {
@@ -163,7 +176,11 @@ struct SunnySearchPage: View {
                 SXAnswerView(answer: a) { q in go(q, cont: true) }
                 deeper(e)
                 footer(e, a)
-                if last && !a.followUps.isEmpty {
+                // Under a one-name payoff: the book's names and Also helps, in place of the follow-ups (block 30).
+                if let m = a.more {
+                    SXOtherPayoffs(m: m) { q, id in go(q, cont: true, id: id) }
+                    SXAlsoHelps(m: m) { q, id in go(q, cont: true, id: id) }
+                } else if last && !a.followUps.isEmpty {
                     SXFlow(spacing: 8) { ForEach(a.followUps, id: \.self) { f in chip(f) { go(f, cont: true) } } }
                 }
             }
@@ -378,16 +395,16 @@ struct SunnySearchPage: View {
         icon().frame(width: 36, height: 36).background(fill, in: .circle).frame(width: 44, height: 44).contentShape(.rect)
     }
 
-    /// Asks and puts the keyboard away.
-    private func go(_ q: String, cont: Bool?) {
+    /// Asks and puts the keyboard away; the answer it came from folds (at once with Reduce Motion).
+    private func go(_ q: String, cont: Bool?, id: String? = nil) {
         focused = false
-        search.ask(q, cont: cont)
+        withAnimation(reduce ? nil : .easeOut(duration: 0.3)) { search.ask(q, cont: cont, id: id) }
     }
 
     private func send() {
         let q = search.query
         focused = false
-        search.ask(q)
+        withAnimation(reduce ? nil : .easeOut(duration: 0.3)) { search.ask(q) }
     }
 
     private func listen() {

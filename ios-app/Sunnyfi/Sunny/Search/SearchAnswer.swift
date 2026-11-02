@@ -40,6 +40,7 @@ struct SXAnswerView: View {
         case .chart(let c): SXChartCard(p: c)
         case .book(let b): SXBookCard(p: b, ask: ask)
         case .whatif(let w): SXWhatIfCard(p: w)
+        case .tech(let t): SXTechCard(p: t)
         case .none(let why, let dym): SXNone(why: why, didYouMean: dym, ask: ask)
         }
     }

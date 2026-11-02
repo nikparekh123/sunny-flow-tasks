@@ -6,7 +6,9 @@
 //  place of your last 10, picked from the book each time Search opens), what
 //  you are typing, the voice, and the thread of answers. A follow-up chip, or
 //  a question that starts with And, What about or How about, adds to the
-//  thread; anything else starts fresh. Back (or a swipe from the left edge)
+//  thread; anything else starts fresh. A follow-up folds the answer it came
+//  from to its first line; a tap opens it again and it stays open (block 30,
+//  Nik 1 Nov 2026: every follow-up, not only the payoff's). Back (or a swipe from the left edge)
 //  leaves Search for the tab you came from, after closing the microphone sheet
 //  or stopping the voice; Search opens fresh on the suggestions next time.
 //
@@ -22,7 +24,11 @@ final class SearchStore {
         enum Phase: Equatable { case loading, working(String), done(SXAnswer), failed }
         let id = UUID()
         let q: String
+        /// The answer id a tile or a logo asked with (pay:BABA, tech:NKE:ma50).
+        var aid: String?
         var phase: Phase = .loading
+        /// Folded to its first line by the turn after it; opened again only by a tap.
+        var folded = false
         var deep: Phase?
         var feedback: String?
         var notAsked = false
@@ -65,20 +71,29 @@ final class SearchStore {
         !entries.isEmpty && q.range(of: #"^(and|what about|how about|also)\b"#, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
-    /// spoken: the words came from the voice, so Sunny reads a misheard word for what was meant.
-    func ask(_ raw: String, cont: Bool? = nil, spoken: Bool = false) {
+    /// spoken: the words came from the voice, so Sunny reads a misheard word for what was meant. id: the answer id a
+    /// tile or a logo carries, so the answer never depends on reading the words.
+    func ask(_ raw: String, cont: Bool? = nil, spoken: Bool = false, id: String? = nil) {
         let q = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
         let keep = cont ?? continues(q)
         let thread = keep ? threadText() : []
-        let e = Entry(q: q)
+        let e = Entry(q: q, aid: id)
+        // The answer it came from folds to its first line; older answers keep whatever state they are in.
+        if keep, let i = entries.indices.last { entries[i].folded = true }
         if keep { entries.append(e) } else { entries = [e] }
         query = ""
         typing = false
         jump = keep ? e.id : nil
         jumpTick += 1
         // The question moves to the top of your searches at once; the server keeps the real list.
-        Task { await run(e.id, q, thread, deep: false, spoken: spoken) }
+        Task { await run(e.id, q, thread, deep: false, spoken: spoken, aid: id) }
+    }
+
+    /// A folded answer opens in place and stays open.
+    func unfold(_ id: UUID) {
+        guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[i].folded = false
     }
 
     func goDeeper(_ id: UUID) {
@@ -100,11 +115,11 @@ final class SearchStore {
         if deep { entries[i].deep = p } else { entries[i].phase = p }
     }
 
-    private func run(_ id: UUID, _ q: String, _ thread: [[String: String]], deep: Bool, spoken: Bool = false) async {
+    private func run(_ id: UUID, _ q: String, _ thread: [[String: String]], deep: Bool, spoken: Bool = false, aid: String? = nil) async {
         // The request's id: the server keeps the answer under it, so one lost on the way is fetched again.
         let rid = UUID().uuidString
         do {
-            let a = try await SXClient.ask(q, thread: thread, deep: deep, spoken: spoken, rid: rid) { [weak self] step, work in
+            let a = try await SXClient.ask(q, thread: thread, deep: deep, spoken: spoken, rid: rid, aid: aid) { [weak self] step, work in
                 guard let self, let i = self.entries.firstIndex(where: { $0.id == id }) else { return }
                 let cur = deep ? self.entries[i].deep : self.entries[i].phase
                 // Sunny's own data shows the soft pulse; live data, research and the web say what they are doing.
@@ -209,9 +224,12 @@ enum SXClient {
     }
 
     /// Asks, streamed: one line per step while it reads, the answer last.
-    static func ask(_ q: String, thread: [[String: String]], deep: Bool, spoken: Bool = false, rid: String = UUID().uuidString,
+    static func ask(_ q: String, thread: [[String: String]], deep: Bool, spoken: Bool = false, rid: String = UUID().uuidString, aid: String? = nil,
                     step: @escaping @MainActor (String, Bool) -> Void) async throws -> SXAnswer {
-        let (bytes, _) = try await URLSession.shared.bytes(for: try await request(["ask": q, "thread": thread, "deep": deep, "voice": spoken, "rid": rid, "stream": true, "draws": ["whatif"]]))
+        // draws: the newer cards this build can draw; more is the payoff's names and Also helps (block 30).
+        var body: [String: Any] = ["ask": q, "thread": thread, "deep": deep, "voice": spoken, "rid": rid, "stream": true, "draws": ["whatif", "tech", "more"]]
+        if let aid, !deep { body["id"] = aid }
+        let (bytes, _) = try await URLSession.shared.bytes(for: try await request(body))
         for try await line in bytes.lines {
             guard let data = line.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             if let s = o["step"] as? String { await step(s, o["work"] as? Bool ?? false) }

@@ -20,8 +20,12 @@ struct SXAnswer: Decodable, Equatable {
     let followUps: [String]
     let recap: String?
     let canAnswer: Bool
+    /// The line a folded answer shows above its first sentence ("NKE · Payoff by Friday · every leg").
+    let label: String?
+    /// Under a one-name payoff (block 30): the book's names and Also helps, in place of the follow-ups.
+    let more: SXMore?
 
-    enum CodingKeys: String, CodingKey { case id, parts, source, followUps = "follow_ups", recap, canAnswer = "can_answer" }
+    enum CodingKeys: String, CodingKey { case id, parts, source, followUps = "follow_ups", recap, canAnswer = "can_answer", label, more }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(Int.self, forKey: .id)
@@ -30,12 +34,30 @@ struct SXAnswer: Decodable, Equatable {
         followUps = (try? c.decode([String].self, forKey: .followUps)) ?? []
         recap = try? c.decodeIfPresent(String.self, forKey: .recap)
         canAnswer = (try? c.decode(Bool.self, forKey: .canAnswer)) ?? false
+        label = try? c.decodeIfPresent(String.self, forKey: .label)
+        more = try? c.decodeIfPresent(SXMore.self, forKey: .more)
     }
-    init(parts: [SXPart]) { id = nil; self.parts = parts; source = nil; followUps = []; recap = nil; canAnswer = false }
+    init(parts: [SXPart]) { id = nil; self.parts = parts; source = nil; followUps = []; recap = nil; canAnswer = false; label = nil; more = nil }
 
     /// The words Read aloud speaks, in screen order, without the colour marks.
     var spoken: String {
         parts.map(\.spoken).filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// A folded answer's line: its first sentence, without the colour marks.
+    var firstSentence: String {
+        for p in parts {
+            let t: String
+            switch p {
+            case .say(let x), .body(let x): t = SXText.plain(x)
+            case .web(let x, _, _): t = x
+            case .none(let why, _): t = why ?? "Can’t answer from your data."
+            default: continue
+            }
+            if let r = t.range(of: #"^.*?[.!?](\s|$)"#, options: .regularExpression) { return t[r].trimmingCharacters(in: .whitespaces) }
+            return t
+        }
+        return ""
     }
 }
 
@@ -77,6 +99,8 @@ enum SXPart: Decodable, Equatable {
     case book(SXBook)
     /// What if · Delta and Gamma (block 29): what a move does to a name's delta, on a slider.
     case whatif(SXWhatIf)
+    /// Technicals (block 29): four small cards from the last close, the one asked first.
+    case tech(SXTech)
     case none(why: String?, didYouMean: String?)
 
     private enum K: String, CodingKey {
@@ -110,6 +134,8 @@ enum SXPart: Decodable, Equatable {
             self = (try? SXBook(from: d)).map { .book($0) } ?? .rows(head: nil, rows: [])
         case "whatif":
             self = (try? SXWhatIf(from: d)).map { .whatif($0) } ?? .rows(head: nil, rows: [])
+        case "tech":
+            self = (try? SXTech(from: d)).map { .tech($0) } ?? .rows(head: nil, rows: [])
         default: self = .none(why: s(.why), didYouMean: s(.didYouMean))
         }
     }
@@ -123,7 +149,7 @@ enum SXPart: Decodable, Equatable {
         case .rows: return ""
         case .panel(let title, let say, _, _, _, _, _): return say.map { "\(title ?? ""). \(p($0))" } ?? ""
         case .web(let summary, _, _): return "From the web: " + summary
-        case .payoff, .chart, .book, .whatif: return ""
+        case .payoff, .chart, .book, .whatif, .tech: return ""
         case .none(let why, _): return "I can't answer that from your data. " + (why ?? "")
         }
     }

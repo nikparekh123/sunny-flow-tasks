@@ -3,7 +3,10 @@
  * launch design: handoff "Search for launch", block 27, 28 Oct 2026).
  *   POST { list: true }                     ->  the lookup menu
  *   POST { lookup, args? }                  ->  { card }: one lookup on its own
- *   POST { ask, thread?, deep?, stream? }   ->  { id, parts, source, follow_ups, recap, can_answer, check, cost_usd }
+ *   POST { ask, thread?, deep?, stream?, id? }  ->  { id, parts, source, follow_ups, recap, can_answer, label, more, check, cost_usd }
+ *                                               id: the answer id a tile or a logo carries (pay:BABA, tech:NKE:ma50), so
+ *                                               the answer never depends on reading the words. label: the folded line.
+ *                                               more: under a one-name payoff, the book's names and Also helps (block 30).
  *                                               stream: true sends one JSON line per step ({ step, work }) and the
  *                                               answer last ({ answer }), so the app can say what it is doing.
  *   POST { recents: true }                  ->  the caller's last 10 searches, newest first, each with what it gave
@@ -21,11 +24,11 @@
  * member of a book (only that book; a member of two reads the one they own).
  */
 import Anthropic from 'npm:@anthropic-ai/sdk@1.3.0';
-import { bookNames, caller, context, db, lookup, MENU, OWNER_ONLY, SB_KEY, SB_URL, type Ctx, type Row } from './lookups.ts';
+import { bookNames, caller, context, db, lookup, MENU, moreFor, OWNER_ONLY, SB_KEY, SB_URL, type Ctx, type Row } from './lookups.ts';
 import { checkAnswer } from './check.ts';
 import { COUNTS, fmt, SLOT, Slots } from './slots.ts';
 
-const BUILD = '2026-10-31.1';
+const BUILD = '2026-11-01.1';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';
@@ -151,6 +154,22 @@ The shape: pick what fits, never more than the question needs.
   never "falls to" that figure. Second: "Slide to try any move up to 15%." A question without the
   word delta or safe that asks what a move does goes to the payoff. Only the book's names; the whole book stays rows.
   follow_ups such as "What does a 10% drop do to my BABA delta?", "And for NKE?".
+- One technical number (What's Nike's 50-day? What's NKE's RSI? What's Nike's 52-week range?): read technicals with the
+  ticker and asked (ma50, ma20, ma200, rsi, or range for the 52-week). Then one "say" of ONE sentence and {"tech": true}:
+  Sunny draws four small cards, the one asked first. Nothing else. The sentence, by what was asked: "NKE is {g:above} its
+  50-day at {b:[r3|$2]}." ({r:below} when price_vs says below); "NKE's RSI is {b:[r9|#]}, neutral." (overbought or
+  oversold in {o:}); "NKE is {b:[r12|%0]} under its 52-week high of {b:[r10|#2]}." Exactly that sentence and nothing
+  added to it (no close, no date, no second figure): the cards carry the rest. Its figures are from the last close.
+  follow_ups such as "Did NKE cross its 50-day?", "Is NKE in an uptrend?".
+- What analysts say about a name (What do analysts say about Nike?): read analyst_targets. One "say" of two sentences:
+  the average target and how far above or below today's price it is ({g:} above, {r:} below, plain when under 5%), then
+  the lowest and highest targets. Source research.
+- When a name reports (When does BABA report?): read events with the ticker. One "say": "BABA reports on {b:Nov 24}, in
+  {b:[r2|#] days}. The first expiry after it is {b:Nov 27}, so calls sold for that week carry the report." The report
+  date and first_expiry_after are dates; say today or tomorrow when days_to_report is 0 or 1. Nothing else. When no
+  date is saved, say so in one sentence.
+- A name's walls on a later expiry (NKE's walls on Nov 20): read gamma with view that expiry (2026-11-20). The same rows
+  as the walls this week, then a "body" with the move priced by that expiry when it is there. No chart. Source sunny.
 - Panels only for an update on one name (give me an update on Nike, catch me up on BABA): a "say", a "trio" of three
   numbers, then one "panel" per topic, each with its own source: Your position, Walls this week, Fair value and
   targets, Valuation and dividend, Against peers and sector, The day after earnings. Leave out a panel when its data
@@ -364,6 +383,10 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
       // What if · Delta and Gamma (block 29): the slider's every step, drawn on the phone; its source line is its own.
       const card = ran.filter((x) => x.ok && x.name === 'delta_gamma' && x.card?.chart).at(-1)?.card;
       if (card?.chart && c.draws?.includes('whatif')) parts.push({ type: 'whatif', ...card.chart, at: marketOpen() ? clock(new Date(c.at)) : `${lastClose()} close` });
+    } else if (p.tech) {
+      // Technicals (block 29, card 4): four small cards from the last close, drawn on the phone; each has its own source.
+      const card = ran.filter((x) => x.ok && x.name === 'technicals').at(-1)?.card;
+      if (card?.chart && c.draws?.includes('tech')) parts.push({ type: 'tech', ...card.chart });
     }
   }
   // A big number leads (block 27): a sentence the model put above it moves under it, as body text.
@@ -376,7 +399,7 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
   const recap = f.recap ? plain(S(f.recap) ?? '') : null;
   // The source line ends every answer, unless its last part is a panel with a source of its own.
   const last = parts.at(-1);
-  const source = last?.type === 'panel' || last?.type === 'none' || last?.type === 'payoff' || last?.type === 'chart' || last?.type === 'book' || last?.type === 'whatif' ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
+  const source = ['panel', 'none', 'payoff', 'chart', 'book', 'whatif', 'tech'].includes(last?.type) ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
   return { parts, source, follow_ups, recap, can_answer: f.can_answer !== false && !parts.some((x) => x.type === 'none'),
     bad, literal: lit.join(' \n '), webLiteral: webLit.join(' \n ') };
 }
@@ -396,6 +419,7 @@ function stepOf(name: string, a: Row): { step: string; work: boolean } {
     case 'roll': return s(`Working out ${t}'s roll`);
     case 'payoff': return s(t ? `Working out ${t} by Friday` : 'Working out the book by Friday');
     case 'chart': return s(`Drawing ${t}'s chart`);
+    case 'technicals': return s(`Reading ${t}'s closes`);
     case 'book': return s('Drawing your book');
     case 'gamma': return s(`Reading ${t}'s walls`, true);
     case 'walls_live': return s(`Reading ${t}'s live chain`, true);
@@ -410,13 +434,49 @@ function stepOf(name: string, a: Row): { step: string; work: boolean } {
   }
 }
 
+// ── Answer ids and the folded line (block 30, handoff Oct 31 2026) ──────────────────────────────────────
+
+/** A tile or a logo carries its answer id, so the answer never depends on reading the words: "And BABA?" with pay:BABA
+    is BABA's payoff, a tile's question comes with its own lookup. */
+export const ANSWER_ID = /^(pay|tech|an|walls|earn):[A-Z][A-Z.]{0,7}(:[a-z0-9-]{1,12})?$/;
+function routeOf(id: string): string {
+  const [k, t, x] = id.split(':');
+  switch (k) {
+    case 'pay': return `the payoff by Friday for ${t}, every leg: read payoff for ${t}`;
+    case 'tech': return `${t}'s technicals, asked from a tile: read technicals for ${t} with asked ${x ?? 'ma50'}`;
+    case 'an': return `what analysts say about ${t}: read analyst_targets for ${t}`;
+    case 'walls': return x ? `${t}'s walls on the ${x} expiry: read gamma for ${t} with view ${x}` : `${t}'s walls this week`;
+    default: return `when ${t} reports: read events for ${t}`;
+  }
+}
+
+/** The line a folded answer shows above its first sentence: the card it drew, or what it read. */
+function labelOf(parts: Row[], ran: Ran[]): string | null {
+  const p = parts.find((x) => ['payoff', 'chart', 'book', 'whatif', 'tech'].includes(x.type));
+  if (p?.type === 'payoff') {
+    const t = p.names?.[0]?.t;
+    return p.mode === 'one' ? `${t} · Payoff by ${p.word} · every leg` : p.mode === 'sold' ? `${t} · What you sold, by ${p.word}` : `Payoff by ${p.word} · the whole book`;
+  }
+  if (p?.type === 'chart') return `${p.t} · Price chart`;
+  if (p?.type === 'book') return `Your book · ${p.view === 'grid' ? 'small charts' : 'list'}`;
+  if (p?.type === 'whatif') return `${p.t} · What if · Delta and Gamma`;
+  if (p?.type === 'tech') return `${p.t} · Technicals`;
+  const r = ran.find((x) => x.ok && x.card);
+  if (!r) return null;
+  const t = r.args.ticker ? String(r.args.ticker).toUpperCase() : '';
+  if (r.name === 'gamma') { const v = String(r.args.view ?? 'weeklies'); return `${t} · Walls ${/^\d{4}-/.test(v) ? 'on ' + monDay(v) : 'this week'}`; }
+  if (r.name === 'events' && t) return `${t} · Earnings date`;
+  if (r.name === 'analyst_targets') return `${t} · Analysts`;
+  return r.card?.tag ? String(r.card.tag) : null;
+}
+
 // ── Asking ───────────────────────────────────────────────────────────────────────────────────────────────
 
 /** Test runs only (step 4): force one model and effort for every question, and return everything each answer read. */
 interface Test { model?: 'haiku' | 'opus'; effort?: 'low' | 'medium' | 'high'; trace?: boolean }
 type Emit = (e: Row) => void;
 
-async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner: boolean, test: Test = {}, emit: Emit = () => {}, spoken = false) {
+async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner: boolean, test: Test = {}, emit: Emit = () => {}, spoken = false, aid: string | null = null) {
   const t0 = Date.now();
   const model = test.model === 'haiku' ? HAIKU : MODEL;
   const effort = test.effort ?? (deep ? 'medium' : 'low');
@@ -430,7 +490,8 @@ async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner
     { role: 'user', content: `Today is ${c.today}, ${clock(now)} New York time; the market is ${marketOpen(now) ? 'open' : 'closed'}. ` +
       `Names in the book: ${names}. Watchlist: ${(c.p.watchlist ?? []).map((w: Row) => w.ticker).join(', ') || 'none'}.\n\n` +
       (owner ? '' : 'This login views the book only: it has no To do, so never say what to buy, sell, roll or hedge.\n\n') +
-      `${deep ? DEEP + '\n\n' : ''}${spoken ? SPOKEN + '\n\n' : ''}Question: ${question}` },
+      `${deep ? DEEP + '\n\n' : ''}${spoken ? SPOKEN + '\n\n' : ''}Question: ${question}` +
+      (aid && !deep ? `\n(Asked from a tile or a name under the last answer, answer id ${aid}: this is ${routeOf(aid)}.)` : '') },
   ];
   let final: Row | null = null, built: ReturnType<typeof build> | null = null, stop = '', retried = false, firstMiss: string[] = [];
   let steps = 0;
@@ -521,12 +582,19 @@ async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner
   const parts = !answered ? none("That isn't in Sunny's data or on the sites Sunny trusts.")
     : withheld ? none("I couldn't check every figure in that answer against your data, so I've left it out.") : built!.parts;
   const lead = parts.find((p) => p.type === 'say' || p.type === 'body' || p.type === 'web');
+  // Under a one-name payoff (block 30): the book's names and Also helps, from this same snapshot; they replace the
+  // follow-up chips. Only for a phone that draws them.
+  const pay = !deep && answered && !withheld && c.draws?.includes('more') ? parts.find((p) => p.type === 'payoff' && p.mode === 'one') : null;
+  const more = pay ? await moreFor(c, String(pay.names[0].t),
+    ((pay.names[0].walls ?? []) as Row[]).find((w) => w.label === 'Ceiling')?.k ?? null).catch(() => null) : null;
   return {
     ok: true, build: BUILD, route: deep ? 'deeper' : 'quick', model, deep,
     parts,
     source: answered && !withheld ? built!.source : null,
-    follow_ups: answered ? built!.follow_ups : [],
+    follow_ups: answered && !more ? built!.follow_ups : [],
     recap: answered && !withheld ? built!.recap : null,
+    label: answered && !withheld ? labelOf(parts, ran) : null,
+    more,
     can_answer: answered && !withheld ? built!.can_answer : false,
     check: { ok: !withheld, checked: ck.checked + wk.checked, unverified, retried, first_try_unverified: firstMiss },
     // For the test page and the step 4 harness, which read these.
@@ -569,7 +637,7 @@ async function logAsk(book: string, user: string | undefined, q: string, threadL
   const r = await rest('search_log?select=id', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify([{
     book_id: book, user_id: user ?? null, question: q, thread_len: threadLen, deep, model: a.model, effort: a.effort,
     // The phone's request id and what it is sent: an answer lost on the way is fetched again by the id (29 Oct 2026).
-    rid: rid ?? null, reply: { parts: a.parts, source: a.source, follow_ups: a.follow_ups, recap: a.recap, can_answer: a.can_answer },
+    rid: rid ?? null, reply: { parts: a.parts, source: a.source, follow_ups: a.follow_ups, recap: a.recap, can_answer: a.can_answer, label: a.label, more: a.more },
     answer: a.answer, big: a.big, cards: (a.parts as Row[]).map((x) => x.type), lookups: a.lookups,
     parts: a.parts, source: a.source, recap: a.recap, preview: preview(a),
     can_answer: a.can_answer, check_ok: a.check?.ok ?? null, unverified: a.check?.unverified ?? [], retried: a.check?.retried ?? false,
@@ -610,7 +678,8 @@ function questions(c: Ctx, owner: boolean): Row {
       `What did ${t}’s bought legs cost?`, `How much time value is left on ${t}?`, `Why did ${t} move today?`, `Who is trading ${t}?`,
       `What’s the payoff on my ${t} position?`, `How are my ${t} calls doing?`, `How’s ${t} doing this week?`,
       `How’s ${t} doing this quarter?`, `Is ${t} in an uptrend?`, `Did ${t} cross its 50-day?`,
-      `Is my ${t} delta safe if it moves 10%?`, `What does a 10% drop do to my ${t} delta?`]),
+      `Is my ${t} delta safe if it moves 10%?`, `What does a 10% drop do to my ${t} delta?`, `What’s ${t}’s 50-day?`,
+      `What’s ${t}’s 52-week range?`, `What do analysts say about ${t}?`, `When does ${t} report?`]),
   ];
   // A viewer has no To do (31 Oct 2026): its question and Try chip go.
   const todoQ = 'What do I need to do today?';
@@ -707,7 +776,8 @@ Deno.serve(async (req) => {
       const thread = Array.isArray(body.thread) ? body.thread.slice(-6) : [];
       // Test settings only for the scheduler and service keys (the step 4 runs), never from the app.
       const run = async (emit?: Emit) => {
-        const a = await ask(q, thread, !!body.deep, c, who.owner, who.system ? body.test ?? {} : {}, emit, !!body.voice);
+        const aid = typeof body.id === 'string' && ANSWER_ID.test(body.id) ? body.id : null;
+        const a = await ask(q, thread, !!body.deep, c, who.owner, who.system ? body.test ?? {} : {}, emit, !!body.voice, aid);
         const rid = typeof body.rid === 'string' ? body.rid.slice(0, 64) : undefined;
         const id = body.test ? null : await logAsk(book, who.user, q, thread.length, !!body.deep, a, rid);
         return { ...a, id, cost_usd: Number(costOf(a.model, a.usage).toFixed(4)) };
