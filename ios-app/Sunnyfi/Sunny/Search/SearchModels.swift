@@ -50,6 +50,7 @@ struct SXAnswer: Decodable, Equatable {
             let t: String
             switch p {
             case .say(let x), .body(let x): t = SXText.plain(x)
+            case .page(let x): t = SXText.plain(x.lead)
             case .web(let x, _, _): t = x
             case .none(let why, _): t = why ?? "Can’t answer from your data."
             default: continue
@@ -101,11 +102,13 @@ enum SXPart: Decodable, Equatable {
     case whatif(SXWhatIf)
     /// Technicals (block 29): four small cards from the last close, the one asked first.
     case tech(SXTech)
+    /// A name's page (block 31): pushed over Search; in the chat its paragraph and a button that opens it again.
+    case page(SXPage)
     case none(why: String?, didYouMean: String?)
 
     private enum K: String, CodingKey {
         case type, text, label, value, n, count, fmt, sub, tone, items, head, rows, title, say, trio, table, note, source
-        case summary, sources, line, why, didYouMean = "did_you_mean"
+        case summary, sources, line, why, lead, didYouMean = "did_you_mean"
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
@@ -136,6 +139,9 @@ enum SXPart: Decodable, Equatable {
             self = (try? SXWhatIf(from: d)).map { .whatif($0) } ?? .rows(head: nil, rows: [])
         case "tech":
             self = (try? SXTech(from: d)).map { .tech($0) } ?? .rows(head: nil, rows: [])
+        case "page":
+            // A page that will not read keeps its paragraph.
+            self = (try? SXPage(from: d)).map { .page($0) } ?? .say(s(.lead) ?? "")
         default: self = .none(why: s(.why), didYouMean: s(.didYouMean))
         }
     }
@@ -150,6 +156,7 @@ enum SXPart: Decodable, Equatable {
         case .panel(let title, let say, _, _, _, _, _): return say.map { "\(title ?? ""). \(p($0))" } ?? ""
         case .web(let summary, _, _): return "From the web: " + summary
         case .payoff, .chart, .book, .whatif, .tech: return ""
+        case .page(let x): return p(x.lead)
         case .none(let why, _): return "I can't answer that from your data. " + (why ?? "")
         }
     }

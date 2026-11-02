@@ -9,7 +9,7 @@
 //  that grows to five lines; each question a bubble on the right with its text
 //  answer under it, Go deeper, Read aloud, thumbs, Not what I asked and (under
 //  the last) two follow-ups, or under a one-name payoff the book's names and
-//  Also helps (block 30). A follow-up folds the answer it came from to one
+//  Also helps (block 30). A name's page (block 31) slides in over all of it. A follow-up folds the answer it came from to one
 //  line; a tap opens it again. A back button top left, or a swipe from the left
 //  edge, closes the microphone sheet or stops the voice, then leaves Search
 //  for the tab.
@@ -66,7 +66,17 @@ struct SunnySearchPage: View {
             }
             .opacity(chrome ? 1 : 0)
             edge
+            // A name's page, pushed over Search (block 31): in from the right, out the same way.
+            if let p = search.page {
+                SXNamePage(p: p, close: closePage, ask: { q in closePage(); go(q, cont: true) },
+                           listen: { closePage(); listen() })
+                    .transition(.move(edge: .trailing))
+                    .zIndex(5)
+            }
         }
+        .animation(reduce ? .easeOut(duration: 0.2) : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: search.page)
+        .environment(\.sxOpenPage) { p in focused = false; search.page = p }
+        .onChange(of: search.page) { _, p in if p != nil { focused = false } }
         .onAppear {
             search.open()
             // The chat box is ready to type in the moment Search opens (Nik, 28 Oct 2026), once it has faded in.
@@ -221,7 +231,9 @@ struct SunnySearchPage: View {
 
     private func footer(_ e: SearchStore.Entry, _ a: SXAnswer) -> some View {
         let reading = speaker.reading == e.id
-        let canDeep = e.deep == nil && !a.parts.contains { if case .none = $0 { return true }; return false }
+        // A name's page has no Go deeper or Read aloud (Nik, 2 Nov 2026), in the chat either.
+        let page = a.parts.contains { if case .page = $0 { return true }; return false }
+        let canDeep = !page && e.deep == nil && !a.parts.contains { if case .none = $0 { return true }; return false }
         return HStack(spacing: 0) {
             if canDeep {
                 Button { search.goDeeper(e.id) } label: {
@@ -230,12 +242,14 @@ struct SunnySearchPage: View {
                 }
                 .buttonStyle(.plain)
             }
-            Button { speaker.toggle(e.id, a.spoken) } label: {
-                Image(systemName: reading ? "speaker.wave.2.fill" : "speaker.wave.2").font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(reading ? SX.web : SX.muted).frame(width: 44, height: 44).contentShape(.rect)
+            if !page {
+                Button { speaker.toggle(e.id, a.spoken) } label: {
+                    Image(systemName: reading ? "speaker.wave.2.fill" : "speaker.wave.2").font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(reading ? SX.web : SX.muted).frame(width: 44, height: 44).contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(reading ? "Stop reading" : "Read aloud")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(reading ? "Stop reading" : "Read aloud")
             Spacer(minLength: 0)
             thumb(e, "up", "hand.thumbsup", "Good answer")
             thumb(e, "down", "hand.thumbsdown", "Bad answer")
@@ -315,6 +329,7 @@ struct SunnySearchPage: View {
     /// Back: the microphone sheet or the voice first, then out of Search to the tab (Nik, 28 Oct 2026: back after
     /// a conversation leaves Search, it does not stop on the suggestions).
     private func back() {
+        if search.page != nil { closePage(); return }
         if voice.denied { voice.denied = false; return }
         if voice.on { voice.stop(); return }
         close()
@@ -413,8 +428,11 @@ struct SunnySearchPage: View {
         voice.start(hints: search.hints) { q in search.ask(q, spoken: true) }
     }
 
+    private func closePage() { search.page = nil }
+
     /// The same as opening, backwards: the page goes in 0.22 s after a 0.08 s wait, then the tab takes over.
     private func close() {
+        search.page = nil
         focused = false
         voice.stop()
         speaker.stop()

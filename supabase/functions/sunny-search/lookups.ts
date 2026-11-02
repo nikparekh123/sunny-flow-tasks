@@ -247,6 +247,16 @@ async function researchFigures(t: string, topics: string[]) {
 const RESEARCH_UNITS = 'Research Nik saved, with its source and date: context only, never for To do, strikes or hedges. ' +
   'unit usd is dollars (revenue and market cap in full dollars), pct is percent, x is a multiple.';
 
+/** The analysts as Nasdaq reports them (ticker-technicals saves them each day): the average target, its low and high, and
+    how many say buy, hold and sell. Nik, 2 Nov 2026: analysts are Nasdaq's everywhere (the chart's line, the tile, the
+    card); Investing Pro keeps fair value. */
+async function nasdaqAnalysts(t: string): Promise<Row | null> {
+  const [r] = await db(`ticker_fundamentals?ticker=eq.${t}&analyst_target=not.is.null` +
+    '&select=day,analyst_target,analyst_low,analyst_high,n_buy,n_hold,n_sell&order=day.desc&limit=1').catch(() => [] as Row[]);
+  return r ? { day: String(r.day), target: num(r.analyst_target), low: num(r.analyst_low), high: num(r.analyst_high),
+    buy: num(r.n_buy), hold: num(r.n_hold), sell: num(r.n_sell) } : null;
+}
+
 // ── Payoff by Friday (block 28, handoff Oct 29 2026) ─────────────────────────────────────────────────────
 
 /* What each price by Friday adds or costs: every leg re-priced with Black-Scholes at its own IV, held where it is
@@ -470,7 +480,7 @@ async function priceChart(c: Ctx, t: string, range: string, mark: string | null)
   });
   const gday = week.findIndex((w) => w.d === today), started = gday >= 0 && !week[gday].closed && now >= week[gday].open;
 
-  const [hist, gv, quotes, res] = await Promise.all([
+  const [hist, gv, quotes, res, nq] = await Promise.all([
     closesOf(t),
     db(`gamma_view_day?view=eq.weeklies&ticker=eq.${t}&select=day,walls:data->walls&order=day.desc&limit=1`).catch(() => [] as Row[]),
     // A quote every 15 s or so: each open day in two halves, so no read reaches PostgREST's 1,000 rows.
@@ -480,6 +490,7 @@ async function priceChart(c: Ctx, t: string, range: string, mark: string | null)
         `&captured_at=lt.${new Date(b).toISOString()}&select=spot,captured_at&order=captured_at.asc&limit=1000`).catch(() => [] as Row[]));
     })).then((x) => x.flat()),
     researchFigures(t, ['fair_value']).catch(() => null),
+    nasdaqAnalysts(t),
   ]);
   // Daily closes, today's price as today's close once the session has started.
   const days = hist.filter((x) => x.d < today);
@@ -538,8 +549,10 @@ async function priceChart(c: Ctx, t: string, range: string, mark: string | null)
     return null;
   };
   const yr = cs.slice(ix.y), hi = Math.max(...yr), lo = Math.min(...yr);
-  const fig = (m: string) => res?.rows.find((r) => r.metric === m)?.value, an = num(fig('analyst_target')), fv = num(fig('fair_value_average'));
-  const research = an != null && fv != null && res ? { an, fv, src: `${res.src.source} · ${dayMon(String(res.src.asof))}` } : null;
+  // Fair value from Investing Pro, the analysts' target from Nasdaq (2 Nov 2026).
+  const fig = (m: string) => res?.rows.find((r) => r.metric === m)?.value, an = nq?.target ?? null, fv = num(fig('fair_value_average'));
+  const research = an != null && fv != null && res
+    ? { an, fv, src: `${String(res.src.source).split(',')[0]} · ${dayMon(String(res.src.asof))} · analysts Nasdaq · ${dayMon(nq!.day)}` } : null;
 
   const RNG: Record<string, string> = { w: 'Week', m: 'Month', q: 'Quarter', y: 'Year' };
   const rg = RNG[range] ? range : 'w', m50 = ma50[n - 1]!, m200 = ma200[n - 1];
@@ -571,7 +584,7 @@ async function priceChart(c: Ctx, t: string, range: string, mark: string | null)
     ix: { w: ix.w - y0, m: ix.m - y0, q: ix.q - y0 },
     week: { days: week.map((w) => ({ lab: `${WDAY[new Date(w.d + 'T12:00:00Z').getUTCDay()]} ${Number(w.d.slice(8))}`, closed: w.closed })),
       today: started ? gday : week.findIndex((w) => w.d === today && !w.closed), exp: week.findIndex((w) => w.d === expDay), pts },
-    sold: sold.map((l) => ({ k: Number(l.strike), cp: l.type === 'call' ? 'c' : 'p' })), cap: cap == null ? null : { pct: cap, tag },
+    sold: sold.map((l) => ({ k: Number(l.strike), cp: l.type === 'call' ? 'c' : 'p' })), cap: cap == null ? null : { pct: cap, tag, pace },
     // Every open sold strike, next week's too (a Friday's new sale): the book's status line reads the nearest.
     soldAll: [...new Map(legs.filter((l) => l.side === 'sold').map((l) => [`${l.type}${l.strike}`, { k: Number(l.strike), cp: l.type === 'call' ? 'c' : 'p' }])).values()],
     legs: bought.map(({ g, k }) => ({ g, k })), leapsK: leaps?.k ?? null, walls, res: research,
@@ -702,9 +715,9 @@ const said = (t: string) => (t === 'NKE' ? 'Nike' : t);
    next monthly's own walls (its Ceiling, or the first call wall under its own label when none reads as a Ceiling). */
 export async function moreFor(c: Ctx, t: string, weekCeiling: number | null): Promise<Row> {
   const fri = fridayOf(c, Date.now()).day, mo = monthlyAfter(c, fri), md = monDay(mo), n = said(t);
-  const [tech, res, [gm]] = await Promise.all([
+  const [tech, nq, [gm]] = await Promise.all([
     technicals(t, 'ma50').catch(() => null),
-    researchFigures(t, ['fair_value']).catch(() => null),
+    nasdaqAnalysts(t),
     db(`gamma_view_day?ticker=eq.${t}&view=eq.${mo}&select=day,walls:data->walls&order=day.desc&limit=1`).catch(() => [] as Row[]),
   ]);
   const dashed = (k: string, l: string, d: string) => ({ k, l, v: 'Not yet', d, tone: null, pend: true });
@@ -715,12 +728,12 @@ export async function moreFor(c: Ctx, t: string, weekCeiling: number | null): Pr
     m50 ? { k: 'ma50', l: '50-day', v: m50.v.toFixed(2), d: `Price ${m50.p.toFixed(1)}% ${m50.up ? 'above' : 'below'}`, tone: m50.up ? 'up' : 'down',
       id: `tech:${t}:ma50`, q: `What’s ${n}’s 50-day?` } : dashed('ma50', '50-day', ready(50)),
   ];
-  const an = num(res?.rows.find((r) => r.metric === 'analyst_target')?.value), spot = spotOf(c, t);
+  const an = nq?.target ?? null, spot = spotOf(c, t);
   if (an != null && spot > 0) {
     const d = an / spot - 1;
     tiles.push({ k: 'an', l: 'Analysts', v: `$${an.toFixed(2)}`, d: `${pctAbs1(d).toFixed(1)}% ${d >= 0 ? 'above' : 'below'} today`,
       tone: Math.abs(d) < 0.05 ? null : d > 0 ? 'up' : 'down', id: `an:${t}`, q: `What do analysts say about ${n}?` });
-  } else tiles.push(dashed('an', 'Analysts', `No research for ${n} yet`));
+  } else tiles.push(dashed('an', 'Analysts', `No analyst targets for ${n} yet`));
   tiles.push(ch && ch.n >= 252 ? { k: 'range', l: '52-week', v: `${ch.range.under}%`, d: `under the high · ${ch.range.lo.toFixed(2)} to ${ch.range.hi.toFixed(2)}`,
     tone: 'muted', id: `tech:${t}:range`, q: `What’s ${n}’s 52-week range?` } : dashed('range', '52-week', ready(252)));
   const ws = ((gm?.walls ?? []) as Row[]).filter((w) => w.side === 'call'), lab = (w: Row) => String(w.label ?? '').toLowerCase();
@@ -736,6 +749,315 @@ export async function moreFor(c: Ctx, t: string, weekCeiling: number | null): Pr
     d: days === 0 ? 'Today' : `In ${days} day${days === 1 ? '' : 's'}`, tone: null, id: `earn:${t}`, q: `When does ${n} report?` };
   const state = (k: string) => { try { const s = whatIf(c, k, undefined, 0)?.data.now.state; return s === 'Short' || s === 'Thin' ? s : null; } catch { return null; } };
   return { t, names: bookNames(c).map((k) => ({ t: k, co: CO[k] ?? k, st: state(k) })), tiles };
+}
+
+// ── The name page (block 31, handoff Nov 2 2026) ───────────────────────────────────────────────────────
+
+/* One page per name, pushed from Search, in three acts. Step 1 is the header and Nike's world: the stock (the year chart
+   as the price chart card draws it, and four figures), the sector (Investing Pro's averages and the S&P 500), what's
+   being said (Nik's Investing Pro notes: the bull case, the bear case and the latest earnings call) and earnings (the day
+   after each of the last four reports, the next report, the move the options price to the first expiry after it). One
+   snapshot: the model writes the paragraph and the findings from these figures and the cards draw the same ones. Asked,
+   2 Nov 2026: a section with no data is left out, never shown with sample figures; analysts are Nasdaq's; the sector card
+   is "Peers and sector"; the earnings stat is the move to that expiry, named by its date. */
+const NOTE_ROWS: [string, RegExp][] = [['bull', /^bull case/i], ['bear', /^bear case/i], ['call', /^earnings call/i]];
+/** A note's first point: its first bullet, else its first line ("Summary" headings skipped). */
+const firstPoint = (body: unknown) => {
+  const lines = String(body ?? '').split('\n').map((x) => x.trim()).filter((x) => x && !/^summary:?$/i.test(x));
+  return (lines.find((x) => /^[-•*]\s/.test(x)) ?? lines[0] ?? '').replace(/^[-•*]\s+/, '').trim();
+};
+const monShort = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+const whenOf = (time: unknown) => (time === 'amc' ? 'after the close' : time === 'bmo' ? 'before the open' : null);
+const figTxt = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+/** A market cap as the research writes it: 55.8B, 840M. */
+const capTxt = (v: number) => (v >= 1e9 ? `${(v / 1e9).toFixed(1)}B` : `${Math.round(v / 1e6)}M`);
+
+// ── Your Nike (block 31, step 2) ──────────────────────────────────────────────────────────────────────
+
+/* Asked, 2 Nov 2026: the book is split by each name's value now (the Allocation card's figure); Made = Realized + Open
+   as the P&L glossary has them (Realized = everything closed since the book's start, by sunny-home's rules and IBKR's
+   figures, so it matches the Performance card; Open = IBKR's unrealized on what is held); You % = Made over the name's
+   value on its first day; Week by week grades calls only, a roll counting in the week it was bought back. The money
+   comes from IBKR's daily report, so it runs to the last close IBKR has sent. */
+const BOOK_FROM: Record<string, string> = { S: '2026-08-31', N: '2026-10-29' };
+/** Every row of a read that grows: PostgREST stops at 1,000, so page through it in a fixed order. */
+async function dbAll(path: string): Promise<Row[]> {
+  const out: Row[] = [];
+  for (let off = 0; ; off += 1000) {
+    const rows = await db(`${path}&limit=1000&offset=${off}`);
+    out.push(...rows);
+    if (rows.length < 1000) return out;
+  }
+}
+const yShort = (iso: string) => `${monShort(iso)} ’${iso.slice(2, 4)}`;
+const usd0 = (v: number) => '$' + Math.round(Math.abs(v)).toLocaleString('en-US');
+
+async function yourName(c: Ctx, t: string, ch: Row) {
+  const from = BOOK_FROM[c.book] ?? BOOK_FROM.S, today = c.today, spot = spotOf(c, t), fri = fridayFrom(today);
+  const [trades, sells, lots, pos, closes, po] = await Promise.all([
+    dbAll(`option_trades?book_id=eq.${c.book}&ticker=eq.${t}&voided_at=is.null&select=id,trade_date,executed_at,action,direction,` +
+      'option_type,strike,expiry,contracts,premium,realized_pl,realized_pl_source,note&order=trade_date.asc,executed_at.asc,id.asc'),
+    db(`share_sells?book_id=eq.${c.book}&ticker=eq.${t}&voided_at=is.null&trade_date=gte.${from}&select=trade_date,realized_pl`).catch(() => [] as Row[]),
+    db(`share_lots?book_id=eq.${c.book}&ticker=eq.${t}&voided_at=is.null&acquired_date=gte.${from}&select=acquired_date,realized_pl`).catch(() => [] as Row[]),
+    dbAll(`account_positions_daily?book_id=eq.${c.book}&underlying=eq.${t}&report_date=gte.${from}` +
+      '&select=report_date,position_value,fifo_pnl_unrealized&order=report_date.asc,account_id.asc,conid.asc'),
+    db(`daily_closes?ticker=eq.${t}&date=gte.${addDays(from, -7)}&select=date,close_price&order=date.asc`).catch(() => [] as Row[]),
+    payoff(c, t, false).catch(() => null),
+  ]);
+
+  // Realized, as sunny-home books it: each closing fill at IBKR's figure, what is left open past expiry on that day, and
+  // share sales after the start (on the start day only a lot bought that day counts). Calls sold are graded by week too.
+  const real: { d: string; amt: number }[] = [];
+  const weeks = new Map<string, { sold: number; kept: number; full: boolean }>();
+  const wk = (d: string, sold: number, kept: number, full: boolean) => {
+    const f = fridayFrom(d), w = weeks.get(f) ?? { sold: 0, kept: 0, full: true };
+    w.sold += sold; w.kept += kept; w.full &&= full; weeks.set(f, w);
+  };
+  const groups = new Map<string, Row[]>();
+  for (const x of trades) {
+    const k = `${x.option_type}|${x.direction}|${Number(x.strike)}|${x.expiry}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(x);
+  }
+  for (const rows of groups.values()) {
+    const fills = [...rows].sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date))
+      || String(a.executed_at ?? '').localeCompare(String(b.executed_at ?? '')) || (a.action === 'open' ? -1 : 1));
+    const first = fills.find((f) => f.action === 'open');
+    if (!first) continue;
+    const pre = String(first.trade_date) < from, f0 = fills[0], short = f0.direction === 'short', exp = String(f0.expiry);
+    const calls = short && f0.option_type === 'call' && !pre;
+    let qty = 0, cost = 0;
+    for (const x of fills) {
+      const n = Number(x.contracts), px = Number(x.premium) * 100;
+      if (x.action === 'open') { qty += n; cost += n * px; continue; }
+      const avg = qty > 0 ? cost / qty : 0;
+      const ib = x.realized_pl != null && x.realized_pl_source === 'ibkr' ? Number(x.realized_pl) : null;
+      const amt = ib ?? (short ? n * (avg - px) : n * (px - avg));
+      if (!pre || String(x.trade_date) > from) real.push({ d: String(x.trade_date), amt });
+      // Kept in full: expired, or bought back for 5 cents or less.
+      if (calls) wk(String(x.trade_date), n * avg, amt, /IBKR Ep lifecycle/.test(String(x.note ?? '')) || Number(x.premium) <= 0.05);
+      cost -= n * avg; qty -= n;
+    }
+    if (qty > 0.0001 && exp < today) {
+      if (!pre || exp > from) real.push({ d: exp, amt: short ? cost : -cost });
+      if (calls) wk(exp, cost, cost, true);
+    }
+  }
+  for (const s of sells) {
+    const d = String(s.trade_date);
+    if (d <= from && !lots.some((l) => String(l.acquired_date) <= d)) continue;
+    real.push({ d, amt: Number(s.realized_pl ?? 0) });
+  }
+  for (const l of lots) if (Number(l.realized_pl)) real.push({ d: String(l.acquired_date), amt: Number(l.realized_pl) });
+
+  // Since you entered: realized to each day plus IBKR's unrealized that day, against the stock from the same day.
+  const byDay = new Map<string, { v: number; u: number }>();
+  for (const p of pos) {
+    const d = String(p.report_date), e = byDay.get(d) ?? { v: 0, u: 0 };
+    e.v += Number(p.position_value ?? 0); e.u += Number(p.fifo_pnl_unrealized ?? 0); byDay.set(d, e);
+  }
+  const days = [...byDay.keys()].sort();
+  let since: Row | null = null;
+  if (days.length >= 2) {
+    const start = days[0], last = days.at(-1)!, base = byDay.get(start)!.v;
+    const cum = (d: string) => real.reduce((s, x) => s + (x.d <= d ? x.amt : 0), 0);
+    const cl = closes.map((x) => ({ d: String(x.date), c: Number(x.close_price) })).filter((x) => x.c > 0);
+    const closeOn = (d: string) => [...cl].reverse().find((x) => x.d <= d)?.c ?? NaN;
+    const c0 = closeOn(start);
+    const pts = days.map((d) => {
+      const made = cum(d) + byDay.get(d)!.u, st = closeOn(d) / c0 - 1;
+      return [d, Math.round(made), base > 0 ? r2(made / base * 100) : null, Number.isFinite(st) ? r2(st * 100) : null];
+    });
+    const made = Math.round(cum(last) + byDay.get(last)!.u), realized = Math.round(cum(last));
+    since = { from: start, to: last, fromDay: monDay(start), toDay: monDay(last), base: Math.round(base), made, realized,
+      open: made - realized, you: base > 0 ? r2(made / base * 100) : null, stock: pts.at(-1)![3], pts,
+      src: `Your trades and IBKR's daily values · to ${monDay(last)} close` };
+  }
+
+  // Week by week: every finished week since the start, then this week so far against pace.
+  const done = [...weeks.entries()].filter(([f, w]) => f < fri && w.sold > 0).sort((a, b) => a[0].localeCompare(b[0])).slice(-12)
+    .map(([f, w]) => ({ fri: f, day: monDay(f), sold: Math.round(w.sold), kept: Math.round(w.kept),
+      g: w.kept < 0 ? 'lost' : w.full ? 'full' : 'part' }));
+  const legs = ((c.p.legs ?? []) as Row[]).filter((l) => l.ticker === t && Number(l.n) > 0 && String(l.expiry) >= today);
+  const wsold = legs.filter((l) => l.side === 'sold' && l.type === 'call' && String(l.expiry) <= fri);
+  const col = wsold.reduce((s, l) => s + Number(l.avg ?? 0) * l.n * 100, 0), left = wsold.reduce((s, l) => s + Number(l.mark ?? l.avg ?? 0) * l.n * 100, 0);
+  const cap = (ch.chart as Row).cap as Row | null;
+  const now = wsold.length && col > 0 ? { fri, day: monDay(fri), sold: Math.round(col), kept: Math.round(col - left),
+    pct: Math.round((1 - left / col) * 100), pace: num(cap?.pace), tag: cap?.tag ?? null } : null;
+  const weeksOut = done.length || now ? { weeks: done, now, from: monDay(from),
+    src: 'Your trades · a roll counts in the week it was bought back' } : null;
+
+  // Nike in your book: each name's value now, this name's share of this week's premium and of the delta in dollars.
+  const hs = ((c.p.allocation?.holdings ?? []) as Row[]).filter((h) => Number(h.now) > 0).sort((a, b) => b.now - a.now);
+  const tot = hs.reduce((s, h) => s + Number(h.now), 0);
+  const prem = new Map<string, number>();
+  for (const l of (c.p.legs ?? []) as Row[]) if (l.side === 'sold' && String(l.expiry) >= today && String(l.expiry) <= fri)
+    prem.set(l.ticker, (prem.get(l.ticker) ?? 0) + Number(l.avg ?? 0) * l.n * 100);
+  const premTot = [...prem.values()].reduce((s, v) => s + v, 0);
+  const dd = ((c.p.risk?.delta?.by ?? []) as Row[]).map((x) => ({ t: String(x.ticker), v: Math.max(0, Number(x.net) * spotOf(c, x.ticker)) }))
+    .filter((x) => Number.isFinite(x.v));
+  const ddTot = dd.reduce((s, x) => s + x.v, 0);
+  const book = hs.some((h) => h.ticker === t) && tot > 0 ? {
+    total: Math.round(tot), rows: hs.map((h) => ({ t: String(h.ticker), usd: Math.round(h.now), pct: Math.round(h.now / tot * 100) })),
+    rank: hs.findIndex((h) => h.ticker === t) + 1,
+    premium: premTot > 0 ? Math.round((prem.get(t) ?? 0) / premTot * 100) : null,
+    delta: ddTot > 0 ? Math.round((dd.find((x) => x.t === t)?.v ?? 0) / ddTot * 100) : null,
+    src: 'Your book · value now, from your positions and live marks' } : null;
+
+  // What you hold: four tiles, each the legs of one kind.
+  const sum = (ls: Row[], f: (l: Row) => number) => ls.reduce((s, l) => s + f(l) * l.n, 0) / Math.max(1, ls.reduce((s, l) => s + l.n, 0));
+  const nOf = (ls: Row[]) => ls.reduce((s, l) => s + Number(l.n), 0);
+  const strikes = (ls: Row[]) => [...new Set(ls.map((l) => Number(l.strike)))].sort((a, b) => a - b);
+  const sold = (type: string, label: string) => {
+    const ls = legs.filter((l) => l.side === 'sold' && l.type === type);
+    if (!ls.length) return { k: type === 'call' ? 'cs' : 'ps', l: label, v: 'None', d: [] as string[], s: null, tone: null };
+    const ks = strikes(ls), exps = [...new Set(ls.map((l) => String(l.expiry)))].sort(), avg = sum(ls, (l) => Number(l.avg ?? 0));
+    const mark = sum(ls, (l) => Number(l.mark ?? l.avg ?? 0)), kept = avg > 0 ? Math.round((1 - mark / avg) * 100) : null;
+    return { k: type === 'call' ? 'cs' : 'ps', l: label, v: ks.length === 1 ? `${nOf(ls)} × ${kf(ks[0])}` : `${nOf(ls)} ${type}s`,
+      d: [`${exps.map(monDay).join(', ')} · sold at $${avg.toFixed(2)}`,
+        ...(ks.length > 1 ? [ks.map((k) => `${nOf(ls.filter((l) => Number(l.strike) === k))} × ${kf(k)}`).join(', ')] : [])],
+      s: kept == null ? null : kept >= 0 ? `${kept}% kept` : `${-kept}% lost`, tone: kept == null ? null : kept >= 0 ? 'up' : 'down' };
+  };
+  const leaps = legs.filter((l) => l.side === 'bought' && kindOf(l) === 'leaps'), hedge = legs.filter((l) => l.side === 'bought' && kindOf(l) === 'hedge');
+  const ins = legs.filter((l) => l.side === 'bought' && kindOf(l) === 'insurance');
+  const hedgeLines = [...new Map(hedge.map((l) => [`${l.strike}|${l.expiry}`, l])).values()]
+    .sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)))
+    .map((l) => `+ ${nOf(hedge.filter((x) => x.strike === l.strike && x.expiry === l.expiry))} × ${kf(Number(l.strike))} hedge, ${monDay(String(l.expiry))}`);
+  const lk = strikes(leaps), le = [...new Set(leaps.map((l) => String(l.expiry)))].sort();
+  const cb = leaps.length ? { k: 'cb', l: 'Calls bought', v: lk.length === 1 ? `${nOf(leaps)} × ${kf(lk[0])} LEAPS` : `${nOf(leaps)} LEAPS`,
+    d: [`${le.map(yShort).join(', ')} · Δ ${sum(leaps, (l) => Number(l.delta ?? 0)).toFixed(2)}`, ...hedgeLines], s: null, tone: null }
+    : hedge.length ? { k: 'cb', l: 'Calls bought', v: `${nOf(hedge)} hedge calls`, d: hedgeLines.map((x) => x.slice(2)), s: null, tone: null }
+    : { k: 'cb', l: 'Calls bought', v: 'None', d: [], s: null, tone: null };
+  const ik = strikes(ins), ie = [...new Set(ins.map((l) => String(l.expiry)))].sort();
+  const pb = ins.length ? { k: 'pb', l: 'Puts bought', v: ik.length === 1 ? `${nOf(ins)} × ${kf(ik[0])}` : `${nOf(ins)} puts`,
+    d: [`${ie.map(monDay).join(', ')} · insurance`], s: `${Math.abs(Math.round((1 - ik[0] / spot) * 100))}% ${ik[0] > spot ? 'above' : 'below'} today`, tone: 'muted' }
+    : { k: 'pb', l: 'Puts bought', v: 'None', d: [], s: null, tone: null };
+  const hold = { tiles: [sold('call', 'Calls sold'), sold('put', 'Puts sold'), cb, pb], right: 'Calls left, puts right',
+    payoff: po?.chart ? { type: 'payoff', ...po.chart } : null };
+
+  return { book, hold, since, weeks: weeksOut,
+    data: {
+      ...(book ? { in_your_book: { share_of_book_pct: book.rows.find((r) => r.t === t)?.pct, rank_in_book: book.rank, names_in_book: book.rows.length,
+        book_value_usd: book.total, share_of_this_weeks_premium_pct: book.premium, share_of_delta_dollars_pct: book.delta } } : {}),
+      what_you_hold: hold.tiles.map((x) => ({ tile: x.l, holds: x.v, detail: x.d.join('; '), status: x.s })),
+      ...(since ? { since_you_entered: { from: since.from, to_close_of: since.to, made_usd: since.made, realized_usd: since.realized,
+        open_usd: since.open, value_on_first_day_usd: since.base, you_pct: since.you, stock_pct: since.stock } } : {}),
+      ...(weeksOut ? { week_by_week_calls: { weeks: done.length, kept_in_full: done.filter((w) => w.g === 'full').length,
+        kept_part: done.filter((w) => w.g === 'part').length, lost: done.filter((w) => w.g === 'lost').length,
+        kept_usd: done.reduce((s, w) => s + w.kept, 0), sold_usd: done.reduce((s, w) => s + w.sold, 0),
+        lost_usd: done.filter((w) => w.kept < 0).reduce((s, w) => s + w.kept, 0),
+        ...(now ? { this_week: { expiry: now.fri, sold_usd: now.sold, kept_usd: now.kept, kept_pct: now.pct, pace_pct: now.pace, pace: now.tag } } : {}) } } : {}),
+    } };
+}
+
+async function namePage(c: Ctx, t: string, ask: string) {
+  if (!bookNames(c).includes(t)) throw new Error(`${t} is not in the book; the name page covers the book's names for now`);
+  const [ch, val, peers, notes, react] = await Promise.all([
+    priceChart(c, t, 'y', null),
+    researchFigures(t, ['valuation', 'dividend']).catch(() => null),
+    researchFigures(t, ['peers']).catch(() => null),
+    db(`research_notes?ticker=eq.${t}&checked_at=not.is.null&select=asof,source,title,body&order=asof.desc&limit=30`).catch(() => [] as Row[]),
+    researchFigures(t, ['earnings_reactions']).catch(() => null),
+  ]);
+  const co = CO[t] ?? t, d = ch.data as Row, spot = spotOf(c, t);
+  const dayPct = num(c.p.portfolio?.find((x: Row) => x.ticker === t)?.ranges?.d);
+  const dayUsd = dayPct != null && spot > 0 ? r2(Math.abs(spot - spot / (1 + dayPct / 100))) : null;
+
+  // The stock: four figures under the chart, Investing Pro's dated, the 52 weeks from Sunny's closes as the chart has them.
+  const vf = (m: string) => val?.rows.find((r) => r.metric === m);
+  const mc = vf('market_cap'), pe = vf('pe_ratio'), dy = vf('dividend_yield_pct');
+  const stats = [
+    mc ? { l: 'Market cap', v: '$' + String(mc.value_text ?? capTxt(Number(mc.value))).replace(/\s+/g, '') } : null,
+    pe ? { l: 'P/E, last 12 months', v: figTxt(Number(pe.value)) } : null,
+    dy ? { l: 'Dividend yield', v: `${Number(dy.value).toFixed(1)}%` } : null,
+    { l: '52 weeks', v: `${Number(d.low_52w).toFixed(2)} to ${Number(d.high_52w).toFixed(2)}` },
+  ].filter(Boolean) as Row[];
+  const statsSrc = (val ? `${String(val.src.source).split(',')[0]} · ${monDay(String(val.src.asof))} · ` : '') + "52 weeks from Sunny's daily closes";
+
+  // The sector: its peers and its sector (Investing Pro's 1-year total returns, to the research's date), and the name and
+  // the S&P 500 over the year to today from Sunny's prices, so the name's row is the stock section's move (Nik, 2 Nov).
+  const pr = (k: string) => num(peers?.rows.find((r) => r.metric === 'one_year_total_return_pct' && r.period === k)?.value);
+  let sector: Row | null = null;
+  if (peers && (pr('Peers') != null || pr('Sector') != null)) {
+    const asof = String(peers.src.asof), from = addMonths(c.today, -12);
+    const spy = await db(`daily_closes?ticker=eq.SPY&date=gte.${from}&select=date,close_price&order=date.asc&limit=1`).catch(() => [] as Row[]);
+    const ix = (c.p.indices ?? []).find((x: Row) => x.symbol === 'SPY'), a = Number(spy[0]?.close_price), b = Number(ix?.regular ?? ix?.price);
+    const spx = a > 0 && b > 0 ? pct1(b, a) : null;
+    const rows = [{ k: 'me', l: co, pct: num(d.moves_pct?.over_the_year) }, { k: 'peers', l: 'Peers average', pct: pr('Peers') },
+      { k: 'sector', l: 'Sector average', pct: pr('Sector') }, { k: 'spx', l: 'S&P 500', pct: spx }]
+      .filter((r) => r.pct != null).sort((x, y) => y.pct! - x.pct!);
+    sector = { rows, asof, span: '1 year',
+      src: `${co} and S&P 500 from Sunny's prices, to today · peers and sector ${String(peers.src.source).split(',')[0]}, to ${monDay(asof)}` };
+  }
+
+  // What's being said: the latest bull case, bear case and earnings call notes, each its title and first point.
+  const said = NOTE_ROWS.map(([k, re]) => {
+    const n = notes.find((x) => re.test(String(x.title ?? '')));
+    return n ? { k, title: String(n.title), line: firstPoint(n.body), src: `${n.source} · ${monDay(String(n.asof))}`, asof: String(n.asof) } : null;
+  }).filter(Boolean) as Row[];
+
+  // Earnings: the day after each of the last four reports, oldest first; the next report; the move priced to the first
+  // expiry after it (that expiry's 1 SD, named by its date).
+  const by = new Map<string, number>();
+  for (const r of react?.rows ?? []) if (r.metric === 'change_pct' && Number.isFinite(Number(r.value))) by.set(String(r.period), Number(r.value));
+  const moves = [...by.entries()].sort((x, y) => y[0].localeCompare(x[0])).slice(0, 4).reverse().map(([rep, pct]) => ({ rep, m: monShort(rep), pct: r2(pct) }));
+  const ne = nameRow(c, t)?.next_earnings, nd = ne?.date ? String(ne.date) : null;
+  const next = nd && nd >= c.today ? { date: nd, day: monDay(nd), when: whenOf(ne.time), days: daysTo(nd, c.today) } : null;
+  let priced: Row | null = null;
+  if (next) {
+    const exp = expiryAfter(c, next.date, ne.time ?? null);
+    const [g] = await db(`gamma_view_day?ticker=eq.${t}&view=eq.${exp}&select=day,priced:data->priced&order=day.desc&limit=1`).catch(() => [] as Row[]);
+    const p = num(g?.priced?.sd1_pct);
+    if (p != null) priced = { pct: r2(p), exp, by: monDay(exp) };
+  }
+  const earnings = moves.length || next ? { moves, next, priced,
+    src: [react ? `${String(react.src.source).split(',')[0]} · ${monDay(String(react.src.asof))}` : null, next ? 'report date from Nasdaq' : null,
+      priced ? "priced move from Sunny's chains" : null].filter(Boolean).join(' · ') } : null;
+
+  // Your Nike (step 2): the money, from the trades and IBKR's daily values.
+  const mine = await yourName(c, t, ch).catch((e) => { console.error('yourName', t, String(e)); return null; });
+  const order = ask === 'pos' ? ['since', 'book', 'hold', 'weeks'] : ['book', 'hold', 'since', 'weeks'];
+  const mineSecs = mine ? order.filter((k) => (mine as Row)[k]) : [];
+  // The question folds an act it does not need: what's happening folds Your Nike, the position question folds the
+  // world. A folded act is one line, its figures written here so they are exact.
+  const tn = (v: number, txt: string) => (v < 0 ? `{r:${txt}}` : `{g:${txt}}`);
+  const yr = num(d.moves_pct?.over_the_year), pa = num((sector?.rows as Row[] | undefined)?.find((r) => r.k === 'peers')?.pct);
+  const foldWorld = [yr != null ? `Stock ${tn(yr, `${Math.round(Math.abs(yr))}%`)} ${yr < 0 ? 'down' : 'up'} in a year` : null,
+    pa != null ? `peers ${tn(pa, `${Math.round(Math.abs(pa))}%`)} ${pa < 0 ? 'down' : 'up'}` : null,
+    next ? `earnings ${next.day}` : null].filter(Boolean).join(' · ');
+  const sn = mine?.since as Row | null, wn = (mine?.weeks as Row | null)?.now as Row | null;
+  const foldMine = [sn ? `${sn.made < 0 ? 'Down' : 'Made'} ${tn(sn.made, usd0(sn.made))} since ${sn.fromDay}` : null,
+    wn ? (wn.pct >= 0 ? `calls ${tn(1, `${wn.pct}%`)} kept this week` : `this week's calls ${tn(-1, `${-wn.pct}%`)} lost`) : null]
+    .filter(Boolean).join(' · ');
+  const fold = ask === 'news' && mineSecs.length ? 'mine' : ask === 'pos' ? 'world' : null;
+  const sections = ['stock', ...(sector ? ['sector'] : []), ...(said.length ? ['said'] : []), ...(earnings ? ['earnings'] : []), ...mineSecs];
+  const data = {
+    units: 'Percents are already percents and moves are signed (negative is down). In the sector, this_name_pct and sp500_pct ' +
+      "are the year to today from Sunny's prices (this_name_pct is the stock's year move); the peers and sector averages are " +
+      "Investing Pro's 1-year total returns to the sector's as_of date.",
+    ticker: t, company: co, ask, price: r2(spot), ...(dayPct != null ? { today_move_pct: dayPct } : {}), sections,
+    stock: { year_move_pct: d.moves_pct.over_the_year, over_the_52w_low_pct: d.over_the_low_pct, under_the_52w_high_pct: d.under_the_high_pct,
+      high_52w: d.high_52w, low_52w: d.low_52w,
+      ...(mc ? { market_cap: mc.value_text ?? capTxt(Number(mc.value)) } : {}), ...(pe ? { pe_last_12_months: Number(pe.value) } : {}),
+      ...(dy ? { dividend_yield_pct: Number(dy.value) } : {}),
+      ...(d.fair_value != null ? { fair_value: d.fair_value, price_to_fair_value_pct: d.price_to_fair_value_pct } : {}),
+      ...(d.analysts_average_target != null ? { analysts_average_target: d.analysts_average_target, price_to_analysts_pct: d.price_to_analysts_pct } : {}) },
+    ...(sector ? { sector: { as_of: sector.asof, ...Object.fromEntries((sector.rows as Row[]).map((r) => [
+      r.k === 'me' ? 'this_name_pct' : r.k === 'spx' ? 'sp500_pct' : `${r.k}_average_pct`, r.pct])) } } : {}),
+    ...(said.length ? { what_is_being_said: said.map((x) => ({ note: x.title, first_point: x.line, date: x.asof })) } : {}),
+    ...(earnings ? { earnings: { day_after_moves: moves.map((m) => ({ report: m.rep, move_pct: m.pct })),
+      rose_after: moves.filter((m) => m.pct > 0).length, fell_after: moves.filter((m) => m.pct < 0).length,
+      ...(next ? { next_report: { date: next.date, when: next.when, days_to_report: next.days } } : {}),
+      ...(priced ? { priced_move_pct: priced.pct, priced_to_expiry: priced.exp } : {}) } } : {}),
+    ...(mine ? { your_position: mine.data } : {}),
+    ...(fold ? { folded_act: fold === 'mine' ? 'your position (one line)' : "the name's world (one line)" } : {}),
+  };
+  const chart = { t, co, strategy: c.p.strategies?.[t] ?? null, ask, px: r2(spot),
+    day: dayPct != null ? { pct: dayPct, usd: dayUsd } : null,
+    world: { stock: { chart: ch.chart, stats, src: statsSrc }, sector, said: said.length ? { rows: said, src: said[0].src } : null, earnings },
+    mine: mine && mineSecs.length ? { book: mine.book, hold: mine.hold, since: mine.since, weeks: mine.weeks, order: mineSecs } : null,
+    fold, folds: { world: foldWorld || null, mine: foldMine || null } };
+  return { ...card('name_page', tagOf(t, 'Page'), sunny(c), data), chart };
 }
 
 // ── The menu ───────────────────────────────────────────────────────────────────────────────────────────
@@ -765,6 +1087,8 @@ export const MENU: Row[] = [
       mark: { type: 'string', enum: ['cross'], description: "'cross' when he asks whether it crossed its 50-day, or for its 50-day chart" } }, required: ['ticker'] },
   { name: 'technicals', shows: "Technicals for a name from its daily closes (the last close, never the live price): the 20, 50 and 200-day averages and whether the price sits above or below each and by how much, RSI (14-day), and the 52-week high and low with how far under the high it is. Read this when he asks for one technical number (What's Nike's 50-day? NKE's RSI? What's Nike's 52-week range?)", args: { ...TICKER,
       asked: { type: 'string', enum: ['ma50', 'ma20', 'ma200', 'rsi', 'range'], description: 'The number asked: ma50 (the default), ma20, ma200, rsi, or range for the 52-week high and low' } }, required: ['ticker'] },
+  { name: 'name_page', shows: "A name's page, when he asks about one name as a whole (Tell me about Nike, Show me Nike's world, What's happening with Nike?): the price and today's move, the stock over the year (move, 52-week high and low, market cap, P/E, dividend yield), the sector (1-year moves of the name, its peers average, its sector average and the S&P 500), what's being said (Nik's Investing Pro notes) and earnings (the day after each of the last four reports, the next report, the move priced to the first expiry after it); then his position (How's my Nike position doing? too): its share of the book, what he holds, made since he entered against the stock, and his calls week by week", args: { ...TICKER,
+      ask: { type: 'string', enum: ['all', 'news', 'pos'], description: "'news' for what's happening with it; 'pos' for how his position in it is doing; 'all' for tell me about it or show me its world" } }, required: ['ticker'] },
   { name: 'book', shows: "Your book: every name at once, each with its price, its move over the range and the nearest thing that needs him (Week: the closest sold strike or the Ceiling; Month and Quarter: how far from the 50-day; Year: how far under the 52-week high), in that order", args: {
       range: { type: 'string', enum: ['w', 'm', 'q', 'y'], description: 'w week (the default), m month (under their 50-day), q quarter, y year' },
       view: { type: 'string', enum: ['list', 'grid'], description: "'grid' only when he asks for charts (small charts); default list" } } },
@@ -917,6 +1241,8 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
       return await bookChart(c, String(a.range ?? 'w'), String(a.view ?? 'list'));
     case 'technicals':
       return await technicals(need(t, 'technicals'), String(a.asked ?? 'ma50'));
+    case 'name_page':
+      return await namePage(c, need(t, 'name_page'), a.ask === 'news' || a.ask === 'pos' ? a.ask : 'all');
     case 'hedges': {
       const names = t ? [t] : bookNames(c);
       const rows = names.map((k) => {
@@ -1002,13 +1328,20 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
         against_peers_and_sector: peers });
     }
     case 'analyst_targets': {
-      const k = need(t, 'analyst_targets'), { rows, src, fig } = await researchFigures(k, ['fair_value', 'estimates']);
+      /* The analysts are Nasdaq's (2 Nov 2026), so the tile, the chart's line and this answer show one target; Investing
+         Pro's own analyst figures are left out, its fair value and EPS forecasts stay. */
+      const k = need(t, 'analyst_targets');
+      const [res, nq] = await Promise.all([researchFigures(k, ['fair_value', 'estimates']).catch(() => null), nasdaqAnalysts(k)]);
+      if (!res && !nq) throw new Error(`no analyst targets or research for ${k} yet`);
       // How far the average target sits from today's price, cut as the Analysts tile under the payoff cuts it (block 30).
-      const an = num(rows.find((r) => r.metric === 'analyst_target')?.value), px = spotOf(c, k);
-      return card('analyst_targets', tagOf(k, 'Analyst targets'), src, { units: RESEARCH_UNITS,
+      const an = nq?.target ?? null, px = spotOf(c, k);
+      return card('analyst_targets', tagOf(k, 'Analyst targets'), nq ? { kind: 'research', source: 'Nasdaq', asof: nq.day } : res!.src, { units: RESEARCH_UNITS,
+        ...(nq ? { analysts: { source: 'Nasdaq', as_of: nq.day, average_target: nq.target, lowest_target: nq.low, highest_target: nq.high,
+          say_buy: nq.buy, say_hold: nq.hold, say_sell: nq.sell } } : {}),
         ...(an != null && px > 0 ? { price_today: r2(px), average_target_vs_price: an >= px ? 'above' : 'below',
           average_target_from_price_pct: pctAbs1(an / px - 1) } : {}),
-        figures: rows.filter((x) => x.topic === 'fair_value').map(fig), eps_forecasts: rows.filter((x) => x.topic === 'estimates').map(fig) });
+        ...(res ? { investing_pro: { as_of: res.src.asof, figures: res.rows.filter((x) => x.topic === 'fair_value' && !/^analyst/.test(x.metric)).map(res.fig),
+          eps_forecasts: res.rows.filter((x) => x.topic === 'estimates').map(res.fig) } } : {}) });
     }
     case 'earnings_history': {
       const k = need(t, 'earnings_history'), { rows, src, fig } = await researchFigures(k, ['earnings', 'earnings_reactions']);

@@ -7,6 +7,7 @@
  *                                               id: the answer id a tile or a logo carries (pay:BABA, tech:NKE:ma50), so
  *                                               the answer never depends on reading the words. label: the folded line.
  *                                               more: under a one-name payoff, the book's names and Also helps (block 30).
+ *                                               A "page" part (block 31) is a name's page: the phone pushes it over Search.
  *                                               stream: true sends one JSON line per step ({ step, work }) and the
  *                                               answer last ({ answer }), so the app can say what it is doing.
  *   POST { recents: true }                  ->  the caller's last 10 searches, newest first, each with what it gave
@@ -28,7 +29,7 @@ import { bookNames, caller, context, db, lookup, MENU, moreFor, OWNER_ONLY, SB_K
 import { checkAnswer } from './check.ts';
 import { COUNTS, fmt, SLOT, Slots } from './slots.ts';
 
-const BUILD = '2026-11-01.1';
+const BUILD = '2026-11-02.4';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';
@@ -170,6 +171,32 @@ The shape: pick what fits, never more than the question needs.
   date is saved, say so in one sentence.
 - A name's walls on a later expiry (NKE's walls on Nov 20): read gamma with view that expiry (2026-11-20). The same rows
   as the walls this week, then a "body" with the move priced by that expiry when it is there. No chart. Source sunny.
+- A name's page, when he asks about one name as a whole (Tell me about Nike. Show me Nike's world. What's happening with
+  Nike? How's my Nike position doing?): read name_page with the ticker and ask (news for what's happening, pos for how
+  his position is doing, all otherwise). "How's BABA?" alone stays the position rows below. Then reply with exactly one
+  part: {"page": {"lead": "...", "findings": {"stock": "...", "sector": "...", "said": "...", "earnings": "...",
+  "book": "...", "hold": "...", "since": "...", "weeks": "..."}}}, a finding only for each name in the lookup's
+  sections. Sunny draws the page; nothing else, no say, rows or panels.
+  lead: two or three short sentences. all: the stock over the year against its peers, then his money since he entered,
+  then what's next ("Nike is down {r:[r3|%0]} in a year while its peers are down {r:[r9|%0]}. Your position is down
+  {r:[r20|$0]} since Aug 31. Next up: earnings on Dec 17."). news: the stock sentence, then what's being said in a few
+  words, then the next report; no money. pos: his money since he entered against the stock ("Since Aug 31 your Nike
+  position is down {r:[r20|$0]} while the stock rose {g:[r21|%]}."), then this week's calls against pace. Here a
+  percent of 10 or more is whole ([r3|%0]), under 10 has one decimal. Made is realized plus open; say made or down,
+  never profit or loss; the dates are the lookup's. A strike always has its dollar sign ("the $39 calls"); a bare
+  number before calls reads as a count.
+  findings, one short sentence each (sector may take two), each a fact the card under it shows to the decimal:
+  stock: the year move with one decimal and how far over its 52-week low ("Down {r:[r4|%]} in a year, [r6|%0] above its
+  52-week low."). sector: the name against its peers and sector averages ("Its peers are down {r:[r9|%]} in a year and
+  its sector {r:[r10|%]}. Nike is down {r:[r8|%]}, near the bottom."). said: what the notes say, in words only, never a
+  figure ("Performance is growing; China and tariffs still weigh."). earnings: how the stock moved the day after the last
+  reports, then the next one ("Fell the day after 3 of the last 4 reports. Next report Dec 17, after the close.").
+  book: its share of the book and its place ("Nike is your biggest name: [r11|%0] of the book."). hold: the LEAPS and
+  this week's calls ("60 LEAPS carry it; this week's calls are {r:[r12|%0]} lost."). since: made since the first day
+  against the stock ("Down {r:[r20|$0]} since Aug 31, while the stock rose {g:[r21|%]}."). weeks: weeks kept in full
+  out of all, then this week against pace ("Calls kept in full 5 of 9 weeks. This week is behind pace.").
+  follow_ups such as "How's my Nike position doing?", "NKE's walls on Dec 18". Only the book's names; any other name is
+  text only.
 - Panels only for an update on one name (give me an update on Nike, catch me up on BABA): a "say", a "trio" of three
   numbers, then one "panel" per topic, each with its own source: Your position, Walls this week, Fair value and
   targets, Valuation and dividend, Against peers and sector, The day after earnings. Leave out a panel when its data
@@ -198,7 +225,8 @@ When you have read what you need, reply with only this JSON, no other text (part
   {"panel": {"title": "Fair value and targets", "say": "...", "rows": [{"a": "Fair value", "b": " · 15 models",
      "r": "[r7|$2]", "sub": "...", "bar": {"from": "[r8]", "to": "[r9]", "at": "[r7]"}}], "source": "research"}},
   {"web": {"summary": "...", "sources": [{"url": "https://...", "site": "Reuters"}]}},
-  {"none": {"why": "...", "did_you_mean": "..."}}
+  {"none": {"why": "...", "did_you_mean": "..."}},
+  {"page": {"lead": "...", "findings": {"stock": "..."}}}
  ],
  "source": "sunny", "follow_ups": ["...", "..."], "recap": "...", "can_answer": true}
 A panel's table is {"cols": ["NKE", "Peers", "Sector"], "rows": [{"label": "Dividend yield", "values": ["[r1|%]", "[r2|%]",
@@ -383,6 +411,25 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
       // What if · Delta and Gamma (block 29): the slider's every step, drawn on the phone; its source line is its own.
       const card = ran.filter((x) => x.ok && x.name === 'delta_gamma' && x.card?.chart).at(-1)?.card;
       if (card?.chart && c.draws?.includes('whatif')) parts.push({ type: 'whatif', ...card.chart, at: marketOpen() ? clock(new Date(c.at)) : `${lastClose()} close` });
+    } else if (p.page) {
+      /* The name page (block 31): the lookup's page with the model's paragraph and findings. A phone that does not draw
+         pages gets the paragraph as its answer. */
+      const card = ran.filter((x) => x.ok && x.name === 'name_page').at(-1)?.card, lead = S(p.page.lead)?.replace(/\}\}+/g, '}');
+      if (card?.chart && c.draws?.includes('page')) {
+        const fin = Object.fromEntries(Object.entries((p.page.findings ?? {}) as Row).map(([k, v]) => [k, typeof v === 'string' ? v.replace(/\}\}+/g, '}') : v])) as Row, w = card.chart.world;
+        const open = marketOpen();
+        parts.push({ type: 'page', ...card.chart, lead, live: open, at: open ? clock(new Date(c.at)) : `${lastClose()} close`,
+          world: { ...w, stock: { ...w.stock, finding: S(fin.stock), chart: { ...w.stock.chart, at: open ? clock(new Date()) : `${lastClose()} close`, live: open } },
+            sector: w.sector ? { ...w.sector, finding: S(fin.sector) } : null,
+            said: w.said ? { ...w.said, finding: S(fin.said) } : null,
+            earnings: w.earnings ? { ...w.earnings, finding: S(fin.earnings) } : null },
+          mine: card.chart.mine ? { ...card.chart.mine,
+            book: card.chart.mine.book ? { ...card.chart.mine.book, finding: S(fin.book) } : null,
+            hold: card.chart.mine.hold ? { ...card.chart.mine.hold, finding: S(fin.hold), payoff: card.chart.mine.hold.payoff
+              ? { ...card.chart.mine.hold.payoff, at: open ? clock(new Date(c.at)) : `${lastClose()} close` } : null } : null,
+            since: card.chart.mine.since ? { ...card.chart.mine.since, finding: S(fin.since) } : null,
+            weeks: card.chart.mine.weeks ? { ...card.chart.mine.weeks, finding: S(fin.weeks) } : null } : null });
+      } else if (lead) parts.push({ type: 'say', text: lead });
     } else if (p.tech) {
       // Technicals (block 29, card 4): four small cards from the last close, drawn on the phone; each has its own source.
       const card = ran.filter((x) => x.ok && x.name === 'technicals').at(-1)?.card;
@@ -399,7 +446,7 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
   const recap = f.recap ? plain(S(f.recap) ?? '') : null;
   // The source line ends every answer, unless its last part is a panel with a source of its own.
   const last = parts.at(-1);
-  const source = ['panel', 'none', 'payoff', 'chart', 'book', 'whatif', 'tech'].includes(last?.type) ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
+  const source = ['panel', 'none', 'payoff', 'chart', 'book', 'whatif', 'tech', 'page'].includes(last?.type) ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
   return { parts, source, follow_ups, recap, can_answer: f.can_answer !== false && !parts.some((x) => x.type === 'none'),
     bad, literal: lit.join(' \n '), webLiteral: webLit.join(' \n ') };
 }
@@ -420,6 +467,7 @@ function stepOf(name: string, a: Row): { step: string; work: boolean } {
     case 'payoff': return s(t ? `Working out ${t} by Friday` : 'Working out the book by Friday');
     case 'chart': return s(`Drawing ${t}'s chart`);
     case 'technicals': return s(`Reading ${t}'s closes`);
+    case 'name_page': return s(`Reading ${t}'s world`, true);
     case 'book': return s('Drawing your book');
     case 'gamma': return s(`Reading ${t}'s walls`, true);
     case 'walls_live': return s(`Reading ${t}'s live chain`, true);
@@ -438,7 +486,7 @@ function stepOf(name: string, a: Row): { step: string; work: boolean } {
 
 /** A tile or a logo carries its answer id, so the answer never depends on reading the words: "And BABA?" with pay:BABA
     is BABA's payoff, a tile's question comes with its own lookup. */
-export const ANSWER_ID = /^(pay|tech|an|walls|earn):[A-Z][A-Z.]{0,7}(:[a-z0-9-]{1,12})?$/;
+export const ANSWER_ID = /^(pay|tech|an|walls|earn|name):[A-Z][A-Z.]{0,7}(:[a-z0-9-]{1,12})?$/;
 function routeOf(id: string): string {
   const [k, t, x] = id.split(':');
   switch (k) {
@@ -446,13 +494,17 @@ function routeOf(id: string): string {
     case 'tech': return `${t}'s technicals, asked from a tile: read technicals for ${t} with asked ${x ?? 'ma50'}`;
     case 'an': return `what analysts say about ${t}: read analyst_targets for ${t}`;
     case 'walls': return x ? `${t}'s walls on the ${x} expiry: read gamma for ${t} with view ${x}` : `${t}'s walls this week`;
+    case 'name': return x === 'news' ? `${t}'s page, what is happening with it: read name_page for ${t} with ask news`
+      : x === 'pos' ? `${t}'s page, how his position is doing: read name_page for ${t} with ask pos`
+      : `${t}'s page: read name_page for ${t} with ask all`;
     default: return `when ${t} reports: read events for ${t}`;
   }
 }
 
 /** The line a folded answer shows above its first sentence: the card it drew, or what it read. */
 function labelOf(parts: Row[], ran: Ran[]): string | null {
-  const p = parts.find((x) => ['payoff', 'chart', 'book', 'whatif', 'tech'].includes(x.type));
+  const p = parts.find((x) => ['payoff', 'chart', 'book', 'whatif', 'tech', 'page'].includes(x.type));
+  if (p?.type === 'page') return `${p.t} · ${p.co} page`;
   if (p?.type === 'payoff') {
     const t = p.names?.[0]?.t;
     return p.mode === 'one' ? `${t} · Payoff by ${p.word} · every leg` : p.mode === 'sold' ? `${t} · What you sold, by ${p.word}` : `Payoff by ${p.word} · the whole book`;
@@ -679,7 +731,8 @@ function questions(c: Ctx, owner: boolean): Row {
       `What’s the payoff on my ${t} position?`, `How are my ${t} calls doing?`, `How’s ${t} doing this week?`,
       `How’s ${t} doing this quarter?`, `Is ${t} in an uptrend?`, `Did ${t} cross its 50-day?`,
       `Is my ${t} delta safe if it moves 10%?`, `What does a 10% drop do to my ${t} delta?`, `What’s ${t}’s 50-day?`,
-      `What’s ${t}’s 52-week range?`, `What do analysts say about ${t}?`, `When does ${t} report?`]),
+      `What’s ${t}’s 52-week range?`, `What do analysts say about ${t}?`, `When does ${t} report?`,
+      `Tell me about ${t}`, `What’s happening with ${t}?`, `Show me ${t}’s world`, `How’s my ${t} position doing?`]),
   ];
   // A viewer has no To do (31 Oct 2026): its question and Try chip go.
   const todoQ = 'What do I need to do today?';

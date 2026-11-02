@@ -41,6 +41,7 @@ struct SXAnswerView: View {
         case .book(let b): SXBookCard(p: b, ask: ask)
         case .whatif(let w): SXWhatIfCard(p: w)
         case .tech(let t): SXTechCard(p: t)
+        case .page(let pg): SXPageEntry(p: pg)
         case .none(let why, let dym): SXNone(why: why, didYouMean: dym, ask: ask)
         }
     }

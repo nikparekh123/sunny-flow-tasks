@@ -44,6 +44,8 @@ final class SearchStore {
     /// Read aloud: the entry being read.
     var speaking: UUID?
     /// Scroll to this entry when an answer starts (nil scrolls to the top).
+    /// The name page showing over Search (block 31): set when an answer is one, cleared by back.
+    var page: SXPage?
     private(set) var jump: UUID?
     private(set) var jumpTick = 0
     /// The last press and hold on the search button that opened listening.
@@ -113,6 +115,9 @@ final class SearchStore {
     private func set(_ id: UUID, deep: Bool, _ p: Entry.Phase) {
         guard let i = entries.firstIndex(where: { $0.id == id }) else { return }
         if deep { entries[i].deep = p } else { entries[i].phase = p }
+        // A name's page slides in by itself when the latest answer is one (block 31, Nik 2 Nov 2026).
+        if !deep, i == entries.count - 1, case .done(let a) = p,
+           let pg = a.parts.lazy.compactMap({ if case .page(let x) = $0 { x } else { nil } }).first { page = pg }
     }
 
     private func run(_ id: UUID, _ q: String, _ thread: [[String: String]], deep: Bool, spoken: Bool = false, aid: String? = nil) async {
@@ -227,7 +232,7 @@ enum SXClient {
     static func ask(_ q: String, thread: [[String: String]], deep: Bool, spoken: Bool = false, rid: String = UUID().uuidString, aid: String? = nil,
                     step: @escaping @MainActor (String, Bool) -> Void) async throws -> SXAnswer {
         // draws: the newer cards this build can draw; more is the payoff's names and Also helps (block 30).
-        var body: [String: Any] = ["ask": q, "thread": thread, "deep": deep, "voice": spoken, "rid": rid, "stream": true, "draws": ["whatif", "tech", "more"]]
+        var body: [String: Any] = ["ask": q, "thread": thread, "deep": deep, "voice": spoken, "rid": rid, "stream": true, "draws": ["whatif", "tech", "more", "page"]]
         if let aid, !deep { body["id"] = aid }
         let (bytes, _) = try await URLSession.shared.bytes(for: try await request(body))
         for try await line in bytes.lines {
