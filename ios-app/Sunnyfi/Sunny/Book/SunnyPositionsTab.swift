@@ -26,6 +26,8 @@ struct SunnyPositionsTab: View {
     @AppStorage(POrders.doneKey) private var doneRaw = ""
     /// Scrolled: the small title reads "Positions" alone, no line under it (Nik, 26 Oct 2026).
     @State private var scrolled = false
+    /// The page's scroll offset, kept quietly (no redraw) for the cards' glide after a turn.
+    @State private var y = PScrollY()
 
     var body: some View {
         @Bindable var router = router
@@ -42,6 +44,9 @@ struct SunnyPositionsTab: View {
     }
 
     private func screen(_ home: HomePayload) -> some View {
+        // Read here so a sale marked placed or done rebuilds the names at once: the To do badge counted one tap behind
+        // when nothing in this body read them (2 Nov 2026).
+        _ = (placedRaw, doneRaw)
         let words = store.words ?? home
         let all = PNames.keep(PNames.build(home, orderFrom: words), order)
         // No filters (Nik, 26 Oct 2026): every name, always.
@@ -54,7 +59,9 @@ struct SunnyPositionsTab: View {
                     } else {
                         totals(PMath.legs(home))
                             .padding(.bottom, 12)
-                        SunnyPositionCards(home: home, names: shown)
+                        SunnyPositionCards(home: home, names: shown) { d in
+                            withAnimation(reduce ? nil : S.standard(0.45)) { top.scrollTo(y: y.v + d) }
+                        }
                         SunnyInventory(home: home, words: words)
                             .id("inventory")
                             .padding(.top, 20)
@@ -71,6 +78,8 @@ struct SunnyPositionsTab: View {
             .onChange(of: router.topTick[.positions]) { _, _ in withAnimation(reduce ? nil : S.standard(0.45)) { top.scrollTo(edge: .top) } }
             .scrollEdgeEffectStyle(.soft, for: .top)
             .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 50 } action: { _, v in scrolled = v }
+            // ScrollPosition's y counts from the content's top edge, the offset from under the bars: add the bars back.
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, v in y.v = v }
             .refreshable { await store.refresh(.pull); reorder() }
             .onAppear { if order.isEmpty { reorder() } }
             .onChange(of: router.tab) { _, t in if t == .positions { reorder() } }
@@ -199,3 +208,6 @@ private struct POpacity: ButtonStyle {
             .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
     }
 }
+
+/// The page's scroll offset, held outside SwiftUI's state so it changes without redrawing anything.
+final class PScrollY { var v: CGFloat = 0 }

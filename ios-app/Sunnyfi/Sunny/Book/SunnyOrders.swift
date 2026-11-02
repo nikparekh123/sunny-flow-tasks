@@ -210,15 +210,38 @@ struct POrdersFace: View {
     }
 
     var body: some View {
-        let os = POrders.build(t, p, legs: legs, dg: n.dg, earnings: earnings, placed: placed, done: done)
+        // Done orders leave the face (Nik, 2 Nov 2026): what is left is still to place, waiting, paused or skipped. A sale
+        // marked placed or done for the week by hand keeps its Undo as one line at the foot.
+        let all = POrders.build(t, p, legs: legs, dg: n.dg, earnings: earnings, placed: placed, done: done)
+        let os = all.filter { $0.status != .done }, done = all.filter { $0.status == .done }
         // No counts or re-check line on top (Nik, 26 Oct 2026): the orders, Watch this week, the footer.
         VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(os.enumerated()), id: \.element.id) { i, o in box(o, number: o.status == .todo || o.status == .waiting ? i + 1 : nil) }
             watch()
+            if let u = done.first(where: { $0.undo || $0.unfinish }) { undoLine(done.count, u) }
             Text("Orders clear on their own once IBKR shows the new position.")
                 .sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    /// "1 done" and an Undo: the sale marked by hand comes back as an order.
+    private func undoLine(_ n: Int, _ o: POrder) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(S.green)
+                .frame(width: 22, height: 22).background(Circle().fill(S.green.opacity(0.14)))
+            Text("\(n) done").sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.muted)
+            Spacer(minLength: 8)
+            Button { if o.undo { setPlaced(nil) } else { setDone(false) } } label: {
+                Text("Undo").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                    .padding(.horizontal, 18).frame(height: 36).background(Capsule().fill(S.track)).contentShape(Capsule())
+            }
+            .buttonStyle(SPressStyle(scale: 0.97))
+            .accessibilityLabel("Undo")
+            .accessibilityHint("Brings back \(o.head): \(o.title)")
+        }
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .contain)
     }
 
     // MARK: One order

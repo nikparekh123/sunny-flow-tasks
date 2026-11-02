@@ -52,8 +52,8 @@ final class HomeRouter {
     var jump = 7
     /// The Δ Γ face's move, % (handoff 32, 13g): one value for every card, 10% down to 10% up.
     var move = 7
-    /// A card opened from a tap: the face it opens on ("todo", "sold", "bought", "dg"), and the ring.
-    var cardFace: [String: String] = [:]
+    /// A card opened from a tap: the face every card turns to ("todo", "sold", "bought", "dg"), and the ring.
+    var cardFace: String?
     var cardTick = 0
     var ring: String?
     /// The Positions screen scrolls here, smoothly ("pos-NKE").
@@ -87,7 +87,7 @@ final class HomeRouter {
     func openCard(_ t: String, face: String) {
         let switching = tab != .positions
         tab = .positions
-        cardFace[t] = face
+        cardFace = face
         Task { @MainActor in
             // The tab's screen is built first, so its scroll and the card's pager are there to move.
             if switching { try? await Task.sleep(for: .milliseconds(350)) }
