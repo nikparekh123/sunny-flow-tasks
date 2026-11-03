@@ -17,6 +17,9 @@
 //  bought strikes dotted on its scale (one off it sits at the edge with an arrow),
 //  every leg as a row (sold: kept this week; bought: moved since Friday's close),
 //  kept on sold · bought, this week · net so far, then Premium vs decay.
+//  Every sold leg shows, next week's too (Nik, 3 Nov 2026, after selling Nov 13 calls on
+//  top of the Nov 6 ones): its strike on the chart tagged with its expiry, one row per
+//  type and expiry, the numbers over all of them; pace stays this week's.
 //
 
 import SwiftUI
@@ -145,6 +148,7 @@ struct PSoldPlan: View {
     let n: PName
     let width: CGFloat
     private let exp: String
+    /// This week's sold legs (pace, breakevens); `c.legs` is every sold leg.
     private let legs: [PLeg]
     private let g: Geom
     private let gone: Double
@@ -211,7 +215,13 @@ struct PSoldPlan: View {
         // Y fits the price, strikes and breakevens (a 6% span at least), then the week's line.
         var ks: [Double: (q: Int, call: Bool, dist: Double)] = [:]
         for l in legs { let e = ks[l.k]; ks[l.k] = ((e?.q ?? 0) + l.q, l.call, l.dist) }
-        let all = [c.px] + Array(ks.keys) + be.map(\.v)
+        // Sold on other expiries (next week's calls): their strikes too, each tagged with its expiry.
+        var oks: [String: (k: Double, q: Int, call: Bool, exp: String)] = [:]
+        for l in c.legs where l.expiry != exp {
+            let id = "\(l.call ? "c" : "p")\(l.k)|\(l.expiry)", e = oks[id]
+            oks[id] = (l.k, (e?.q ?? 0) + l.q, l.call, l.expiry)
+        }
+        let all = [c.px] + Array(ks.keys) + oks.values.map(\.k) + be.map(\.v)
         var ylo = all.min() ?? c.px, yhi = all.max() ?? c.px
         let sp0 = max(yhi - ylo, c.px * 0.06), mid0 = (ylo + yhi) / 2
         ylo = mid0 - sp0 * 0.62; yhi = mid0 + sp0 * 0.62
@@ -245,8 +255,11 @@ struct PSoldPlan: View {
         let tags = PSideTag.spread(ks.map { k, v in
             both ? PSideTag(id: "\(v.call ? "c" : "p")\(k)", y: Y(k), num: PF.strike(k), sub: v.call ? "Sold call" : "Sold put", isPrice: false, pill: !v.call)
                 : PSideTag(id: "\(v.call ? "c" : "p")\(k)", y: Y(k), num: PF.strike(k), sub: PF.dist(v.dist), qty: "×\(v.q)", isPrice: false, pill: !v.call)
+        } + oks.map { id, v in
+            PSideTag(id: "o" + id, y: Y(v.k), num: PF.strike(v.k), sub: PF.monthDay(v.exp), qty: both ? "" : "×\(v.q)", isPrice: false, pill: !v.call)
         } + bTags, H: H)
-        g = Geom(plot: PR, pts: pts, end: pts.last ?? CGPoint(x: 0, y: Y(c.px)), lines: ks.keys.sorted().map { ("s\($0)", Y($0)) }, tags: tags,
+        let sLines = Array(Set(ks.keys).union(oks.values.map(\.k))).sorted().map { ("s\($0)", Y($0)) }
+        g = Geom(plot: PR, pts: pts, end: pts.last ?? CGPoint(x: 0, y: Y(c.px)), lines: sLines, tags: tags,
                  bes: be.map { (Y($0.v), "Breakeven " + PF.price($0.v), $0.call) }, today: todayJ, dots: dots)
         // The share of the week gone, in trading time; the days left after today.
         let total = Double(max(1, trades.count))
@@ -257,17 +270,20 @@ struct PSoldPlan: View {
     }
 
     var body: some View {
-        let A = PTotals(legs), keptUp = A.g >= 0
+        let A = PTotals(legs)
         VStack(alignment: .leading, spacing: 16) {
             header
             chart
             if all, let b = bought {
-                PAllRows(sold: legs, exp: exp, bought: b, n: n, today: today)
+                PAllRows(sold: c.legs, bought: b, n: n, today: today)
                 if let p = n.plan, let wk = p.wk { PWeekNet(wk: wk, legs: n.legs, week: p.week) }
             } else {
             pace(A)
-            PSideStats(cells: [(PF.usd(A.base), "collected", S.ink), (PF.usd(A.tv), "left to earn", S.ink),
-                               (PF.usd(abs(A.g)), keptUp ? "kept" : "lost", keptUp ? S.green : S.red)])
+            // Other expiries sold too: one row each, and the numbers over every sold leg.
+            if c.legs.contains(where: { $0.expiry != exp }) { PLegRows(rows: pSoldRows(c.legs)) }
+            let T = PTotals(c.legs), tUp = T.g >= 0
+            PSideStats(cells: [(PF.usd(T.base), "collected", S.ink), (PF.usd(T.tv), "left to earn", S.ink),
+                               (PF.usd(abs(T.g)), tUp ? "kept" : "lost", tUp ? S.green : S.red)])
             if let p = n.plan, let wk = p.wk { PWeekNet(wk: wk, legs: n.legs, week: p.week) }
             }
         }
@@ -472,7 +488,16 @@ struct PBoughtPlan: View {
         for l in a { qs[l.k, default: 0] += l.q }
         let b = a.reduce(0) { $0 + $1.base }, nw = a.reduce(0) { $0 + $1.now }, g = nw - b
         let exps = Set(a.map(\.expiry)).sorted()
-        let t = "\(name) " + qs.keys.sorted().map { "\(PF.strike($0)) ×\(qs[$0]!)" }.joined(separator: " and ") + ", " + exps.map(expLabel).joined(separator: " and ")
+        // One expiry: "LEAPS 30 ×60, Jan ’28". Several: each strike with its own ("40 ×14 Mar 19 and 42.5 ×15 Jan 15"
+        // read as 40 Jan, 42.5 Mar when the dates came after; 3 Nov 2026).
+        let t: String
+        if exps.count == 1 {
+            t = "\(name) " + qs.keys.sorted().map { "\(PF.strike($0)) ×\(qs[$0]!)" }.joined(separator: " and ") + ", " + expLabel(exps[0])
+        } else {
+            var ke: [String: (k: Double, e: String, q: Int)] = [:]
+            for l in a { let id = "\(l.expiry)|\(l.k)"; ke[id] = (l.k, l.expiry, (ke[id]?.q ?? 0) + l.q) }
+            t = "\(name) " + ke.values.sorted { ($0.e, $0.k) < ($1.e, $1.k) }.map { "\(PF.strike($0.k)) ×\($0.q) \(expLabel($0.e))" }.joined(separator: " and ")
+        }
         let sub = "Paid \(PF.usd(b)) · now \(PF.usd(nw))" + (key == "lp" ? delta(a).map { " · delta " + String(format: "%.2f", $0) } ?? "" : "")
         return (key, t, sub, g, b > 0 ? g / b * 100 : 0)
     }

@@ -123,63 +123,80 @@ struct PChips: View {
     }
 }
 
-/// All's legs (sold rows say what is kept this week, bought rows how much they moved since Friday's close) and
-/// the three numbers under them.
+/// One leg row: what it is and what it did, the amount on the right in up or down color (no minus sign).
+struct PLegRow: Identifiable { let id: String; let t: String; let sub: String; let v: Double; let word: String }
+
+/// Every sold leg, one row per type and expiry (Nik, 3 Nov 2026: Sold shows every call and put sold, next week's too):
+/// what it collected, what is left to earn, what it has kept.
+func pSoldRows(_ sold: [PLeg]) -> [PLegRow] {
+    let groups = Dictionary(grouping: sold) { "\($0.call ? 0 : 1)|\($0.expiry)" }
+    return groups.keys.sorted { a, b in
+        let x = a.split(separator: "|"), y = b.split(separator: "|")
+        return x[1] != y[1] ? x[1] < y[1] : x[0] < y[0]
+    }.map { key in
+        let a = groups[key]!, call = a[0].call
+        var qs: [Double: Int] = [:]
+        for l in a { qs[l.k, default: 0] += l.q }
+        let A = PTotals(a)
+        let t = (call ? "Sold calls " : "Sold puts ") + qs.keys.sorted().map { "\(PF.strike($0)) ×\(qs[$0]!)" }.joined(separator: " and ")
+            + ", " + PF.monthDay(a[0].expiry)
+        return PLegRow(id: "s" + key, t: t, sub: "Collected \(PF.usd(A.base)) · \(PF.usd(A.tv)) left to earn", v: A.g,
+                       word: PF.pct(A.pct) + (A.g >= 0 ? " kept" : " lost"))
+    }
+}
+
+/// Leg rows, a hairline above each.
+struct PLegRows: View {
+    let rows: [PLegRow]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(rows) { r in
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(r.t).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(S.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(r.sub).sType(SType(size: 13, weight: 500, line: 18, tracking: 0)).foregroundStyle(S.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(PF.usd(r.v)).sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
+                        Text(r.word).sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
+                    }
+                    .foregroundStyle(r.v >= 0 ? S.green : S.red)
+                    .fixedSize()
+                }
+                .padding(.vertical, 12)
+                .overlay(alignment: .top) { Rectangle().fill(S.pRule).frame(height: 1) }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(r.t), \(r.sub), \(r.v >= 0 ? "up" : "down") \(PF.usd(r.v)) \(r.word)")
+            }
+        }
+    }
+}
+
+/// All's legs (every sold leg says what it has kept, bought rows how much they moved since Friday's close) and the
+/// three numbers under them.
 struct PAllRows: View {
     let sold: [PLeg]
-    let exp: String
     let bought: PCard
     let n: PName
     let today: String
 
-    private struct Row: Identifiable { let id: String; let t: String; let sub: String; let v: Double; let word: String }
-
-    private var rows: [Row] {
+    private var rows: [PLegRow] {
         let bp = PBoughtPlan(c: bought, n: n, today: today, width: 0)
-        func soldRow(_ key: String, _ name: String, _ a: [PLeg]) -> Row? {
-            guard !a.isEmpty else { return nil }
-            var qs: [Double: Int] = [:]
-            for l in a { qs[l.k, default: 0] += l.q }
-            let A = PTotals(a)
-            let t = "\(name) " + qs.keys.sorted().map { "\(PF.strike($0)) ×\(qs[$0]!)" }.joined(separator: " and ") + ", " + PF.monthDay(exp)
-            return Row(id: key, t: t, sub: "Collected \(PF.usd(A.base)) · \(PF.usd(A.tv)) left to earn", v: A.g,
-                       word: PF.pct(A.pct) + (A.g >= 0 ? " kept" : " lost"))
-        }
-        func boughtRow(_ key: String, _ name: String, _ a: [PLeg]) -> Row? {
+        func boughtRow(_ key: String, _ name: String, _ a: [PLeg]) -> PLegRow? {
             guard let r = bp.row(key, name, a) else { return nil }
-            return Row(id: key, t: r.t, sub: r.sub, v: PTotals(a).week, word: "this week")
+            return PLegRow(id: key, t: r.t, sub: r.sub, v: PTotals(a).week, word: "this week")
         }
-        return [soldRow("sc", "Sold calls", sold.filter(\.call)), soldRow("sp", "Sold puts", sold.filter { !$0.call }),
-                boughtRow("lp", "LEAPS", bp.leaps), boughtRow("hc", "Hedge call", bp.hedges), boughtRow("ip", "Insurance put", bp.puts)]
-            .compactMap { $0 }
+        return pSoldRows(sold) + [boughtRow("lp", "LEAPS", bp.leaps), boughtRow("hc", "Hedge call", bp.hedges),
+                                  boughtRow("ip", "Insurance put", bp.puts)].compactMap { $0 }
     }
 
     var body: some View {
         let kept = PTotals(sold).g, wk = PTotals(bought.legs).week, net = kept + wk
         VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(rows) { r in
-                    HStack(alignment: .top, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(r.t).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(S.ink)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text(r.sub).sType(SType(size: 13, weight: 500, line: 18, tracking: 0)).foregroundStyle(S.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 0)
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(PF.usd(r.v)).sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
-                            Text(r.word).sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
-                        }
-                        .foregroundStyle(r.v >= 0 ? S.green : S.red)
-                        .fixedSize()
-                    }
-                    .padding(.vertical, 12)
-                    .overlay(alignment: .top) { Rectangle().fill(S.pRule).frame(height: 1) }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(r.t), \(r.sub), \(r.v >= 0 ? "up" : "down") \(PF.usd(r.v)) \(r.word)")
-                }
-            }
+            PLegRows(rows: rows)
             PSideStats(cells: [(PF.usd(kept), kept >= 0 ? "kept on sold" : "lost on sold", kept >= 0 ? S.green : S.red),
                                (PF.usd(wk), "bought, this week", wk >= 0 ? S.green : S.red),
                                (PF.usd(net), "net so far", net >= 0 ? S.green : S.red)])
