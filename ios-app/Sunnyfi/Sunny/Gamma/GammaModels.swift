@@ -128,6 +128,36 @@ struct NamePlan: Decodable, Hashable {
     struct WallRef: Decodable, Hashable { let k: Double; let label: String; let conf: Int? }
     struct Budget: Decodable, Hashable { let pct: Double; let over: Bool; let perWeek: Double; let premium: Double }
     struct Recheck: Decodable, Hashable { let above: Double?; let below: Double? }
+
+    /// The Risk face (block 13i, 3 Nov 2026), on the hedge rule's own terms: net delta at the week's Thursday close
+    /// from today's price to the target, the low, the need and where it goes short; the walls on the next three
+    /// weeklies and four monthlies with the calls at each that cover the need; the hedge's pick first.
+    let risk: Risk?
+    struct Risk: Decodable, Hashable {
+        let week: String; let by: String; let spot: Double; let target: Target; let accel: Accel?
+        /// The week's sale while it is not placed, counted in the line.
+        let sale: Way.Leg?
+        /// The line: price and net delta at that price, today's first.
+        let px: [Double]; let d: [Double]
+        let low: Low; let need: Int; let short: Double?
+        let cols: [Col]; let pick: Pick?; let shares: Shares?
+        struct Col: Decodable, Hashable, Identifiable {
+            var id: String { e }
+            let e: String; let days: Int; let weekly: Bool; let oi: Bool; let walls: [Wall]; let yours: [Yours]
+        }
+        struct Wall: Decodable, Hashable, Identifiable {
+            var id: String { "\(side)\(k)" }
+            let k: Double; let side: String; let label: String; let conf: Int?; let quoted: Bool?
+            let mid: Double?; let dLow: Double?; let n: Int; let far: Bool; let cost: Double?
+            /// The line after the buy (same prices as the line); nil when nothing is bought.
+            let after: [Double]?; let lowAfter: Double?
+            /// Calls already held at this strike on this chain ("5 more calls").
+            let held: Int
+        }
+        struct Yours: Decodable, Hashable { let k: Double; let n: Int; let side: String; let type: String }
+        struct Pick: Decodable, Hashable { let e: String; let k: Double }
+        struct Shares: Decodable, Hashable { let n: Int; let cost: Double }
+    }
 }
 
 /// The Gamma rows for one name: the latest session's views, and the sessions before it for the week's history.

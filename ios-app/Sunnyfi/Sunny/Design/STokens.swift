@@ -122,6 +122,17 @@ enum S {
     /// Grid lines and soft fills (Yield, Payback, Sold vs Bought, Risk).
     static let pGrid     = dynA(0x1D1D1F, 0.06, 0xFFFFFF, 0.07)
 
+    // Positions Position · Risk (block 13i, 3 Nov 2026): the wall colors (Accelerator light deepened to 5.0:1),
+    // the short stretch, the Goes short row's tint, chips on the chart, muted text on a tinted row.
+    static let wallCeiling = dyn(0x2F5AA8, 0x86A8F0)
+    static let wallFloor   = dyn(0x995123, 0xE8975C)
+    static let wallAccel   = dyn(0x0B6F75, 0x4CC9D0)
+    static let wallUnclear = dyn(0x6E6E73, 0xAEAEB2)
+    static let downTint    = dynA(0xBC2E30, 0.09, 0xFF6961, 0.16)
+    static let thinTint    = dynA(0xB35200, 0.10, 0xF2A93B, 0.18)
+    static let chartChip   = dynA(0xFFFFFF, 0.9, 0x1C1C1E, 0.86)
+    static let mutedOnTile = dyn(0x646469, 0xAEAEB2)
+
     // Added Oct 19 (handoff 26): the strategy mark fill (13b) and the
     // Aftershock countdown bar track (26); the Aftershock deck card (03b).
     static let track = dynA(0x1D1D1F, 0.06, 0xFFFFFF, 0.10)

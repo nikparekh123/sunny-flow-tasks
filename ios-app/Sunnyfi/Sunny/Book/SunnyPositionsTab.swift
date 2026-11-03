@@ -4,7 +4,8 @@
 //
 //  Blocks 12 and 12a (handoff 30, 22 Oct 2026) · the Positions tab: the native
 //  nav bar (large title and a subtitle; no filters since 26 Oct 2026), the book's totals in one
-//  sideways row, one glass card per name with To do first, then Inventory.
+//  sideways row, one glass card per name, then Inventory. Block 13i (3 Nov 2026): the
+//  cards are Position · Risk; a name with something left to cover comes first.
 //  The chrome is the system's; only what sits inside the cards is custom.
 //
 
@@ -93,10 +94,11 @@ struct SunnyPositionsTab: View {
         .navigationSubtitle(scrolled ? "" : subtitle(all))
     }
 
-    /// The order as the data reads now: names with To do first, then the cards' own order.
+    /// The order as the data reads now: names with something left to cover first (13i), then the cards' own order.
     private func reorder() {
         guard let h = store.home else { return }
-        order = PNames.build(h, orderFrom: store.words ?? h).map(\.t)
+        let all = PNames.build(h, orderFrom: store.words ?? h)
+        order = (all.filter(\.cover) + all.filter { !$0.cover }).map(\.t)
     }
 
     /// The Walls screen: opens on next Friday's expiry; the To do chains are tagged (13d).
@@ -113,10 +115,10 @@ struct SunnyPositionsTab: View {
         }
     }
 
-    /// "7 names · 5 with To do".
+    /// "7 names · 2 to cover" (13i: To do left the cards).
     private func subtitle(_ all: [PName]) -> String {
-        let names = PWords.n(all.count, "name"), todo = all.filter(\.hasTodo).count
-        return names + (todo > 0 ? " · \(todo) with To do" : "")
+        let names = PWords.n(all.count, "name"), cover = all.filter(\.cover).count
+        return names + (cover > 0 ? " · \(cover) to cover" : "")
     }
 
     // MARK: Totals (block 12): always the whole book

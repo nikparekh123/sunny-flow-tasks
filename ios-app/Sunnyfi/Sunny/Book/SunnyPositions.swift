@@ -15,6 +15,13 @@
 //  (SunnyOrders) and the badge counts the orders to place; the insights and
 //  walls buttons are gone (Insights and Gamma are tabs). A card with nothing
 //  on the face showing says so in one line ("Nothing bought").
+//  Block 13i (3 Nov 2026): two faces, Position · Risk, in a segmented control inside
+//  each card, linked so a turn on one card turns every card (the card touched stays
+//  still on screen); To do and Δ Γ are gone from the cards (their logic stays on the
+//  server: Risk reads the hedge rule's walls). Position holds Sold and Bought behind
+//  All · Sold · Bought chips, shared by every card. A name with nothing bought has
+//  Position only and no control. An orange dot before the ticker and on Risk while
+//  the book goes short within the hedge rule's target.
 //
 
 import SwiftUI
@@ -52,15 +59,17 @@ struct PName: Identifiable {
         return ways?.trades ?? tasks.count
     }
     var hasTodo: Bool { todoN > 0 }
+    /// The Risk face (13i): the hedge rule's line and walls, for a name with something bought.
+    var risk: NamePlan.Risk? { bought != nil ? plan?.risk : nil }
+    /// Something left to cover within the hedge rule's target: the orange dots, the card first.
+    var cover: Bool { (risk?.need ?? 0) > 0 }
+    var faces: [PFace] { risk != nil ? [.position, .risk] : [.position] }
 
     /// Whether the card has something on a face; without it the face is one line.
     func has(_ f: PFace) -> Bool {
         switch f {
-        // With ways the To do face stays on every card, the walls showing even with nothing to trade (23 Oct).
-        case .todo: hasTodo || ways != nil || plan != nil
-        case .sold: sold != nil
-        case .bought: bought != nil
-        case .dg: bought != nil && dg != nil
+        case .position: sold != nil || bought != nil
+        case .risk: risk != nil
         }
     }
     /// The Δ Γ dot, only while a buy is open: red when it goes short inside a normal week's move,
@@ -71,26 +80,8 @@ struct PName: Identifiable {
         if let th = d.thin, th <= sd { return S.orange }
         return nil
     }
-    /// What this name adds to a face's tab: the To do count, or a dot where the reason is.
-    func mark(_ f: PFace) -> PMark {
-        guard has(f) else { return .none }
-        // With a plan: the orders to place on To do, an orange dot on Δ Γ while a hedge is due (13e).
-        if let p = plan {
-            return switch f {
-            case .todo: todoN > 0 ? .badge(todoN) : .none
-            case .dg: (p.hedge?.add ?? 0) > 0 ? .dot(S.orange) : .none
-            default: .none
-            }
-        }
-        // With ways the badge says it all: no dots on the other tabs (13c).
-        if ways != nil { return f == .todo && todoN > 0 ? .badge(todoN) : .none }
-        return switch f {
-        case .todo: tasks.isEmpty ? .none : .badge(tasks.count)
-        case .sold: tasks.contains { $0.face == "sold" } ? .dot(S.orange) : .none
-        case .bought: .none
-        case .dg: dgDot.map { .dot($0) } ?? .none
-        }
-    }
+    /// What this name adds to a face's tab: an orange dot on Risk while something is left to cover (13i).
+    func mark(_ f: PFace) -> PMark { f == .risk && cover ? .dot(S.orange) : .none }
 
     func matches(_ f: PFilter) -> Bool {
         switch f {
@@ -151,15 +142,16 @@ enum PNames {
     }
 }
 
-/// The cards, in order, each entering once (block 12, Motion), under the one control that turns them all.
+/// The cards, in order, each entering once (block 12, Motion). Each card carries its own Position · Risk control;
+/// the faces and chips are one choice for every card (block 13i).
 struct SunnyPositionCards: View {
     let home: HomePayload
     let names: [PName]
-    /// Scrolls the page by this many points (the Positions tab's scroll): after a turn, the card you were on glides
-    /// to the top of the screen, so it reads from the top and the cards above changing height don't move it.
+    /// Scrolls the page by this many points (the Positions tab's scroll): after a turn, the card you touched glides
+    /// back to where it was, so the cards above changing height don't move it.
     var glide: ((CGFloat) -> Void)? = nil
     @State private var seen = false
-    /// The face every card is on (Nik, 2 Nov 2026: one control for all the cards, outside them).
+    /// The face and chip every card is on.
     @State private var sw = PFaceSwitch()
     @Environment(HomeRouter.self) private var router
     @Environment(\.accessibilityReduceMotion) private var reduce
@@ -174,114 +166,99 @@ struct SunnyPositionCards: View {
         let open = MarketClock.isRegular(SClock.now(), calendar: home.calendar)
         // Lazy: only the cards on screen are built and redrawn on each 15 s update (Nik's phone showed a 550 ms hang
         // when all seven cards, four faces each, redrew every update; 26 Oct 2026).
-        // Every face some card has, in the one order; each card carries them all, so a turn moves every card alike.
-        let F = PFace.allCases.filter { f in names.contains { $0.has(f) } }
-        // The control scrolls with the page, not pinned (Nik, 2 Nov 2026: pinned "looks odd").
         LazyVStack(alignment: .leading, spacing: 12) {
-            Section {
-                ForEach(Array(names.enumerated()), id: \.element.id) { j, n in
-                    PNameCard(n: n, faces: F, sw: sw, ringed: router.ring == n.t, width: width,
-                              go: seen || reduce, delay: Double(min(j, 6)) * S.stagger,
-                              hours: hours, live: live, today: home.today, open: open, cal: home.calendar)
-                        // Where each card on screen sits, for the glide after a turn (not observed: no redraws).
-                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .scrollView) } action: { sw.frames[n.t] = $0 }
-                        // Scrolled to from a tap: the id sits on the row itself, outermost, so the lazy list can find a
-                        // card it has not built yet (block 12a).
-                        .id("pos-\(n.t)")
-                }
-            } header: {
-                if F.count > 1 {
-                    PFaceTabs(faces: F.map(\.label), spoken: F.map(\.spoken), marks: F.map { f in PMark.sum(names.map { $0.mark(f) }) },
-                              prog: sw.prog) { i in sw.select(F[i], in: F, reduce: reduce) }
-                        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .scrollView).maxY } action: { sw.bar = $0 }
-                        .pEnter(seen || reduce, 0)
-                }
+            ForEach(Array(names.enumerated()), id: \.element.id) { j, n in
+                PNameCard(n: n, faces: n.faces, sw: sw, ringed: router.ring == n.t, width: width,
+                          go: seen || reduce, delay: Double(min(j, 6)) * S.stagger,
+                          hours: hours, live: live, today: home.today, open: open, cal: home.calendar)
+                    // Where each card on screen sits, for the glide after a turn (not observed: no redraws).
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .scrollView) } action: { sw.frames[n.t] = $0 }
+                    // Scrolled to from a tap: the id sits on the row itself, outermost, so the lazy list can find a
+                    // card it has not built yet (block 12a).
+                    .id("pos-\(n.t)")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // First view animates once (block 12, Motion): any sliver on screen counts.
         .onScrollVisibilityChange(threshold: 0.001) { v in if v { seen = true } }
-        .onAppear { sw.fit(F) }
-        // A face that comes or goes (To do once every trade fills): stay on the face you were on.
-        .onChange(of: F) { _, new in sw.fit(new) }
-        // Opened from a tap (the map, a chip, the Earnings card): every card turns to that face, and once the page has
-        // scrolled there the card glides out from under the control.
+        // Opened from a tap (the map, a chip, Insights): every card turns to that face (the old faces' names land on
+        // Position or Risk), and once the page has scrolled there nothing else moves.
         .onChange(of: router.cardTick) { _, _ in
-            if let f = router.cardFace.flatMap(PFace.init(rawValue:)), F.contains(f) { sw.select(f, in: F, reduce: reduce, haptic: false) }
-            if let t = router.ring { settle(on: t, after: 0.55) }
+            guard let s = router.cardFace else { return }
+            let (f, c) = PFace.from(s)
+            if let c { sw.chip = c }
+            sw.select(f, reduce: reduce, haptic: false)
         }
-        // A turn by hand: the card you were on (the one swiped, else the one a third of the way down) to the top.
+        // A turn by hand: the card touched glides back to where it was once the heights settle.
         .onChange(of: sw.turned) { _, _ in
-            let t = sw.pick ?? reading
-            sw.pick = nil
-            if let t { settle(on: t, after: 0.4) }
+            guard let a = sw.anchor else { return }
+            settle(a.t, at: a.y, after: 0.4)
         }
-        .onChange(of: keptOn) { _, on in if let f = on ? (F.contains(.sold) ? .sold : nil) : F.first { sw.select(f, in: F, reduce: reduce, haptic: false) } }
+        .onChange(of: keptOn) { _, on in sw.chip = on ? .sold : .all }
     }
 
-    /// The top of what shows of the page: under the control while it is on screen, else under the bars.
-    private var shownTop: CGFloat { max(sw.bar, 0) }
-
-    /// The card a third of the way down what shows: the one being read.
-    private var reading: String? {
-        let h = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.height ?? 852
-        let probe = shownTop + (h - shownTop) / 3
-        return names.first { (sw.frames[$0.t]?.maxY ?? -1) > probe && (sw.frames[$0.t]?.minY ?? .infinity) < h }?.t
-    }
-
-    /// Once the faces have turned and the heights settled, scroll so the card's top sits 12 pt under the control, or
-    /// under the bars once the control has scrolled away. Not for the first card while its top shows (nothing moved).
-    private func settle(on t: String, after s: Double) {
+    /// Once the faces have turned and the heights settled, scroll so the touched card's top is back where it was.
+    private func settle(_ t: String, at y: CGFloat, after s: Double) {
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(reduce ? 0.05 : s))
             guard let f = sw.frames[t] else { return }
-            let want = shownTop + 12, d = f.minY - want
-            if abs(d) < 1 || (t == names.first?.t && d > 0) { return }
-            glide?(d)
+            let d = f.minY - y
+            if abs(d) >= 1 { glide?(d) }
         }
     }
 }
 
-/// The face every card is on, and the control's capsule: it rides the finger while a card is swiped, and
-/// moves with a tap. The cards watch `face` and turn to it.
+/// The face and chip every card is on. A card's control rides that card's own swipe; where it settles, every card
+/// turns. The card touched is the anchor the page keeps still.
 @Observable final class PFaceSwitch {
-    let prog = PFaceProgress()
-    var face: PFace = .todo
-    /// Bumped by a turn by hand (a tap or a swipe), for the glide; the card swiped, if it was a swipe.
+    var face: PFace = .position
+    var chip: PChip = .all
+    /// Bumped by a turn by hand (a tap or a swipe), for the glide.
     var turned = 0
-    @ObservationIgnored var pick: String?
-    /// Each card on screen, and the control's foot, in the page's visible space (kept quietly: they change every frame).
+    /// The card touched and its top before the turn, in the page's visible space.
+    @ObservationIgnored var anchor: (t: String, y: CGFloat)?
+    /// Each card on screen in the page's visible space (kept quietly: they change every frame).
     @ObservationIgnored var frames: [String: CGRect] = [:]
-    @ObservationIgnored var bar: CGFloat = 0
 
-    /// A tap on the control or inside a card: the capsule slides there and every card turns.
-    @MainActor func select(_ f: PFace, in faces: [PFace], reduce: Bool, haptic: Bool = true) {
-        guard let i = faces.firstIndex(of: f) else { return }
+    /// A tap on a card's control or a row inside it: every card turns.
+    @MainActor func select(_ f: PFace, from t: String? = nil, reduce: Bool, haptic: Bool = true) {
+        if let t, let y = frames[t]?.minY { anchor = (t, y) } else if t == nil { anchor = nil }
         if haptic && f != face { UISelectionFeedbackGenerator().selectionChanged() }
-        if reduce { prog.p = Double(i) } else { withAnimation(S.standard(0.35)) { prog.p = Double(i) } }
-        if haptic && f != face { turned += 1 }
+        let was = face
         face = f
+        if haptic && f != was { turned += 1 }
     }
     /// A card's swipe has settled on a face.
-    func settle(_ f: PFace, in faces: [PFace], from t: String) {
-        prog.p = Double(faces.firstIndex(of: f) ?? 0)
-        prog.moving = false
-        if f != face { pick = t; turned += 1 }
+    func settle(_ f: PFace, from t: String) {
+        if f != face { turned += 1 }
         face = f
     }
-    /// The faces changed: keep the one showing, else Sold, else the first.
-    func fit(_ faces: [PFace]) {
-        if !faces.contains(face), let f = faces.contains(.sold) ? .sold : faces.first { face = f }
-        prog.p = Double(faces.firstIndex(of: face) ?? 0)
+    /// A chip on one card: every card shows the same legs.
+    @MainActor func pick(_ c: PChip, from t: String) {
+        guard c != chip else { return }
+        if let y = frames[t]?.minY { anchor = (t, y) }
+        UISelectionFeedbackGenerator().selectionChanged()
+        chip = c
+        turned += 1
     }
 }
 
-/// A card's faces, in order.
+/// A card's faces, in order (block 13i): Position, then Risk for a name with something bought.
 enum PFace: String, CaseIterable, Identifiable {
-    case todo, sold, bought, dg
+    case position, risk
     var id: String { rawValue }
-    var label: String { switch self { case .todo: "To do"; case .sold: "Sold"; case .bought: "Bought"; case .dg: "Δ Γ" } }
-    var spoken: String { self == .dg ? "Delta and Gamma" : label }
+    var label: String { self == .position ? "Position" : "Risk" }
+    var spoken: String { label }
+    /// A face named by a link from elsewhere: the old faces' names land on these (To do and Δ Γ on Risk, Sold and
+    /// Bought on Position with that chip).
+    static func from(_ s: String) -> (PFace, PChip?) {
+        switch s {
+        case "risk", "dg", "todo": (.risk, nil)
+        case "sold": (.position, .sold)
+        case "bought": (.position, .bought)
+        default: (.position, nil)
+        }
+    }
 }
 
 /// The words and numbers the cards share (block 12, Numbers).
@@ -316,13 +293,13 @@ enum PMark: Equatable {
     }
 }
 
-// MARK: - One name's card (block 13)
+// MARK: - One name's card (block 13, 13i)
 
 private struct PNameCard: View {
     typealias Face = PFace
     @Environment(\.accessibilityReduceMotion) private var reduce
     let n: PName
-    /// Every card carries the same faces, in the same order, so one turn moves them all alike.
+    /// This card's faces: Position, and Risk when something is bought.
     let faces: [Face]
     let sw: PFaceSwitch
     /// Opened from a tap: a 2 pt ink outline for 1.8 s.
@@ -337,17 +314,11 @@ private struct PNameCard: View {
     let cal: [CalendarDay]
 
     @State private var pos = ScrollPosition()
-    /// This card's own swipe, for its height; the control follows it only while this card is the one swiped.
+    /// This card's own swipe: its control's thumb and its height follow it.
     @State private var prog = PFaceProgress()
     @State private var driving = false
     /// Each face's own height: the card takes the one it is on, blended mid-swipe (handoff 31).
     @State private var hs: [Face: CGFloat] = [:]
-    /// Done for this week on a sale: read so the badge redraws with it.
-    @AppStorage(POrders.doneKey) private var doneRaw = ""
-    @AppStorage(POrders.placedKey) private var placedRaw = ""
-    /// The To do face's chip and tapped ways, kept for the session (13c).
-    @State private var block: PWays.Block = .sell
-    @State private var sel: [PWays.Block: String] = [:]
 
     private var t: String { n.t }
     /// One face is the card's full width; it carries the 20 pt side padding itself, so a strike
@@ -358,6 +329,13 @@ private struct PNameCard: View {
         let F = faces
         VStack(alignment: .leading, spacing: 16) {
             head.padding(.horizontal, 20)
+            if F.count > 1 {
+                PFaceTabs(faces: F.map(\.label), spoken: F.map(\.spoken), marks: F.map { n.mark($0) }, prog: prog, raised: false) { i in
+                    guard let f = F[safe: i] else { return }
+                    sw.select(f, from: t, reduce: reduce)
+                }
+                .padding(.horizontal, 20)
+            }
             // Each face at its own height, top aligned: the card takes the one on screen and blends
             // between two mid-swipe (handoff 31, 13).
             PFaceHeight(prog: prog, heights: F.map { hs[$0] }) {
@@ -378,16 +356,17 @@ private struct PNameCard: View {
                 .scrollDisabled(F.count < 2)
                 .onScrollGeometryChange(for: Double.self) { g in Double(g.contentOffset.x / max(1, g.containerSize.width)) } action: { _, v in
                     prog.p = v
-                    if driving { sw.prog.p = v }
                 }
-                // A finger on this card: the control rides it, and where it settles every card turns.
+                // A finger on this card: where it settles every card turns, and this card stays still on screen.
                 .onScrollPhaseChange { _, ph in
                     prog.moving = ph != .idle
-                    if ph == .interacting { driving = true }
-                    if driving { sw.prog.moving = ph != .idle }
+                    if ph == .interacting && !driving {
+                        driving = true
+                        if let y = sw.frames[t]?.minY { sw.anchor = (t, y) }
+                    }
                     if ph == .idle, driving {
                         driving = false
-                        if let f = F[safe: Int(prog.p.rounded())] { sw.settle(f, in: F, from: t) }
+                        if let f = F[safe: Int(prog.p.rounded())] { sw.settle(f, from: t) }
                     }
                 }
             }
@@ -409,54 +388,47 @@ private struct PNameCard: View {
         }
         .sunnyGlow()
         .pEnter(go, delay)
-        // The control or another card turned: this one follows, unless it is the one that was swiped.
+        // Another card turned (or this one's control): this one follows, unless it is the one being swiped. A card
+        // without that face stays where it is.
         .onChange(of: sw.face) { _, f in
             guard !driving, let i = F.firstIndex(of: f), abs(prog.p - Double(i)) > 0.01 else { return }
             if reduce { pos.scrollTo(x: CGFloat(i) * pageW) } else { withAnimation(S.standard(0.35)) { pos.scrollTo(x: CGFloat(i) * pageW) } }
         }
-        // The faces changed (To do once every trade fills): stay on the face showing.
+        // The faces changed (Risk once something is bought, or gone): stay on the face showing.
         .onChange(of: F) { _, new in
             let i = new.firstIndex(of: sw.face) ?? 0
             var tr = Transaction(); tr.disablesAnimations = true
             withTransaction(tr) { pos.scrollTo(x: CGFloat(i) * pageW) }
         }
         .onAppear {
-            #if DEBUG && targetEnvironment(simulator)
-            // `-ways buy` opens every To do face on Buy; `-waysSel bc.w2` taps that way (screenshots).
-            let a = ProcessInfo.processInfo.arguments
-            if a.contains("buy"), a.contains("-ways") { block = .buy }
-            if let i = a.firstIndex(of: "-waysSel"), i + 1 < a.count { sel[block] = a[i + 1] }
-            #endif
             // Built as it scrolls on: on the face every card is on.
             if let i = F.firstIndex(of: sw.face), i > 0 {
                 var tr = Transaction(); tr.disablesAnimations = true
                 withTransaction(tr) { pos.scrollTo(x: CGFloat(i) * pageW) }
+                prog.p = Double(i)
             }
         }
     }
 
-    /// A face's height as measured: a change while the card is still (a chip, a fill) eases 0.3 s;
+    /// A face's height as measured: a change while the card is still (a chip, a pick) eases 0.3 s;
     /// mid-swipe it follows at once (Reduce Motion: always at once).
     private func setHeight(_ f: Face, _ v: CGFloat) {
         guard abs((hs[f] ?? 0) - v) > 0.5 else { return }
         if hs[f] == nil || prog.moving || reduce { hs[f] = v } else { withAnimation(S.standard(0.3)) { hs[f] = v } }
     }
 
-    /// A tap inside the card ("Sell in To do", a To do row): every card turns, this one with them. Each card
-    /// scrolls by the face's x offset, never its id: an id scroll moves the page underneath too.
-    private func scroll(to f: Face) {
-        sw.pick = t
-        sw.select(faces.contains(f) ? f : .sold, in: faces, reduce: reduce)
-    }
+    /// A row inside Position ("Goes short", "Friday's sale"): every card turns to Risk, this one stays still.
+    private func openRisk() { sw.select(.risk, from: t, reduce: reduce) }
 
     // MARK: Header
 
-    /// The ticker, its price and today's move; the strategy on the right; an orange dot while there is work.
+    /// The ticker, its price and today's move; the strategy on the right; an orange dot while something is left to
+    /// cover (13i).
     private var head: some View {
         HStack(alignment: .center, spacing: 8) {
-            if n.hasTodo {
+            if n.cover {
                 Circle().fill(S.orange).frame(width: 10, height: 10)
-                    .accessibilityLabel("Has To do")
+                    .accessibilityLabel("Needs cover")
             }
             (Text(t).font(SType(size: 20, weight: 700, line: 24, tracking: 0).font())
              + Text(" " + PF.price(n.px)).font(SType(size: 20, weight: 500, line: 24, tracking: 0).font(tabular: true))
@@ -480,31 +452,43 @@ private struct PNameCard: View {
     // MARK: Faces
 
     @ViewBuilder private func face(_ f: Face) -> some View {
-        if !n.has(f) {
-            nothing(f)
-        } else {
         switch f {
-        case .todo:
-            if let p = n.plan { POrdersFace(t: t, p: p, n: n, legs: n.legs, earnings: n.earnings) }
-            else if let w = n.ways { PWaysFace(t: t, px: n.px, w: w, block: $block, sel: $sel) } else { todoFace }
-        // With the week's plan: Sold and Bought as 13f (handoff 32).
-        case .sold: if let c = n.sold { if n.plan != nil, let v = PSoldPlan(c: c, n: n, hours: hours, live: live, today: today, cal: cal, width: width) { v } else { side(c) } }
-        case .bought: if let c = n.bought { if n.plan != nil { PBoughtPlan(c: c, n: n, today: today, width: width) } else { side(c) } }
-        case .dg: if let d = n.dg { PDGFace(t: t, dg: d, width: width, plan: n.plan) }
-        }
+        case .position: position
+        case .risk:
+            if let r = n.risk {
+                PRiskFace(t: t, r: r, perLeap: n.plan?.sell.n, sold: n.legs.filter { $0.side == "sold" && $0.type == "call" && $0.expiry == r.week },
+                          width: width, active: sw.face == .risk)
+            }
         }
     }
 
-    /// A face this card has nothing on, in one line.
-    private func nothing(_ f: Face) -> some View {
-        let w = switch f {
-        case .todo: "Nothing to do this week"
-        case .sold: "Nothing sold"
-        case .bought, .dg: "Nothing bought"
+    /// Position (13i): the row on top when the book goes short or Friday's sale is still to place, then All · Sold ·
+    /// Bought when the name has both sides (All first), else the one side it has.
+    private var position: some View {
+        let two = n.sold != nil && n.bought != nil
+        return VStack(alignment: .leading, spacing: 18) {
+            if let r = n.risk, n.cover { PGoesShortRow(r: r, tap: openRisk) }
+            if let r = n.risk, let sale = r.sale { PSaleRow(sale: sale, perLeap: n.plan?.sell.n, tap: openRisk) }
+            if two { PChips(chip: sw.chip) { c in sw.pick(c, from: t) } }
+            legs(two ? sw.chip : (n.sold != nil ? .sold : .bought))
         }
-        return Text(w).sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
-            .foregroundStyle(S.muted)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    @ViewBuilder private func legs(_ c: PChip) -> some View {
+        switch c {
+        case .all:
+            if let s = n.sold, let b = n.bought, n.plan != nil,
+               let v = PSoldPlan(c: s, n: n, hours: hours, live: live, today: today, cal: cal, width: width, bought: b) { v }
+            else if let s = n.sold { sold(s) }
+        case .sold: if let s = n.sold { sold(s) }
+        case .bought:
+            if let b = n.bought { if n.plan != nil { PBoughtPlan(c: b, n: n, today: today, width: width) } else { side(b) } }
+        }
+    }
+
+    @ViewBuilder private func sold(_ c: PCard) -> some View {
+        if n.plan != nil, let v = PSoldPlan(c: c, n: n, hours: hours, live: live, today: today, cal: cal, width: width) { v } else { side(c) }
     }
 
     /// Sold or Bought: By Fri and the nearest strikes, the hourly line with the strikes, four numbers.
@@ -527,7 +511,6 @@ private struct PNameCard: View {
                                            today: today),
                        width: width, go: go, d: delay, open: open)
             Spacer(minLength: 0)
-            if c.sold && n.ways == nil { unsold }
             footer(c)
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -580,154 +563,6 @@ private struct PNameCard: View {
         return ([t, c.sold ? "Sold" : "Bought", PF.price(c.px)] + d + ["\(PWords.dollars(sold: c.sold, up: c.totals.up)) \(g) dollars"])
             .joined(separator: ", ")
     }
-
-    // MARK: Unsold (block 13, Sold): room left while a sale is open, a tap goes to To do
-
-    @ViewBuilder private var unsold: some View {
-        let b = n.bars, uc = max(0, (b?.cc ?? 0) - (b?.cs ?? 0)), up = b?.putsPaused == true ? 0 : max(0, (b?.pc ?? 0) - (b?.ps ?? 0))
-        if (uc > 0 || up > 0) && n.tasks.contains(where: { $0.kind == "sell" || $0.kind == "put" }) {
-            let words = (uc > 0 ? PWords.n(uc, "call") : "") + (uc > 0 && up > 0 ? " and " : "") + (up > 0 ? PWords.n(up, "put") : "") + " unsold"
-            Button { scroll(to: .todo) } label: {
-                HStack(alignment: .center, spacing: 10) {
-                    Circle().fill(S.orange).frame(width: 8, height: 8)
-                    Text(words).sType(SType(size: 15, weight: 600, line: 20, tracking: 0))
-                        .foregroundStyle(S.ink)
-                        .lineLimit(1).minimumScaleFactor(0.85)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Text("Sell in To do").sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false)
-                        .foregroundStyle(S.muted)
-                    Path { q in q.move(to: CGPoint(x: 1.2, y: 1.2)); q.addLine(to: CGPoint(x: 5.8, y: 6)); q.addLine(to: CGPoint(x: 1.2, y: 10.8)) }
-                        .stroke(S.muted, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
-                        .frame(width: 7, height: 12)
-                }
-                .padding(.top, 12)
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(POpacityPress())
-            .overlay(alignment: .top) { Rectangle().fill(S.pRule).frame(height: 1) }
-            .accessibilityLabel("\(words). Sell in To do")
-        }
-    }
-
-    // MARK: To do (block 13): the bars, This week, Buy inventory, three numbers
-
-    private var todoFace: some View {
-        let rows = n.tasks, wk = rows.filter { !$0.buy }, buy = rows.filter(\.buy)
-        let cash = rows.reduce(0.0) { $0 + ($1.credit ? $1.cost : -$1.cost) }   // > 0: a credit
-        let delta = rows.reduce(0.0) { $0 + $1.delta }
-        return VStack(alignment: .leading, spacing: 18) {
-            if let b = n.bars {
-                HStack(alignment: .top, spacing: 16) {
-                    bar("Calls", b.cs, b.cc)
-                    if b.putsPaused { pausedPuts(b) }
-                    else if b.pc > 0 || b.ps > 0 { bar("Puts", b.ps, b.pc) } else { Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
-                }
-            }
-            VStack(alignment: .leading, spacing: 14) {
-                if !wk.isEmpty { group("This week", wk) }
-                if !buy.isEmpty { group("Buy inventory", buy) }
-            }
-            Spacer(minLength: 0)
-            stats([
-                (Double(rows.count), { "\(Int($0.rounded()))" }, "to do", S.ink),
-                (abs(cash), { PF.usd($0) }, cash > 0 ? "net credit" : "net cost", cash > 0 ? S.green : S.ink),
-                (delta, { $0 >= 0 ? "+" + PF.usd($0) : PF.usd($0) }, "delta added", delta < 0 ? S.red : S.ink),
-            ])
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(rows.count) to do, \(PF.usd(cash)) net \(cash > 0 ? "credit" : "cost"), \(PWords.delta(delta)) added")
-        }
-        .frame(maxHeight: .infinity, alignment: .top)
-    }
-
-    /// Sold against room ("7 of 5"): a 6 pt bar, ink, red with its numbers when more is sold than room.
-    private func bar(_ l: String, _ a: Int, _ room: Int) -> some View {
-        let over = a > room, w = room > 0 ? min(1, Double(a) / Double(room)) : (a > 0 ? 1 : 0)
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(l).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                Spacer(minLength: 0)
-                Text("\(a) of \(room)").sType(SType(size: 13, weight: 500, line: 16, tracking: 0))
-                    .foregroundStyle(over ? S.red : S.muted)
-                    .contentTransition(.numericText(value: Double(a)))
-            }
-            .lineLimit(1)
-            GeometryReader { g in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(S.track)
-                    Capsule().fill(over ? S.red : S.ink).frame(width: g.size.width * w)
-                }
-            }
-            .frame(height: 6)
-            .animation(reduce ? nil : S.standard(0.4), value: w)
-        }
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(l), \(a) of \(room) sold" + (over ? ", \(a - room) over" : ""))
-    }
-
-    /// Put sales paused: the stock's last close is under its 50-day average (Nik, 23 Oct 2026). In the
-    /// puts bar's place, so the card says why there is no put to sell.
-    private func pausedPuts(_ b: TodoBars) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Puts paused").sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
-            Text(b.s50.map { "Below the 50-day \(PF.price($0))" } ?? "Below the 50-day")
-                .sType(SType(size: 13, weight: 500, line: 16, tracking: 0))
-                .foregroundStyle(S.muted)
-                .lineLimit(1).minimumScaleFactor(0.85)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Puts paused, below the 50-day average" + (b.s50.map { " of \(PF.price($0))" } ?? ""))
-    }
-
-    private func group(_ h: String, _ rows: [WeekTask]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(h).sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                Spacer(minLength: 0)
-                Text("\(rows.count)").sType(SType(size: 13, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.muted)
-            }
-            .padding(.bottom, 6)
-            .accessibilityAddTraits(.isHeader)
-            ForEach(rows) { r in todoRow(r) }
-        }
-    }
-
-    /// The action, why under it; the cost on the right (a credit in green), the delta it adds under it.
-    /// A tap swipes to the face behind the task: Sold for a roll or a sale, Δ Γ for a buy.
-    private func todoRow(_ r: WeekTask) -> some View {
-        Button { scroll(to: r.face == "dg" ? .dg : .sold) } label: {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(r.act ?? r.action).sType(SType(size: 15, weight: 600, line: 20, tracking: 0))
-                        .foregroundStyle(S.ink)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let w = r.why {
-                        Text(w).sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
-                            .foregroundStyle(S.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(PF.usd(r.cost) + (r.credit ? " credit" : "")).sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
-                        .foregroundStyle(r.credit ? S.green : S.ink)
-                    Text(PWords.delta(r.delta)).sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
-                        .foregroundStyle(r.delta < 0 ? S.red : S.muted)
-                }
-                .lineLimit(1)
-                .fixedSize()
-            }
-            .padding(.vertical, 8)
-            .frame(minHeight: 56)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(POpacityPress())
-        .overlay(alignment: .top) { Rectangle().fill(S.pRule).frame(height: 1) }
-        .accessibilityLabel("\(r.act ?? r.action), \(r.why ?? ""), \(PF.usd(r.cost))\(r.credit ? " credit" : ""), \(PWords.delta(r.delta))")
-        .accessibilityHint(r.face == "dg" ? "See Delta and Gamma" : "See Sold")
-    }
 }
 
 /// The pager's height: the face on screen, blended between two by the swipe (handoff 31, 13). Its own
@@ -752,6 +587,8 @@ private struct PFaceTabs: View {
     let spoken: [String]
     let marks: [PMark]
     let prog: PFaceProgress
+    /// The dot raised beside the label (block 13), or on its middle with 6 before it (Position · Risk, 13i).
+    var raised = true
     let tap: (Int) -> Void
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduce
@@ -807,8 +644,8 @@ private struct PFaceTabs: View {
                                         .padding(.leading, 5)
                                 case .dot(let c):
                                     Circle().fill(c).frame(width: 6, height: 6)
-                                        .padding(.leading, 3)
-                                        .offset(y: -5)
+                                        .padding(.leading, raised ? 3 : 6)
+                                        .offset(y: raised ? -5 : 0)
                                 case .none:
                                     EmptyView()
                                 }
@@ -832,7 +669,7 @@ private struct PFaceTabs: View {
     static func spoken(_ t: String, _ m: PMark) -> String {
         switch m {
         case .badge(let n): "\(t), \(n) to do"
-        case .dot: "\(t), needs a look"
+        case .dot: "\(t), needs attention"
         case .none: t
         }
     }

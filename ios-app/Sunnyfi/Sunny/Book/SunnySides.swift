@@ -13,6 +13,10 @@
 //  has left (a month at least), one row per leg type. Both end with This week:
 //  the premium on what the week's expiry sold against a week of decay on
 //  everything bought (sunny-home `plan.wk`, one source).
+//  Block 13i (3 Nov 2026): inside Position, All is the Sold chart this week with the
+//  bought strikes dotted on its scale (one off it sits at the edge with an arrow),
+//  every leg as a row (sold: kept this week; bought: moved since Friday's close),
+//  kept on sold · bought, this week · net so far, then Premium vs decay.
 //
 
 import SwiftUI
@@ -84,7 +88,8 @@ private struct PSegLine: Shape {
     }
 }
 
-/// "This week · net $243" and what it is made of; losses red, never a minus sign.
+/// "Premium vs decay · $732 ahead" and what it is made of; losses red, never a minus sign (13i: was
+/// "This week · net", which sat under All's "net so far" with a different number).
 struct PWeekNet: View {
     let wk: NamePlan.Wk
     let legs: [Leg]
@@ -102,7 +107,7 @@ struct PWeekNet: View {
             : t + Text(PF.usd(wk.dec)).foregroundStyle(S.red) + Text(" decay on " + (hedged ? "LEAPS and hedges" : "LEAPS") + ". ")
         t = t + Text(net >= 0 ? "Premium covers the decay." : "Premium does not cover the decay yet.")
         return VStack(alignment: .leading, spacing: 2) {
-            (Text("This week · net ") + Text(PF.usd(net)).foregroundStyle(net >= 0 ? S.green : S.red))
+            (Text("Premium vs decay · ") + Text(PF.usd(net) + (net >= 0 ? " ahead" : " behind")).foregroundStyle(net >= 0 ? S.green : S.red))
                 .sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(S.ink)
             t.sType(SType(size: 13, weight: 500, line: 18, tracking: 0)).foregroundStyle(S.muted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -115,7 +120,7 @@ struct PWeekNet: View {
 }
 
 /// Stats along a face's foot: 17 bold over a 12 label, a rule above (as block 13).
-private struct PSideStats: View {
+struct PSideStats: View {
     let cells: [(String, String, Color)]
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -123,6 +128,7 @@ private struct PSideStats: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(c.0).sType(SType(size: 17, weight: 700, line: 20, tracking: 0)).foregroundStyle(c.2).lineLimit(1)
                     Text(c.1).sType(SType(size: 12, weight: 500, line: 14, tracking: 0), tabular: false).foregroundStyle(S.muted)
+                        .lineLimit(1).minimumScaleFactor(0.85)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -143,6 +149,10 @@ struct PSoldPlan: View {
     private let g: Geom
     private let gone: Double
     private let left: Int
+    /// All (13i): this week on both sides, the bought legs' card beside the sold.
+    private let bought: PCard?
+    private var all: Bool { bought != nil }
+    private let today: String
     @Environment(\.colorScheme) private var scheme
 
     /// The chart: Mon to Fri of the expiry's week, 7 hourly slots a day.
@@ -155,13 +165,15 @@ struct PSoldPlan: View {
         let tags: [PSideTag]
         let bes: [(y: CGFloat, text: String, call: Bool)]
         let today: Int?
+        /// All: the bought strikes inside the sold scale, dotted.
+        var dots: [CGFloat] = []
     }
 
-    init?(c: PCard, n: PName, hours: Hours?, live: Double, today: String, cal: [CalendarDay], width: CGFloat) {
+    init?(c: PCard, n: PName, hours: Hours?, live: Double, today: String, cal: [CalendarDay], width: CGFloat, bought: PCard? = nil) {
         let exp = c.weekExpiry ?? c.legs.map(\.expiry).min() ?? ""
         let legs = c.legs.filter { $0.expiry == exp }
         guard !legs.isEmpty else { return nil }
-        self.c = c; self.n = n; self.width = width; self.exp = exp; self.legs = legs
+        self.c = c; self.n = n; self.width = width; self.exp = exp; self.legs = legs; self.bought = bought; self.today = today
         // The five weekdays of the expiry's week and which of them trade.
         let wd = MarketClock.addDays(exp, 0).weekday
         let mon = MarketClock.addDays(exp, -(wd - 2)).iso
@@ -209,11 +221,33 @@ struct PSoldPlan: View {
         let Y = { (v: Double) in H - CGFloat((v - lo) / (hi - lo)) * H }
         let X = { (s: Double) in CGFloat((s + 0.5) / 35) * PR }
         let pts = raw.map { CGPoint(x: X($0.0), y: Y($0.1)) }
+        // All: every tag names its leg, and the bought strikes join on the sold scale; one off it sits at the
+        // edge with an arrow, the scale stays the sold one.
+        var bTags: [PSideTag] = [], dots: [CGFloat] = []
+        if let b = bought {
+            // One tag per strike and leg (a hedge call and an insurance put can share a strike).
+            var bk: [String: (k: Double, call: Bool, name: String)] = [:]
+            for l in b.legs {
+                let name = l.call ? (l.up ? "Hedge" : "LEAPS") : "Put"
+                bk["\(name)\(l.k)"] = (l.k, l.call, name)
+            }
+            for (id, v) in bk {
+                let k = v.k
+                if k >= lo && k <= hi {
+                    dots.append(Y(k))
+                    bTags.append(PSideTag(id: "b" + id, y: Y(k), num: PF.strike(k), sub: v.name, isPrice: false, pill: !v.call))
+                } else {
+                    bTags.append(PSideTag(id: "b" + id, y: k > hi ? 0 : H, num: PF.strike(k), sub: v.name + (k > hi ? " ↑" : " ↓"), isPrice: false, pill: !v.call))
+                }
+            }
+        }
+        let both = bought != nil
         let tags = PSideTag.spread(ks.map { k, v in
-            PSideTag(id: "\(v.call ? "c" : "p")\(k)", y: Y(k), num: PF.strike(k), sub: PF.dist(v.dist), qty: "×\(v.q)", isPrice: false, pill: !v.call)
-        }, H: H)
+            both ? PSideTag(id: "\(v.call ? "c" : "p")\(k)", y: Y(k), num: PF.strike(k), sub: v.call ? "Sold call" : "Sold put", isPrice: false, pill: !v.call)
+                : PSideTag(id: "\(v.call ? "c" : "p")\(k)", y: Y(k), num: PF.strike(k), sub: PF.dist(v.dist), qty: "×\(v.q)", isPrice: false, pill: !v.call)
+        } + bTags, H: H)
         g = Geom(plot: PR, pts: pts, end: pts.last ?? CGPoint(x: 0, y: Y(c.px)), lines: ks.keys.sorted().map { ("s\($0)", Y($0)) }, tags: tags,
-                 bes: be.map { (Y($0.v), "Breakeven " + PF.price($0.v), $0.call) }, today: todayJ)
+                 bes: be.map { (Y($0.v), "Breakeven " + PF.price($0.v), $0.call) }, today: todayJ, dots: dots)
         // The share of the week gone, in trading time; the days left after today.
         let total = Double(max(1, trades.count))
         let done = Double(trades.filter { $0 < today }.count)
@@ -227,10 +261,15 @@ struct PSoldPlan: View {
         VStack(alignment: .leading, spacing: 16) {
             header
             chart
+            if all, let b = bought {
+                PAllRows(sold: legs, exp: exp, bought: b, n: n, today: today)
+                if let p = n.plan, let wk = p.wk { PWeekNet(wk: wk, legs: n.legs, week: p.week) }
+            } else {
             pace(A)
             PSideStats(cells: [(PF.usd(A.base), "collected", S.ink), (PF.usd(A.tv), "left to earn", S.ink),
                                (PF.usd(abs(A.g)), keptUp ? "kept" : "lost", keptUp ? S.green : S.red)])
             if let p = n.plan, let wk = p.wk { PWeekNet(wk: wk, legs: n.legs, week: p.week) }
+            }
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .accessibilityElement(children: .contain)
@@ -272,6 +311,11 @@ struct PSoldPlan: View {
                 ForEach(g.lines, id: \.id) { l in
                     PSegLine(pts: [CGPoint(x: 0, y: l.y), CGPoint(x: PR, y: l.y)])
                         .stroke(S.pStrike, style: StrokeStyle(lineWidth: 1.5, dash: [4.5, 3]))
+                }
+                // All: the bought strikes, dotted.
+                ForEach(Array(g.dots.enumerated()), id: \.offset) { _, y in
+                    PSegLine(pts: [CGPoint(x: 0, y: y), CGPoint(x: PR, y: y)])
+                        .stroke(S.pStrike, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [0, 3]))
                 }
                 PSegLine(pts: g.pts).stroke(lineC, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                 Path { p in for t in g.tags where abs(t.cy - t.y) > 3 { p.move(to: CGPoint(x: PR, y: t.y)); p.addLine(to: CGPoint(x: PR + 6, y: t.cy)) } }
@@ -335,9 +379,9 @@ struct PBoughtPlan: View {
     let width: CGFloat
     @Environment(\.colorScheme) private var scheme
 
-    private var leaps: [PLeg] { c.legs.filter { $0.call && !$0.up } }
-    private var hedges: [PLeg] { c.legs.filter { $0.call && $0.up } }
-    private var puts: [PLeg] { c.legs.filter { !$0.call } }
+    var leaps: [PLeg] { c.legs.filter { $0.call && !$0.up } }
+    var hedges: [PLeg] { c.legs.filter { $0.call && $0.up } }
+    var puts: [PLeg] { c.legs.filter { !$0.call } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -422,7 +466,7 @@ struct PBoughtPlan: View {
         .padding(.top, -4)
     }
 
-    private func row(_ key: String, _ name: String, _ a: [PLeg]) -> (key: String, t: String, sub: String, g: Double, pct: Double)? {
+    func row(_ key: String, _ name: String, _ a: [PLeg]) -> (key: String, t: String, sub: String, g: Double, pct: Double)? {
         guard !a.isEmpty else { return nil }
         var qs: [Double: Int] = [:]
         for l in a { qs[l.k, default: 0] += l.q }

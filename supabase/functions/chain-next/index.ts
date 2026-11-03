@@ -41,7 +41,7 @@ const json = (status: number, body: unknown) =>
     status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 
-const BUILD = '2026-10-26.1';
+const BUILD = '2026-11-03.1';
 
 const THETA_URL = Deno.env.get('THETA_URL') ?? '';
 const THETA_KEY = Deno.env.get('THETA_PROXY_KEY') ?? '';
@@ -444,8 +444,9 @@ Deno.serve(async (req) => {
         const r = await fetch(`${THETA_URL}/v3/option/list/expirations?symbol=${ticker}&format=json`,
           { headers: { 'x-proxy-key': THETA_KEY }, signal: AbortSignal.timeout(15_000) }).catch(() => null);
         const list = r && r.ok ? (((await r.json())?.response ?? []) as Record<string, unknown>[]) : [];
-        const exps = list.map((x) => String(x.expiration ?? x.date ?? '')).filter(Boolean)
-          .map((e) => (e.includes('-') ? e : `${e.slice(0, 4)}-${e.slice(4, 6)}-${e.slice(6, 8)}`)).filter(monthly);
+        const allExps = list.map((x) => String(x.expiration ?? x.date ?? '')).filter(Boolean)
+          .map((e) => (e.includes('-') ? e : `${e.slice(0, 4)}-${e.slice(4, 6)}-${e.slice(6, 8)}`));
+        const exps = allExps.filter(monthly);
         /* The hedge quarterly, where new hedge calls are bought and the put walls priced: January 2027
            (where the hedge already sat), then March, June, September and December (Nik, 22 Oct 2026),
            each until it is under 8 weeks out, then the next (Nik, 23 Oct 2026: "8 weeks out is fine";
@@ -481,7 +482,15 @@ Deno.serve(async (req) => {
         /* THE HEDGE RUNGS (Nik, 26 Oct 2026): hedge calls and insurance puts sit on two monthlies, a near rung 45 to
            90 days out and a far rung 90 to 180 days out, any monthly. Every monthly 40 to 185 days out, calls 1x to
            1.8x the price and puts 0.6x to 1x, from ONE Theta request for every expiry of the name (0.3 to 4 s). */
-        const want = exps.filter((e) => dayN(e) >= 40 && dayN(e) <= 185);
+        /* THE RISK FACE (Positions block 13i, 3 Nov 2026) prices every saved wall on the next three weeklies and four
+           monthlies, so those chains come from the same one request: the next four weekly Fridays (a Thursday when
+           its Friday is shut) and the next five monthlies, calls 0.8x to 1.8x (a Floor under the price is a call
+           strike too). sunny-home's roll story keeps to the 40 to 185 day rungs. */
+        const wdOf = (e: string) => new Date(e + 'T12:00:00Z').getUTCDay();
+        const nextDay = (e: string) => new Date(Date.parse(e + 'T12:00:00Z') + 86_400_000).toISOString().slice(0, 10);
+        const weekly = (e: string) => !monthly(e) && (wdOf(e) === 5 || (wdOf(e) === 4 && !allExps.includes(nextDay(e))));
+        const near = [...allExps.filter((e) => dayN(e) >= 0 && weekly(e)).sort().slice(0, 4), ...exps.filter((e) => dayN(e) >= 0).sort().slice(0, 5)];
+        const want = [...new Set([...exps.filter((e) => dayN(e) >= 40 && dayN(e) <= 185), ...near])].sort();
         if (want.length) {
           const all = await thetaGet(`/v3/option/snapshot/quote?symbol=${ticker}&expiration=*`).catch(() => [] as TRow[]);
           const byExp = new Map<string, TRow[]>();
@@ -496,7 +505,7 @@ Deno.serve(async (req) => {
             let kept = 0;
             for (const c of items) {
               const k = c.details?.strike_price, side = c.details?.contract_type;
-              if (typeof k !== 'number' || !(side === 'call' ? k >= spot && k <= spot * 1.8 : side === 'put' ? k >= spot * 0.6 && k <= spot : false)) continue;
+              if (typeof k !== 'number' || !(side === 'call' ? k >= spot * 0.8 && k <= spot * 1.8 : side === 'put' ? k >= spot * 0.6 && k <= spot : false)) continue;
               const mid = midOf(c, spot);
               if (mid == null || c.greeks?.delta == null) continue;
               kept++;

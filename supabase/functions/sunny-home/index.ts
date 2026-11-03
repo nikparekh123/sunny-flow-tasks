@@ -22,7 +22,7 @@
  * while the index futures trade, 30 s apart, a quiet pass every 10 minutes otherwise;
  * the sunny-home-N cron sends {"book":"N"} for the cousin's book, BOOKS below).
  */
-const BUILD = '2026-11-02.1';
+const BUILD = '2026-11-03.2';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -332,7 +332,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     get(`dividends?pay_date=gt.${BOOK_START}&pay_date=lte.${today}&select=ticker,ex_date,pay_date&order=pay_date.asc,ticker.asc`),
     /* The 3- and 12-month upside calls the Planner sizes (chain-next, 15 min). */
     get('option_chain_upside?select=ticker,tenor,expiry,strike,mid,delta,iv,spot&order=ticker.asc,tenor.asc,strike.asc'),
-    /* The hedge rungs' calls: every monthly 40 to 185 days out, 1x to 1.8x the price (chain-next, 15 min). */
+    /* The hedge rungs' calls: every monthly 40 to 185 days out, 1x to 1.8x the price (chain-next, 15 min), and since
+       3 Nov 2026 the Risk face's chains too (the next weeklies and monthlies, 0.8x to 1.8x). */
     page('option_chain_hedge?side=eq.call&select=ticker,expiry,strike,mid,delta,iv&order=ticker.asc,expiry.asc,strike.asc'),
   ]);
 
@@ -2109,7 +2110,10 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         /* Each monthly's call walls above the price (the tape's view, else open interest), the two highest ranked
            within twice the target's move; per call, its delta at the low and at the target, and the count that
            keeps every price from today to the target at or above zero. */
-        const exps = [...new Set(rungQuotes.filter((r) => r.ticker === t).map((r) => String(r.expiry)))].sort();
+        // The rungs only, 40 to 185 days: chain-next also stores the Risk face's nearer chains there (3 Nov 2026).
+        const rungDays = (e: string) => (Date.parse(e) - Date.parse(today)) / 864e5;
+        const exps = [...new Set(rungQuotes.filter((r) => r.ticker === t).map((r) => String(r.expiry)))]
+          .filter((e) => rungDays(e) >= 39 && rungDays(e) <= 186).sort();
         const months = exps.map((exp) => {
           const qs = rungQuotes.filter((r) => r.ticker === t && String(r.expiry) === exp && Number(r.mid) > 0);
           const quote = (k: number) => qs.find((r) => Math.abs(Number(r.strike) - k) < 1e-6) ?? null;
@@ -2137,8 +2141,75 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
           low: { px: r2(low.px), d: Math.round(low.d) }, need, months,
           by_shares: { n: need, cost: Math.round(need * spot) } };
       })(targetExp);
+      /* RISK (block 13i; Nik, 3 Nov 2026: "your hedge rule", "your hedge pick"). The Positions Risk face reads the
+         hedge function's own terms, so the two never disagree: net delta at W's Thursday close on the hedge grid,
+         today's price to the target (+1.5 weekly SD, +2 with an Accelerator just above the sale), W's planned sale
+         counted while it is not placed. The low, the need (the low turned positive, plus 1) and the first price
+         where it goes short. Then the saved walls on the next three weeklies and four monthlies from W on: the
+         biggest call wall, the biggest put wall and the biggest Accelerator besides, each under its tape label
+         (open interest when the tape has no view); per wall the calls at its strike that keep the whole line at or
+         above zero (the hedge function's count), their cost and the line after. Yours = what is sold or held on
+         that chain, LEAPS left out. The default way is the hedge's own pick. */
+      const risk = (() => {
+        if (!tPx || !sdW) return null;
+        const line = grid.map((S) => netW(S, atmSale));
+        let li = 0; line.forEach((v, i) => { if (v < line[li]) li = i; });
+        const low = line[li], lowPx = grid[li], need = low < 0 ? Math.ceil(-low) + 1 : 0;
+        const firstShort = line.findIndex((v) => v < 0);
+        // The expiries the name lists (its chains or its saved walls) from W on: a calendar Friday it does not list
+        // (NKE has no February monthly) is not a column.
+        const wdOf = (e: string) => new Date(e + 'T12:00:00Z').getUTCDay();
+        const isMonthly = (e: string) => { const d = Number(e.slice(8, 10)), wd = wdOf(e); return (wd === 5 && d >= 15 && d <= 21) || (wd === 4 && d >= 14 && d <= 20); };
+        const listed = [...new Set([...rungQuotes.filter((r) => r.ticker === t).map((r) => String(r.expiry)),
+          ...[...gviews.keys()].filter((k) => k.startsWith(t + '|')).map((k) => k.slice(t.length + 1)).filter((v) => /^\d{4}-\d{2}-\d{2}$/.test(v))])]
+          .filter((e) => e >= W && (wdOf(e) === 5 || wdOf(e) === 4)).sort();
+        const weeklies = listed.filter((e) => !isMonthly(e)).slice(0, 3), monthlies = listed.filter(isMonthly).slice(0, 4);
+        const quote = (e: string, k: number) => rungQuotes.find((r) => r.ticker === t && String(r.expiry) === e && Math.abs(Number(r.strike) - k) < 1e-6 && Number(r.mid) > 0)
+          ?? chainRows.find((r) => r.ticker === t && String(r.expiry) === e && r.side === 'call' && Math.abs(Number(r.strike) - k) < 1e-6 && Number(r.mid) > 0) ?? null;
+        const byRank = (a: Row, b: Row) => Number(a.rank) - Number(b.rank);
+        const col = (e: string, weekly: boolean) => {
+          const gv = gviews.get(`${t}|${e}`);
+          const vw = (gv?.walls ?? []) as Row[];
+          const cw = vw.filter((w) => w.side === 'call').sort(byRank)[0], pw = vw.filter((w) => w.side === 'put').sort(byRank)[0];
+          // The biggest Accelerator besides, unless the biggest call or put wall is one already.
+          const aw = [cw, pw].some((w) => w?.label === 'accelerator') ? null
+            : vw.filter((w) => w.label === 'accelerator' && w !== cw && w !== pw).sort(byRank)[0];
+          const o = gv ? null : wallsAt(t, e).now;
+          const ws: Row[] = gv ? ([cw, aw, pw].filter(Boolean) as Row[]).map((w) => ({ k: Number(w.k), side: w.side, label: w.label ?? 'unclear', conf: num(w.conf) }))
+            : [o?.cw != null ? { k: Number(o.cw), side: 'call', label: 'ceiling', conf: null } : null,
+               o?.pw != null ? { k: Number(o.pw), side: 'put', label: 'floor', conf: null } : null].filter(Boolean) as Row[];
+          const walls: Row[] = ws.map((w) => {
+            const q0 = quote(e, Number(w.k)), iv = q0 ? num(q0.iv) : null, mid = q0 ? Number(q0.mid) : null;
+            const K = Number(w.k), dLow = q0 ? dW(lowPx, K, e, iv, true) : null;
+            let n = 0;
+            if (q0 && need > 0) for (let i = 0; i < grid.length; i++) {
+              const dq = dW(grid[i], K, e, iv, true);
+              if (line[i] < 0 && dq > 0) n = Math.max(n, Math.ceil(-line[i] / (100 * dq)));
+            }
+            // No call quote at that strike (outside the stored band): no count, said so; a quote whose delta at the
+            // low is under .02 is too far out to cover it.
+            const far = need > 0 && !!q0 && (!(dLow != null && dLow >= 0.02) || n > 500);
+            if (far || !q0) n = 0;
+            const after = n ? line.map((v, i) => Math.round(v + n * 100 * dW(grid[i], K, e, iv, true))) : null;
+            const held = ls.filter((l) => l.side === 'bought' && l.type === 'call' && l.expiry === e && Math.abs(l.strike - K) < 1e-6).reduce((a, l) => a + l.n, 0);
+            return { ...w, quoted: !!q0, mid: mid == null ? null : r2(mid), d_low: dLow == null ? null : Math.round(dLow * 100) / 100, n, far, cost: mid == null ? null : Math.round(n * mid * 100),
+                     after, low_after: after ? Math.min(...after) : null, held };
+          });
+          const yours = ls.filter((l) => l.expiry === e && !isLeap(l)).map((l) => ({ k: l.strike, n: l.n, side: l.side, type: l.type }));
+          return { e, days: Math.round((Date.parse(e) - Date.parse(today)) / 864e5), weekly, oi: !gv && walls.length > 0, walls, yours };
+        };
+        const cols = [...weeklies.map((e) => col(e, true)), ...monthlies.map((e) => col(e, false))];
+        const pe = hRow ? String(hRow.expiry) : null, pc = pe ? cols.find((c) => c.e === pe) : null;
+        const pw0 = pc ? pc.walls.find((w) => Math.abs(Number(w.k) - Number(hk)) < 1e-6) ?? pc.walls.find((w) => w.side === 'call') ?? null : null;
+        return { week: W, by: byW, spot: r2(spot), target: { sd: tSd, px: r2(tPx) }, accel: accelAbove ? { k: accelAbove.k } : null,
+          sale: atmSale[0] ? { k: atmSale[0].k, n: atmSale[0].n } : null,
+          px: grid.map(r2), d: line.map((v) => Math.round(v)),
+          low: { px: r2(lowPx), d: Math.round(low) }, need, short: firstShort >= 0 ? r2(grid[firstShort]) : null,
+          cols, pick: pc && pw0 ? { e: pc.e, k: Number(pw0.k) } : null,
+          shares: need ? { n: need, cost: Math.round(need * spot) } : null };
+      })();
       return {
-        story,
+        story, risk,
         week: W, by: byW, sd: sdW == null ? null : r2(sdW), earnings: earnW,
         sell: { n: nCalls, sold: soldW, left: leftW, done: doneW, pick: 'atm', ways: ways2,
                 wall: atmW ? wallAt(atmW.k) : null, accel: accelAbove ? { k: accelAbove.k, conf: accelAbove.conf } : null },
