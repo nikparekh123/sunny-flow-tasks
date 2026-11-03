@@ -16,12 +16,12 @@
 //  walls buttons are gone (Insights and Gamma are tabs). A card with nothing
 //  on the face showing says so in one line ("Nothing bought").
 //  Block 13i (3 Nov 2026): two faces, Position · Risk, in a segmented control inside
-//  each card, linked so a turn on one card turns every card (the card touched stays
-//  still on screen); To do and Δ Γ are gone from the cards (their logic stays on the
-//  server: Risk reads the hedge rule's walls). Position holds Sold and Bought behind
-//  All · Sold · Bought chips, shared by every card. A name with nothing bought has
-//  Position only and no control. An orange dot before the ticker and on Risk while
-//  the book goes short within the hedge rule's target.
+//  each card; To do and Δ Γ are gone from the cards (their logic stays on the server:
+//  Risk reads the hedge rule's walls). Position holds Sold and Bought behind All · Sold ·
+//  Bought chips. A turn or a chip changes only the card touched (Nik, 3 Nov 2026: "only
+//  the ones you change"; the handoff linked every card). A name with nothing bought has
+//  Position only and no control. An orange dot before the ticker and on Risk while the
+//  book goes short within the hedge rule's target.
 //
 
 import SwiftUI
@@ -142,16 +142,13 @@ enum PNames {
     }
 }
 
-/// The cards, in order, each entering once (block 12, Motion). Each card carries its own Position · Risk control;
-/// the faces and chips are one choice for every card (block 13i).
+/// The cards, in order, each entering once (block 12, Motion). Each card carries its own Position · Risk control
+/// and chips, and turns alone (block 13i; Nik, 3 Nov 2026).
 struct SunnyPositionCards: View {
     let home: HomePayload
     let names: [PName]
-    /// Scrolls the page by this many points (the Positions tab's scroll): after a turn, the card you touched glides
-    /// back to where it was, so the cards above changing height don't move it.
-    var glide: ((CGFloat) -> Void)? = nil
     @State private var seen = false
-    /// The face and chip every card is on.
+    /// Each card's face and chip.
     @State private var sw = PFaceSwitch()
     @Environment(HomeRouter.self) private var router
     @Environment(\.accessibilityReduceMotion) private var reduce
@@ -171,8 +168,6 @@ struct SunnyPositionCards: View {
                 PNameCard(n: n, faces: n.faces, sw: sw, ringed: router.ring == n.t, width: width,
                           go: seen || reduce, delay: Double(min(j, 6)) * S.stagger,
                           hours: hours, live: live, today: home.today, open: open, cal: home.calendar)
-                    // Where each card on screen sits, for the glide after a turn (not observed: no redraws).
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .scrollView) } action: { sw.frames[n.t] = $0 }
                     // Scrolled to from a tap: the id sits on the row itself, outermost, so the lazy list can find a
                     // card it has not built yet (block 12a).
                     .id("pos-\(n.t)")
@@ -181,65 +176,38 @@ struct SunnyPositionCards: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         // First view animates once (block 12, Motion): any sliver on screen counts.
         .onScrollVisibilityChange(threshold: 0.001) { v in if v { seen = true } }
-        // Opened from a tap (the map, a chip, Insights): every card turns to that face (the old faces' names land on
-        // Position or Risk), and once the page has scrolled there nothing else moves.
+        // Opened from a tap (the map, a chip, Insights): that card turns to the face named (the old faces' names
+        // land on Position or Risk).
         .onChange(of: router.cardTick) { _, _ in
-            guard let s = router.cardFace else { return }
+            guard let s = router.cardFace, let t = router.ring else { return }
             let (f, c) = PFace.from(s)
-            if let c { sw.chip = c }
-            sw.select(f, reduce: reduce, haptic: false)
+            if let c { sw.chips[t] = c }
+            sw.select(f, for: t, haptic: false)
         }
-        // A turn by hand: the card touched glides back to where it was once the heights settle.
-        .onChange(of: sw.turned) { _, _ in
-            guard let a = sw.anchor else { return }
-            settle(a.t, at: a.y, after: 0.4)
-        }
-        .onChange(of: keptOn) { _, on in sw.chip = on ? .sold : .all }
-    }
-
-    /// Once the faces have turned and the heights settled, scroll so the touched card's top is back where it was.
-    private func settle(_ t: String, at y: CGFloat, after s: Double) {
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(reduce ? 0.05 : s))
-            guard let f = sw.frames[t] else { return }
-            let d = f.minY - y
-            if abs(d) >= 1 { glide?(d) }
-        }
+        .onChange(of: keptOn) { _, on in for n in names { sw.chips[n.t] = on ? .sold : .all } }
     }
 }
 
-/// The face and chip every card is on. A card's control rides that card's own swipe; where it settles, every card
-/// turns. The card touched is the anchor the page keeps still.
+/// Each card's face and chip for the session (a card the lazy list rebuilds keeps them). A card's control rides its
+/// own swipe; a tap, a swipe or a chip changes that card alone.
 @Observable final class PFaceSwitch {
-    var face: PFace = .position
-    var chip: PChip = .all
-    /// Bumped by a turn by hand (a tap or a swipe), for the glide.
-    var turned = 0
-    /// The card touched and its top before the turn, in the page's visible space.
-    @ObservationIgnored var anchor: (t: String, y: CGFloat)?
-    /// Each card on screen in the page's visible space (kept quietly: they change every frame).
-    @ObservationIgnored var frames: [String: CGRect] = [:]
+    var faces: [String: PFace] = [:]
+    var chips: [String: PChip] = [:]
+    func face(_ t: String) -> PFace { faces[t] ?? .position }
+    func chip(_ t: String) -> PChip { chips[t] ?? .all }
 
-    /// A tap on a card's control or a row inside it: every card turns.
-    @MainActor func select(_ f: PFace, from t: String? = nil, reduce: Bool, haptic: Bool = true) {
-        if let t, let y = frames[t]?.minY { anchor = (t, y) } else if t == nil { anchor = nil }
-        if haptic && f != face { UISelectionFeedbackGenerator().selectionChanged() }
-        let was = face
-        face = f
-        if haptic && f != was { turned += 1 }
+    /// A tap on a card's control or a row inside it.
+    @MainActor func select(_ f: PFace, for t: String, haptic: Bool = true) {
+        if haptic && f != face(t) { UISelectionFeedbackGenerator().selectionChanged() }
+        faces[t] = f
     }
     /// A card's swipe has settled on a face.
-    func settle(_ f: PFace, from t: String) {
-        if f != face { turned += 1 }
-        face = f
-    }
-    /// A chip on one card: every card shows the same legs.
-    @MainActor func pick(_ c: PChip, from t: String) {
-        guard c != chip else { return }
-        if let y = frames[t]?.minY { anchor = (t, y) }
+    func settle(_ f: PFace, for t: String) { faces[t] = f }
+    /// A chip on a card.
+    @MainActor func pick(_ c: PChip, for t: String) {
+        guard c != chip(t) else { return }
         UISelectionFeedbackGenerator().selectionChanged()
-        chip = c
-        turned += 1
+        chips[t] = c
     }
 }
 
@@ -332,7 +300,7 @@ private struct PNameCard: View {
             if F.count > 1 {
                 PFaceTabs(faces: F.map(\.label), spoken: F.map(\.spoken), marks: F.map { n.mark($0) }, prog: prog, raised: false) { i in
                     guard let f = F[safe: i] else { return }
-                    sw.select(f, from: t, reduce: reduce)
+                    sw.select(f, for: t)
                 }
                 .padding(.horizontal, 20)
             }
@@ -357,16 +325,13 @@ private struct PNameCard: View {
                 .onScrollGeometryChange(for: Double.self) { g in Double(g.contentOffset.x / max(1, g.containerSize.width)) } action: { _, v in
                     prog.p = v
                 }
-                // A finger on this card: where it settles every card turns, and this card stays still on screen.
+                // A finger on this card: where it settles, this card's face.
                 .onScrollPhaseChange { _, ph in
                     prog.moving = ph != .idle
-                    if ph == .interacting && !driving {
-                        driving = true
-                        if let y = sw.frames[t]?.minY { sw.anchor = (t, y) }
-                    }
+                    if ph == .interacting { driving = true }
                     if ph == .idle, driving {
                         driving = false
-                        if let f = F[safe: Int(prog.p.rounded())] { sw.settle(f, from: t) }
+                        if let f = F[safe: Int(prog.p.rounded())] { sw.settle(f, for: t) }
                     }
                 }
             }
@@ -388,21 +353,20 @@ private struct PNameCard: View {
         }
         .sunnyGlow()
         .pEnter(go, delay)
-        // Another card turned (or this one's control): this one follows, unless it is the one being swiped. A card
-        // without that face stays where it is.
-        .onChange(of: sw.face) { _, f in
+        // This card's face changed (its control, a row inside it, a link): the pager follows, unless the finger is on it.
+        .onChange(of: sw.face(t)) { _, f in
             guard !driving, let i = F.firstIndex(of: f), abs(prog.p - Double(i)) > 0.01 else { return }
             if reduce { pos.scrollTo(x: CGFloat(i) * pageW) } else { withAnimation(S.standard(0.35)) { pos.scrollTo(x: CGFloat(i) * pageW) } }
         }
         // The faces changed (Risk once something is bought, or gone): stay on the face showing.
         .onChange(of: F) { _, new in
-            let i = new.firstIndex(of: sw.face) ?? 0
+            let i = new.firstIndex(of: sw.face(t)) ?? 0
             var tr = Transaction(); tr.disablesAnimations = true
             withTransaction(tr) { pos.scrollTo(x: CGFloat(i) * pageW) }
         }
         .onAppear {
-            // Built as it scrolls on: on the face every card is on.
-            if let i = F.firstIndex(of: sw.face), i > 0 {
+            // Built as it scrolls on: on the face it was left on.
+            if let i = F.firstIndex(of: sw.face(t)), i > 0 {
                 var tr = Transaction(); tr.disablesAnimations = true
                 withTransaction(tr) { pos.scrollTo(x: CGFloat(i) * pageW) }
                 prog.p = Double(i)
@@ -417,8 +381,8 @@ private struct PNameCard: View {
         if hs[f] == nil || prog.moving || reduce { hs[f] = v } else { withAnimation(S.standard(0.3)) { hs[f] = v } }
     }
 
-    /// A row inside Position ("Goes short", "Friday's sale"): every card turns to Risk, this one stays still.
-    private func openRisk() { sw.select(.risk, from: t, reduce: reduce) }
+    /// A row inside Position ("Goes short", "Friday's sale"): this card turns to Risk.
+    private func openRisk() { sw.select(.risk, for: t) }
 
     // MARK: Header
 
@@ -457,7 +421,7 @@ private struct PNameCard: View {
         case .risk:
             if let r = n.risk {
                 PRiskFace(t: t, r: r, perLeap: n.plan?.sell.n, sold: n.legs.filter { $0.side == "sold" && $0.type == "call" && $0.expiry == r.week },
-                          width: width, active: sw.face == .risk)
+                          width: width, active: sw.face(t) == .risk)
             }
         }
     }
@@ -469,8 +433,8 @@ private struct PNameCard: View {
         return VStack(alignment: .leading, spacing: 18) {
             if let r = n.risk, n.cover { PGoesShortRow(r: r, tap: openRisk) }
             if let r = n.risk, let sale = r.sale { PSaleRow(sale: sale, perLeap: n.plan?.sell.n, tap: openRisk) }
-            if two { PChips(chip: sw.chip) { c in sw.pick(c, from: t) } }
-            legs(two ? sw.chip : (n.sold != nil ? .sold : .bought))
+            if two { PChips(chip: sw.chip(t)) { c in sw.pick(c, for: t) } }
+            legs(two ? sw.chip(t) : (n.sold != nil ? .sold : .bought))
         }
         .frame(maxHeight: .infinity, alignment: .top)
     }
