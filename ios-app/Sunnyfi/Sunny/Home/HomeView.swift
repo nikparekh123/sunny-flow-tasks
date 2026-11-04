@@ -223,6 +223,10 @@ struct HomeView: View {
                 }
                 .padding(.top, 14)
                 .padding(.bottom, 40)
+                // Held to the screen's exact width. The stack measured 393.00000000000006 on a 393 pt
+                // screen (rounding), so iOS let the page slide sideways under an angled drag and spring
+                // back, up to 65 pt (Nik, 4 Nov 2026).
+                .containerRelativeFrame(.horizontal)
             }
             .scrollIndicators(.hidden)
             .scrollPosition($homePos)
