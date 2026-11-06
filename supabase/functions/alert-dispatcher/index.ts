@@ -160,7 +160,12 @@ Deno.serve(async (req) => {
      body, where it costs nothing to read. Roughly 4 or 5 pushes a day. */
   type Bucket = { legs: typeof openLegs; spot: number };
   const buckets = new Map<string, Map<string, Bucket>>();
+  /* Switched off 6 Nov 2026 (Nik: "turn off the in the money alerts now"). They fired every day a leg sat in
+     the money (44 short-call, 36 long-put and 15 seven-day pushes in three weeks) and said nothing new. The
+     notification design of 6 Nov replaces them; until then they are simply not queued. */
+  const OFF = new Set(['short_call_itm', 'long_put_itm', 'theta_critical']);
   const collect = (cat: string, leg: typeof openLegs[number], spot: number) => {
+    if (OFF.has(cat)) return;
     let byTicker = buckets.get(cat);
     if (!byTicker) { byTicker = new Map(); buckets.set(cat, byTicker); }
     const b = byTicker.get(leg.ticker) ?? { legs: [], spot };
