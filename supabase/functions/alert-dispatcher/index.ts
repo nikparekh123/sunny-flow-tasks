@@ -163,7 +163,8 @@ Deno.serve(async (req) => {
   /* Switched off 6 Nov 2026 (Nik: "turn off the in the money alerts now"). They fired every day a leg sat in
      the money (44 short-call, 36 long-put and 15 seven-day pushes in three weeks) and said nothing new. The
      notification design of 6 Nov replaces them; until then they are simply not queued. */
-  const OFF = new Set(['short_call_itm', 'long_put_itm', 'theta_critical']);
+  // + theta_cliff and earnings_day_before, also off from 6 Nov 2026 (Nik: "turn the old alerts off").
+  const OFF = new Set(['short_call_itm', 'long_put_itm', 'theta_critical', 'theta_cliff', 'earnings_day_before']);
   const collect = (cat: string, leg: typeof openLegs[number], spot: number) => {
     if (OFF.has(cat)) return;
     let byTicker = buckets.get(cat);
@@ -248,7 +249,7 @@ Deno.serve(async (req) => {
   // earnings_day_before — positions with earnings_date == tomorrow EST.
   const tomorrowEST = isoTomorrow(todayEST);
   for (const p of (positions ?? []) as PositionRow[]) {
-    if (p.earnings_date === tomorrowEST) {
+    if (!OFF.has('earnings_day_before') && p.earnings_date === tomorrowEST) {
       await enqueue(queued, supabase, {
         category: 'earnings_day_before',
         dedup_key: `earnings:${p.ticker}:${tomorrowEST}`,
