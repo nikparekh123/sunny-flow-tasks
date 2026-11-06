@@ -779,7 +779,7 @@ const capTxt = (v: number) => (v >= 1e9 ? `${(v / 1e9).toFixed(1)}B` : `${Math.r
    figures, so it matches the Performance card; Open = IBKR's unrealized on what is held); You % = Made over the name's
    value on its first day; Week by week grades calls only, a roll counting in the week it was bought back. The money
    comes from IBKR's daily report, so it runs to the last close IBKR has sent. */
-const BOOK_FROM: Record<string, string> = { S: '2026-08-31', N: '2026-10-29', D: '2026-10-29' };
+const BOOK_FROM: Record<string, string> = { S: '2026-08-31', N: '2026-10-29' };   // demo book D deleted 6 Nov 2026
 /** Every row of a read that grows: PostgREST stops at 1,000, so page through it in a fixed order. */
 async function dbAll(path: string): Promise<Row[]> {
   const out: Row[] = [];
