@@ -206,7 +206,9 @@ export function yourPosition(names: NameBook[], clk: PositionClock, name: (t: st
     const fp = ts ? ts.price : null, st = short ? 2 : thin ? 1 : 0;
     return {
       id: x.t, name: name(x.t), st, fp, n: r.n, lg: r.lg, frac: r.lg ? r.n / r.lg : 1, sd: x.sd,
-      line: fp != null ? (ts!.now ? 'Short at today’s price by ' + fri : 'Short above $' + f2(fp) + ' by ' + fri) : thin ? 'Thin by Friday, never short' : 'Stays long past ↑' + f1(x.sd * 3) + '%',
+      /* Nik, 7 Nov 2026: "short above $X" read as "you start losing above $X", which is not true. Say where the
+         P&L peaks instead; the right side keeps the delta. */
+      line: fp != null ? (ts!.now ? 'Already past its best by ' + fri : 'Makes the most at $' + f2(fp) + ' by ' + fri) : thin ? 'Thin by Friday, still gains as it rises' : 'Keeps making more past ↑' + f1(x.sd * 3) + '%',
       lineColor: fp != null ? (short ? 'red' : 'orange') : 'secondary',
       right: short ? 'Short ' + fn(r.n) + ' Δ' : thin ? 'Thin' : 'Long ' + fn(r.n) + ' Δ',
       rightColor: short ? 'red' : thin ? 'orange' : 'ink', at: 'at ↑' + f1(x.sd) + '%',
@@ -215,11 +217,11 @@ export function yourPosition(names: NameBook[], clk: PositionClock, name: (t: st
 
   const nS = rows.filter((r) => r.st === 2).length, nT = rows.filter((r) => r.st === 1).length, first = rows.find((r) => r.st > 0);
   const story: Span[] = wk
-    ? [sp('This week’s calls ended Friday, so you are '), sp('long only', true), sp(' until Monday’s sales: a 1% rise makes you '), sp(fK(now.d$), true, 'green'), sp('. Selling again brings the short back above the calls.')]
+    ? [sp('This week’s calls ended Friday, so you are '), sp('long only', true), sp(' until Monday’s sales: a 1% rise makes you '), sp(fK(now.d$), true, 'green'), sp('. Selling again caps how much a rise can make.')]
     : [sp('Long now: a 1% rise makes you '), sp(fK(now.d$), true, 'green'), sp('. ')].concat(fm != null
-      ? [sp('If the market rises '), sp(f1(fm) + '%', true, 'orange'), sp(' by ' + fri + ' you turn short' + (first ? ', first in ' + first.name + '.' : '.'))]
-      : [sp('The book stays long even if the market rises 10% by ' + fri)].concat(first
-        ? [sp(', but '), sp(first.name, true, first.st === 2 ? 'red' : 'orange'), sp(first.st === 2 && first.fp != null ? ' turns short above $' + f2(first.fp) + '.' : ' runs thin.')]
+      ? [sp('Your book makes the most if the market rises '), sp(f1(fm) + '%', true, 'orange'), sp(' by ' + fri + (first ? '. ' + first.name + ' gets there first.' : '.'))]
+      : [sp('Your book keeps making more even if the market rises 10% by ' + fri)].concat(first
+        ? [sp(', but '), sp(first.name, true, first.st === 2 ? 'red' : 'orange'), sp(first.st === 2 && first.fp != null ? ' makes the most at $' + f2(first.fp) + '.' : ' runs thin.')]
         : [sp('.')]));
 
   const i0 = M.indexOf(0), pv = F[i0].p, up5 = F[M.indexOf(5)].p, dn5 = F[M.indexOf(-5)].p;
@@ -230,9 +232,9 @@ export function yourPosition(names: NameBook[], clk: PositionClock, name: (t: st
     stats: [{ v: fK(up5), l: 'if up 5%', c: col(up5) }, { v: fK(pv), l: clk.nextFriday ? 'flat to next Fri' : 'flat to Friday', c: col(pv) }, { v: fK(dn5), l: 'if down 5%', c: col(dn5) }],
     cover: cover.shares > 0 ? 'Insurance puts cover ' + fn(cover.covered) + ' of your ' + fn(cover.shares) + ' shares, ' + coverPct + '%. Shares have no floor below that.' : '',
     assign: assign.length ? 'Ex-dividend this week: ' + assign.map((a) => name(a.t) + ' ' + a.exLabel).join(', ') + '. Calls in the money with less time value than the dividend can be assigned the day before.' : null,
-    count: nS || nT ? [nS ? nS + ' short' : '', nT ? nT + ' thin' : ''].filter(Boolean).join(', ') + ' at a priced move' : 'Every name long at a priced move',
+    count: nS || nT ? [nS ? nS + (nS === 1 ? ' past its best' : ' past their best') : '', nT ? nT + ' thin' : ''].filter(Boolean).join(', ') + ' at a priced move' : 'Every name long at a priced move',
     countColor: nS ? 'red' : nT ? 'orange' : 'secondary', rows,
-    aria: 'Your position, P&L by ' + fri + ' if the market moves 10% down to 10% up. ' + (fm != null ? 'Short above a ' + f1(fm) + '% rise.' : 'Long throughout.'),
+    aria: 'Your position, P&L by ' + fri + ' if the market moves 10% down to 10% up. ' + (fm != null ? 'Makes the most at a ' + f1(fm) + '% rise.' : 'Keeps making more all the way up.'),
     dollarDelta: now.d$, up5, flat: pv, dn5, coverPct, nShort: nS, nThin: nT,
   };
 }
@@ -246,6 +248,7 @@ export interface GridLeg {
   earned: number;              // premium already earned (sold legs), added when the leg is on
   value: number;               // what it is worth now
   pl: number[][];              // [stop][price] P&L from now, $
+  pl0?: number[];              // [price] P&L now, when the first stop is not now (the chart's dashed Today line)
   d: number[][];               // [stop][price] delta, shares
   th: number[][];              // [stop][price] theta, $ a day
   vg: number[][];              // [stop][price] vega, $ a vol point
@@ -275,6 +278,7 @@ export function positionsGrid(nb: NameBook, stops: Stop[], otm: { K: number; ex:
     d: grid(l, (x, s, tt) => nb.dl(x, s, tt), r1),
     th: grid(l, (x, s, tt) => (nb.val(x, s, tt + 0.05) - nb.val(x, s, tt)) / 0.05, r1),
     vg: grid(l, (x, s, tt) => (x.ty === 'S' ? 0 : nb.val(x, s, tt, 0.01) - nb.val(x, s, tt)), r1),
+    ...((stops[0]?.tt ?? 0) > 0 ? { pl0: S.map((s) => r0(nb.lpl(l, s, nb.t0))) } : {}),
   }));
   let fix: PositionsGrid['fix'] = { otm: null };
   if (otm) {

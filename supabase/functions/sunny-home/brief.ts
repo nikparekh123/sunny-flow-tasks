@@ -224,7 +224,8 @@ export function buildBrief(x: BriefIn) {
     const h = holdings(nb);
     return { t: nb.t, name: company(nb.t), S0: nb.S0, P0: nb.P0, iv: +nb.iv.toFixed(4), sd: +nb.sd.toFixed(3),
       st: row?.st ?? 0, short: (row?.st ?? 0) === 2, fp: row?.fp ?? null, strategy: x.strategies[nb.t] ?? '',
-      size: Math.round(h.sh[0] + h.lp[0] + h.oc[0]), h: roundH(h) };
+      size: Math.round(h.sh[0] + h.lp[0] + h.oc[0]), h: roundH(h),
+      gain: Math.round(nb.legs.filter((l) => l.kind === 'shares').reduce((a, l) => a + l.q * (nb.S0 - l.K), 0)) };
   });
   const totals = names.reduce((a, n) => addH(a, n.h), zeroH());
 

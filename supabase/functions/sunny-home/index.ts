@@ -24,7 +24,8 @@
  */
 import { buildBrief } from './brief.ts';
 import { buildDoc, type NameDay } from './doc.ts';
-const BUILD = '2026-11-07.2';
+import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
+const BUILD = '2026-11-07.3';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -2318,9 +2319,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         if (!dg) return ['Delta is not in yet.', ''];
         const f1 = (v: number) => (v % 1 ? v.toFixed(1) : String(v));
         if (dg.needs) return [dg.sh != null ? 'Delta is too thin.' : 'Delta is getting thin.',
-          `A normal week's move, about +${f1(dg.m1!)}%, leaves _less than half_ of today's delta${dg.sh != null ? `, and it goes _short after +${f1(dg.sh)}%_.` : '. It never goes short inside 10%.'}`];
-        if (dg.sh != null) return ['Delta holds this week.', `It stays long through a normal week's move of about +${f1(dg.m1 ?? 0)}% and goes _short after +${f1(dg.sh)}%_.`];
-        if (dg.thin != null) return ['Delta holds this week.', `It stays long through a normal week's move of about +${f1(dg.m1 ?? 0)}%, gets _thin after +${f1(dg.thin)}%_ and never goes short.`];
+          `A normal week's move, about +${f1(dg.m1!)}%, leaves _less than half_ of today's delta${dg.sh != null ? `, and _each rise past +${f1(dg.sh)}% costs you_.` : '. It still gains through a 10% rise.'}`];
+        if (dg.sh != null) return ['Delta holds this week.', `It stays long through a normal week's move of about +${f1(dg.m1 ?? 0)}% and _makes the most at +${f1(dg.sh)}%_.`];
+        if (dg.thin != null) return ['Delta holds this week.', `It stays long through a normal week's move of about +${f1(dg.m1 ?? 0)}%, gets _thin after +${f1(dg.thin)}%_ and still gains through 10%.`];
         return ['Delta is on target.', 'It stays _long all the way to a 10% jump_.'];
       };
       /* ── Handoff 32 (14d): six tagged points in the design's order (events, range, hedge, walls, premium,
@@ -2354,7 +2355,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         const thr = `+${f1(Number(tg.sd))} SD${tg.pct != null ? ` (+${f1(Number(tg.pct))}%)` : ''}`;
         if (Number(h.add) > 0) v2.push({ key: 'hedge', kind: 'thin', tag: 'Watch',
           lead: dg?.thin25 != null ? `Your hedge is thin past +${f1(dg.thin25)}%` : 'Your hedge is thin',
-          body: `You stay long through ${dg?.m1 != null ? `a normal week's move, +${f1(dg.m1)}%` : 'a normal week'}.${dg?.sh != null ? ` From +${f1(dg.sh)}% you turn short.` : ''}`
+          body: `You stay long through ${dg?.m1 != null ? `a normal week's move, +${f1(dg.m1)}%` : 'a normal week'}.${dg?.sh != null ? ` Past +${f1(dg.sh)}% each rise costs you.` : ''}`
             + ` Buying ${h.add} ${mdy(String(h.exp))} calls, about ${usd0(Number(h.cost))}, keeps you safe through ${thr}. It is in To do.` });
         else v2.push({ key: 'hedge', kind: 'covered', tag: 'Helps', lead: 'The hedge covers a big week',
           body: `With the ${h.held} ${mdy(String(h.exp))} calls held, delta stays positive through ${thr}.` }); }
@@ -2981,6 +2982,15 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const out = buildBrief({ today, wd: now.wd, mins: now.mins, isTrading, addDays, cal, legs, isLeap: (l) => isLeap(l as Leg),
       shares: sharesHeld, shareAvg, spot: spotOf, closes, chain: chainRows, divRows: divHist, strategies });
     brief = out.brief; briefInputs = out.inputs;
+    /* Positions (positions.ts): each name's walls by chain, its 20-day line and month's range, and on the
+       weekend the sold legs that ended Friday. sunny-positions hands them to the phone with the grid. */
+    const pctx = { today, moment: String(brief.moment), isTrading, addDays, gviews, daily, groups };
+    const eDay = endedDay(pctx);
+    for (const n of (briefInputs?.names ?? []) as Row[]) {
+      const t = String(n.t);
+      n.walls = wallsFor(t, pctx); n.tech = techFor(t, pctx); n.ended = endedFor(t, eDay, pctx);
+    }
+    if (briefInputs) briefInputs.ended_day = eDay;
   } catch (e) { brief = { v: 1, error: String((e as Error)?.message ?? e) }; }
   step('brief');
   /* ── NEW HOME'S PAGE (doc.ts): the sections and cards for the moment, from the same reads. The whole page

@@ -22,7 +22,8 @@ const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers
 const json = (s: number, b: unknown) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } });
 
 type NameInput = { t: string; S0: number; P0: number; iv: number; legs: Leg[]; divs: Div[]; stops: Stop[]; fridayStop: number;
-  otm: { K: number; ex: string; days: number; label: string } | null };
+  otm: { K: number; ex: string; days: number; label: string } | null;
+  walls?: unknown[]; tech?: unknown; ended?: unknown[] };
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -35,7 +36,7 @@ Deno.serve(async (req) => {
   const r = await fetch(`${URL_}/rest/v1/home_snapshot?book_id=eq.${book}&select=built_at,inputs:payload->brief_inputs`,
     { headers: { apikey: ANON, Authorization: auth } });
   if (!r.ok) return json(r.status === 401 ? 401 : 502, { error: 'could not read the book' });
-  const rows = await r.json() as { built_at: string; inputs: { built_at: string; r: number; names: NameInput[] } | null }[];
+  const rows = await r.json() as { built_at: string; inputs: { built_at: string; r: number; names: NameInput[]; ended_day?: string | null } | null }[];
   const inp = rows[0]?.inputs;
   if (!inp) return json(404, { error: 'no positions for this book yet' });
   const n = inp.names.find((x) => x.t === t);
@@ -49,5 +50,8 @@ Deno.serve(async (req) => {
   const otm = n.otm ? { ...n.otm, days: n.otm.days - gone } : null;
   const nb = new NameBook({ t, S0: n.S0, P0: n.P0, iv: n.iv, legs, divs, r: inp.r });
   const g = positionsGrid(nb, stops, otm);
-  return json(200, { v: 1, book, ...g, fridayStop: n.fridayStop, built_at: inp.built_at, priced_at: new Date().toISOString() });
+  /* Walls by chain, the 20-day line and the month's range, and on the weekend the legs that ended Friday:
+     sunny-home's reads (positions.ts), passed through as they are. */
+  return json(200, { v: 1, book, ...g, fridayStop: n.fridayStop, walls: n.walls ?? [], tech: n.tech ?? null,
+    ended: n.ended ?? [], endedDay: inp.ended_day ?? null, built_at: inp.built_at, priced_at: new Date().toISOString() });
 });

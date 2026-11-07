@@ -18,7 +18,7 @@ struct BriefPositionsScreen: View {
     @AppStorage(BriefPrivacy.key) private var privacy = false
     @Environment(\.accessibilityReduceMotion) private var reduce
 
-    @State private var name: String = BriefDebug.name ?? "NKE"
+    @State private var name: String = BriefDebug.name ?? (BriefDebug.sample ? "NKE" : "")
     @State private var stop = BriefDebug.stop ?? 0
     @State private var pos = ScrollPosition()
     @State private var price: Double?
@@ -34,8 +34,26 @@ struct BriefPositionsScreen: View {
     @State private var chain = 0
     @State private var scrolled: CGFloat = 0
 
+    /// Sample mode: the design's book. Otherwise the server's brief for the book on screen.
+    private var live: Bool { !BriefDebug.sample }
+    private var liveNames: [JSONValue] { brief.live?.names ?? [] }
+    private var names: [String] {
+        live ? liveNames.compactMap { $0["t"].string } : SampleBook.names.filter { SampleBook.book(acct)[$0] != nil }
+    }
+    private var model: PositionsModel? {
+        if !live { return PositionsModel(t: name, acct: acct, weekend: weekend) }
+        guard let b = brief.book else { return nil }
+        return brief.positions.model(b, name)
+    }
+    private var totals: [PositionsModel.Holdings] {
+        live ? liveNames.map(PositionsModel.holdings(json:)) : SampleBook.names.compactMap { PositionsModel(t: $0, acct: acct, weekend: weekend)?.holdings() }
+    }
+    private var strip: [LogoStrip.Item] {
+        live ? liveNames.map { LogoStrip.Item(t: $0["t"].string ?? "", company: $0["name"].string ?? "", warn: $0["short"].bool) }
+            : names.map { LogoStrip.Item(t: $0, company: SampleBook.company[$0] ?? $0, warn: PositionsModel(t: $0, acct: acct, weekend: weekend)?.shortByFriday ?? false) }
+    }
+
     var body: some View {
-        let names = SampleBook.names.filter { SampleBook.book(acct)[$0] != nil }
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if brief.showsStrip {
@@ -46,17 +64,33 @@ struct BriefPositionsScreen: View {
                 Text("Positions").sType(SType(size: 34, weight: 800, line: 40, tracking: -0.02), tabular: false)
                     .foregroundStyle(S.ink).padding(.horizontal, S.margin).padding(.top, brief.showsStrip ? 4 : 16)
                     .accessibilityAddTraits(.isHeader)
-                BookTotalsRow(acct: acct, weekend: weekend, mode: $totalsMode, privacy: privacy).padding(.top, 12)
-                LogoStrip(names: names, acct: acct, weekend: weekend, selected: name) { t in
-                    withAnimation(reduce ? nil : S.standard(0.3)) { name = t; price = nil; off = []; fix = nil }
+                if live && names.isEmpty {
+                    // An empty book (Nicolay's, until he trades): one line, as agreed.
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Nothing held yet").sType(SType(size: 20, weight: 700, line: 24, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                        Text("Each name you hold shows here once IBKR reports it.").sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
+                    }
+                    .padding(.horizontal, S.margin).padding(.top, 16)
                 }
-                .padding(.top, 16)
-                if let m = PositionsModel(t: name, acct: acct, weekend: weekend) {
+                if !names.isEmpty {
+                    BookTotalsRow(hs: totals, mode: $totalsMode, privacy: privacy).padding(.top, 12)
+                    LogoStrip(items: strip, selected: name) { t in
+                        withAnimation(reduce ? nil : S.standard(0.3)) { name = t; price = nil; off = []; fix = nil }
+                    }
+                    .padding(.top, 16)
+                }
+                if let m = model {
                     NameRow(m: m).padding(.horizontal, S.margin).padding(.top, 14)
                     PositionsDetail(m: m, stop: Binding(get: { min(stop, m.stops.count - 1) }, set: { stop = $0 }), price: $price, off: $off,
                                     legFilter: $legFilter, layer: $layer, chain: $chain, fix: $fix, wallsKind: $wallsKind, privacy: privacy)
                         .padding(.top, 12)
                         .id("\(acct)-\(name)")
+                } else if live && !names.isEmpty, let b = brief.book {
+                    Group {
+                        if let e = brief.positions.error(b, name) { Text(e) } else { ProgressView().controlSize(.regular) }
+                    }
+                    .sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
+                    .frame(maxWidth: .infinity).padding(.top, 60)
                 }
             }
             .padding(.bottom, 128)
@@ -82,27 +116,44 @@ struct BriefPositionsScreen: View {
         }
         .onAppear(perform: arrive)
         .onChange(of: brief.positionsName) { _, _ in arrive() }
+        .onChange(of: names) { _, _ in arrive() }
+        .onChange(of: name) { _, t in if live, !t.isEmpty, let b = brief.book { UserDefaults.standard.set(t, forKey: "positions.last.\(b)") }; load() }
+        .onChange(of: brief.built) { _, _ in load() }
+        .onChange(of: model?.stops.count) { _, _ in arriveAtFriday() }
     }
 
-    /// From a Your position row: that name at the Friday close stop. From the tab: the last name, today.
+    /// From a Your position row: that name at the Friday close stop. From the tab: the last name viewed, or on
+    /// the first open the first name past its best by Friday, else the biggest (answer 4).
     private func arrive() {
-        if let t = brief.positionsName { name = t }
-        if brief.positionsAtFriday {
-            stop = weekend ? 4 : 3; price = nil; brief.positionsAtFriday = false
+        if let t = brief.positionsName, names.contains(t) { name = t; brief.positionsName = nil }
+        if live, !names.contains(name) {
+            let last = brief.book.flatMap { UserDefaults.standard.string(forKey: "positions.last.\($0)") }
+            if let l = last, names.contains(l) { name = l }
+            else if let s = liveNames.first(where: { $0["short"].bool })?["t"].string { name = s }
+            else { name = liveNames.max { ($0["size"].double ?? 0) < ($1["size"].double ?? 0) }?["t"].string ?? names.first ?? "" }
         }
+        load()
+        arriveAtFriday()
+    }
+    private func arriveAtFriday() {
+        guard brief.positionsAtFriday, let m = model else { return }
+        stop = m.fridayStop; price = nil; brief.positionsAtFriday = false
+    }
+    /// Live: ask for the name on screen when it is missing or priced on an older build.
+    private func load() {
+        guard live, !name.isEmpty, let b = brief.book, let built = brief.built,
+              let n = liveNames.first(where: { $0["t"].string == name }) else { return }
+        brief.positions.load(book: b, t: name, built: built, name: n)
     }
 }
 
 // MARK: - Book totals (one sideways row)
 
 private struct BookTotalsRow: View {
-    let acct: String
-    let weekend: Bool
+    let hs: [PositionsModel.Holdings]
     @Binding var mode: Int
     let privacy: Bool
     var body: some View {
-        let models = SampleBook.names.compactMap { PositionsModel(t: $0, acct: acct, weekend: weekend) }
-        let hs = models.map { $0.holdings() }
         let gain = hs.reduce(0) { $0 + $1.shareGain }, tl = hs.reduce(0) { $0 + $1.timeLeaps }, to = hs.reduce(0) { $0 + $1.timeOtm }
         let ip = hs.reduce(0) { $0 + $1.ip.value }, sc = hs.reduce(0) { $0 + $1.sc.value }, sp = hs.reduce(0) { $0 + $1.sp.value }
         let shT = hs.reduce(0) { $0 + $1.sh.today }, lpT = hs.reduce(0) { $0 + $1.lp.today }, ocT = hs.reduce(0) { $0 + $1.oc.today }, ipT = hs.reduce(0) { $0 + $1.ip.today }
@@ -149,16 +200,15 @@ private struct BookTotalsRow: View {
 // MARK: - Logo strip
 
 private struct LogoStrip: View {
-    let names: [String]
-    let acct: String
-    let weekend: Bool
+    struct Item: Hashable { let t: String; let company: String; let warn: Bool }
+    let items: [Item]
     let selected: String
     let pick: (String) -> Void
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 18) {
-                ForEach(names, id: \.self) { t in
-                    let on = t == selected, warn = PositionsModel(t: t, acct: acct, weekend: weekend)?.shortByFriday ?? false
+                ForEach(items, id: \.t) { it in
+                    let t = it.t, on = t == selected, warn = it.warn
                     Button { pick(t) } label: {
                         VStack(spacing: 6) {
                             ZStack(alignment: .topTrailing) {
@@ -174,7 +224,7 @@ private struct LogoStrip: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel((SampleBook.company[t] ?? t) + (warn ? ", short if it rises its priced move by Friday" : ""))
+                    .accessibilityLabel(it.company + (warn ? ", past its best if it rises its priced move by Friday" : ""))
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
@@ -228,7 +278,7 @@ private struct PositionsDetail: View {
                         .foregroundStyle(pl < 0 ? S.red : S.green)
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(pl < 0 ? (short ? "Losing, and short" : "Losing") : short ? "Making, but short" : "Long and making")
+                        Text(pl < 0 ? (short ? "Losing, and rises cost you" : "Losing") : short ? "Making, past its best" : "Long and making")
                             .sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false)
                             .foregroundStyle(pl < 0 ? S.red : short ? S.act : S.green)
                         Text("\(m.t) at $\(String(format: "%.2f", px)) · \(st.long)").sType(BK.caption).foregroundStyle(S.secondary)
@@ -261,7 +311,7 @@ private struct PositionsDetail: View {
                 }
                 if layer == "Walls" {
                     HStack(spacing: 8) {
-                        ForEach([(0, "Weekly · Oct 30"), (3, "Monthly · Nov 20")], id: \.0) { c in
+                        ForEach(chainChips, id: \.0) { c in
                             Button { withAnimation(.timingCurve(0.3, 1.4, 0.5, 1, duration: 0.45)) { chain = c.0 } } label: {
                                 Text(c.1).font(.system(size: 13, weight: .semibold)).foregroundStyle(S.ink)
                                     .padding(.horizontal, 12).frame(height: 30)
@@ -274,7 +324,7 @@ private struct PositionsDetail: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 10) {
                         legend("—", "P&L on that date", S.ink); legend("--", "Today", S.secondary)
-                        legend("|", "Turns short", S.act); legend("|", "Hurting", S.red)
+                        legend("|", "Makes the most", S.act); legend("|", "Hurting", S.red)
                     }
                     Text("Tap a leg to switch it off").sType(BK.label, tabular: false).foregroundStyle(S.secondary)
                 }
@@ -284,8 +334,8 @@ private struct PositionsDetail: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(short ? "Short" : "Long") \(SampleEngine.fn(g.d)) Δ at $\(String(format: "%.2f", px)), \(st.long)")
                         .sType(SType(size: 20, weight: 700, line: 24, tracking: 0)).foregroundStyle(short ? S.red : S.ink)
-                    Text(short ? "Short by \(SampleEngine.fn(g.d)) shares of delta. Each fix below shows what it costs and where it leaves you."
-                         : fl.map { "Nothing to add here. Drag right: you turn short above $" + String(format: "%.2f", $0) } ?? "Nothing to add here. You stay long across the chart.")
+                    Text(short ? "Each $1 up costs about $\(SampleEngine.fn(g.d)) here. Each fix below shows what it costs and where it leaves you."
+                         : fl.map { "Nothing to add here. Drag right: it makes the most at $" + String(format: "%.2f", $0) + ", and each $1 above costs you." } ?? "Nothing to add here. It keeps making more across the chart.")
                         .sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false).foregroundStyle(S.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -298,6 +348,12 @@ private struct PositionsDetail: View {
             .padding(.horizontal, S.margin)
             .padding(.top, 16)
         }
+    }
+
+    /// The Walls layer's two chains: the nearest weekly and the nearest monthly.
+    private var chainChips: [(Int, String)] {
+        [m.chains.firstIndex { $0.kind == "Weekly" }, m.chains.firstIndex { $0.kind == "Monthly" }].compactMap { $0 }
+            .map { ($0, "\(m.chains[$0].kind) · \(m.chains[$0].label)") }
     }
 
     private func greek(_ l: String, _ v: String, _ c: Color) -> some View {
@@ -331,11 +387,13 @@ private struct PositionsChart: View {
     /// The layer's price lines: this chain's walls, or the 20-day average and the month's high and low.
     private var layerLines: [(k: Double, label: String, color: Color, dashed: Bool)] {
         if layer == "Walls" {
-            let w = SampleBook.walls(m.t, chain), ex = SampleBook.expiries[chain].label
-            var out: [(Double, String, Color, Bool)] = [(w.flip, "Flip · \(ex)", S.act, true)]
-            if let c = w.c { out.append((c.k, "Ceiling · \(ex)", S.navy, false)) }
-            if let f = w.f { out.append((f.k, "Floor · \(ex)", S.brown, false)) }
-            if let a = w.a { out.append((a.k, "Accelerator · \(ex)", S.brown.opacity(0.5), false)) }
+            guard m.chains.indices.contains(chain) else { return [] }
+            let w = m.chains[chain], ex = w.label
+            var out: [(Double, String, Color, Bool)] = []
+            if let f = w.flip { out.append((f, "Flip · \(ex)", S.act, true)) }
+            if let c = w.c { out.append((c, "Ceiling · \(ex)", S.navy, false)) }
+            if let f = w.f { out.append((f, "Floor · \(ex)", S.brown, false)) }
+            if let a = w.a { out.append((a, "Accelerator · \(ex)", S.brown.opacity(0.5), false)) }
             return out.filter { $0.0 >= m.X0 && $0.0 <= m.X1 }
         }
         if layer == "Technicals" {
@@ -537,7 +595,7 @@ private struct LegsList: View {
         VStack(alignment: .leading, spacing: 8) {
             Button { withAnimation(.easeOut(duration: 0.25)) { endedOpen.toggle() } } label: {
                 HStack {
-                    Text("Ended Oct 30 · settled").sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                    Text(m.endedLabel).sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
                     Spacer()
                     Image(systemName: "chevron.down").font(.system(size: 13, weight: .semibold)).foregroundStyle(S.secondary)
                         .rotationEffect(.degrees(endedOpen ? 180 : 0))
@@ -549,8 +607,8 @@ private struct LegsList: View {
                     let itm = l.ty == .call ? px > l.K : px < l.K
                     VStack(alignment: .leading, spacing: 3) {
                         Text(l.title).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                        Text(itm ? "Ended Oct 30, $\(String(format: "%.2f", abs(px - l.K))) in the money at $\(String(format: "%.2f", px)). Rolled before the close, so no shares went."
-                                 : "Ended Oct 30, worth nothing at $\(String(format: "%.2f", px)): kept in full.")
+                        Text(m.endedNotes[l.id] ?? (itm ? "Ended Oct 30, $\(String(format: "%.2f", abs(px - l.K))) in the money at $\(String(format: "%.2f", px)). Rolled before the close, so no shares went."
+                                 : "Ended Oct 30, worth nothing at $\(String(format: "%.2f", px)): kept in full."))
                             .sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -660,14 +718,13 @@ private struct WallsByExpiry: View {
                     }.buttonStyle(.plain)
                 }
             }
-            let rows = SampleBook.expiries.enumerated().filter { kind == "All" || (kind == "Weeklies" ? $0.element.kind == "Weekly" : $0.element.kind == "Monthly") }
+            let rows = m.chains.enumerated().filter { kind == "All" || (kind == "Weeklies" ? $0.element.kind == "Weekly" : $0.element.kind == "Monthly") }
             GeometryReader { g in
                 let lw: CGFloat = 76, w = g.size.width - lw
                 let X = { (px: Double) -> CGFloat in lw + CGFloat((px - m.X0) / (m.X1 - m.X0)) * w }
                 ZStack(alignment: .topLeading) {
                     ForEach(Array(rows.enumerated()), id: \.offset) { r, item in
-                        let (e, ex) = item
-                        let wl = SampleBook.walls(m.t, e), y = CGFloat(r) * 42
+                        let ex = item.element, wl = ex, y = CGFloat(r) * 42
                         let band = m.S0 * m.v * (Double(ex.trading) / 252).squareRoot()
                         VStack(alignment: .leading, spacing: 1) {
                             Text(ex.label).sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
@@ -676,13 +733,16 @@ private struct WallsByExpiry: View {
                         .offset(y: y + 6)
                         Capsule().fill(S.chip).frame(width: max(0, X(min(m.X1, m.S0 + band)) - X(max(m.X0, m.S0 - band))), height: 10)
                             .offset(x: X(max(m.X0, m.S0 - band)), y: y + 16)
-                        Rectangle().fill(S.act).frame(width: 1, height: 18).opacity(0.8).offset(x: X(wl.flip), y: y + 12)
+                        if let fl = wl.flip, fl >= m.X0, fl <= m.X1 { Rectangle().fill(S.act).frame(width: 1, height: 18).opacity(0.8).offset(x: X(fl), y: y + 12) }
                         // Labels in lanes: a wall within 30 pt of the one before it puts its number below the bar.
-                        let ms = [wl.a.map { ($0.k, S.brown.opacity(0.4)) }, wl.f.map { ($0.k, S.brown) }, wl.c.map { ($0.k, S.navy) }]
+                        let ms = [wl.a.map { ($0, S.brown.opacity(0.4)) }, wl.f.map { ($0, S.brown) }, wl.c.map { ($0, S.navy) }]
                             .compactMap { $0 }.sorted { $0.0 < $1.0 }
                         ForEach(Array(ms.enumerated()), id: \.offset) { i, mk in
-                            let close = i > 0 && abs(X(min(max(mk.0, m.X0), m.X1)) - X(min(max(ms[i - 1].0, m.X0), m.X1))) < 30
-                            marker(mk.0, mk.1, X, y, below: close)
+                            let px = { (j: Int) in X(min(max(ms[j].0, m.X0), m.X1)) }
+                            let close = i > 0 && abs(px(i) - px(i - 1)) < 30
+                            // A wall with the next one close on its right puts its number on its left.
+                            let left = !close && i + 1 < ms.count && abs(px(i + 1) - px(i)) < 30
+                            marker(mk.0, mk.1, X, y, below: close, left: left)
                         }
                         if r < rows.count - 1 { Rectangle().fill(S.hairline).frame(height: 0.5).offset(y: y + 41) }
                     }
@@ -697,13 +757,18 @@ private struct WallsByExpiry: View {
         .briefCard()
     }
 
-    @ViewBuilder private func marker(_ k: Double, _ c: Color, _ X: (Double) -> CGFloat, _ y: CGFloat, below: Bool = false) -> some View {
+    @ViewBuilder private func marker(_ k: Double, _ c: Color, _ X: (Double) -> CGFloat, _ y: CGFloat, below: Bool = false, left: Bool = false) -> some View {
         let inRange = k >= m.X0 && k <= m.X1
         let x = X(min(max(k, m.X0), m.X1))
         let label = inRange ? String(format: "%g", k) : "\(String(format: "%g", k)) \(k > m.X1 ? "→" : "←")"
         RoundedRectangle(cornerRadius: 2).fill(c).frame(width: 5, height: 16).offset(x: x - 2.5, y: y + 13)
-        Text(label).font(.system(size: 10, weight: .bold).monospacedDigit()).foregroundStyle(c).fixedSize()
-            .offset(x: below ? x - 6 : x + 5, y: below ? y + 29 : y + 14)
+        if left {
+            Text(label).font(.system(size: 10, weight: .bold).monospacedDigit()).foregroundStyle(c).fixedSize()
+                .frame(width: 44, alignment: .trailing).offset(x: x - 49, y: y + 14)
+        } else {
+            Text(label).font(.system(size: 10, weight: .bold).monospacedDigit()).foregroundStyle(c).fixedSize()
+                .offset(x: below ? x - 6 : x + 5, y: below ? y + 29 : y + 14)
+        }
     }
     private func key(_ c: Color, _ t: String) -> some View {
         HStack(spacing: 4) { RoundedRectangle(cornerRadius: 1.5).fill(c).frame(width: 4, height: 12); Text(t).sType(BK.caption, tabular: false).foregroundStyle(S.secondary) }
@@ -719,7 +784,7 @@ private struct WholeBook: View {
         let h = m.holdings()
         VStack(alignment: .leading, spacing: 8) {
             Text("Whole \(m.t) book").sType(BK.title, tabular: false).foregroundStyle(S.ink)
-            Text("Everything you hold in \(SampleBook.company[m.t] ?? m.t), today").sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
+            Text("Everything you hold in \(m.company), today").sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
             Text("Long").sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink).padding(.top, 6)
             ForEach([("Shares", h.sh), ("LEAPS", h.lp), ("OTM calls", h.oc), ("Insurance puts", h.ip)].filter { $0.1.value != 0 }, id: \.0) { r in
                 BHairline()

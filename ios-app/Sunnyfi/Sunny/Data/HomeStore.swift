@@ -55,6 +55,14 @@ final class HomeStore {
     private var inFlight: Task<Void, Never>?
     /// The book this login's Home shows, looked up once per login (31 Oct 2026).
     private var book: (user: UUID, id: String)?
+    /// The book on screen ("S", "N"), once looked up; Positions asks sunny-positions for it.
+    var bookIDNow: String? {
+        #if DEBUG && targetEnvironment(simulator)
+        let a = ProcessInfo.processInfo.arguments
+        if a.contains("-fixture") { return a.firstIndex(of: "-fixtureBook").flatMap { a.indices.contains($0 + 1) ? a[$0 + 1] : nil } ?? "S" }
+        #endif
+        return book?.id
+    }
     private var lastAttemptFailedOffline = false
     private let path = NWPathMonitor()
 

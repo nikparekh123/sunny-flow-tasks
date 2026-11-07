@@ -62,21 +62,21 @@ Deno.test('Your position · pre · Sunny', () => {
   assertEquals(yp.stats.map((s) => s.v), ['$40K', '$3.8K', '$52K']);
   assertEquals(yp.stats.map((s) => s.c), ['green', 'green', 'red']);
   assertEquals(yp.cover, 'Insurance puts cover 4,000 of your 15,000 shares, 27%. Shares have no floor below that.');
-  assertEquals(yp.count, '1 short, 2 thin at a priced move');
+  assertEquals(yp.count, '1 past its best, 2 thin at a priced move');
   assertEquals(yp.rows.map((r) => r.id), ['NKE', 'BABA', 'NFLX', 'FIS', 'PEP', 'UBER', 'LULU']);
   assertEquals(row(yp, 'NKE').right, 'Short 917 Δ');
   assertEquals(row(yp, 'NKE').at, 'at ↑4.9%');
-  assertEquals(row(yp, 'BABA').line, 'Thin by Friday, never short');
-  assertEquals(row(yp, 'FIS').line, 'Stays long past ↑12.7%');
+  assertEquals(row(yp, 'BABA').line, 'Thin by Friday, still gains as it rises');
+  assertEquals(row(yp, 'FIS').line, 'Keeps making more past ↑12.7%');
   assertEquals(row(yp, 'FIS').right, 'Long 1,134 Δ');
   assertEquals(row(yp, 'PEP').right, 'Long 555 Δ');
   assertEquals(row(yp, 'UBER').right, 'Long 905 Δ');
-  assertEquals(row(yp, 'LULU').line, 'Stays long past ↑20.3%');
+  assertEquals(row(yp, 'LULU').line, 'Keeps making more past ↑20.3%');
   assertEquals(row(yp, 'LULU').right, 'Long 1,965 Δ');
   // To the cent the design's .05% grid says $36.23; the engine's first cent may sit one or two cents lower.
   const fp = row(yp, 'NKE').fp!;
   assert(fp >= 36.20 && fp <= 36.24, 'Nike turns short near $36.23, got ' + fp);
-  assertEquals(text(yp.sentence), `Long now: a 1% rise makes you $9.3K. The book stays long even if the market rises 10% by Friday, but Nike turns short above $${fp.toFixed(2)}.`);
+  assertEquals(text(yp.sentence), `Long now: a 1% rise makes you $9.3K. Your book keeps making more even if the market rises 10% by Friday, but Nike makes the most at $${fp.toFixed(2)}.`);
 });
 
 Deno.test('Your position · open · Sunny and Nicolay', () => {
@@ -86,13 +86,13 @@ Deno.test('Your position · open · Sunny and Nicolay', () => {
   assertEquals(fK(b.dollarDelta), '$2.8K');
   assertEquals(b.stats.map((s) => s.v), ['$12K', '$863', '$15K']);
   assertEquals(b.cover, 'Insurance puts cover 1,200 of your 5,300 shares, 23%. Shares have no floor below that.');
-  assertEquals(b.count, '2 short at a priced move');
+  assertEquals(b.count, '2 past their best at a priced move');
   assertEquals(b.rows.slice(0, 2).map((r) => r.id), ['NKE', 'BABA']);
   assertEquals(row(b, 'NKE').right, 'Short 262 Δ');
   assertEquals(row(b, 'BABA').right, 'Short 34 Δ');
   const bp = row(b, 'BABA').fp!;
   assert(bp >= 104.85 && bp <= 104.91, 'Alibaba turns short near $104.91, got ' + bp);
-  assertEquals(row(b, 'NFLX').line, 'Stays long past ↑19.0%');
+  assertEquals(row(b, 'NFLX').line, 'Keeps making more past ↑19.0%');
   assertEquals(row(b, 'NFLX').right, 'Long 383 Δ');
 });
 
@@ -104,12 +104,12 @@ Deno.test('Your position · post', () => {
 
 Deno.test('Your position · weekend', () => {
   const a = card(BOOK_A, 'weekend'), b = card(BOOK_B, 'weekend');
-  assertEquals(text(a.sentence), 'This week’s calls ended Friday, so you are long only until Monday’s sales: a 1% rise makes you $11K. Selling again brings the short back above the calls.');
+  assertEquals(text(a.sentence), 'This week’s calls ended Friday, so you are long only until Monday’s sales: a 1% rise makes you $11K. Selling again caps how much a rise can make.');
   assertEquals(a.stats.map((s) => s.v), ['$55K', '$1.2K', '$56K']);
   assertEquals(a.stats[1].l, 'flat to next Fri');
   assertEquals(a.count, 'Every name long at a priced move');
   assertEquals(row(a, 'NKE').right, 'Long 6,291 Δ');
-  assertEquals(row(a, 'NKE').line, 'Stays long past ↑14.8%');
+  assertEquals(row(a, 'NKE').line, 'Keeps making more past ↑14.8%');
   assertEquals(row(a, 'NFLX').right, 'Long 3,274 Δ');
   assertEquals(b.stats.map((s) => s.v), ['$16K', '$219', '$17K']);
   assertEquals(row(b, 'NKE').right, 'Long 1,742 Δ');
@@ -152,7 +152,7 @@ Deno.test('Invariant 1 · turns-short price is one number on Home and Positions'
       if (r.fp == null) continue;
       const G = positionsGrid(nb, STOPS, null);
       assertEquals(G.turnsShort[3], r.fp, nb.t + ': Positions at the Friday stop says the Home price');
-      assert(r.line.includes('$' + r.fp.toFixed(2)) || r.line.startsWith('Short at'));
+      assert(r.line.includes('$' + r.fp.toFixed(2)) || r.line.startsWith('Already past'));
     }
   }
 });

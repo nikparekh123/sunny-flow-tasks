@@ -133,7 +133,8 @@ struct HomeView: View {
                     // Pass 1 (6 Nov handoff): one name at a time on the sample book; the old stacked cards stay for real
                     // data until Pass 2 feeds the new screen.
                     NavigationStack {
-                        if BriefDebug.sample { BriefPositionsScreen().toolbar(.hidden, for: .navigationBar) }
+                        // Pass 2: the new screen on the real book once the server's brief is in; the old cards until then.
+                        if BriefDebug.sample || (brief.live != nil && brief.live?.error == nil) { BriefPositionsScreen().toolbar(.hidden, for: .navigationBar) }
                         else { SunnyPositionsTab(store: store) }
                     }
                     .modifier(OwnTabBar())
@@ -175,23 +176,26 @@ struct HomeView: View {
         .environment(brief)
         .onAppear(perform: briefSetup)
         // The server's brief, decoded once per build (memoized; HomeStore ticks every 15 to 30 s).
-        .onChange(of: home.builtAt, initial: true) { _, _ in brief.ingest(home.brief, key: home.builtAt) }
+        .onChange(of: home.builtAt, initial: true) { _, _ in brief.ingest(home.brief, key: home.builtAt, book: store.bookIDNow) }
     }
 
     /// Who sees which accounts. Sample mode (DEBUG): both books and Overview, as the design shows Nik.
     /// Real books arrive with the account strip in Pass 2 (book_members, owned books).
     private func briefSetup() {
+        // Debug runs (simulator only): open on a tab or an overlay, on the sample or the real book.
+        if BriefDebug.tab == "positions" { router.tab = .positions }
+        defer {
+            switch BriefDebug.open {
+            case "timevalue": brief.sheet = .timeValue
+            case "economy": brief.sheet = .economy
+            case let o? where o.hasPrefix("ticker:"): brief.ticker = String(o.dropFirst(7))
+            default: break
+            }
+        }
         guard BriefDebug.sample else { return }
         brief.accounts = [.overview, .sunny, .nicolay]
         brief.account = BriefDebug.account ?? .sunny
         UserDefaults.standard.set(BriefDebug.privacy, forKey: BriefPrivacy.key)
-        if BriefDebug.tab == "positions" { router.tab = .positions }
-        switch BriefDebug.open {
-        case "timevalue": brief.sheet = .timeValue
-        case "economy": brief.sheet = .economy
-        case let o? where o.hasPrefix("ticker:"): brief.ticker = String(o.dropFirst(7))
-        default: break
-        }
     }
 
     /// A tap on the open tab scrolls it to the top.

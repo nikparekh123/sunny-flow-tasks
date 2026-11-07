@@ -135,11 +135,17 @@ final class BriefState {
     /// The server's brief for the book on screen, decoded once per update (memoized: never built in a body).
     private(set) var live: BriefLive?
     private var liveKey: String?
+    /// The book the brief is for ("S", "N") and its build: Positions asks sunny-positions for that book.
+    private(set) var book: String?
+    var built: String? { liveKey }
+    /// Positions on the real book: one model per name and build, fetched when a name opens.
+    let positions = PositionsSource()
 
     /// Called on each new Home payload: decodes the brief only when the build is new.
-    func ingest(_ brief: JSONValue?, key: String?) {
+    func ingest(_ brief: JSONValue?, key: String?, book: String? = nil) {
         guard key != liveKey else { return }
         liveKey = key
+        self.book = book
         live = brief.map(BriefLive.init)
     }
 

@@ -306,7 +306,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
         footer: [sp(`${$0(look.left)} left to earn on ${look.q} calls, ${$0(look.kept)} kept.`, true)] };
     }
     const n = shorts[0];
-    return { type: 'toDecide', title: 'To decide · turns short', subtitle: `${n.name} turns short above $${n.fp!.toFixed(2)} by Friday`,
+    return { type: 'toDecide', title: 'To decide · near its best', subtitle: `${n.name} makes the most at $${n.fp!.toFixed(2)} by Friday`,
       body: `A priced move is ${p1(n.sd)} by Friday. Roll the calls or add before then?` };
   };
 
@@ -631,9 +631,9 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     S.push({ kicker: 'Your book', headline: h(false), privacy: h(true), cards: [yourNames(), whatsMoving(), yourPosition()] });
     if (shorts.length || look) {
       const two = shorts.length >= 2, n = shorts[0], k = n?.soldCalls.filter((c) => c.ex <= F).sort((a, b) => a.K - b.K)[0]?.K;
-      const head = shorts.length === 0 ? [sp(`No name turns short by Friday. ${company(look.t)}’s calls are ${look.cap}% kept.`, true)]
-        : two ? [sp(`${shorts.length === 2 ? `${shorts[0].name} and ${shorts[1].name}` : `${shorts.slice(0, -1).map((y) => y.name).join(', ')} and ${shorts.at(-1)!.name}`} turn short by Friday.`, true)]
-        : [sp(`${n.name} turns short above $${n.fp!.toFixed(2)} by Friday.`, true)];
+      const head = shorts.length === 0 ? [sp(`Every name still gains from a priced rise by Friday. ${company(look.t)}’s calls are ${look.cap}% kept.`, true)]
+        : two ? [sp(`${shorts.length === 2 ? `${shorts[0].name} and ${shorts[1].name}` : `${shorts.slice(0, -1).map((y) => y.name).join(', ')} and ${shorts.at(-1)!.name}`} are past their best at a priced rise by Friday.`, true)]
+        : [sp(`${n.name} makes the most at $${n.fp!.toFixed(2)} by Friday.`, true)];
       const full = shorts.length === 0 ? head : [sp(`${head[0].t}${two ? ' Roll the calls or add before then.' : ` Roll the ${k ?? ''} calls or add before then.`.replace('the  calls', 'the calls')}`, true)];
       S.push({ kicker: 'To decide', headline: full, openHeadline: head, cards: [toDecide()], ownerCards: ['toDecide'] });
     }

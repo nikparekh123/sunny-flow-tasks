@@ -136,8 +136,8 @@ struct YourPositionModel {
         let byT = Dictionary(uniqueKeysWithValues: NB.map { ($0.t, $0) })
         let rows: [Row] = rs.map { r in
             let x = byT[r.t]!, nm = names[r.t] ?? r.t
-            let line = r.fp.map { "Short above $" + String(format: "%.2f", $0) + " by " + (wk ? "next Friday" : "Friday") }
-                ?? (r.st == 1 ? "Thin by Friday, never short" : "Stays long past ↑" + E.f1(x.sd * 3) + "%")
+            let line = r.fp.map { "Makes the most at $" + String(format: "%.2f", $0) + " by " + (wk ? "next Friday" : "Friday") }
+                ?? (r.st == 1 ? "Thin by Friday, still gains as it rises" : "Keeps making more past ↑" + E.f1(x.sd * 3) + "%")
             return Row(id: r.t, name: nm, line: line, lineColor: r.fp != nil ? (r.st == 2 ? "red" : "orange") : "secondary",
                        right: r.st == 2 ? "Short " + E.fn(r.n) + " Δ" : r.st == 1 ? "Thin" : "Long " + E.fn(r.n) + " Δ",
                        rightColor: r.st == 2 ? "red" : r.st == 1 ? "orange" : "ink", at: "at ↑" + E.f1(x.sd) + "%", st: r.st)
@@ -148,17 +148,17 @@ struct YourPositionModel {
         if wk {
             story = [BriefSpan("This week’s calls ended Friday, so you are "), BriefSpan("long only", b: true),
                      BriefSpan(" until Monday’s sales: a 1% rise makes you "), BriefSpan(E.fK(now.d), b: true, c: "green"),
-                     BriefSpan(". Selling again brings the short back above the calls.")]
+                     BriefSpan(". Selling again caps how much a rise can make.")]
         } else {
             story = [BriefSpan("Long now: a 1% rise makes you "), BriefSpan(E.fK(now.d), b: true, c: "green"), BriefSpan(". ")]
             if let fm {
-                story += [BriefSpan("If the market rises "), BriefSpan(E.f1(fm) + "%", b: true, c: "orange"),
-                          BriefSpan(" by Friday you turn short" + (first.map { ", first in " + (names[$0.t] ?? $0.t) + "." } ?? "."))]
+                story += [BriefSpan("Your book makes the most if the market rises "), BriefSpan(E.f1(fm) + "%", b: true, c: "orange"),
+                          BriefSpan(" by Friday" + (first.map { ". " + (names[$0.t] ?? $0.t) + " gets there first." } ?? "."))]
             } else {
-                story += [BriefSpan("The book stays long even if the market rises 10% by Friday")]
+                story += [BriefSpan("Your book keeps making more even if the market rises 10% by Friday")]
                 if let f = first {
                     story += [BriefSpan(", but "), BriefSpan(names[f.t] ?? f.t, b: true, c: f.st == 2 ? "red" : "orange"),
-                              BriefSpan(f.st == 2 && f.fp != nil ? " turns short above $" + String(format: "%.2f", f.fp!) + "." : " runs thin.")]
+                              BriefSpan(f.st == 2 && f.fp != nil ? " makes the most at $" + String(format: "%.2f", f.fp!) + "." : " runs thin.")]
                 } else { story += [BriefSpan(".")] }
             }
         }
@@ -181,8 +181,8 @@ struct YourPositionModel {
             subtitle: sub, sentence: story, grid: M, friday: F.map(\.p), today: Nw.map(\.p), shortAt: fm,
             stats: [(E.fK(up5), "if up 5%", col(up5)), (E.fK(pv), wk ? "flat to next Fri" : "flat to Friday", col(pv)), (E.fK(dn5), "if down 5%", col(dn5))],
             cover: cover, assign: assign,
-            count: nS + nT > 0 ? [nS > 0 ? "\(nS) short" : nil, nT > 0 ? "\(nT) thin" : nil].compactMap { $0 }.joined(separator: ", ") + " at a priced move" : "Every name long at a priced move",
+            count: nS + nT > 0 ? [nS > 0 ? "\(nS) " + (nS == 1 ? "past its best" : "past their best") : nil, nT > 0 ? "\(nT) thin" : nil].compactMap { $0 }.joined(separator: ", ") + " at a priced move" : "Every name long at a priced move",
             countColor: nS > 0 ? "red" : nT > 0 ? "orange" : "secondary", rows: rows,
-            aria: "Your position, P&L by \(wk ? "next Friday" : "Friday") if the market moves 10% down to 10% up. " + (fm.map { "Short above a \(E.f1($0))% rise." } ?? "Long throughout."))
+            aria: "Your position, P&L by \(wk ? "next Friday" : "Friday") if the market moves 10% down to 10% up. " + (fm.map { "Makes the most at a \(E.f1($0))% rise." } ?? "Keeps making more all the way up."))
     }
 }
