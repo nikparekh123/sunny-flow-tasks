@@ -177,6 +177,7 @@ struct HomeView: View {
         .onAppear(perform: briefSetup)
         // The server's brief, decoded once per build (memoized; HomeStore ticks every 15 to 30 s).
         .onChange(of: home.builtAt, initial: true) { _, _ in
+            brief.fresh = (SXClient.parseDate(home.fresh.marks ?? ""), SXClient.parseDate(home.fresh.trades ?? ""))
             brief.ingest(home.brief, key: home.builtAt, book: store.bookIDNow, overview: home.overview, books: store.books)
         }
         // The strip picked a book: read its Home (Overview stays on S's last build).
@@ -189,8 +190,13 @@ struct HomeView: View {
     /// Who sees which accounts. Sample mode (DEBUG): both books and Overview, as the design shows Nik.
     /// Real books arrive with the account strip in Pass 2 (book_members, owned books).
     private func briefSetup() {
-        // Debug runs (simulator only): open on a tab or an overlay, on the sample or the real book.
+        // Debug runs (simulator only): open on a tab or an overlay, privacy on, on the sample or the real book.
         if BriefDebug.tab == "positions" { router.tab = .positions }
+        if BriefDebug.privacy { UserDefaults.standard.set(true, forKey: BriefPrivacy.key) }
+        #if DEBUG && targetEnvironment(simulator)
+        // A saved-data run (-fixture) sets privacy from its own flag every time, so one run never leaks into the next.
+        if ProcessInfo.processInfo.arguments.contains("-fixture") { UserDefaults.standard.set(BriefDebug.privacy, forKey: BriefPrivacy.key) }
+        #endif
         defer {
             switch BriefDebug.open {
             case "timevalue": brief.sheet = .timeValue

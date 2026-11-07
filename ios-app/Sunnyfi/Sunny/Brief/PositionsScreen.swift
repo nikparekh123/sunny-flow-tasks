@@ -81,8 +81,13 @@ struct BriefPositionsScreen: View {
                 }
                 if let m = model {
                     NameRow(m: m).padding(.horizontal, S.margin).padding(.top, 14)
+                    if live, let t = brief.asOf() {
+                        Text("As of \(Self.asOfWords(t)) · IBKR data is late").sType(BK.sub, tabular: false).foregroundStyle(S.act)
+                            .padding(.horizontal, S.margin).padding(.top, 4)
+                    }
                     PositionsDetail(m: m, stop: Binding(get: { min(stop, m.stops.count - 1) }, set: { stop = $0 }), price: $price, off: $off,
-                                    legFilter: $legFilter, layer: $layer, chain: $chain, fix: $fix, wallsKind: $wallsKind, privacy: privacy)
+                                    legFilter: $legFilter, layer: $layer, chain: $chain, fix: $fix, wallsKind: $wallsKind, privacy: privacy,
+                                    late: live && brief.asOf() != nil)
                         .padding(.top, 12)
                         .id("\(acct)-\(name)")
                 } else if live && !names.isEmpty, let b = brief.book {
@@ -120,6 +125,13 @@ struct BriefPositionsScreen: View {
         .onChange(of: name) { _, t in if live, !t.isEmpty, let b = brief.book { UserDefaults.standard.set(t, forKey: "positions.last.\(b)") }; load() }
         .onChange(of: brief.built) { _, _ in load() }
         .onChange(of: model?.stops.count) { _, _ in arriveAtFriday() }
+    }
+
+    /// "3:58 PM" today, "Fri 3:58 PM" before today.
+    static func asOfWords(_ d: Date) -> String {
+        let f = DateFormatter(); f.timeZone = TimeZone(identifier: "America/New_York")
+        f.dateFormat = Calendar.current.isDate(d, inSameDayAs: SClock.now()) ? "h:mm a" : "EEE h:mm a"
+        return f.string(from: d)
     }
 
     /// From a Your position row: that name at the Friday close stop. From the tab: the last name viewed, or on
@@ -261,11 +273,13 @@ private struct PositionsDetail: View {
     @Binding var fix: String?
     @Binding var wallsKind: String
     let privacy: Bool
+    /// IBKR is late (README 9.4): the last values stay, the makes-the-most line goes.
+    var late = false
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
         let st = m.stops[stop], px = price ?? m.S0, tt = st.tt
-        let pl = m.pl(px, tt, off: off), g = m.greeks(px, tt, off: off), fl = m.flip(tt, off: off)
+        let pl = m.pl(px, tt, off: off), g = m.greeks(px, tt, off: off), fl = late ? nil : m.flip(tt, off: off)
         let short = g.d < 0
         let fixes = m.fixes(px, tt, off: off)
         let picked = fixes.first { $0.id == fix }
@@ -309,7 +323,9 @@ private struct PositionsDetail: View {
                         .buttonStyle(.plain)
                     }
                 }
-                if layer == "Walls" {
+                if layer == "Walls" && chainChips.isEmpty {
+                    Text("No walls saved for \(m.t) yet").sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
+                } else if layer == "Walls" {
                     HStack(spacing: 8) {
                         ForEach(chainChips, id: \.0) { c in
                             Button { withAnimation(.timingCurve(0.3, 1.4, 0.5, 1, duration: 0.45)) { chain = c.0 } } label: {
@@ -335,6 +351,7 @@ private struct PositionsDetail: View {
                     Text("\(short ? "Short" : "Long") \(SampleEngine.fn(g.d)) Δ at $\(String(format: "%.2f", px)), \(st.long)")
                         .sType(SType(size: 20, weight: 700, line: 24, tracking: 0)).foregroundStyle(short ? S.red : S.ink)
                     Text(short ? "Each $1 up costs about $\(SampleEngine.fn(g.d)) here. Each fix below shows what it costs and where it leaves you."
+                         : late ? "Nothing to add here. The makes-the-most line comes back when IBKR data is live again."
                          : fl.map { "Nothing to add here. Drag right: it makes the most at $" + String(format: "%.2f", $0) + ", and each $1 above costs you." } ?? "Nothing to add here. It keeps making more across the chart.")
                         .sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false).foregroundStyle(S.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -719,6 +736,9 @@ private struct WallsByExpiry: View {
                 }
             }
             let rows = m.chains.enumerated().filter { kind == "All" || (kind == "Weeklies" ? $0.element.kind == "Weekly" : $0.element.kind == "Monthly") }
+            if m.chains.isEmpty {
+                Text("No walls saved for \(m.t) yet").sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
+            }
             GeometryReader { g in
                 let lw: CGFloat = 76, w = g.size.width - lw
                 let X = { (px: Double) -> CGFloat in lw + CGFloat((px - m.X0) / (m.X1 - m.X0)) * w }
@@ -733,6 +753,11 @@ private struct WallsByExpiry: View {
                         .offset(y: y + 6)
                         Capsule().fill(S.chip).frame(width: max(0, X(min(m.X1, m.S0 + band)) - X(max(m.X0, m.S0 - band))), height: 10)
                             .offset(x: X(max(m.X0, m.S0 - band)), y: y + 16)
+                        if wl.c == nil && wl.f == nil && wl.a == nil && wl.flip == nil {
+                            // README 9.4: an expiry with no walls says so on its row.
+                            Text("No walls saved for \(ex.label)").sType(SType(size: 12, weight: 500, line: 15, tracking: 0), tabular: false)
+                                .foregroundStyle(S.secondary).fixedSize().offset(x: lw + 8, y: y + 13)
+                        }
                         if let fl = wl.flip, fl >= m.X0, fl <= m.X1 { Rectangle().fill(S.act).frame(width: 1, height: 18).opacity(0.8).offset(x: X(fl), y: y + 12) }
                         // Labels in lanes: a wall within 30 pt of the one before it puts its number below the bar.
                         let ms = [wl.a.map { ($0, S.brown.opacity(0.4)) }, wl.f.map { ($0, S.brown) }, wl.c.map { ($0, S.navy) }]
@@ -750,8 +775,10 @@ private struct WallsByExpiry: View {
                 }
             }
             .frame(height: CGFloat(rows.count) * 42)
-            HStack(spacing: 10) {
-                key(S.navy, "Ceiling"); key(S.brown, "Floor"); key(S.brown.opacity(0.4), "Accelerator"); key(S.act, "Flip"); key(S.ink, "Today")
+            if !m.chains.isEmpty {
+                HStack(spacing: 10) {
+                    key(S.navy, "Ceiling"); key(S.brown, "Floor"); key(S.brown.opacity(0.4), "Accelerator"); key(S.act, "Flip"); key(S.ink, "Today")
+                }
             }
         }
         .briefCard()

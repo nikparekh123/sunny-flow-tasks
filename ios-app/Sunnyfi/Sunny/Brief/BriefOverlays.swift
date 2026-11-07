@@ -119,6 +119,14 @@ struct TimeValueSheet: View {
         let cap = coll > 0 ? 1 - left / coll : 0
         let ready = rows.filter { $0.perShare < 0.05 || ($0.collected > 0 && 1 - $0.left / $0.collected >= 0.9) || $0.intrinsic > 0 }
         BriefSheetChrome(title: "Time value", close: close) {
+            if rows.isEmpty {
+                // An account with nothing sold (README 10): one line, no zero bars.
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Nothing sold yet").sType(SType(size: 20, weight: 700, line: 24, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                    Text("Time value shows here once calls or puts are sold.").sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(BriefWords.plain("$" + SampleEngine.fn(left), privacy: privacy))
@@ -208,6 +216,7 @@ struct TimeValueSheet: View {
                     }
                 }
             }
+            }
         }
     }
 }
@@ -286,6 +295,12 @@ struct TickerChartPage: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     TickerLine(pts: pts, lines: lines, up: ch >= 0).frame(maxHeight: .infinity)
+                        .overlay(alignment: .topLeading) {
+                            if live && lines.isEmpty {
+                                Text(layer == "Positions" ? "Nothing held in \(t)" : layer == "Walls" ? "No walls saved for \(t)" : "")
+                                    .sType(BK.small, tabular: false).foregroundStyle(S.secondary)
+                            }
+                        }
                 }
                 HStack {
                     ForEach(["1W", "1M", "3M", "YTD", "1Y", "All"], id: \.self) { r in
