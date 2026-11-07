@@ -22,7 +22,8 @@
  * while the index futures trade, 30 s apart, a quiet pass every 10 minutes otherwise;
  * the sunny-home-N cron sends {"book":"N"} for the cousin's book, BOOKS below).
  */
-const BUILD = '2026-11-06.1';
+import { buildBrief } from './brief.ts';
+const BUILD = '2026-11-06.2';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -2965,6 +2966,21 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     }
   }
   step('aftershock');
+  /* ── THE BRIEF (handoff 6 Nov 2026, Pass 2): New Home and Positions from the one book engine (brief.ts,
+     _shared/book-engine.ts). Each option's own IV, a 4% rate, dividends counted (declared ones, then each
+     name's regular one carried forward). It never breaks the build: a failure leaves `brief.error`. */
+  let brief: Row = { v: 1, error: 'not built' }, briefInputs: Row | null = null;
+  try {
+    const divNames = [...new Set([...book, ...[...sharesHeld].filter(([, n]) => n > 0).map(([t]) => t)])];
+    const divHist = divNames.length ? await get(`dividends?ticker=in.(${divNames.join(',')})&ex_date=gte.${addDays(today, -400)}`
+      + '&select=ticker,ex_date,cash_amount,frequency&order=ex_date.asc') : [];
+    const shareAvg = new Map<string, number>();
+    for (const [t, n] of sharesNow) if (n > 0 && (shareCost.get(t) ?? 0) > 0) shareAvg.set(t, (shareCost.get(t) ?? 0) / n);
+    const out = buildBrief({ today, wd: now.wd, mins: now.mins, isTrading, addDays, cal, legs, isLeap: (l) => isLeap(l as Leg),
+      shares: sharesHeld, shareAvg, spot: spotOf, closes, chain: chainRows, divRows: divHist, strategies });
+    brief = out.brief; briefInputs = out.inputs;
+  } catch (e) { brief = { v: 1, error: String((e as Error)?.message ?? e) }; }
+  step('brief');
   const payload = {
     build: BUILD, built_at: new Date().toISOString(), today, trading_today: isTrading(today),
     calendar: cal.filter((c) => String(c.date) >= today)
@@ -2997,6 +3013,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     flow_profile: flowProfile,
     /* Daily closes per name for the Bought face (13f). */
     daily,
+    /* New Home and Positions (handoff 6 Nov 2026): the brief, and the engine inputs sunny-positions prices on a grid. */
+    brief, brief_inputs: briefInputs,
   };
   return { payload, ms: Date.now() - t0, steps };
 }
