@@ -236,7 +236,7 @@ struct BHeatMap: View {
                         .frame(width: w, height: h)
                         .contentShape(Rectangle())
                         // The ticker chart is the sample's until its real series lands (Pass 2); real tiles do not open it yet.
-                        .onTapGesture { if BriefDebug.sample, let t = t["ticker"].string, SampleBook.q[t] != nil { brief.ticker = t } }
+                        .onTapGesture { if let t = t["ticker"].string, !BriefDebug.sample || SampleBook.q[t] != nil { brief.ticker = t } }
                         .offset(x: r[0] * sx, y: r[1] * sy)
                     }
                 }

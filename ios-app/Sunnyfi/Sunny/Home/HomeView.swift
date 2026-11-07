@@ -147,7 +147,7 @@ struct HomeView: View {
             }
             // A ticker chart, pushed from any name tile (block 33): from the right, full screen, X goes back.
             if let t = brief.ticker {
-                TickerChartPage(t: t, acct: brief.account.sampleKey) { withAnimation(reduce ? nil : S.standard(0.45)) { brief.ticker = nil } }
+                TickerChartPage(t: t, acct: brief.account.sampleKey, book: brief.book) { withAnimation(reduce ? nil : S.standard(0.45)) { brief.ticker = nil } }
                     .transition(reduce ? .opacity : .move(edge: .trailing))
                     .zIndex(3)
             }

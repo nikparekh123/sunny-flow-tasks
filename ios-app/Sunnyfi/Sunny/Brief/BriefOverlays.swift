@@ -236,18 +236,25 @@ struct EconomySheet: View {
 struct TickerChartPage: View {
     let t: String
     let acct: String
+    /// The book on screen (live): sunny-chart adds its legs in this name. Nil in sample mode.
+    var book: String? = nil
     let close: () -> Void
     @State private var range = "3M"
     @State private var layer = "Positions"
+    @State private var wire: TickerWire?
+    @State private var failed = false
+
+    private var live: Bool { !BriefDebug.sample }
 
     var body: some View {
-        let q = SampleBook.q[t] ?? (0, 0)
+        let q = live ? (wire?.price ?? 0, wire?.prev ?? 0) : (SampleBook.q[t] ?? (0, 0))
         let mv = q.1 > 0 ? (q.0 - q.1) / q.1 * 100 : 0
-        let all = SampleSeries.year(t)
-        let n = ["1W": 5, "1M": 22, "3M": 63, "YTD": 210, "1Y": 252, "All": all.count][range] ?? 63
+        let all = live ? (wire?.closes ?? []) : SampleSeries.year(t)
+        let ytd = live ? (wire?.ytdCount ?? 210) : 210
+        let n = ["1W": 5, "1M": 22, "3M": 63, "YTD": ytd, "1Y": 252, "All": all.count][range] ?? 63
         let pts = Array(all.suffix(n + 1))
-        let ch = (pts.last ?? 0) - (pts.first ?? 0), chp = (pts.first ?? 1) > 0 ? ch / pts.first! * 100 : 0
-        let lines = positionLines()
+        let ch = (pts.last ?? 0) - (pts.first ?? 0), chp = (pts.first ?? 0) > 0 ? ch / pts[0] * 100 : 0
+        let lines = layerLines()
         ZStack(alignment: .top) {
             SBackground()
             VStack(alignment: .leading, spacing: 10) {
@@ -266,14 +273,20 @@ struct TickerChartPage: View {
                     .padding(.horizontal, 12).frame(height: 44).glassEffect(.regular, in: .capsule)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(SampleBook.company[t] ?? t).sType(BK.small, tabular: false).foregroundStyle(S.secondary)
+                    Text(live ? (wire?.name ?? t) : (SampleBook.company[t] ?? t)).sType(BK.small, tabular: false).foregroundStyle(S.secondary)
                     HStack(spacing: 6) {
                         Text(String(format: "$%.2f %.2f%%", abs(ch), abs(chp))).sType(SType(size: 17, weight: 700, line: 22, tracking: 0)).foregroundStyle(ch < 0 ? S.red : S.green)
                         Text(["1W": "past week", "1M": "past month", "3M": "past 3 months", "YTD": "this year", "1Y": "past year", "All": "since the start"][range] ?? "")
                             .sType(SType(size: 17, weight: 500, line: 22, tracking: 0), tabular: false).foregroundStyle(S.secondary)
                     }
                 }
-                TickerLine(pts: pts, lines: layer == "Positions" ? lines : [], up: ch >= 0).frame(maxHeight: .infinity)
+                if live && wire == nil {
+                    Group { if failed { Text("Could not load \(t). Try again in a moment.") } else { ProgressView() } }
+                        .sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    TickerLine(pts: pts, lines: lines, up: ch >= 0).frame(maxHeight: .infinity)
+                }
                 HStack {
                     ForEach(["1W", "1M", "3M", "YTD", "1Y", "All"], id: \.self) { r in
                         Button { withAnimation(S.morph) { range = r } } label: {
@@ -297,6 +310,21 @@ struct TickerChartPage: View {
             }
             .padding(.horizontal, S.margin)
         }
+        .task(id: t) {
+            guard live else { return }
+            do { wire = try await TickerChartClient.fetch(t: t, book: book) } catch { failed = true }
+        }
+    }
+
+    /// The layer's lines: Positions (the legs held), Walls (the nearest weekly's), Technicals (averages, year range).
+    private func layerLines() -> [(k: Double, label: String, solid: Bool)] {
+        guard live else { return layer == "Positions" ? positionLines() : [] }
+        guard let w = wire else { return [] }
+        switch layer {
+        case "Positions": return w.positions.map { ($0.k, $0.label, $0.solid ?? false) }
+        case "Walls": return w.walls.map { ($0.k, $0.label, false) }
+        default: return w.techLines
+        }
     }
 
     /// The legs held in this name, as labelled lines on the price: hedge (OTM) calls and LEAPS dotted, sold calls solid.
@@ -311,6 +339,15 @@ struct TickerChartPage: View {
 }
 
 private struct TickerLine: View {
+    /// Label columns: a label within 14 pt of one above it in the same column moves one column right.
+    static func columns(_ ys: [CGFloat]) -> [Int] {
+        var last: [CGFloat] = [], out: [Int] = []
+        for y in ys {
+            if let c = last.firstIndex(where: { abs($0 - y) >= 14 }) { last[c] = y; out.append(c) }
+            else { last.append(y); out.append(last.count - 1) }
+        }
+        return out.map { min($0, 2) }
+    }
     let pts: [Double]
     let lines: [(k: Double, label: String, solid: Bool)]
     let up: Bool
@@ -322,15 +359,17 @@ private struct TickerLine: View {
             let W = g.size.width - 40, H = g.size.height
             let X = { (i: Int) -> CGFloat in CGFloat(i) / CGFloat(max(1, pts.count - 1)) * W }
             let Y = { (p: Double) -> CGFloat in CGFloat((hi - p) / (hi - lo)) * H }
+            let shown = lines.filter { $0.k >= lo && $0.k <= hi }.sorted { $0.k > $1.k }
+            let cols = Self.columns(shown.map { Y($0.k) })
             ZStack(alignment: .topLeading) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { _, l in
-                    if l.k >= lo && l.k <= hi {
-                        Path { $0.move(to: CGPoint(x: 0, y: Y(l.k))); $0.addLine(to: CGPoint(x: W, y: Y(l.k))) }
-                            .stroke(S.ink.opacity(l.solid ? 0.8 : 0.5), style: StrokeStyle(lineWidth: 1, dash: l.solid ? [] : [2, 3]))
-                        Text(l.label).font(.system(size: 10, weight: .bold)).foregroundStyle(S.ink)
-                            .padding(.horizontal, 4).background(S.dyn(0xF1F2F4, 0x0A0F0C))
-                            .position(x: 52, y: Y(l.k))
-                    }
+                ForEach(Array(shown.enumerated()), id: \.offset) { i, l in
+                    Path { $0.move(to: CGPoint(x: 0, y: Y(l.k))); $0.addLine(to: CGPoint(x: W, y: Y(l.k))) }
+                        .stroke(S.ink.opacity(l.solid ? 0.8 : 0.5), style: StrokeStyle(lineWidth: 1, dash: l.solid ? [] : [2, 3]))
+                    Text(l.label).font(.system(size: 10, weight: .bold)).foregroundStyle(S.ink)
+                        .lineLimit(1).fixedSize()
+                        .padding(.horizontal, 4).background(S.dyn(0xF1F2F4, 0x0A0F0C))
+                        // Left-aligned in its column: the centre sits half the label's width in.
+                        .position(x: 4 + CGFloat(cols[i]) * (W / 2.6) + (CGFloat(l.label.count) * 5.6 + 8) / 2, y: Y(l.k))
                 }
                 Path { p in for (i, v) in pts.enumerated() { let pt = CGPoint(x: X(i), y: Y(v)); i == 0 ? p.move(to: pt) : p.addLine(to: pt) } }
                     .stroke(up ? S.green : S.red, style: StrokeStyle(lineWidth: 1.6, lineJoin: .round))

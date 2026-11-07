@@ -221,6 +221,9 @@ Deno.serve(async (req) => {
     { feed: 'dividends-sync',       warnHours: 30,  critHours: 50 },
     { feed: 'account-history',      warnHours: 30,  critHours: 50 },
     { feed: 'account-history-N',    warnHours: 30,  critHours: 50 },   // book N's Home history (31 Oct 2026)
+    /* The economy on New Home (econ-sync, FRED): every 30 min on weekdays and nightly, so a day is one missed night
+       plus the weekend's single run (7 Nov 2026). */
+    { feed: 'econ-sync',            warnHours: 30,  critHours: 50 },
     // weekday only — the grace has to clear a weekend, and a long one
     { feed: 'ticker-iv-snapshot',   warnHours: 80,  critHours: 110 },
     { feed: 'theta-check',          warnHours: 80,  critHours: 110 },
