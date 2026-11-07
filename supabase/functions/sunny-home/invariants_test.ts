@@ -6,9 +6,10 @@
 //   deno test --allow-read supabase/functions/sunny-home/invariants_test.ts
 
 import { assert, assertEquals } from 'jsr:@std/assert@1';
-import { type BriefLeg, buildBrief, type Moment } from './brief.ts';
+import { type BriefLeg, buildBrief, company, type Moment } from './brief.ts';
 import { buildDoc, type NameDay } from './doc.ts';
-import { checkInvariants } from './invariants.ts';
+import { checkInvariants, checkOverview } from './invariants.ts';
+import { buildOverview, comingIn } from './overview.ts';
 
 type Row = Record<string, any>;
 const addDays = (d: string, n: number) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
@@ -167,4 +168,55 @@ Deno.test('Caught · 12 · an order in the copy without orders', () => {
   const p = page('post'), open = clone(p.open);
   open.sections[0].cards.push({ type: 'tomorrowOrders', rows: [] });
   caught(checkInvariants({ ...p, open }), 12);
+});
+
+// ── Overview across two books (README 12: 2, 3, 4, 5, 9) ──
+
+function bookB() {
+  const [today, wd, mins] = WHEN.open;
+  const legs: BriefLeg[] = [
+    leg('NKE', 'call', 'sold', 36, '2026-10-30', 20, 0.32, 0.06, 0.40),
+    leg('NKE', 'put', 'bought', 33, '2027-03-19', 10, 1.9, 1.8, 0.40),
+    leg('BABA', 'call', 'sold', 104, '2026-10-30', 5, 1.1, 0.45, 0.42),
+  ];
+  const { brief, inputs } = buildBrief({ today, wd, mins, isTrading, addDays, cal: [], legs, isLeap: (l) => l.expiry >= '2027-12-01',
+    shares: new Map([['NKE', 2000], ['BABA', 500], ['FIS', 1000]]), shareAvg: new Map([['NKE', 39.8], ['BABA', 90], ['FIS', 31]]),
+    spot: new Map([...SPOT, ['FIS', 33.6]]), closes: [...CLOSES, ...CLOSES.filter((c) => c.ticker === 'NKE').map((c) => ({ ...c, ticker: 'FIS', close_price: 33.6 }))],
+    chain: [], divRows: DIVS, strategies: {} });
+  return { brief: { ...(brief as Row), base: 250_000, pace: { week: 0.5, avg4: 0.6 } }, inputs: inputs as Row };
+}
+function overview() {
+  const a = page('open'), b = bookB();
+  const sides = [{ id: 'S', name: 'Sunny', brief: { ...a.brief, base: BASE, pace: { week: 0.7, avg4: 0.5 } }, inputs: a.inputs, orders: ORDERS },
+    { id: 'N', name: 'Nicolay', brief: b.brief, inputs: b.inputs, orders: [ORDERS[0]] }];
+  const o: Row = { ...buildOverview(sides, '2026-10-27', 11 * 60 + 20, company), comingIn: comingIn(sides, DIVS, company) };
+  return { o, sides };
+}
+
+Deno.test('Overview · both books agree with each book', () => {
+  const { o, sides } = overview();
+  const fails = checkOverview(o, sides, DIVS);
+  assertEquals(fails.length, 0, show(fails));
+  assertEquals(o.header, 'Both accounts · Tue Oct 27');
+  assertEquals(o.checks.map((c: Row) => c.name), ['Downside', 'Concentration', 'Pace', 'Calls at work', 'Delta', 'To do']);
+  assertEquals(o.checks.find((c: Row) => c.name === 'To do').big, '3');
+  assert(!/turns? short/.test(JSON.stringify(o)), 'Overview never says "turns short"');
+  assert(!/—/.test(JSON.stringify(o)), 'no em dashes');
+});
+Deno.test('Overview · caught · a Delta chip that disagrees with the book', () => {
+  const { o, sides } = overview();
+  const d = o.checks.find((c: Row) => c.name === 'Delta');
+  d.chips = d.chips.map((c: string) => (c.startsWith('Nicolay') ? 'Nicolay all long' : c));
+  caught(checkOverview(o, sides, DIVS), 2);
+});
+Deno.test('Overview · caught · a To do chip that disagrees with the orders', () => {
+  const { o, sides } = overview();
+  const d = o.checks.find((c: Row) => c.name === 'To do');
+  d.chips = d.chips.map((c: string) => (c.startsWith('Sunny') ? 'Sunny 9' : c));
+  caught(checkOverview(o, sides, DIVS), 5);
+});
+Deno.test('Overview · caught · Coming in that is not shares x per share', () => {
+  const { o, sides } = overview();
+  o.comingIn.raw[0].amount += 1;
+  caught(checkOverview(o, sides, DIVS), 9);
 });

@@ -55,13 +55,24 @@ final class HomeStore {
     private var inFlight: Task<Void, Never>?
     /// The book this login's Home shows, looked up once per login (31 Oct 2026).
     private var book: (user: UUID, id: String)?
+    /// Every book this login is a member of, owned first (the account strip: Sunny = S, Nicolay = N).
+    private(set) var books: [String] = []
+    /// The book the strip picked; nil = the login's default (S when it holds S, else its first owned book).
+    private var picked: String?
     /// The book on screen ("S", "N"), once looked up; Positions asks sunny-positions for it.
     var bookIDNow: String? {
         #if DEBUG && targetEnvironment(simulator)
         let a = ProcessInfo.processInfo.arguments
-        if a.contains("-fixture") { return a.firstIndex(of: "-fixtureBook").flatMap { a.indices.contains($0 + 1) ? a[$0 + 1] : nil } ?? "S" }
+        if a.contains("-fixture") { return picked ?? a.firstIndex(of: "-fixtureBook").flatMap { a.indices.contains($0 + 1) ? a[$0 + 1] : nil } ?? "S" }
         #endif
         return book?.id
+    }
+    /// The account strip switched books: read that book's Home (the last one stays on screen until it lands).
+    func show(book id: String) async {
+        guard books.contains(id), id != bookIDNow else { return }
+        picked = id
+        if let b = book { book = (b.user, id) }
+        await refresh(.pull)
     }
     private var lastAttemptFailedOffline = false
     private let path = NWPathMonitor()
@@ -164,20 +175,25 @@ final class HomeStore {
     }
 
     /// ⚠ ONE HOME PER BOOK (31 Oct 2026): sunny-home writes a home_snapshot row per book, and RLS lets a login
-    /// read its own books' only. Nik's login owns book S; his cousin's is a viewer of book N. An owned book comes
-    /// first (the S|N switch picks between two later).
+    /// read its own books' only. Nik's login owns book S; his cousin's login owns book N.
+    /// ⚠ THE DEFAULT IS S (7 Nov 2026, account strip): a login that holds S opens on S whatever else it holds, so
+    /// adding Nik's logins to N never opens his phone on his cousin's book. Builds before this one picked the
+    /// first owned book alphabetically (N < S): Nik's logins join N only once this build is on his phone.
     private func bookID() async throws -> String {
         #if DEBUG && targetEnvironment(simulator)
-        if ProcessInfo.processInfo.arguments.contains("-fixture") { return "S" }
+        let a = ProcessInfo.processInfo.arguments
+        if a.contains("-fixture") { books = a.contains("-fixtureN") ? ["S", "N"] : [bookIDNow ?? "S"]; return bookIDNow ?? "S" }
         #endif
         let user = try await SupabaseService.client.auth.session.user.id
         if let b = book, b.user == user { return b.id }
         struct Member: Decodable { let book_id: String; let role: String }
         let ms: [Member] = try await SupabaseService.client.from("book_members").select("book_id,role").execute().value
-        guard let m = ms.sorted(by: { ($0.role == "owner" ? 0 : 1, $0.book_id) < ($1.role == "owner" ? 0 : 1, $1.book_id) }).first
-        else { throw URLError(.userAuthenticationRequired) }
-        book = (user, m.book_id)
-        return m.book_id
+        let sorted = ms.sorted(by: { ($0.role == "owner" ? 0 : 1, $0.book_id) < ($1.role == "owner" ? 0 : 1, $1.book_id) }).map(\.book_id)
+        guard let first = sorted.first else { throw URLError(.userAuthenticationRequired) }
+        books = sorted
+        let id = picked.flatMap { sorted.contains($0) ? $0 : nil } ?? (sorted.contains("S") ? "S" : first)
+        book = (user, id)
+        return id
     }
 
     /// The row, or in a DEBUG simulator run with `-fixture <path>` a saved copy
@@ -190,6 +206,8 @@ final class HomeStore {
     private static func source(book: String) async throws -> Data {
         #if DEBUG && targetEnvironment(simulator)
         let a = ProcessInfo.processInfo.arguments
+        // `-fixtureN <path>`: book N's saved row, for the account strip without signing in.
+        if book == "N", let i = a.firstIndex(of: "-fixtureN"), i + 1 < a.count { return try Data(contentsOf: URL(fileURLWithPath: a[i + 1])) }
         if let i = a.firstIndex(of: "-fixture"), i + 1 < a.count {
             let row = try Data(contentsOf: URL(fileURLWithPath: a[i + 1]))
             guard let j = a.firstIndex(of: "-fixtureTodo"), j + 1 < a.count else { return row }

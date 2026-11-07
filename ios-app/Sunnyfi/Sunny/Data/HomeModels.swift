@@ -66,6 +66,8 @@ struct HomePayload: Decodable {
     /// New Home and Positions (handoff 6 Nov 2026, Pass 2): the server's brief, read loosely. `doc` is Home's
     /// page for the moment, `position` the Your position card, `timeValue` the sheet's sold legs.
     let brief: JSONValue?
+    /// Overview (block 32): both books, in book S's owner part only.
+    let overview: JSONValue?
 }
 
 extension HomePayload {

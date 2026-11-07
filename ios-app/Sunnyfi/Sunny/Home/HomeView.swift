@@ -176,7 +176,14 @@ struct HomeView: View {
         .environment(brief)
         .onAppear(perform: briefSetup)
         // The server's brief, decoded once per build (memoized; HomeStore ticks every 15 to 30 s).
-        .onChange(of: home.builtAt, initial: true) { _, _ in brief.ingest(home.brief, key: home.builtAt, book: store.bookIDNow) }
+        .onChange(of: home.builtAt, initial: true) { _, _ in
+            brief.ingest(home.brief, key: home.builtAt, book: store.bookIDNow, overview: home.overview, books: store.books)
+        }
+        // The strip picked a book: read its Home (Overview stays on S's last build).
+        .onChange(of: brief.account) { _, a in
+            guard !BriefDebug.sample, a != .overview else { return }
+            Task { await store.show(book: a == .nicolay ? "N" : "S") }
+        }
     }
 
     /// Who sees which accounts. Sample mode (DEBUG): both books and Overview, as the design shows Nik.

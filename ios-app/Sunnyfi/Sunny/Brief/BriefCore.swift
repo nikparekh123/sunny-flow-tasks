@@ -142,10 +142,21 @@ final class BriefState {
     let positions = PositionsSource()
 
     /// Called on each new Home payload: decodes the brief only when the build is new.
-    func ingest(_ brief: JSONValue?, key: String?, book: String? = nil) {
-        guard key != liveKey else { return }
+    /// Overview (block 32): both books, from book S's last build (owners only). Kept while another book is on screen.
+    private(set) var liveOverview: JSONValue?
+
+    func ingest(_ brief: JSONValue?, key: String?, book: String? = nil, overview: JSONValue? = nil, books: [String] = []) {
+        guard key != liveKey || book != self.book else { return }
         liveKey = key
         self.book = book
+        if !BriefDebug.sample {
+            // The strip on the real books: Overview (when S's build carried one), then each book this login is in.
+            if let o = overview, case .object = o, o["error"].isNull { liveOverview = o }
+            let accts: [BriefAccount] = books.compactMap { $0 == "S" ? .sunny : $0 == "N" ? .nicolay : nil }
+            accounts = (liveOverview != nil && accts.contains(.sunny) ? [.overview] : []) + accts
+            if account != .overview { account = book == "N" ? .nicolay : .sunny }
+            if accounts.isEmpty { accounts = [account] }
+        }
         live = brief.map(BriefLive.init)
     }
 

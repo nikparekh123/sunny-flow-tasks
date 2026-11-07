@@ -22,11 +22,12 @@
  * while the index futures trade, 30 s apart, a quiet pass every 10 minutes otherwise;
  * the sunny-home-N cron sends {"book":"N"} for the cousin's book, BOOKS below).
  */
-import { buildBrief } from './brief.ts';
+import { buildBrief, company as companyOf } from './brief.ts';
 import { buildDoc, type NameDay } from './doc.ts';
 import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
-import { checkInvariants } from './invariants.ts';
-const BUILD = '2026-11-07.4';
+import { checkInvariants, checkOverview } from './invariants.ts';
+import { type BookSide, buildOverview, comingIn } from './overview.ts';
+const BUILD = '2026-11-07.5';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -3053,11 +3054,40 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
          brief (and logged) so a mismatch shows the day it happens, not when Nik spots it. */
       const failed = checkInvariants({ brief, full: docs.full, open: docs.open, inputs: briefInputs, orders: docOrders });
       if (failed.length) console.warn('sunny-home invariants', bookId, JSON.stringify(failed.slice(0, 10)));
-      brief = { ...brief, doc: docs.full, base: baseAt(today), checks: { ok: !failed.length, failed: failed.slice(0, 20) } };
+      /* Pace (Overview): what this week keeps if Friday goes to plan (sold less bought back), on the base as at
+         that Friday, and the average of the four weeks before it, each on its own base (a closed week keeps the
+         base it had). */
+      const keptOf = (w: Row) => Number(w.calls_sold) - Number(w.calls_back) + Number(w.puts_sold) - Number(w.puts_back);
+      const fWeek = addDays(String(brief.friday), -((new Date(String(brief.friday) + 'T12:00:00Z').getUTCDay() + 6) % 7));
+      const yNow = (yieldOut as Row[]).find((w) => w.week === fWeek), yPrev = (yieldOut as Row[]).filter((w) => w.week < fWeek).slice(-4);
+      const yOn = (w: Row) => { const b = baseAt(String(w.fri)); return b > 0 ? keptOf(w) / b * 100 : 0; };
+      const pace = { week: yNow ? +yOn(yNow).toFixed(4) : null, avg4: yPrev.length ? +(yPrev.reduce((a, w) => a + yOn(w), 0) / yPrev.length).toFixed(4) : null };
+      brief = { ...brief, doc: docs.full, base: baseAt(today), pace, checks: { ok: !failed.length, failed: failed.slice(0, 20) } };
       briefDocOpen = docs.open;
     } catch (e) { brief = { ...brief, doc: { v: 1, error: String((e as Error)?.message ?? e) } }; }
   }
   step('doc');
+  /* ── OVERVIEW (overview.ts): both books, built in book S's build from S's brief and N's latest one. Owners only
+     (OWNER_TOP): it counts the trades to place. Never breaks the build. ── */
+  let overview: Row | null = null;
+  if (bookId === 'S' && !brief.error) {
+    try {
+      const other = 'N';
+      const [snapN, todoN] = await Promise.all([
+        get(`home_snapshot?book_id=eq.${other}&select=brief:payload->brief,inputs:payload->brief_inputs,built_at`),
+        get(`home_todo?book_id=eq.${other}&select=orders:payload->top->this_week`),
+      ]);
+      const sides: BookSide[] = [
+        { id: 'S', name: 'Sunny', brief, inputs: briefInputs, orders: [...thisWeek] },
+        { id: other, name: 'Nicolay', brief: snapN[0]?.brief ?? null, inputs: snapN[0]?.inputs ?? null, orders: (todoN[0]?.orders ?? []) as Row[] },
+      ];
+      const ov: Row = { ...buildOverview(sides, today, now.mins, companyOf), comingIn: comingIn(sides, divs, companyOf), other_built: snapN[0]?.built_at ?? null };
+      const failedO = checkOverview(ov, sides, divs);
+      if (failedO.length) console.warn('sunny-home overview invariants', JSON.stringify(failedO.slice(0, 10)));
+      overview = { ...ov, audit: { ok: !failedO.length, failed: failedO.slice(0, 20) } };
+    } catch (e) { overview = { v: 1, error: String((e as Error)?.message ?? e) }; }
+  }
+  step('overview');
   const payload = {
     build: BUILD, built_at: new Date().toISOString(), today, trading_today: isTrading(today),
     calendar: cal.filter((c) => String(c.date) >= today)
@@ -3091,7 +3121,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     /* Daily closes per name for the Bought face (13f). */
     daily,
     /* New Home and Positions (handoff 6 Nov 2026): the brief, and the engine inputs sunny-positions prices on a grid. */
-    brief, brief_inputs: briefInputs, brief_doc_open: briefDocOpen,
+    brief, brief_inputs: briefInputs, brief_doc_open: briefDocOpen, overview,
   };
   return { payload, ms: Date.now() - t0, steps };
 }
@@ -3123,7 +3153,7 @@ const refused = () => new Response(JSON.stringify({ ok: false, error: 'not allow
    lay `owner` back over `open` (objects merge, anything else replaces, names matched by ticker), which
    gives back this exact payload; a viewer's never carries an order. A new key that says what to trade
    goes in here too. */
-const OWNER_TOP = ['this_week', 'todo', 'ways', 'plan'];
+const OWNER_TOP = ['this_week', 'todo', 'ways', 'plan', 'overview'];
 const OWNER_NAME = ['plan', 'expected', 'calls', 'puts', 'written', 'delta', 'bar', 'split', 'thesis', 'read_rule'];
 const OWNER_V2 = ['verdict', 'chips', 'orders', 'acts'];
 /* A point or row that names an order: the thin hedge's "Buying N calls ... It is in To do." */

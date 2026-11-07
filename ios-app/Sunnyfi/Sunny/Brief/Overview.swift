@@ -16,7 +16,7 @@ struct OverviewScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
-        let o = BriefDebug.sample ? BriefSample.overview["privacyOff"] : .null
+        let o = BriefDebug.sample ? BriefSample.overview["privacyOff"] : (brief.liveOverview ?? .null)
         ZStack(alignment: .top) {
             SBackground()
             ScrollView {

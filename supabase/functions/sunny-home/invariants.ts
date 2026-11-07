@@ -185,3 +185,47 @@ export function checkInvariants(x: CheckIn): Check[] {
 
   return out;
 }
+
+// ── Overview's half (README 12: 2, 3, 4, 5, 9 across both books) ──
+export interface OverviewSide { id: string; name: string; brief: Row | null; inputs: Row | null; orders: Row[] }
+export function checkOverview(o: Row, books: OverviewSide[], divs: Row[] = []): Check[] {
+  const out: Check[] = [];
+  const fail = (id: number, what: string, detail: string) => out.push({ id, what, detail });
+  const chk = (name: string) => (o?.checks ?? []).find((c: Row) => c.name === name);
+  const chip = (name: string, who: string) => ((chk(name)?.chips ?? []) as string[]).find((c) => c.startsWith(`${who} `));
+  for (const b of books) {
+    const rows: Row[] = b.brief?.position?.rows ?? [];
+    if (!rows.length) continue;
+    // 2 · past its best: the Delta chip = that book's By name rows
+    const nS = rows.filter((r) => r.st === 2).length, nT = rows.filter((r) => r.st === 1).length;
+    const want = [nS ? `${nS} past ${nS === 1 ? 'its' : 'their'} best` : '', nT ? `${nT} thin` : ''].filter(Boolean).join(' · ') || 'all long';
+    if (chip('Delta', b.name) !== `${b.name} ${want}`) fail(2, 'past-its-best names', `Overview "${chip('Delta', b.name)}" vs ${b.name}'s By name "${want}"`);
+    // 3 · put cover: the Downside chip = that book's Your position line
+    const cov = String(b.brief?.position?.cover ?? '').match(/ (\d+)%\./)?.[1];
+    if (cov && chip('Downside', b.name) !== `${b.name} ${cov}%`) fail(3, 'put cover', `Overview "${chip('Downside', b.name)}" vs ${b.name}'s Your position ${cov}%`);
+    // 4 · calls at work: sold calls / (shares / 100), capped at 100% a name, from the legs
+    let sh = 0, cv = 0;
+    const F = String(b.brief?.friday ?? '');
+    for (const n of (b.inputs?.names ?? []) as Row[]) {
+      const s = (n.legs as Row[]).filter((l) => l.kind === 'shares').reduce((a, l) => a + l.q, 0);
+      const c = (n.legs as Row[]).filter((l) => l.kind === 'sc' && String(l.ex) <= F).reduce((a, l) => a - l.q * 100, 0);
+      if (s > 0) { sh += s; cv += Math.min(s, c); }
+    }
+    if (sh > 0 && chip('Calls at work', b.name) !== `${b.name} ${Math.round(cv / sh * 100)}%`) fail(4, 'calls at work', `Overview "${chip('Calls at work', b.name)}" vs ${Math.round(cv / sh * 100)}% from ${b.name}'s legs`);
+    // 5 · To do per account = that book's orders
+    if (chip('To do', b.name) !== `${b.name} ${b.orders.length}`) fail(5, 'To do', `Overview "${chip('To do', b.name)}" vs ${b.orders.length} orders in ${b.name}'s`);
+  }
+  // 9 · dividends: Coming in = shares x per share, book by book
+  if (o?.comingIn?.raw) {
+    for (const b of books) {
+      let a = 0;
+      for (const n of (b.inputs?.names ?? []) as Row[]) {
+        const s = (n.legs as Row[]).filter((l) => l.kind === 'shares').reduce((x, l) => x + l.q, 0);
+        if (s > 0) for (const d of divs.filter((x) => String(x.ticker).toUpperCase() === n.t)) a += s * Number(d.cash_amount);
+      }
+      const got = (o.comingIn.raw as Row[]).find((r) => r.id === b.id)?.amount ?? 0;
+      if (Math.round(a) !== got) fail(9, 'dividends', `Coming in ${b.name} ${got} vs ${Math.round(a)} from shares x per share`);
+    }
+  }
+  return out;
+}
