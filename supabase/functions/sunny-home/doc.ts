@@ -3,7 +3,7 @@
 // day card's caption, the deck's alerts, one lede, then the numbered sections with their cards, in the shapes
 // of the design's sample (ios-app Sunny/Brief/Sample/brief-home.json), so the phone only draws.
 //
-// ⚠ ANYTHING WITHOUT A REAL FEED HIDES (README 9.4): The economy and Out today (no economic feed yet), After
+// ⚠ ANYTHING WITHOUT A REAL FEED HIDES (README 9.4): The economy and Out today when econ-sync has nothing, After
 // hours (no news feed), Thesis check (Investing Pro not wired) and the S&P weights on the sector maps are left
 // out, with no gap: a section with no cards goes and the ones after it move up a number.
 //
@@ -32,6 +32,7 @@ export interface DocIn {
   market: Row[]; sectors: Row[]; futures: Row[]; watch: Row[];
   chart: Row | null; yieldWeeks: Row[]; payback: Row | null; history: Row | null;
   earnings: Row[]; macro: Row[]; divs: Row[]; trades: Row[]; orders: Row[]; aftershock: Row | null;
+  econ?: Row[];                    // econ_cards (econ-sync, FRED): the twelve indicators
   baseNow: number; baseAt: (d: string) => number;
 }
 
@@ -231,6 +232,27 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const rows = worldRows(true); if (!rows.length) return null;
     return { type: 'worldThisWeek', title: 'The world this week', subtitle: 'Mon to Fri', rows, footer: `Week of ${md(monday)} to ${ymd(weekFri).d} · local closes` };
   };
+  // ── The economy (FRED, econ-sync): Worth watching by rule, new = landed since yesterday, the rest steady ──
+  const nyDay = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const econ = [...(x.econ ?? [])].sort((a, b) => Number(a.ord) - Number(b.ord));
+  const landed = (r: Row) => (r.landed_at ? nyDay(String(r.landed_at)) : '');
+  const isNew = (r: Row) => landed(r) >= addDays(today, -1);
+  const tagged = (r: Row): Row => ({ ...r.card, ...(r.watch ? { tag: 'Worth watching', tagStyle: 'yellow' } : isNew(r) ? { tag: 'New since yesterday', tagStyle: 'plain' } : {}) });
+  const econAll = [...econ.filter((r) => r.watch), ...econ.filter((r) => !r.watch && isNew(r)), ...econ.filter((r) => !r.watch && !isNew(r))].map(tagged);
+  const economyCard = () => {
+    if (!econ.length) return null;
+    const nW = econ.filter((r) => r.watch).length, nN = econ.filter((r) => !r.watch && isNew(r)).length, steady = econ.length - nW - nN;
+    const feat = econAll.slice(0, Math.max(3, Math.min(5, nW + nN)));
+    return { type: 'economy', label: 'The economy', headline: nW ? `${nW} to watch` : 'Nothing to watch',
+      sub: `${nN ? `${nN} new since yesterday · ` : ''}${steady} steady`,
+      rows: feat.map((c) => ({ name: c.name, value: c.value, trend: c.trend })), indicators: feat,
+      button: econ.length > feat.length ? `See the other ${econ.length - feat.length}` : null };
+  };
+  const outToday = () => {
+    const rows = econ.filter((r) => landed(r) === today).map((r) => ({ ...r.card, tag: 'Out today', tagStyle: 'plain' }));
+    return rows.length ? { type: 'outToday', indicators: rows } : null;
+  };
+
   const sectorsCard = (wkMode: boolean) => {
     const ss = sec(wkMode); if (ss.length < 2) return null;
     const by = [...ss].sort((a, b) => b.move - a.move), lead = by[0], trail = by[by.length - 1];
@@ -623,13 +645,13 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   };
 
   if (moment === 'futures' || moment === 'pre') {
-    S.push({ kicker: 'World and economy', headline: worldHead(), cards: [moment === 'futures' ? futuresCards() : indexCards(), overnight(), sectorsCard(false)] });
+    S.push({ kicker: 'World and economy', headline: worldHead(), cards: [moment === 'futures' ? futuresCards() : indexCards(), overnight(), economyCard(), sectorsCard(false)] });
     S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), yourPosition()] });
     const ne = earningsAhead(14);
     const ch = nextEarn && dayDiff(today, String(nextEarn.date)) <= 14 ? `${company(nextEarn.ticker)} reports in ${dayDiff(today, String(nextEarn.date))} days.` : (comingRows(today, addDays(today, 45))[0] ? `Next: ${leadOf(comingRows(today, addDays(today, 45))[0].text)}, ${comingRows(today, addDays(today, 45))[0].date}.` : 'Nothing dated in the next six weeks.');
     S.push({ kicker: 'Coming up', headline: [sp(ch, true)], cards: [ne, (() => { const rows = comingRows(today, addDays(today, 45)); return rows.length ? { type: 'comingUp', title: 'Coming up', rows } : null; })()] });
   } else if (session) {
-    S.push({ kicker: 'The market', headline: marketHead(), cards: [indexCards(), sectorsCard(false)] });
+    S.push({ kicker: 'The market', headline: marketHead(), cards: [indexCards(), outToday(), sectorsCard(false)] });
     const bt = bookToday, m = bt ? mostOf(Math.sign(bt.made) || -1) : null;
     const h = (p: boolean): Span[] => (bt && held ? [sp(`${bt.made < 0 ? 'Down' : 'Up'} `, true), sp(money(bt.made, p), true, col(bt.made)), sp(m ? `, most of it ${m.name}.` : '.', true)] : namesHead());
     S.push({ kicker: 'Your book', headline: h(false), privacy: h(true), cards: [yourNames(), whatsMoving(), yourPosition()] });
@@ -650,7 +672,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     S.push({ kicker: 'Tomorrow', headline: [sp(orders ? `${word(orders)} ${orders === 1 ? 'order' : 'orders'} to place at the open.` : 'Nothing to place at the open.', true)],
       openHeadline: [sp(cl ? cl.line[0].t : 'Tomorrow.', true)], cards: [tom, cl], ownerCards: ['tomorrowOrders'] });
   } else {
-    S.push({ kicker: 'The week', headline: marketHead(), cards: [weekIndexes(), worldThisWeek(), sectorsCard(true)] });
+    S.push({ kicker: 'The week', headline: marketHead(), cards: [weekIndexes(), worldThisWeek(), economyCard(), sectorsCard(true)] });
     S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), held ? results() : null, yourPosition()] });
     const pb = payback(), tm2 = thetaMonth(), mName = MONTH[ymd(today).m - 1], done = ymd(addDays(today, 7)).m !== ymd(today).m && dayDiff(today, `${today.slice(0, 7)}-28`) <= 0;
     const pbPct = x.payback && x.baseNow > 0 ? (Number(x.payback.made ?? 0) / x.baseNow) * 100 : 0;
@@ -676,7 +698,9 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const strip = (l: Span[]) => (forOwner || !owner.some((o) => o.key === 'lede') ? l
       : l.filter((s) => !/to place at the open/.test(s.t)).map((s) => ({ ...s, t: s.t.replace(/, and \w+ sales? comes? Monday\./, '.') })));
     return { v: 1, moment, built_for: today, title: TITLE[moment], dateLine, dayCaption, lede: strip(lede), privacy: { lede: strip(ledeP) },
-      alert, deckCards, sections, hidden: ['economy', 'outToday', 'afterHours', 'thesisCheck'] };
+      alert, deckCards, sections, hidden: [...(econ.length ? [] : ['economy', 'outToday']), 'afterHours', 'thesisCheck'],
+      // The economy sheet: all twelve, watch first, then new, then steady.
+      economy: econ.length ? { title: 'The economy', sub: `${econ.length} indicators · the last four readings`, indicators: econAll } : null };
   };
   return { full: build(true), open: build(false) };
 }

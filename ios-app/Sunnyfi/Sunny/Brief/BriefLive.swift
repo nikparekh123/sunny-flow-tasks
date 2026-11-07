@@ -16,6 +16,8 @@ struct BriefLive {
     /// False for a book with nothing held (the cards read "Nothing held yet").
     let hasBook: Bool
     let timeValue: JSONValue
+    /// The economy sheet: the twelve FRED indicators (econ-sync), watch first.
+    let economy: JSONValue
     let names: [JSONValue]
     let error: String?
 
@@ -26,6 +28,7 @@ struct BriefLive {
         position = YourPositionModel(json: j["position"])
         hasBook = !j["names"].array.isEmpty
         timeValue = j["timeValue"]
+        economy = d["economy"]
         names = j["names"].array
         error = j["error"].string ?? d["error"].string
     }

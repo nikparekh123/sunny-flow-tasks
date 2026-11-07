@@ -653,6 +653,8 @@ struct Chart: Decodable {
     let interestCum: [Double?]
     let commissionCum: [Double?]
     let dividendsCum: [Double?]
+    /// Deposits less withdrawals, running total: never a gain (data answer, 6 Nov 2026). Older builds: none.
+    let depositsCum: [Double]?
     let capitalLong: [Double?]
     let sharesValue: [Double?]
     let groups: [String: Group]

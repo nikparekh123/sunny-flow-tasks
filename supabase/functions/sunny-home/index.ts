@@ -27,7 +27,7 @@ import { buildDoc, type NameDay } from './doc.ts';
 import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
-const BUILD = '2026-11-07.5';
+const BUILD = '2026-11-07.7';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -2857,6 +2857,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     nav: col('nav'), margin: col('margin'), realized_cum: col('realized_cum'), unrealized: col('unrealized'),
     time_value: col('time_value'), interest_cum: col('interest_cum'), commission_cum: col('commission_cum'),
     dividends_cum: col('dividends_cum'), capital_long: col('capital_long'), shares_value: col('shares_value'),
+    /* Money paid in and out, running total (IBKR's deposits_withdrawals). Data answer, 6 Nov 2026: a deposit
+       shows as its own line and is never a gain, so the change line takes the range's deposits out. */
+    deposits_cum: pts.map((p) => r2(cum('deposits_withdrawals', String(p.day)))),
     groups: Object.fromEntries(GK_LIST.map((g) => [g, { line: gcol(g, 'line'), real: gcol(g, 'real'),
       unreal: gcol(g, 'unreal'), tv: gcol(g, 'tv') }])),
     shares_tickers: pts.map((p) => Number((p.groups as Record<string, Record<string, number>>).sh?.tickers ?? 0)),
@@ -3001,6 +3004,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   if (!brief.error) {
     try {
       const sectorRows = await get('market_sectors?select=symbol,sector,etf,name,market_cap,price,day_pct,week_base');
+      const econRows = await get('econ_cards?select=id,ord,card,watch,last_period,landed_at&order=ord.asc');
       const lastSession = isTrading(today) ? today : prevTrading(today);
       const dPrev = prevTrading(lastSession), monday = addDays(today, -((new Date(today + 'T12:00:00Z').getUTCDay() + 6) % 7));
       /* What a leg is worth at the last close before the session: that day's mark, or what it cost if opened after. */
@@ -3049,7 +3053,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const docOrders = [...thisWeek].sort((a, b) => (['roll', 'buy', 'sell', 'put'].indexOf(a.kind) - ['roll', 'buy', 'sell', 'put'].indexOf(b.kind)));
       const docs = buildDoc({ moment: brief.moment, today, mins: now.mins, isTrading, addDays, cal, brief, names: nameDays,
         market, sectors: sectorRows, futures, watch: watchlist as Row[], chart, yieldWeeks: yieldOut, payback, history,
-        earnings, macro, divs, trades, orders: docOrders, aftershock, baseNow: baseAt(today), baseAt });
+        earnings, macro, divs, trades, orders: docOrders, aftershock, baseNow: baseAt(today), baseAt, econ: econRows });
       /* README 12: the same number reads the same everywhere. Checked on every build; failures kept with the
          brief (and logged) so a mismatch shows the day it happens, not when Nik spots it. */
       const failed = checkInvariants({ brief, full: docs.full, open: docs.open, inputs: briefInputs, orders: docOrders });

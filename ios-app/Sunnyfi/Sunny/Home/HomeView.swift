@@ -159,7 +159,7 @@ struct HomeView: View {
                 switch k {
                 case .timeValue: TimeValueSheet(acct: brief.account.sampleKey, privacy: UserDefaults.standard.bool(forKey: BriefPrivacy.key),
                                                 live: brief.live?.timeValue ?? .null) { brief.sheet = nil }
-                case .economy: EconomySheet { brief.sheet = nil }
+                case .economy: EconomySheet(live: brief.live?.economy ?? .null) { brief.sheet = nil }
                 }
             }
             .presentationDetents([.large])

@@ -93,6 +93,11 @@ struct ChartModel {
         if i == n - 1, c.liveLast, let live { return live }
         return c.nav[i] ?? 0
     }
+    /// Deposits less withdrawals from the close of day s to day i: taken out of the change, shown on its own line.
+    func deposited(_ s: Int, _ i: Int) -> Double {
+        guard let d = c.depositsCum, d.indices.contains(s), d.indices.contains(i) else { return 0 }
+        return d[i] - d[s]
+    }
     func keys(_ g: ChartGroup, _ h: ChartHalf) -> [String] {
         switch g {
         case .sold: h == .calls ? ["cs"] : h == .puts ? ["ps"] : ["cs", "ps"]
@@ -284,6 +289,7 @@ struct AccountChart: View {
             }
             .frame(minHeight: 34)
             changeLine
+            depositLine
         }
     }
 
@@ -314,7 +320,7 @@ struct AccountChart: View {
                     Text(scrubbing ? "on capital" : "on capital · \(range.words)")
                         .sType(Self.changeWords, tabular: false).foregroundStyle(S.muted)
                 } else {
-                    let first = m.nav(s), d = bigValue - first
+                    let first = m.nav(s), d = bigValue - first - m.deposited(s, i)
                     let p = first != 0 ? d / abs(first) * 100 : 0
                     Text("\(F.money(d)) · \(F.pct(p, places: 1))")
                         .sType(Self.changeValue)
@@ -334,6 +340,19 @@ struct AccountChart: View {
         .lineLimit(1)
         .frame(minHeight: 20)
         .animation(.smooth(duration: S.roll), value: at)
+    }
+
+    /// Money paid in or out in the range, on its own line (never in the change above it).
+    @ViewBuilder private var depositLine: some View {
+        if let m = model, !fresh, !pnl, single == nil, !compare {
+            let (s, _) = bounds, dep = m.deposited(s, at)
+            if abs(dep) >= 1 {
+                Text("\(F.money(abs(dep))) \(dep > 0 ? "deposited" : "withdrawn") \(scrubbing ? "by then" : range.words)")
+                    .sType(Self.changeWords, tabular: false).foregroundStyle(S.muted)
+                    .blur(radius: hidden ? 9 : 0)
+                    .lineLimit(1)
+            }
+        }
     }
 
     private var eyeButton: some View {
@@ -433,7 +452,7 @@ struct AccountChart: View {
         let navs = (s...e).map { m.nav($0) }
         let (lo, hi) = pad(navs.min() ?? 0, navs.max() ?? 0)
         let main = resample(navs, lo, hi)
-        let tone = (navs.last ?? 0) - (navs.first ?? 0) < 0 ? S.red : S.green
+        let tone = (navs.last ?? 0) - (navs.first ?? 0) - m.deposited(s, e) < 0 ? S.red : S.green
         return Lines(main: main, groups: Array(repeating: main, count: 4),
                      base: top + CGFloat(1 - ((navs.first ?? 0) - lo) / (hi - lo)) * h, tone: tone, dot: main)
     }

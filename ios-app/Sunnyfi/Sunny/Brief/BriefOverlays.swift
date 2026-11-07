@@ -215,9 +215,11 @@ struct TimeValueSheet: View {
 // MARK: - The economy (12 indicators)
 
 struct EconomySheet: View {
+    /// The live sheet (doc.economy); the sample's in sample mode.
+    var live: JSONValue = .null
     let close: () -> Void
     var body: some View {
-        let e = BriefSample.sheets["economy"]
+        let e = BriefDebug.sample || live.isNull ? BriefSample.sheets["economy"] : live
         BriefSheetChrome(title: e["title"].string ?? "The economy", close: close) {
             VStack(alignment: .leading, spacing: 14) {
                 Text(e["sub"].string ?? "").sType(BK.small, tabular: false).foregroundStyle(S.secondary)
