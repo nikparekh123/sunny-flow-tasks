@@ -1,0 +1,1270 @@
+{
+ "gaps": [
+  "aftershock.page.capturedRender: the page draws on a canvas and animates its texts; the strings are taken from the source table, no single rendered state"
+ ],
+ "timeValue": {
+  "opensFrom": "“Time value ›” under the account chart (SunnyHomeChart view tv)",
+  "byAccount": {
+   "a": {
+    "title": "Time value",
+    "total": "$2,402",
+    "totalSub": "left of $5,990 collected",
+    "captured": "60% captured",
+    "capturedColor": "green",
+    "capturedPct": 60,
+    "readyToRoll": {
+     "title": "Ready to roll",
+     "count": "7 strikes",
+     "rule": "Under $0.05 a share left, or 90% captured",
+     "cards": [
+      {
+       "logo": "NFLX",
+       "name": "Netflix",
+       "leg": "72 calls ×8",
+       "left": "$14",
+       "leftLabel": "left",
+       "status": "$1.40 in the money",
+       "statusColor": "red",
+       "action": "Assignment risk",
+       "actionColor": "red",
+       "aria": "Netflix 72 calls ×8, $14 left, in the money by $1.40"
+      },
+      {
+       "logo": "NKE",
+       "name": "Nike",
+       "leg": "37 calls ×14",
+       "left": "$9",
+       "leftLabel": "left",
+       "status": "96% captured",
+       "statusColor": "orange",
+       "action": "Roll to next week",
+       "actionColor": "orange",
+       "aria": "Nike 37 calls ×14, $9 left, 96% captured"
+      },
+      {
+       "logo": "NKE",
+       "name": "Nike",
+       "leg": "33 puts ×6",
+       "left": "$2",
+       "leftLabel": "left",
+       "status": "96% captured",
+       "statusColor": "orange",
+       "action": "Roll to next week",
+       "actionColor": "orange",
+       "aria": "Nike 33 puts ×6, $2 left, 96% captured"
+      },
+      {
+       "logo": "NKE",
+       "name": "Nike",
+       "leg": "33.5 puts ×9",
+       "left": "$7",
+       "leftLabel": "left",
+       "status": "94% captured",
+       "statusColor": "orange",
+       "action": "Roll to next week",
+       "actionColor": "orange",
+       "aria": "Nike 33.5 puts ×9, $7 left, 94% captured"
+      },
+      {
+       "logo": "NKE",
+       "name": "Nike",
+       "leg": "36.5 calls ×22",
+       "left": "$40",
+       "leftLabel": "left",
+       "status": "92% captured",
+       "statusColor": "orange",
+       "action": "Roll to next week",
+       "actionColor": "orange",
+       "aria": "Nike 36.5 calls ×22, $40 left, 92% captured"
+      },
+      {
+       "logo": "NKE",
+       "name": "Nike",
+       "leg": "34 puts ×15",
+       "left": "$45",
+       "leftLabel": "left",
+       "status": "$0.03 a share left",
+       "statusColor": "orange",
+       "action": "Roll to next week",
+       "actionColor": "orange",
+       "aria": "Nike 34 puts ×15, $45 left, 83% captured"
+      },
+      {
+       "logo": "FIS",
+       "name": "Fidelity National",
+       "leg": "36 calls ×5",
+       "left": "$13",
+       "leftLabel": "left",
+       "status": "$0.03 a share left",
+       "statusColor": "orange",
+       "action": "Roll to next week",
+       "actionColor": "orange",
+       "aria": "Fidelity National 36 calls ×5, $13 left, 75% captured"
+      }
+     ]
+    },
+    "names": [
+     {
+      "logo": "BABA",
+      "name": "Alibaba",
+      "strikes": "3 strikes",
+      "captured": "24%",
+      "left": "$824",
+      "of": "of $1,090",
+      "aria": "Alibaba, 24% captured, $824 left of $1,090, 3 strikes",
+      "rows": [
+       {
+        "leg": "104 calls ×10",
+        "captured": "19%",
+        "left": "$535",
+        "of": "of $660",
+        "aria": "Alibaba 104 calls ×10, 19% captured, $535 left of $660"
+       },
+       {
+        "leg": "105 calls ×6",
+        "captured": "30%",
+        "left": "$205",
+        "of": "of $293",
+        "aria": "Alibaba 105 calls ×6, 30% captured, $205 left of $293"
+       },
+       {
+        "leg": "106 calls ×4",
+        "captured": "39%",
+        "left": "$84",
+        "of": "of $137",
+        "aria": "Alibaba 106 calls ×4, 39% captured, $84 left of $137"
+       }
+      ]
+     },
+     {
+      "logo": "NFLX",
+      "name": "Netflix",
+      "strikes": "3 strikes",
+      "captured": "62%",
+      "left": "$454",
+      "of": "of $1,184",
+      "aria": "Netflix, 62% captured, $454 left of $1,184, 3 strikes",
+      "rows": [
+       {
+        "leg": "72 calls ×8",
+        "captured": "96%",
+        "left": "$14",
+        "of": "of $326",
+        "aria": "Netflix 72 calls ×8, 96% captured, $14 left of $326"
+       },
+       {
+        "leg": "74 calls ×13",
+        "captured": "45%",
+        "left": "$390",
+        "of": "of $715",
+        "aria": "Netflix 74 calls ×13, 45% captured, $390 left of $715"
+       },
+       {
+        "leg": "76 calls ×5",
+        "captured": "65%",
+        "left": "$49",
+        "of": "of $143",
+        "aria": "Netflix 76 calls ×5, 65% captured, $49 left of $143"
+       }
+      ]
+     },
+     {
+      "logo": "PEP",
+      "name": "PepsiCo",
+      "strikes": "2 strikes",
+      "captured": "31%",
+      "left": "$351",
+      "of": "of $505",
+      "aria": "PepsiCo, 31% captured, $351 left of $505, 2 strikes",
+      "rows": [
+       {
+        "leg": "145 calls ×5",
+        "captured": "27%",
+        "left": "$255",
+        "of": "of $350",
+        "aria": "PepsiCo 145 calls ×5, 27% captured, $255 left of $350"
+       },
+       {
+        "leg": "146 calls ×3",
+        "captured": "38%",
+        "left": "$96",
+        "of": "of $155",
+        "aria": "PepsiCo 146 calls ×3, 38% captured, $96 left of $155"
+       }
+      ]
+     },
+     {
+      "logo": "NKE",
+      "name": "Nike",
+      "strikes": "6 strikes",
+      "captured": "86%",
+      "left": "$320",
+      "of": "of $2,352",
+      "aria": "Nike, 86% captured, $320 left of $2,352, 6 strikes",
+      "rows": [
+       {
+        "leg": "36 calls ×36",
+        "captured": "81%",
+        "left": "$216",
+        "of": "of $1,152",
+        "aria": "Nike 36 calls ×36, 81% captured, $216 left of $1,152"
+       },
+       {
+        "leg": "36.5 calls ×22",
+        "captured": "92%",
+        "left": "$40",
+        "of": "of $521",
+        "aria": "Nike 36.5 calls ×22, 92% captured, $40 left of $521"
+       },
+       {
+        "leg": "37 calls ×14",
+        "captured": "96%",
+        "left": "$9",
+        "of": "of $233",
+        "aria": "Nike 37 calls ×14, 96% captured, $9 left of $233"
+       },
+       {
+        "leg": "34 puts ×15",
+        "captured": "83%",
+        "left": "$45",
+        "of": "of $270",
+        "aria": "Nike 34 puts ×15, 83% captured, $45 left of $270"
+       },
+       {
+        "leg": "33.5 puts ×9",
+        "captured": "94%",
+        "left": "$7",
+        "of": "of $120",
+        "aria": "Nike 33.5 puts ×9, 94% captured, $7 left of $120"
+       },
+       {
+        "leg": "33 puts ×6",
+        "captured": "96%",
+        "left": "$2",
+        "of": "of $56",
+        "aria": "Nike 33 puts ×6, 96% captured, $2 left of $56"
+       }
+      ]
+     },
+     {
+      "logo": "UBER",
+      "name": "Uber",
+      "strikes": "2 strikes",
+      "captured": "34%",
+      "left": "$283",
+      "of": "of $428",
+      "aria": "Uber, 34% captured, $283 left of $428, 2 strikes",
+      "rows": [
+       {
+        "leg": "71 calls ×7",
+        "captured": "30%",
+        "left": "$196",
+        "of": "of $280",
+        "aria": "Uber 71 calls ×7, 30% captured, $196 left of $280"
+       },
+       {
+        "leg": "72 calls ×5",
+        "captured": "41%",
+        "left": "$87",
+        "of": "of $148",
+        "aria": "Uber 72 calls ×5, 41% captured, $87 left of $148"
+       }
+      ]
+     },
+     {
+      "logo": "FIS",
+      "name": "Fidelity National",
+      "strikes": "3 strikes",
+      "captured": "60%",
+      "left": "$170",
+      "of": "of $430",
+      "aria": "Fidelity National, 60% captured, $170 left of $430, 3 strikes",
+      "rows": [
+       {
+        "leg": "35 calls ×13",
+        "captured": "55%",
+        "left": "$117",
+        "of": "of $260",
+        "aria": "Fidelity National 35 calls ×13, 55% captured, $117 left of $260"
+       },
+       {
+        "leg": "35.5 calls ×8",
+        "captured": "66%",
+        "left": "$40",
+        "of": "of $118",
+        "aria": "Fidelity National 35.5 calls ×8, 66% captured, $40 left of $118"
+       },
+       {
+        "leg": "36 calls ×5",
+        "captured": "75%",
+        "left": "$13",
+        "of": "of $52",
+        "aria": "Fidelity National 36 calls ×5, 75% captured, $13 left of $52"
+       }
+      ]
+     }
+    ],
+    "buttons": {
+     "expandAll": "Show every strike",
+     "collapseAll": "Fold every name"
+    },
+    "note": "Prototype stand-in strikes (tvMany: 2 to 3 strikes a name); per AUDIT-LOG 6 the app reads the real sold legs, the same rows as Positions."
+   },
+   "b": {
+    "title": "Time value",
+    "total": "$753",
+    "totalSub": "left of $1,676 collected",
+    "captured": "55% captured",
+    "capturedColor": "green",
+    "capturedPct": 55,
+    "readyToRoll": {
+     "title": "Ready to roll",
+     "count": "3 strikes",
+     "rule": "Under $0.05 a share left, or 90% captured",
+     "cards": [
+      {
+       "logo": "NFLX",
+       "name": "Netflix",
+       "leg": "72 calls ×2",
+       "left": "$4",
+       "leftLabel": "left",
+       "status": "$1.40 in the money",
+       "statusColor": "red",
+       "action": "Assignment risk",
+       "actionColor": "red",
+       "aria": "Netflix 72 calls ×2, $4 left, in the money by $1.40"
+      },
+      {
+       "logo": "NKE",
+       "name": "Nike",
+       "leg": "37 calls ×4",
+       "left": "$3",
+       "leftLabel": "left",
+       "status": "96% captured",
+       "statusColor": "orange",
+       "action": "Roll to next week",
+       "actionColor": "orange",
+       "aria": "Nike 37 calls ×4, $3 left, 96% captured"
+      },
+      {
+       "logo": "NKE",
+       "name": "Nike",
+       "leg": "36.5 calls ×6",
+       "left": "$11",
+       "leftLabel": "left",
+       "status": "92% captured",
+       "statusColor": "orange",
+       "action": "Roll to next week",
+       "actionColor": "orange",
+       "aria": "Nike 36.5 calls ×6, $11 left, 92% captured"
+      }
+     ]
+    },
+    "names": [
+     {
+      "logo": "BABA",
+      "name": "Alibaba",
+      "strikes": "2 strikes",
+      "captured": "23%",
+      "left": "$229",
+      "of": "of $296",
+      "aria": "Alibaba, 23% captured, $229 left of $296, 2 strikes",
+      "rows": [
+       {
+        "leg": "104 calls ×3",
+        "captured": "19%",
+        "left": "$161",
+        "of": "of $198",
+        "aria": "Alibaba 104 calls ×3, 19% captured, $161 left of $198"
+       },
+       {
+        "leg": "105 calls ×2",
+        "captured": "30%",
+        "left": "$68",
+        "of": "of $98",
+        "aria": "Alibaba 105 calls ×2, 30% captured, $68 left of $98"
+       }
+      ]
+     },
+     {
+      "logo": "PEP",
+      "name": "PepsiCo",
+      "strikes": "2 strikes",
+      "captured": "30%",
+      "left": "$134",
+      "of": "of $192",
+      "aria": "PepsiCo, 30% captured, $134 left of $192, 2 strikes",
+      "rows": [
+       {
+        "leg": "145 calls ×2",
+        "captured": "27%",
+        "left": "$102",
+        "of": "of $140",
+        "aria": "PepsiCo 145 calls ×2, 27% captured, $102 left of $140"
+       },
+       {
+        "leg": "146 calls ×1",
+        "captured": "38%",
+        "left": "$32",
+        "of": "of $52",
+        "aria": "PepsiCo 146 calls ×1, 38% captured, $32 left of $52"
+       }
+      ]
+     },
+     {
+      "logo": "NFLX",
+      "name": "Netflix",
+      "strikes": "2 strikes",
+      "captured": "59%",
+      "left": "$124",
+      "of": "of $301",
+      "aria": "Netflix, 59% captured, $124 left of $301, 2 strikes",
+      "rows": [
+       {
+        "leg": "72 calls ×2",
+        "captured": "96%",
+        "left": "$4",
+        "of": "of $81",
+        "aria": "Netflix 72 calls ×2, 96% captured, $4 left of $81"
+       },
+       {
+        "leg": "74 calls ×4",
+        "captured": "45%",
+        "left": "$120",
+        "of": "of $220",
+        "aria": "Netflix 74 calls ×4, 45% captured, $120 left of $220"
+       }
+      ]
+     },
+     {
+      "logo": "UBER",
+      "name": "Uber",
+      "strikes": "2 strikes",
+      "captured": "34%",
+      "left": "$119",
+      "of": "of $179",
+      "aria": "Uber, 34% captured, $119 left of $179, 2 strikes",
+      "rows": [
+       {
+        "leg": "71 calls ×3",
+        "captured": "30%",
+        "left": "$84",
+        "of": "of $120",
+        "aria": "Uber 71 calls ×3, 30% captured, $84 left of $120"
+       },
+       {
+        "leg": "72 calls ×2",
+        "captured": "41%",
+        "left": "$35",
+        "of": "of $59",
+        "aria": "Uber 72 calls ×2, 41% captured, $35 left of $59"
+       }
+      ]
+     },
+     {
+      "logo": "FIS",
+      "name": "Fidelity National",
+      "strikes": "2 strikes",
+      "captured": "59%",
+      "left": "$74",
+      "of": "of $179",
+      "aria": "Fidelity National, 59% captured, $74 left of $179, 2 strikes",
+      "rows": [
+       {
+        "leg": "35 calls ×6",
+        "captured": "55%",
+        "left": "$54",
+        "of": "of $120",
+        "aria": "Fidelity National 35 calls ×6, 55% captured, $54 left of $120"
+       },
+       {
+        "leg": "35.5 calls ×4",
+        "captured": "66%",
+        "left": "$20",
+        "of": "of $59",
+        "aria": "Fidelity National 35.5 calls ×4, 66% captured, $20 left of $59"
+       }
+      ]
+     },
+     {
+      "logo": "NKE",
+      "name": "Nike",
+      "strikes": "3 strikes",
+      "captured": "86%",
+      "left": "$74",
+      "of": "of $529",
+      "aria": "Nike, 86% captured, $74 left of $529, 3 strikes",
+      "rows": [
+       {
+        "leg": "36 calls ×10",
+        "captured": "81%",
+        "left": "$60",
+        "of": "of $320",
+        "aria": "Nike 36 calls ×10, 81% captured, $60 left of $320"
+       },
+       {
+        "leg": "36.5 calls ×6",
+        "captured": "92%",
+        "left": "$11",
+        "of": "of $142",
+        "aria": "Nike 36.5 calls ×6, 92% captured, $11 left of $142"
+       },
+       {
+        "leg": "37 calls ×4",
+        "captured": "96%",
+        "left": "$3",
+        "of": "of $67",
+        "aria": "Nike 37 calls ×4, 96% captured, $3 left of $67"
+       }
+      ]
+     }
+    ],
+    "buttons": {
+     "expandAll": "Show every strike",
+     "collapseAll": "Fold every name"
+    },
+    "note": "Prototype stand-in strikes (tvMany: 2 to 3 strikes a name); per AUDIT-LOG 6 the app reads the real sold legs, the same rows as Positions."
+   }
+  }
+ },
+ "economy": {
+  "title": "The economy",
+  "sub": "12 indicators · the last four readings",
+  "indicators": [
+   {
+    "name": "Junk bond spread",
+    "label": "Junk bond spread",
+    "tag": "Worth watching",
+    "tagStyle": "yellow",
+    "value": "3.40",
+    "arrow": "↘",
+    "trend": "Dipped this week after 7 weeks up",
+    "chartAria": "Junk bond spread: Oct 16 3.31, Oct 23 3.38, Oct 30 3.44, This week 3.40",
+    "chart": {
+     "points": [
+      {
+       "label": "Oct 16",
+       "value": "3.31",
+       "current": false
+      },
+      {
+       "label": "Oct 23",
+       "value": "3.38",
+       "current": false
+      },
+      {
+       "label": "Oct 30",
+       "value": "3.44",
+       "current": false
+      },
+      {
+       "label": "This week",
+       "value": "3.40",
+       "current": true
+      }
+     ]
+    },
+    "note": "Up 0.79 since mid-September, from near its tightest. Still under its long-run average of about 5, but lenders are getting pickier."
+   },
+   {
+    "name": "Consumer mood",
+    "label": "Consumer mood",
+    "tag": "Worth watching",
+    "tagStyle": "yellow",
+    "value": "48.1",
+    "arrow": "↘",
+    "trend": "Down 2 months in a row",
+    "chartAria": "Consumer mood: Jul 49.5, Aug 55.2, Sep 51.7, Oct 48.1",
+    "chart": {
+     "points": [
+      {
+       "label": "Jul",
+       "value": "49.5",
+       "current": false
+      },
+      {
+       "label": "Aug",
+       "value": "55.2",
+       "current": false
+      },
+      {
+       "label": "Sep",
+       "value": "51.7",
+       "current": false
+      },
+      {
+       "label": "Oct",
+       "value": "48.1",
+       "current": true
+      }
+     ],
+     "marker": "May low · 44.8"
+    },
+    "note": "Close to May’s 44.8, the lowest since at least 1985. Matters for NKE, LULU, PEP and KR, though people have kept spending through gloomy readings since 2022."
+   },
+   {
+    "name": "Auto and other loans",
+    "label": "Auto and other loans",
+    "tag": "Worth watching",
+    "tagStyle": "yellow",
+    "value": "2.33%",
+    "arrow": "↗",
+    "trend": "Up 2 quarters in a row, after 4 down",
+    "chartAria": "Auto and other loans: Q3 2025 2.33%, Q4 2025 2.27%, Q1 2026 2.28%, Q2 2026 2.33%",
+    "chart": {
+     "points": [
+      {
+       "label": "Q3 2025",
+       "value": "2.33%",
+       "current": false
+      },
+      {
+       "label": "Q4 2025",
+       "value": "2.27%",
+       "current": false
+      },
+      {
+       "label": "Q1 2026",
+       "value": "2.28%",
+       "current": false
+      },
+      {
+       "label": "Q2 2026",
+       "value": "2.33%",
+       "current": true
+      }
+     ]
+    },
+    "note": "Turning up again and above 2019’s 2.1%. The next number comes in late November."
+   },
+   {
+    "name": "Yield curve 10y minus 3m",
+    "label": "Yield curve 10y minus 3m",
+    "value": "+0.74",
+    "arrow": "↘",
+    "trend": "Down 0.09 in three weeks",
+    "chartAria": "Yield curve 10y minus 3m: Oct 16 0.83, Oct 23 0.78, Oct 30 0.78, This week 0.74",
+    "chart": {
+     "points": [
+      {
+       "label": "Oct 16",
+       "value": "+0.83",
+       "current": false
+      },
+      {
+       "label": "Oct 23",
+       "value": "+0.78",
+       "current": false
+      },
+      {
+       "label": "Oct 30",
+       "value": "+0.78",
+       "current": false
+      },
+      {
+       "label": "This week",
+       "value": "+0.74",
+       "current": true
+      }
+     ]
+    },
+    "note": "Normal shape. The small flattening is ordinary week-to-week noise."
+   },
+   {
+    "name": "Financial stress",
+    "label": "Financial stress",
+    "value": "0.58",
+    "arrow": "↗",
+    "trend": "Up 2 weeks in a row",
+    "chartAria": "Financial stress: Oct 9 minus 0.46, Oct 16 minus 0.72, Oct 23 minus 0.63, Oct 30 minus 0.58",
+    "chart": {
+     "points": [
+      {
+       "label": "Oct 9",
+       "value": "0.46",
+       "current": false
+      },
+      {
+       "label": "Oct 16",
+       "value": "0.72",
+       "current": false
+      },
+      {
+       "label": "Oct 23",
+       "value": "0.63",
+       "current": false
+      },
+      {
+       "label": "Oct 30",
+       "value": "0.58",
+       "current": true
+      }
+     ],
+     "marker": "Average · 0"
+    },
+    "note": "Still calmer than average. The two-week rise is small."
+   },
+   {
+    "name": "Jobless claims",
+    "label": "Jobless claims",
+    "tag": "New since yesterday",
+    "tagStyle": "plain",
+    "value": "194K",
+    "arrow": "↘",
+    "trend": "Down 2 weeks in a row",
+    "chartAria": "Jobless claims: Oct 3 198K, Oct 10 200K, Oct 17 195K, Oct 24 194K",
+    "chart": {
+     "points": [
+      {
+       "label": "Oct 3",
+       "value": "198K",
+       "current": false
+      },
+      {
+       "label": "Oct 10",
+       "value": "200K",
+       "current": false
+      },
+      {
+       "label": "Oct 17",
+       "value": "195K",
+       "current": false
+      },
+      {
+       "label": "Oct 24",
+       "value": "194K",
+       "current": true
+      }
+     ]
+    },
+    "note": "Layoffs are very low, close to July’s 189K, the lowest since at least 1985."
+   },
+   {
+    "name": "Bank credit growth",
+    "label": "Bank credit growth",
+    "tag": "New since yesterday",
+    "tagStyle": "plain",
+    "value": "+6.3%",
+    "arrow": "↘",
+    "trend": "Dipped after 2 weeks up",
+    "chartAria": "Bank credit growth: Oct 7 6.1%, Oct 14 6.2%, Oct 21 6.4%, Oct 28 6.3%",
+    "chart": {
+     "points": [
+      {
+       "label": "Oct 7",
+       "value": "+6.1%",
+       "current": false
+      },
+      {
+       "label": "Oct 14",
+       "value": "+6.2%",
+       "current": false
+      },
+      {
+       "label": "Oct 21",
+       "value": "+6.4%",
+       "current": false
+      },
+      {
+       "label": "Oct 28",
+       "value": "+6.3%",
+       "current": true
+      }
+     ]
+    },
+    "note": "Banks are lending at a normal pace, about 6% a year, the same as in 2019."
+   },
+   {
+    "name": "Sahm rule",
+    "label": "Sahm rule",
+    "value": "0.00",
+    "arrow": "↗",
+    "trend": "Up after 9 months down",
+    "chartAria": "Sahm rule: Jun 0.07, Jul minus 0.03, Aug minus 0.07, Sep 0.00",
+    "chart": {
+     "points": [
+      {
+       "label": "Jun",
+       "value": "0.07",
+       "current": false
+      },
+      {
+       "label": "Jul",
+       "value": "0.03",
+       "current": false
+      },
+      {
+       "label": "Aug",
+       "value": "0.07",
+       "current": false
+      },
+      {
+       "label": "Sep",
+       "value": "0.00",
+       "current": true
+      }
+     ],
+     "marker": "Recession signal · 0.50"
+    },
+    "note": "Unemployment is at its low. The tick up is tiny next to the 0.50 recession signal."
+   },
+   {
+    "name": "Banks tightening loans",
+    "label": "Banks tightening loans",
+    "value": "1.7%",
+    "arrow": "↗",
+    "trend": "Mixed, up a little after a big drop",
+    "chartAria": "Banks tightening loans: Jan 5.3%, Apr 8.1%, Jul 0.0%, Oct 1.7%",
+    "chart": {
+     "points": [
+      {
+       "label": "Jan",
+       "value": "5.3%",
+       "current": false
+      },
+      {
+       "label": "Apr",
+       "value": "8.1%",
+       "current": false
+      },
+      {
+       "label": "Jul",
+       "value": "0.0%",
+       "current": false
+      },
+      {
+       "label": "Oct",
+       "value": "1.7%",
+       "current": true
+      }
+     ]
+    },
+    "note": "Banks are hardly tightening, so credit is easy to get."
+   },
+   {
+    "name": "Loans written off",
+    "label": "Loans written off",
+    "value": "0.57%",
+    "arrow": "↘",
+    "trend": "Down 2 quarters in a row",
+    "chartAria": "Loans written off: Q3 2025 0.61%, Q4 2025 0.63%, Q1 2026 0.59%, Q2 2026 0.57%",
+    "chart": {
+     "points": [
+      {
+       "label": "Q3 2025",
+       "value": "0.61%",
+       "current": false
+      },
+      {
+       "label": "Q4 2025",
+       "value": "0.63%",
+       "current": false
+      },
+      {
+       "label": "Q1 2026",
+       "value": "0.59%",
+       "current": false
+      },
+      {
+       "label": "Q2 2026",
+       "value": "0.57%",
+       "current": true
+      }
+     ]
+    },
+    "note": "Loan losses are easing and close to 2019’s 0.51%."
+   },
+   {
+    "name": "Credit cards behind on payments",
+    "label": "Credit cards behind on payments",
+    "value": "2.85%",
+    "arrow": "↘",
+    "trend": "Down 8 quarters in a row, after 11 up",
+    "chartAria": "Credit cards behind on payments: Q3 2025 2.99%, Q4 2025 2.95%, Q1 2026 2.91%, Q2 2026 2.85%",
+    "chart": {
+     "points": [
+      {
+       "label": "Q3 2025",
+       "value": "2.99%",
+       "current": false
+      },
+      {
+       "label": "Q4 2025",
+       "value": "2.95%",
+       "current": false
+      },
+      {
+       "label": "Q1 2026",
+       "value": "2.91%",
+       "current": false
+      },
+      {
+       "label": "Q2 2026",
+       "value": "2.85%",
+       "current": true
+      }
+     ]
+    },
+    "note": "Improving for two years and back near 2019’s 2.6%."
+   },
+   {
+    "name": "Income spent on debt",
+    "label": "Income spent on debt",
+    "value": "11.1%",
+    "arrow": "↘",
+    "trend": "Down 2 quarters in a row",
+    "chartAria": "Income spent on debt: Q3 2025 11.2%, Q4 2025 11.3%, Q1 2026 11.2%, Q2 2026 11.1%",
+    "chart": {
+     "points": [
+      {
+       "label": "Q3 2025",
+       "value": "11.2%",
+       "current": false
+      },
+      {
+       "label": "Q4 2025",
+       "value": "11.3%",
+       "current": false
+      },
+      {
+       "label": "Q1 2026",
+       "value": "11.2%",
+       "current": false
+      },
+      {
+       "label": "Q2 2026",
+       "value": "11.1%",
+       "current": true
+      }
+     ]
+    },
+    "note": "Households spend less of their income on debt than in 2019 (11.6%). Not stretched."
+   }
+  ],
+  "opensFrom": "“See the other 7” under The economy card (Pre-market and Weekend)"
+ },
+ "tickerChart": {
+  "NFLX": {
+   "opensFrom": "any name tile (Your names, a sector heat map); this sample from the Netflix tile, market hours, Sunny",
+   "header": {
+    "logo": "NFLX",
+    "ticker": "NFLX",
+    "price": "$73.40",
+    "move": "1.80%",
+    "moveColor": "green",
+    "close": "X (back)"
+   },
+   "name": "Netflix",
+   "change": {
+    "amount": "$4.47",
+    "pct": "5.74%",
+    "color": "red",
+    "period": "past 3 months"
+   },
+   "chartAria": "Netflix, past 3 months, down 5.74%",
+   "positionLines": [
+    "Hedge 80 ×10",
+    "Sold call 74 ×26",
+    "LEAPS 65 ×10"
+   ],
+   "yAxis": [
+    "65",
+    "70",
+    "75",
+    "80"
+   ],
+   "priceTag": {
+    "t": "73.40",
+    "bg": "red (the move over the range)"
+   },
+   "xAxis": [
+    "Aug 3",
+    "Aug 28",
+    "Sep 23",
+    "Oct 20"
+   ],
+   "ranges": [
+    "1W",
+    "1M",
+    "3M",
+    "YTD",
+    "1Y",
+    "All"
+   ],
+   "rangeSelected": "3M",
+   "layers": [
+    "Positions",
+    "Technicals",
+    "Walls"
+   ],
+   "layerSelected": "Positions",
+   "note": "Line from series/hist(t) in sunny-web-data.js (generated closes, seeded per ticker); only labels are listed here. byRange: the header change, axes and labels for each range (tap to switch); a leading ↑ on a position line = pinned at the top, off the scale.",
+   "byRange": {
+    "1W": {
+     "change": {
+      "amount": "$8.26",
+      "pct": "12.68%",
+      "period": "past week",
+      "color": "green"
+     },
+     "chartAria": "Netflix, past week, up 12.68%",
+     "positionLines": [
+      "Hedge 80 ×10",
+      "Sold call 74 ×26",
+      "LEAPS 65 ×10"
+     ],
+     "offScaleAbove": [
+      "Hedge 80 ×10"
+     ],
+     "yAxis": [
+      "65",
+      "70",
+      "75"
+     ],
+     "priceTag": "73.40",
+     "xAxis": [
+      "Wed",
+      "Thu",
+      "Fri",
+      "Mon",
+      "Tue"
+     ]
+    },
+    "1M": {
+     "change": {
+      "amount": "$7.49",
+      "pct": "11.37%",
+      "period": "past month",
+      "color": "green"
+     },
+     "chartAria": "Netflix, past month, up 11.37%",
+     "positionLines": [
+      "Hedge 80 ×10",
+      "Sold call 74 ×26",
+      "LEAPS 65 ×10"
+     ],
+     "offScaleAbove": [
+      "Hedge 80 ×10"
+     ],
+     "yAxis": [
+      "65",
+      "70",
+      "75"
+     ],
+     "priceTag": "73.40",
+     "xAxis": [
+      "Sep 30",
+      "Oct 8",
+      "Oct 15",
+      "Oct 23"
+     ]
+    },
+    "3M": {
+     "change": {
+      "amount": "$4.47",
+      "pct": "5.74%",
+      "period": "past 3 months",
+      "color": "red"
+     },
+     "chartAria": "Netflix, past 3 months, down 5.74%",
+     "positionLines": [
+      "Hedge 80 ×10",
+      "Sold call 74 ×26",
+      "LEAPS 65 ×10"
+     ],
+     "offScaleAbove": [],
+     "yAxis": [
+      "65",
+      "70",
+      "75",
+      "80"
+     ],
+     "priceTag": "73.40",
+     "xAxis": [
+      "Aug 3",
+      "Aug 28",
+      "Sep 23",
+      "Oct 20"
+     ]
+    },
+    "YTD": {
+     "change": {
+      "amount": "$0.23",
+      "pct": "0.31%",
+      "period": "this year",
+      "color": "red"
+     },
+     "chartAria": "Netflix, this year, down 0.31%",
+     "positionLines": [
+      "Hedge 80 ×10",
+      "Sold call 74 ×26",
+      "LEAPS 65 ×10"
+     ],
+     "offScaleAbove": [],
+     "yAxis": [
+      "60",
+      "70",
+      "80"
+     ],
+     "priceTag": "73.40",
+     "xAxis": [
+      "Jan",
+      "Apr",
+      "Jul",
+      "Oct"
+     ]
+    },
+    "1Y": {
+     "change": {
+      "amount": "$16.57",
+      "pct": "29.15%",
+      "period": "past year",
+      "color": "green"
+     },
+     "chartAria": "Netflix, past year, up 29.15%",
+     "positionLines": [
+      "Hedge 80 ×10",
+      "Sold call 74 ×26",
+      "LEAPS 65 ×10"
+     ],
+     "offScaleAbove": [],
+     "yAxis": [
+      "60",
+      "70",
+      "80"
+     ],
+     "priceTag": "73.40",
+     "xAxis": [
+      "Nov",
+      "Mar",
+      "Jun",
+      "Sep"
+     ]
+    },
+    "All": {
+     "change": {
+      "amount": "$20.07",
+      "pct": "37.64%",
+      "period": "since Jan 8, 2025",
+      "color": "green"
+     },
+     "chartAria": "Netflix, since Jan 8, 2025, up 37.64%",
+     "positionLines": [
+      "Hedge 80 ×10",
+      "Sold call 74 ×26",
+      "LEAPS 65 ×10"
+     ],
+     "offScaleAbove": [],
+     "yAxis": [
+      "50",
+      "60",
+      "70",
+      "80"
+     ],
+     "priceTag": "73.40",
+     "xAxis": [
+      "Mar ’25",
+      "Sep ’25",
+      "Mar ’26",
+      "Sep ’26"
+     ]
+    }
+   }
+  }
+ },
+ "aftershock": {
+  "source": "reference/SunnyAftershock.dc.html (an animated demo: the card and page cycle wait → soon → scan → done every 21 s; state prop pins one)",
+  "card": {
+   "kicker": "Aftershock",
+   "arrow": "→",
+   "tone": "sky: the deepest blue of the hour (night #050A1A→#0B1735, morning #0B1F45→#163C7A, day #0E2F6B→#1A56B4, sunset #0F1D40→#284783)",
+   "states": {
+    "wait": [
+     "Scan at 4:15",
+     "Day 2 · ADBE up 1.9%, DECK down 3.7%"
+    ],
+    "soon": [
+     "Scan in {mm:ss}",
+     "517 names after the close"
+    ],
+    "scan": [
+     "{n} of 517",
+     "Scanning · {found} found so far (or: Scanning for drops of 15% or more)"
+    ],
+    "done": [
+     "2 crashes",
+     "ADBE 18.5% · DECK 16.7%"
+    ],
+    "none": [
+     "All clear",
+     "No crashes · next scan tomorrow 4:15 PM"
+    ]
+   }
+  },
+  "page": {
+   "title": "Aftershock",
+   "back": "Back",
+   "states": {
+    "wait": {
+     "label": "Next scan",
+     "big": "4:15 PM",
+     "sub": "Checks 517 names after the close",
+     "clock": "3:38 PM"
+    },
+    "soon": {
+     "label": "Scan in",
+     "big": "{mm:ss}",
+     "sub": "at 4:15 PM",
+     "clock": "4:{mm} PM"
+    },
+    "scan": {
+     "label": "Scanning",
+     "big": "{n} of 517",
+     "sub": "{found} crash(es) so far, or Looking for drops of 15% or more",
+     "clock": "4:15 PM"
+    },
+    "done": {
+     "label": "Today",
+     "big": "2 crashes",
+     "sub": "517 names checked",
+     "clock": "4:16 PM"
+    },
+    "none": {
+     "label": "Today",
+     "big": "No crashes",
+     "sub": "Next scan tomorrow 4:15 PM",
+     "clock": "4:16 PM"
+    }
+   },
+   "progressBar": "shown in soon and scan",
+   "rows": [
+    {
+     "ticker": "ADBE",
+     "from": "$410.44",
+     "now": "$334.68",
+     "drop": "18.5%",
+     "day1": "Day 1",
+     "day2": {
+      "wait": "up 1.9%",
+      "color": "green",
+      "otherwise": "tomorrow"
+     }
+    },
+    {
+     "ticker": "DECK",
+     "from": "$142.10",
+     "now": "$118.36",
+     "drop": "16.7%",
+     "day1": "Day 1",
+     "day2": {
+      "wait": "down 3.7%",
+      "color": "red",
+      "otherwise": "tomorrow"
+     }
+    }
+   ],
+   "rowFormat": "{ticker} · {from} → {now} · {drop}; ticks Day 1 (on) and Day 2 (on in wait, with the move)",
+   "radar": "517 names on seven orbits; a sonar wave reads outward during scan; crashes (ADBE, DECK) drop out of orbit in red"
+  }
+ }
+}

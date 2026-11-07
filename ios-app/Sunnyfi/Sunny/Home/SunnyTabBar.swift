@@ -22,10 +22,12 @@ struct SunnyTabBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
+        // Handoff 6 Nov (README 11.3): two tabs (148 pt with the padding) centred at 50% − 36 pt, the 62 pt
+        // Search circle from 50% + 48 pt, both 28 pt from the bottom.
         GeometryReader { g in
             let mid = g.size.width / 2, y = g.size.height - 28 - 31
-            bar.position(x: mid - 35, y: y)
-            searchButton.position(x: mid + 117 + 31, y: y)
+            bar.position(x: mid - 36, y: y)
+            searchButton.position(x: mid + 48 + 31, y: y)
         }
         .ignoresSafeArea()
     }
@@ -38,9 +40,9 @@ struct SunnyTabBar: View {
                 Button { pick(t) } label: {
                     VStack(spacing: 1) {
                         SunnyTabIcon(tab: t).frame(width: 24, height: 24)
-                        Text(t.title).font(.system(size: 10, weight: .semibold)).tracking(0.1)
+                        Text(t.title).font(.system(size: 11, weight: .semibold))
                     }
-                    .foregroundStyle(t == tab ? S.ink : S.muted)
+                    .foregroundStyle(t == tab ? S.ink : S.secondary)
                     .frame(width: 70, height: 54)
                     .contentShape(.capsule)
                 }

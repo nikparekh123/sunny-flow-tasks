@@ -32,7 +32,7 @@ enum S {
     static let surface    = dyn(0xF1F2F4, 0x2C2C2E)   // fills inside cards, soft panels
     static let line       = dyn(0xE3E5E8, 0x3A3A3C)   // card outline, hairlines
     static let green      = dyn(0x327133, 0x65C466)   // gains, up (light deepened Oct 28)
-    static let red        = dyn(0xBC2E30, 0xEB4B46)   // losses, down; never a minus sign (light deepened Oct 28; dark kept, Nik)
+    static let red        = dyn(0xBC2E30, 0xFF6961)   // losses, down; never a minus sign. Dark #FF6961 everywhere, Search too (handoff 6 Nov, answer 12)
     static let yellowDeep = dyn(0x996C23, 0xF7CE46)   // breakeven text, near-breakeven dot
     static let yellow     = dyn(0xF7CE46, 0xF7CE46)   // earnings card, breakeven dot, live glow
     static let blue       = dyn(0x2E5ECA, 0x3A86F7)   // put strike, links (light deepened Oct 28)
@@ -143,6 +143,18 @@ enum S {
     static let tile      = dynA(0xFFFFFF, 0.55, 0xFFFFFF, 0.06)
     static let tileWalls = dynA(0xFFFFFF, 0.72, 0xFFFFFF, 0.06)
     static let greenTint = dynA(0x65C466, 0.16, 0x65C466, 0.18)
+
+    // Handoff 6 Nov 2026 (New Home, Positions, Overview; block 34): the design's own tokens, light / dark.
+    static let secondary       = dyn(0x6E6E73, 0x98989D)   // sub lines, labels, kickers
+    static let secondaryOnTint = dyn(0x6E6E73, 0xAEAEB2)   // text on tinted tiles and pills
+    static let hairline        = dyn(0xE3E5E8, 0x3A3A3C)   // rules between rows
+    static let act             = dyn(0xA34B00, 0xFF9F0A)   // orange: thin, act, turns short, Watch
+    static let navy            = dyn(0x2F5AA8, 0x86A8F0)   // call walls and call strikes (charts only)
+    static let brown           = dyn(0x995123, 0xE8975C)   // put walls (charts only)
+    static let teal            = dyn(0x0B6F75, 0x4CC9D0)   // technicals, accelerator
+    static let sheetFill       = dyn(0xFFFFFF, 0x1C1C1E)   // sheets, the Positions chart card
+    static let chip            = dyn(0xF1F2F4, 0x2C2C2E)   // close buttons, quiet fills
+    static let grabber         = dynA(0x3C3C43, 0.3, 0xEBEBF5, 0.3)   // sheet grabber, inactive deck dots
 
     /// A figure on the chart and its stats: red when below zero, else ink.
     static func lossInk(_ v: Double) -> Color { v < 0 ? red : ink }

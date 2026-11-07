@@ -25,7 +25,9 @@ final class HomeRouter {
     /// The four tabs (block 12c, handoff 32) and Search, the round button right of them (block 27). Opens on Home.
     enum Tab: Hashable {
         case home, positions, gamma, insights, search
-        static let bar: [Tab] = [.home, .positions, .gamma, .insights]
+        /// Two tabs since the 6 Nov handoff (answer 7): Gamma and Insights are gone; Walls on Positions and the
+        /// ticker chart do Gamma's job, Your position, To decide and the Thesis check do Insights'.
+        static let bar: [Tab] = [.home, .positions]
         var title: String { switch self { case .home: "Home"; case .positions: "Positions"; case .gamma: "Gamma"; case .insights: "Insights"; case .search: "Search" } }
         var icon: String {
             switch self {

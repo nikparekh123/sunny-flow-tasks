@@ -70,22 +70,29 @@ struct SType {
     nonisolated(unsafe) private static var cache: [String: UIFont] = [:]
     private static let lock = NSLock()
 
+    /// ⚠ SF PRO EVERYWHERE (handoff 6 Nov 2026, Nik's answer 10): the system font, with tabular figures on
+    /// every number. Inter was the web prototype's stand-in. The `wght` value maps to the nearest system
+    /// weight (500 Medium, 600 Semibold, 700 Bold, 800 Heavy); SF picks its Text or Display cut by size.
     private func make(tabular: Bool) -> UIFont {
-        guard let base = UIFont(name: "Inter", size: size) else {
-            return .systemFont(ofSize: size, weight: UIFont.Weight(rawValue: (weight - 400) / 500))
-        }
-        var attrs: [UIFontDescriptor.AttributeName: Any] = [
-            // opsz stays at 14, the text cut, at every size: the design's
-            // web Inter has no optical-size axis, so its big titles and
-            // numbers are the text cut too (the display cut set ~4% narrower).
-            UIFontDescriptor.AttributeName(rawValue: "NSCTFontVariationAttribute"):
-                [0x77676874: weight, 0x6F70737A: 14],
-        ]
-        if tabular {
-            attrs[.featureSettings] = [[UIFontDescriptor.FeatureKey.type: kNumberSpacingType,
-                                         UIFontDescriptor.FeatureKey.selector: kMonospacedNumbersSelector]]
-        }
+        let base = UIFont.systemFont(ofSize: size, weight: Self.systemWeight(weight))
+        guard tabular else { return base }
+        let attrs: [UIFontDescriptor.AttributeName: Any] = [
+            .featureSettings: [[UIFontDescriptor.FeatureKey.type: kNumberSpacingType,
+                                UIFontDescriptor.FeatureKey.selector: kMonospacedNumbersSelector]]]
         return UIFont(descriptor: base.fontDescriptor.addingAttributes(attrs), size: size)
+    }
+
+    static func systemWeight(_ w: CGFloat) -> UIFont.Weight {
+        switch w {
+        case ..<250: return .light
+        case ..<350: return .light
+        case ..<450: return .regular
+        case ..<550: return .medium
+        case ..<650: return .semibold
+        case ..<750: return .bold
+        case ..<850: return .heavy
+        default: return .black
+        }
     }
     func font(tabular: Bool = false) -> Font { Font(uiFont(tabular: tabular)) }
 

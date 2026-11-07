@@ -1,0 +1,163 @@
+{
+ "gaps": [
+  "privacyOn: the prototype does not mask the Overview (rendered with privacy on, nothing changed); block 32 says the Downside amount and Coming in read $••• and percentages stay"
+ ],
+ "source": "New Home iPhone Preview.dc.html, the bo block (Search Explorations 42a); sample at Tue Oct 27; only the account names are live (nameA, nameB)",
+ "privacyOff": {
+  "header": "Both accounts · Tue Oct 27",
+  "sentence": [
+   {
+    "t": "Both books are ",
+    "b": true,
+    "c": "secondary"
+   },
+   {
+    "t": "on pace",
+    "b": true,
+    "c": "ink"
+   },
+   {
+    "t": " this week. A bad week would cost ",
+    "b": true,
+    "c": "secondary"
+   },
+   {
+    "t": "5.6%",
+    "b": true,
+    "c": "ink"
+   },
+   {
+    "t": ", and the puts cover only ",
+    "b": true,
+    "c": "secondary"
+   },
+   {
+    "t": "a quarter",
+    "b": true,
+    "c": "ink"
+   },
+   {
+    "t": " of the shares.",
+    "b": true,
+    "c": "secondary"
+   }
+  ],
+  "tally": [
+   {
+    "t": "3 on track",
+    "dot": "green"
+   },
+   {
+    "t": "3 to watch",
+    "dot": "orange"
+   },
+   {
+    "t": "5 trades to place",
+    "dot": null
+   }
+  ],
+  "checks": [
+   {
+    "name": "Downside",
+    "status": "Watch",
+    "statusColor": "orange",
+    "big": "$77,068",
+    "bigColor": "red",
+    "sentence": "Lost by Friday if every name falls its priced move, 5.6% of what both books hold.",
+    "chips": [
+     "Puts cover 26% of the shares",
+     "Sunny 27%",
+     "Nicolay 23%"
+    ],
+    "aria": "Downside, Watch",
+    "rule": "P&L by Friday if every name falls its priced move, both books; as % of what both hold. Chips: put cover both, per account",
+    "watchWhen": "open question 13.A6 (threshold not set)"
+   },
+   {
+    "name": "Concentration",
+    "status": "Watch",
+    "statusColor": "orange",
+    "big": "40%",
+    "bigColor": "ink",
+    "sentence": "Of both books sits in Nike and Netflix. Both hold the same seven names, so they rise and fall together.",
+    "chips": [
+     "Nike 21%",
+     "Netflix 19%",
+     "Alibaba 17%"
+    ],
+    "aria": "Concentration, Watch",
+    "rule": "Share of both books in the two biggest names",
+    "watchWhen": "one name over 35% or top three over 70%"
+   },
+   {
+    "name": "Pace",
+    "status": "On track",
+    "statusColor": "green",
+    "big": "0.60%",
+    "bigColor": "ink",
+    "sentence": "Kept this week on what both bought, if Friday goes to plan. A usual week is 0.50%.",
+    "chips": [
+     "Sunny 0.61%",
+     "Nicolay 0.58%"
+    ],
+    "aria": "Pace, On track",
+    "rule": "Kept this week on what both bought, if Friday goes to plan, vs a usual week",
+    "watchWhen": "under the 4-week average"
+   },
+   {
+    "name": "Calls at work",
+    "status": "On track",
+    "statusColor": "green",
+    "big": "93%",
+    "bigColor": "ink",
+    "sentence": "Of the 20,300 shares have a call sold this week, one per 100. Lululemon is the gap in both.",
+    "chips": [
+     "Sunny 93%",
+     "Nicolay 92%"
+    ],
+    "aria": "Calls at work, On track",
+    "rule": "Shares with a call sold this week, one per 100, capped at 100% a name",
+    "watchWhen": "under 90% (to confirm)"
+   },
+   {
+    "name": "Delta",
+    "status": "Watch",
+    "statusColor": "orange",
+    "big": "3 of 14",
+    "bigColor": "ink",
+    "sentence": "Names turn short if they rise their priced move by Friday: Nike in both books, Alibaba in Nicolay’s. All 14 are long today.",
+    "chips": [
+     "Sunny 1 short · 2 thin",
+     "Nicolay 2 short"
+    ],
+    "aria": "Delta, Watch",
+    "rule": "Names that turn short at their priced move by Friday",
+    "watchWhen": "any name short"
+   },
+   {
+    "name": "To do",
+    "status": "On track",
+    "statusColor": "green",
+    "big": "5",
+    "bigColor": "ink",
+    "sentence": "Trades to place, none late. Alibaba and Lululemon in Sunny’s, Lululemon in Nicolay’s.",
+    "chips": [
+     "Sunny 4",
+     "Nicolay 1"
+    ],
+    "aria": "To do, On track",
+    "rule": "Trades to place (the same rows as Tomorrow’s orders)",
+    "watchWhen": "any late"
+   }
+  ],
+  "comingIn": {
+   "title": "Coming in",
+   "amount": "$6,245",
+   "amountColor": "green",
+   "line": "Dividends by Dec 8 from Nike, PepsiCo and FIS · Sunny $4,598 · Nicolay $1,647 · kept apart from pace"
+  }
+ },
+ "privacyOn": {
+  "differences": {}
+ }
+}

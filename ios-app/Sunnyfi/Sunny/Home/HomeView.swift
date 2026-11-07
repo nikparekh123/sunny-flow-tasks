@@ -31,6 +31,8 @@ struct HomeView: View {
     /// While Search is open the tab bar and the search button are 120 pt down and faded out.
     @State private var barDown = false
     @State private var barGone = false
+    /// New Home (handoff 6 Nov): the account on screen, shared by Home, Positions and Overview.
+    @State private var brief = BriefState()
 
     var body: some View {
         ZStack {
@@ -111,35 +113,58 @@ struct HomeView: View {
     /// The four tabs (block 12a, 12c). The system's bar is hidden: Sunny draws its own (SunnyTabBar), so Search
     /// sits apart on every iOS (iOS 27 put the system search tab inside the bar). Each tab keeps the 49 pt the
     /// system bar held under it, so nothing moves. Opens on Home.
+    /// Two tabs since the 6 Nov handoff (answer 7): Home and Positions, Search its own circle. Gamma and
+    /// Insights are gone. Overview (block 32) lies over both when the strip lands on it; the tab bar and
+    /// Search slide away and come back when an account is picked.
     private func tabs(_ home: HomePayload) -> some View {
-        TabView(selection: Binding(get: { router.tab }, set: { router.tab = $0 })) {
-            Tab("Home", systemImage: "house.fill", value: HomeRouter.Tab.home) {
-                NavigationStack {
-                    ZStack {
-                        SBackground()
-                        page(home)
+        ZStack {
+            TabView(selection: Binding(get: { router.tab }, set: { router.tab = $0 })) {
+                Tab("Home", systemImage: "house.fill", value: HomeRouter.Tab.home) {
+                    NavigationStack {
+                        ZStack {
+                            SBackground()
+                            BriefHomeScreen(store: store, home: home)
+                        }
+                        .toolbar(.hidden, for: .navigationBar)
                     }
-                    .toolbar(.hidden, for: .navigationBar)
+                    .modifier(OwnTabBar())
                 }
-                .modifier(OwnTabBar())
+                Tab("Positions", systemImage: "rectangle.stack.fill", value: HomeRouter.Tab.positions) {
+                    // Pass 1 (6 Nov handoff): one name at a time on the sample book; the old stacked cards stay for real
+                    // data until Pass 2 feeds the new screen.
+                    NavigationStack {
+                        if BriefDebug.sample { BriefPositionsScreen().toolbar(.hidden, for: .navigationBar) }
+                        else { SunnyPositionsTab(store: store) }
+                    }
+                    .modifier(OwnTabBar())
+                }
             }
-            Tab("Positions", systemImage: "rectangle.stack.fill", value: HomeRouter.Tab.positions) {
-                NavigationStack { SunnyPositionsTab(store: store) }.modifier(OwnTabBar())
-            }
-            // Handoff 32 (12c): Gamma and Insights, one name at a time, the name carried between them.
-            Tab("Gamma", systemImage: "chart.bar.doc.horizontal", value: HomeRouter.Tab.gamma) {
-                NavigationStack { SunnyGammaTab(store: store) }.modifier(OwnTabBar())
-            }
-            Tab("Insights", systemImage: "lightbulb", value: HomeRouter.Tab.insights) {
-                NavigationStack { SunnyInsightsTab(store: store) }.modifier(OwnTabBar())
+            if brief.onOverview {
+                OverviewScreen()
+                    .transition(reduce ? .opacity : .move(edge: .leading).combined(with: .opacity))
+                    .zIndex(1)
             }
         }
+        .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.5), value: brief.onOverview)
         .overlay {
             SunnyTabBar(tab: router.tab, pick: pickTab, search: openSearch)
-                .offset(y: barDown ? 120 : 0)
-                .opacity(barGone ? 0 : 1)
-                .allowsHitTesting(!router.searchOpen)
+                .offset(y: barDown || brief.onOverview ? 120 : 0)
+                .opacity(barGone || brief.onOverview ? 0 : 1)
+                .allowsHitTesting(!router.searchOpen && !brief.onOverview)
+                .animation(reduce ? .easeOut(duration: 0.2) : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: brief.onOverview)
         }
+        .environment(brief)
+        .onAppear(perform: briefSetup)
+    }
+
+    /// Who sees which accounts. Sample mode (DEBUG): both books and Overview, as the design shows Nik.
+    /// Real books arrive with the account strip in Pass 2 (book_members, owned books).
+    private func briefSetup() {
+        guard BriefDebug.sample else { return }
+        brief.accounts = [.overview, .sunny, .nicolay]
+        brief.account = BriefDebug.account ?? .sunny
+        UserDefaults.standard.set(BriefDebug.privacy, forKey: BriefPrivacy.key)
+        if BriefDebug.tab == "positions" { router.tab = .positions }
     }
 
     /// A tap on the open tab scrolls it to the top.
