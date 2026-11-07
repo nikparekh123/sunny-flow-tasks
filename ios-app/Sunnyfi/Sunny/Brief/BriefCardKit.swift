@@ -179,19 +179,21 @@ struct BBars: View {
     var height: CGFloat = 70
     var privacy = false
     var body: some View {
-        let vals = bars.map { $0["value"].double ?? 0 }
-        let mx = max(vals.max() ?? 1, 0.0001)
+        // The signed number when the server sends one (`n` money, `signed` a yield): a month or week that lost draws
+        // red, its label without a minus sign. Else the label's own number.
+        let vals = bars.map { $0["n"].double ?? $0["signed"].double ?? $0["value"].double ?? 0 }
+        let mx = max(vals.map(abs).max() ?? 1, 0.0001)
         HStack(alignment: .bottom, spacing: 8) {
             ForEach(Array(bars.enumerated()), id: \.offset) { i, b in
-                let hl = b["highlight"].bool
+                let hl = b["highlight"].bool, neg = vals[i] < 0, tint = neg ? S.red : S.green
                 VStack(spacing: 4) {
                     Text(BriefWords.plain(b["value"].string, privacy: privacy))
                         .sType(SType(size: 11, weight: 700, line: 13, tracking: 0))
-                        .foregroundStyle(hl ? S.green : BK.color(b["valueColor"].string))
+                        .foregroundStyle(hl ? tint : BK.color(b["valueColor"].string))
                         .lineLimit(1).minimumScaleFactor(0.7)
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(b["empty"].bool ? S.chip : hl ? S.green : S.green.opacity(0.3))
-                        .frame(height: max(4, height * CGFloat(vals[i] / mx)))
+                        .fill(b["empty"].bool ? S.chip : hl ? tint : tint.opacity(0.3))
+                        .frame(height: max(4, height * CGFloat(abs(vals[i]) / mx)))
                     Text(b["label"].string ?? "").sType(SType(size: 11, weight: hl ? 700 : 500, line: 13, tracking: 0))
                         .foregroundStyle(hl ? S.ink : S.secondary).lineLimit(1).minimumScaleFactor(0.8)
                 }

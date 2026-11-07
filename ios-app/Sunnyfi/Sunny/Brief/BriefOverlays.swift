@@ -129,11 +129,12 @@ struct TimeValueSheet: View {
                     GeometryReader { g in
                         ZStack(alignment: .leading) {
                             Capsule().fill(S.chip)
-                            Capsule().fill(S.green).frame(width: g.size.width * CGFloat(cap))
+                            Capsule().fill(S.green).frame(width: g.size.width * CGFloat(min(1, max(0, cap))))
                         }
                     }
                     .frame(height: 8)
-                    Text("\(Int((cap * 100).rounded()))% captured").sType(SType(size: 13, weight: 700, line: 16, tracking: 0)).foregroundStyle(S.green)
+                    // Worth more than it was sold for: a loss so far, in red without a minus sign (colour carries the sign).
+                    Text("\(Int(abs(cap * 100).rounded()))% \(cap < -0.005 ? "given back" : "captured")").sType(SType(size: 13, weight: 700, line: 16, tracking: 0)).foregroundStyle(cap < -0.005 ? S.red : S.green)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
@@ -190,11 +191,11 @@ struct TimeValueSheet: View {
                                     GeometryReader { g in
                                         ZStack(alignment: .leading) {
                                             Capsule().fill(S.chip)
-                                            Capsule().fill(S.green).frame(width: g.size.width * CGFloat(k))
+                                            Capsule().fill(S.green).frame(width: g.size.width * CGFloat(min(1, max(0, k))))
                                         }
                                     }
                                     .frame(height: 6)
-                                    Text("\(Int((k * 100).rounded()))%").sType(SType(size: 12, weight: 700, line: 15, tracking: 0)).foregroundStyle(S.green)
+                                    Text("\(Int(abs(k * 100).rounded()))%").sType(SType(size: 12, weight: 700, line: 15, tracking: 0)).foregroundStyle(k < -0.005 ? S.red : S.green)
                                 }
                             }
                             VStack(alignment: .trailing, spacing: 1) {

@@ -56,6 +56,9 @@ const tm = (t: string | null | undefined) => (t ? hm(Number(t.slice(0, 2)) * 60 
 const num = (v: unknown) => (v == null || v === '' || !isFinite(Number(v)) ? null : Number(v));
 const sp = (t: string, b = false, c?: string): Span => (c ? { t, b, c } : { t, b });
 const word = (n: number) => (n <= 10 ? NUM[n] : String(n));
+/** A row's lead for a headline: its bold words only, so the secondary money ($ a share, $ in all) never reaches a
+ *  headline that has no privacy copy (README 12, invariant 11). */
+const leadOf = (spans: Span[]) => (spans.filter((s) => s.b).map((s) => s.t).join('') || spans.map((s) => s.t).join('')).trim();
 const lc = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
 /** Heat-map tile colours by move (the design's eight steps). */
@@ -472,7 +475,8 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const months: { m: string; v: number }[] = [];
     for (const [d, , v] of (P.series2 ?? []) as [string, number, number][]) { const m = d.slice(0, 7); const e = months.find((y) => y.m === m); if (e) e.v = v; else months.push({ m, v }); }
     const bars = months.slice(-5).map((e, i, a) => { const prev = i ? a[i - 1].v : (months[months.length - a.length - 1]?.v ?? 0), v = e.v - prev, me = e.m === today.slice(0, 7);
-      return { label: MON[Number(e.m.slice(5)) - 1], value: `${v < 0 ? '' : ''}${$K(v)}`, highlight: me, valueColor: me ? col(v) : v < 0 ? 'red' : 'ink', empty: false }; });
+      /* n: the signed amount, so a month that lost draws its bar red (the label stays without a minus sign). */
+      return { label: MON[Number(e.m.slice(5)) - 1], value: $K(v), n: Math.round(v), highlight: me, valueColor: me ? col(v) : v < 0 ? 'red' : 'ink', empty: false }; });
     const whenA = when(pr), whenB = when(ps);
     return { type: 'payback', title: 'Payback · month end'.replace('month end', today.slice(8) >= '25' ? 'month end' : 'so far'),
       subtitle: pr && pr > 0 && ps && ps > 0 ? `Paid back between ${[whenA, whenB].sort((u, v) => Date.parse('1 ' + u) - Date.parse('1 ' + v)).join(' and ')}` : 'Not paid back at the recent pace',
@@ -622,7 +626,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     S.push({ kicker: 'World and economy', headline: worldHead(), cards: [moment === 'futures' ? futuresCards() : indexCards(), overnight(), sectorsCard(false)] });
     S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), yourPosition()] });
     const ne = earningsAhead(14);
-    const ch = nextEarn && dayDiff(today, String(nextEarn.date)) <= 14 ? `${company(nextEarn.ticker)} reports in ${dayDiff(today, String(nextEarn.date))} days.` : (comingRows(today, addDays(today, 45))[0] ? `Next: ${comingRows(today, addDays(today, 45))[0].text.map((s) => s.t).join('').trim()}, ${comingRows(today, addDays(today, 45))[0].date}.` : 'Nothing dated in the next six weeks.');
+    const ch = nextEarn && dayDiff(today, String(nextEarn.date)) <= 14 ? `${company(nextEarn.ticker)} reports in ${dayDiff(today, String(nextEarn.date))} days.` : (comingRows(today, addDays(today, 45))[0] ? `Next: ${leadOf(comingRows(today, addDays(today, 45))[0].text)}, ${comingRows(today, addDays(today, 45))[0].date}.` : 'Nothing dated in the next six weeks.');
     S.push({ kicker: 'Coming up', headline: [sp(ch, true)], cards: [ne, (() => { const rows = comingRows(today, addDays(today, 45)); return rows.length ? { type: 'comingUp', title: 'Coming up', rows } : null; })()] });
   } else if (session) {
     S.push({ kicker: 'The market', headline: marketHead(), cards: [indexCards(), sectorsCard(false)] });
@@ -653,8 +657,8 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     if (held && (pb || tm2)) S.push({ kicker: mName, headline: [sp(`${mName} ${done ? 'is done' : 'so far'}: ${pbPct >= 0 ? `${p1(pbPct)} of what you bought is paid back` : `${p1(pbPct)} of what you bought is given back`}.`, true)], cards: [tm2, pb] });
     const rem = remember(), sells = x.orders.filter((o) => o.kind === 'sell' || o.kind === 'put').length, ne = earningsAhead(7);
     const first = rem?.rows.find((r: Row) => !r.owner);
-    S.push({ kicker: 'Next week', headline: [sp(sells ? `${word(sells)} ${sells === 1 ? 'sale' : 'sales'} Monday.` : first ? `${first.text.map((s: Span) => s.t).join('').trim()}, ${first.date}.` : 'A quiet week ahead.', true)],
-      openHeadline: [sp(first ? `${first.text.map((s: Span) => s.t).join('').trim()}, ${first.date}.` : 'A quiet week ahead.', true)], cards: [ne, rem] });
+    S.push({ kicker: 'Next week', headline: [sp(sells ? `${word(sells)} ${sells === 1 ? 'sale' : 'sales'} Monday.` : first ? `${leadOf(first.text)}, ${first.date}.` : 'A quiet week ahead.', true)],
+      openHeadline: [sp(first ? `${leadOf(first.text)}, ${first.date}.` : 'A quiet week ahead.', true)], cards: [ne, rem] });
   }
 
   const build = (forOwner: boolean) => {

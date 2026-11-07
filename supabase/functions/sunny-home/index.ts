@@ -25,7 +25,8 @@
 import { buildBrief } from './brief.ts';
 import { buildDoc, type NameDay } from './doc.ts';
 import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
-const BUILD = '2026-11-07.3';
+import { checkInvariants } from './invariants.ts';
+const BUILD = '2026-11-07.4';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -3044,11 +3045,15 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         }
         return Math.round(sh + calls);
       };
+      const docOrders = [...thisWeek].sort((a, b) => (['roll', 'buy', 'sell', 'put'].indexOf(a.kind) - ['roll', 'buy', 'sell', 'put'].indexOf(b.kind)));
       const docs = buildDoc({ moment: brief.moment, today, mins: now.mins, isTrading, addDays, cal, brief, names: nameDays,
         market, sectors: sectorRows, futures, watch: watchlist as Row[], chart, yieldWeeks: yieldOut, payback, history,
-        earnings, macro, divs, trades, orders: [...thisWeek].sort((a, b) => (['roll', 'buy', 'sell', 'put'].indexOf(a.kind) - ['roll', 'buy', 'sell', 'put'].indexOf(b.kind))),
-        aftershock, baseNow: baseAt(today), baseAt });
-      brief = { ...brief, doc: docs.full, base: baseAt(today) };
+        earnings, macro, divs, trades, orders: docOrders, aftershock, baseNow: baseAt(today), baseAt });
+      /* README 12: the same number reads the same everywhere. Checked on every build; failures kept with the
+         brief (and logged) so a mismatch shows the day it happens, not when Nik spots it. */
+      const failed = checkInvariants({ brief, full: docs.full, open: docs.open, inputs: briefInputs, orders: docOrders });
+      if (failed.length) console.warn('sunny-home invariants', bookId, JSON.stringify(failed.slice(0, 10)));
+      brief = { ...brief, doc: docs.full, base: baseAt(today), checks: { ok: !failed.length, failed: failed.slice(0, 20) } };
       briefDocOpen = docs.open;
     } catch (e) { brief = { ...brief, doc: { v: 1, error: String((e as Error)?.message ?? e) } }; }
   }
