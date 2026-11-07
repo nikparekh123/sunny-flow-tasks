@@ -230,6 +230,7 @@ struct BHeatMap: View {
                                 }
                             }
                             .foregroundStyle(Color(hex: 0x1D1D1F))
+                            .lineLimit(1)   // shrink to fit, never wrap the % onto its own line (FIS ▼26.04%)
                             .minimumScaleFactor(0.6)
                             .padding(2)
                         }

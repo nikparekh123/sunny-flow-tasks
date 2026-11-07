@@ -27,7 +27,7 @@ import { buildDoc, type NameDay } from './doc.ts';
 import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
-const BUILD = '2026-11-07.7';
+const BUILD = '2026-11-07.8';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -3003,7 +3003,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   let briefDocOpen: Row | null = null;
   if (!brief.error) {
     try {
-      const sectorRows = await get('market_sectors?select=symbol,sector,etf,name,market_cap,price,day_pct,week_base');
+      const sectorRows = await get('market_sectors?select=symbol,sector,etf,name,market_cap,price,day_pct,week_base,sp_weight');
       const econRows = await get('econ_cards?select=id,ord,card,watch,last_period,landed_at&order=ord.asc');
       const lastSession = isTrading(today) ? today : prevTrading(today);
       const dPrev = prevTrading(lastSession), monday = addDays(today, -((new Date(today + 'T12:00:00Z').getUTCDay() + 6) % 7));

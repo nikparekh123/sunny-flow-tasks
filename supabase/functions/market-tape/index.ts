@@ -36,7 +36,7 @@
  * not a JWT, so a verify_jwt function answers 401 to every scheduled call
  * (12 Oct 2026: the first deploys did exactly that).
  */
-const BUILD = '2026-11-07.2';
+const BUILD = '2026-11-07.3';
 const UA = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 '
     + '(KHTML, like Gecko) Version/17.0 Safari/605.1.15',
@@ -287,6 +287,32 @@ Deno.serve(async (req) => {
       const w = weekOf.get(s);
       return w ? { week_base: w.week_base, week_base_date: w.week_base_date, week_start: w.week_start } : {};
     };
+
+    /* Each sector's share of the S&P 500 (the heat map's header), from SPY's holdings by sector (Yahoo, Morningstar's
+       sectors), once a day onto the sector fund's row. Never allowed to stop the quotes. */
+    let spWeights = 0;
+    try {
+      const r = await fetch(`${url}/rest/v1/market_sectors?etf=eq.true&select=symbol,sp_weight_at`, { headers: h });
+      const have = r.ok ? await r.json() as { symbol: string; sp_weight_at: string | null }[] : [];
+      const stale = !have.length || have.some((x) => !x.sp_weight_at || Date.now() - Date.parse(x.sp_weight_at) > 20 * 3600e3);
+      if (stale) {
+        if (!session) session = await newSession();
+        const q = await fetch(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/SPY?modules=topHoldings&crumb=${encodeURIComponent(session.crumb)}`,
+          { headers: { ...UA, Cookie: session.cookie }, signal: AbortSignal.timeout(10_000) });
+        // deno-lint-ignore no-explicit-any
+        const sw = q.ok ? ((await q.json())?.quoteSummary?.result?.[0]?.topHoldings?.sectorWeightings ?? []) as Record<string, any>[] : [];
+        if (!q.ok) await q.body?.cancel();
+        const MAP: Record<string, string> = { technology: 'Technology', financial_services: 'Financials', healthcare: 'Health care',
+          consumer_cyclical: 'Consumer discretionary', communication_services: 'Communication', industrials: 'Industrials',
+          consumer_defensive: 'Consumer staples', energy: 'Energy', utilities: 'Utilities', realestate: 'Real estate', basic_materials: 'Materials' };
+        const at = new Date().toISOString();
+        const wrows = sw.flatMap((o) => Object.entries(o)).map(([k, v]) => {
+          const sec = MAP[k], w = n((v as { raw?: number })?.raw ?? v), x = SECTORS.find((y) => y.sector === sec);
+          return sec && w != null && x ? { symbol: x.etf, sector: sec, etf: true, name: sec, sp_weight: +(w * 100).toFixed(2), sp_weight_at: at } : null;
+        }).filter(Boolean) as Record<string, unknown>[];
+        if (wrows.length) { await upsert('market_sectors', 'symbol', wrows); spWeights = wrows.length; }
+      }
+    } catch { /* tomorrow's call tries again */ }
 
     const passes: Record<string, unknown>[] = [];
     for (let pass = 0; pass < 2; pass++) {

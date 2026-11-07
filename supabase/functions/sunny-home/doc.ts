@@ -4,8 +4,7 @@
 // of the design's sample (ios-app Sunny/Brief/Sample/brief-home.json), so the phone only draws.
 //
 // ⚠ ANYTHING WITHOUT A REAL FEED HIDES (README 9.4): The economy and Out today when econ-sync has nothing, After
-// hours (no news feed), Thesis check (Investing Pro not wired) and the S&P weights on the sector maps are left
-// out, with no gap: a section with no cards goes and the ones after it move up a number.
+// hours (no news feed) and Thesis check (Investing Pro not wired) are left out, with no gap: a section with no cards goes and the ones after it move up a number.
 //
 // ⚠ ORDERS ARE FOR OWNERS (31 Oct 2026): Tomorrow's orders, the orders line in a lede or headline, the "sales
 // Monday" counts and To decide's question say what to trade. buildDoc returns the whole page and a copy without
@@ -95,7 +94,7 @@ function heatMap(title: string, items: { ticker: string; name: string; move: num
   const move = tot ? its.reduce((a, x) => a + x.move * x.weight, 0) / tot : 0;
   return {
     title, ...(period ? { period } : {}), move: p2(move), moveColor: col(move), moveSigned: +move.toFixed(2), ...extra,
-    aria: `${title}, ${upDown(move)} ${p2(move)}${period ? ' this week' : ''}. ` + its.map((x) => `${x.name} ${upDown(x.move)} ${p2(x.move)}`).join(', '),
+    aria: `${title}${extra.weightOfSP500 ? `, ${extra.weightOfSP500} of the S&P 500` : ''}, ${upDown(move)} ${p2(move)}${period ? ' this week' : ''}. ` + its.map((x) => `${x.name} ${upDown(x.move)} ${p2(x.move)}`).join(', '),
     mapSize: [305, 196],
     tiles: its.map((x, k) => ({ name: x.name, move: +x.move.toFixed(2), bg: tileBg(x.move), rect: rects[k], ticker: x.ticker,
       moveText: p2(x.move), showsMove: rects[k][2] >= 34 && rects[k][3] >= 30, weight: +x.weight.toFixed(1) })),
@@ -261,7 +260,9 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
         const mv = wkMode ? (num(r.week_base) && num(r.price) ? (Number(r.price) / Number(r.week_base) - 1) * 100 : null) : num(r.day_pct);
         return mv == null ? null : { ticker: String(r.symbol), name: String(r.name), move: mv, weight: Number(r.market_cap) / 1e9 };
       }).filter(Boolean) as { ticker: string; name: string; move: number; weight: number }[];
-      const m = heatMap(s.sector, its, {}, wkMode ? 'Week' : '');
+      /* The sector's share of the S&P 500 (SPY's holdings by sector, market-tape daily); left out when there is none. */
+      const spw = num(x.sectors.find((r) => r.etf && r.sector === s.sector)?.sp_weight);
+      const m = heatMap(s.sector, its, spw != null ? { weightOfSP500: `${Math.round(spw)}%` } : {}, wkMode ? 'Week' : '');
       return { ...m, move: p2(s.move), moveColor: col(s.move), moveSigned: +s.move.toFixed(2) };
     };
     const why = (s: { sector: string; move: number }) => x.sectors.filter((r) => !r.etf && r.sector === s.sector && num(r.market_cap))
