@@ -144,13 +144,31 @@ struct HomeView: View {
                     .transition(reduce ? .opacity : .move(edge: .leading).combined(with: .opacity))
                     .zIndex(1)
             }
+            // A ticker chart, pushed from any name tile (block 33): from the right, full screen, X goes back.
+            if let t = brief.ticker {
+                TickerChartPage(t: t, acct: brief.account.sampleKey) { withAnimation(reduce ? nil : S.standard(0.45)) { brief.ticker = nil } }
+                    .transition(reduce ? .opacity : .move(edge: .trailing))
+                    .zIndex(3)
+            }
         }
         .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.5), value: brief.onOverview)
+        .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.45), value: brief.ticker)
+        .sheet(item: Binding(get: { brief.sheet }, set: { brief.sheet = $0 })) { k in
+            Group {
+                switch k {
+                case .timeValue: TimeValueSheet(acct: brief.account.sampleKey, privacy: UserDefaults.standard.bool(forKey: BriefPrivacy.key)) { brief.sheet = nil }
+                case .economy: EconomySheet { brief.sheet = nil }
+                }
+            }
+            .presentationDetents([.large])
+            .presentationCornerRadius(38)
+            .presentationBackground(S.sheetFill)
+        }
         .overlay {
             SunnyTabBar(tab: router.tab, pick: pickTab, search: openSearch)
-                .offset(y: barDown || brief.onOverview ? 120 : 0)
-                .opacity(barGone || brief.onOverview ? 0 : 1)
-                .allowsHitTesting(!router.searchOpen && !brief.onOverview)
+                .offset(y: barDown || brief.onOverview || brief.ticker != nil ? 120 : 0)
+                .opacity(barGone || brief.onOverview || brief.ticker != nil ? 0 : 1)
+                .allowsHitTesting(!router.searchOpen && !brief.onOverview && brief.ticker == nil)
                 .animation(reduce ? .easeOut(duration: 0.2) : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: brief.onOverview)
         }
         .environment(brief)
@@ -165,6 +183,12 @@ struct HomeView: View {
         brief.account = BriefDebug.account ?? .sunny
         UserDefaults.standard.set(BriefDebug.privacy, forKey: BriefPrivacy.key)
         if BriefDebug.tab == "positions" { router.tab = .positions }
+        switch BriefDebug.open {
+        case "timevalue": brief.sheet = .timeValue
+        case "economy": brief.sheet = .economy
+        case let o? where o.hasPrefix("ticker:"): brief.ticker = String(o.dropFirst(7))
+        default: break
+        }
     }
 
     /// A tap on the open tab scrolls it to the top.

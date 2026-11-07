@@ -206,6 +206,7 @@ struct BBars: View {
 /// A heat map drawn from the content's own tiles (rects on a 305 × 196 grid, colours by move).
 struct BHeatMap: View {
     let page: JSONValue
+    @Environment(BriefState.self) private var brief
     var body: some View {
         let size = page["mapSize"].array.compactMap(\.double)
         let mw = size.first ?? 305, mh = size.count > 1 ? size[1] : 196
@@ -231,6 +232,8 @@ struct BHeatMap: View {
                             .padding(2)
                         }
                         .frame(width: w, height: h)
+                        .contentShape(Rectangle())
+                        .onTapGesture { if let t = t["ticker"].string, SampleBook.q[t] != nil { brief.ticker = t } }
                         .offset(x: r[0] * sx, y: r[1] * sy)
                     }
                 }

@@ -86,6 +86,8 @@ struct BMarketsCard: View {
 /// One indicator card: label and tag, the reading big, its trend, four bars (the latest dark), a note.
 struct BIndicatorCard: View {
     let c: JSONValue
+    /// 300 in a sideways row; nil fills the width (the economy sheet).
+    var width: CGFloat? = 300
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -126,8 +128,8 @@ struct BIndicatorCard: View {
             }
             Spacer(minLength: 0)
         }
-        .frame(width: 300, alignment: .leading)
-        .frame(minHeight: 300, alignment: .top)
+        .frame(width: width, alignment: .leading)
+        .frame(minHeight: width == nil ? nil : 300, alignment: .top)
         .briefCard()
         .accessibilityElement(children: .combine)
     }
@@ -135,6 +137,7 @@ struct BIndicatorCard: View {
 
 struct BEconomyRow: View {
     let card: JSONValue
+    @Environment(BriefState.self) private var brief
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             BRow {
@@ -165,7 +168,7 @@ struct BEconomyRow: View {
                 ForEach(Array(card["indicators"].array.enumerated()), id: \.offset) { _, c in BIndicatorCard(c: c) }
             }
             if let b = card["button"].string {
-                Button {} label: {
+                Button { brief.sheet = .economy } label: {
                     Text("\(b) ›").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
                 }
                 .buttonStyle(.plain)

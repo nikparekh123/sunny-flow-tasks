@@ -90,6 +90,8 @@ enum BriefDebug {
     static let name: String? = value("-pname")
     static let scroll: CGFloat? = value("-scroll").flatMap(Double.init).map { CGFloat($0) }
     static let stop: Int? = value("-pstop").flatMap(Int.init)
+    /// `-open timevalue|economy|ticker:NFLX` opens an overlay at launch.
+    static let open: String? = value("-bopen")
 
     private static func flag(_ k: String) -> Bool {
         #if DEBUG && targetEnvironment(simulator)
@@ -109,6 +111,8 @@ enum BriefDebug {
     }
 }
 
+enum BriefSheetKind: String, Identifiable { case timeValue, economy; var id: String { rawValue } }
+
 // MARK: - State shared by Home, Positions and Overview
 
 @MainActor
@@ -124,6 +128,9 @@ final class BriefState {
     /// Positions: the name on screen, and whether it opened at the Friday close stop (from Your position).
     var positionsName: String?
     var positionsAtFriday = false
+    /// Overlays (block 33): the Time value sheet, the economy sheet, a ticker chart pushed from a name tile.
+    var sheet: BriefSheetKind?
+    var ticker: String?
 
     var showsStrip: Bool { accounts.count > 1 }
     var onOverview: Bool { account == .overview }

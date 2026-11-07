@@ -32,18 +32,18 @@ struct PositionsModel {
     let legs: [Leg]
     let earned: [String: Double]          // sold leg id → premium already earned (q × 100 × (at − now))
     let X0: Double, X1: Double
-    let stops: [Stop] = [
-        Stop(tt: 0, short: "Today", phrase: "today", long: "Tue Oct 27"), Stop(tt: 1, short: "Wed", phrase: "on Wednesday", long: "Wed Oct 28"),
-        Stop(tt: 2, short: "Thu", phrase: "on Thursday", long: "Thu Oct 29"), Stop(tt: 2.9, short: "Oct 30", phrase: "at the Oct 30 close", long: "Fri Oct 30 close"),
-        Stop(tt: 6, short: "Mon", phrase: "on Mon Nov 2", long: "Mon Nov 2"), Stop(tt: 7, short: "Tue", phrase: "on Tue Nov 3", long: "Tue Nov 3"),
-        Stop(tt: 8, short: "Wed", phrase: "on Wed Nov 4", long: "Wed Nov 4"), Stop(tt: 9, short: "Thu", phrase: "on Thu Nov 5", long: "Thu Nov 5"),
-        Stop(tt: 9.9, short: "Nov 6", phrase: "at the Nov 6 close", long: "Fri Nov 6 close")]
+    /// One stop per trading day to the last sold expiry. On the weekend the week that ended folds away and the
+    /// slider runs Mon Nov 2 to Fri Nov 6 (answer 3), counted from Saturday.
+    let stops: [Stop]
+    /// The weekend: this week's sold legs ended Friday and sit under "Ended Oct 30 · settled".
+    let weekend: Bool
+    let ended: [Leg]
     var sd: Double { S0 * v * (5.0 / 252).squareRoot() }
     var strategy: String
     /// This week's sold legs as booked (sold at, now), for what is left to earn and what is kept.
     let sold: [SampleBook.Sold]
 
-    init?(t: String, acct: String) {
+    init?(t: String, acct: String, weekend: Bool = false) {
         let book = SampleBook.book(acct)
         guard let b = book[t], let q = SampleBook.q[t] else { return nil }
         self.t = t; S0 = q.0; P0 = q.1; v = SampleBook.iv[t] ?? 0.35; strategy = b.strategy; sold = b.sold
@@ -63,7 +63,33 @@ struct PositionsModel {
             L.append(Leg(id: "l\(i)", group: "l", ty: x.put ? .put : .call, K: x.k, q: Double(x.q), T: Double(SampleBook.longDays[x.ex] ?? 300), ex: x.ex,
                          title: "\(x.kind.rawValue) \(fk(x.k)) ×\(x.q), \(x.ex)", kind: x.kind))
         }
-        legs = L; earned = e
+        self.weekend = weekend
+        if weekend {
+            // Saturday: the Oct 30 legs are settled (their premium is in the books, not in P&L from now); the
+            // long legs are 4 days nearer their expiry.
+            ended = L.filter { $0.group == "s" }
+            legs = L.filter { $0.group != "s" }.map { Leg(id: $0.id, group: $0.group, ty: $0.ty, K: $0.K, q: $0.q, T: $0.ty == .shares ? 0 : $0.T - 4, ex: $0.ex, title: $0.title, kind: $0.kind) }
+            earned = [:]
+            stops = [Stop(tt: 2, short: "Mon", phrase: "on Mon Nov 2", long: "Mon Nov 2"), Stop(tt: 3, short: "Tue", phrase: "on Tue Nov 3", long: "Tue Nov 3"),
+                     Stop(tt: 4, short: "Wed", phrase: "on Wed Nov 4", long: "Wed Nov 4"), Stop(tt: 5, short: "Thu", phrase: "on Thu Nov 5", long: "Thu Nov 5"),
+                     Stop(tt: 5.9, short: "Nov 6", phrase: "at the Nov 6 close", long: "Fri Nov 6 close")]
+        } else {
+            ended = []
+            legs = L; earned = e
+            stops = [
+                Stop(tt: 0, short: "Today", phrase: "today", long: "Tue Oct 27"), Stop(tt: 1, short: "Wed", phrase: "on Wednesday", long: "Wed Oct 28"),
+                Stop(tt: 2, short: "Thu", phrase: "on Thursday", long: "Thu Oct 29"), Stop(tt: 2.9, short: "Oct 30", phrase: "at the Oct 30 close", long: "Fri Oct 30 close"),
+                Stop(tt: 6, short: "Mon", phrase: "on Mon Nov 2", long: "Mon Nov 2"), Stop(tt: 7, short: "Tue", phrase: "on Tue Nov 3", long: "Tue Nov 3"),
+                Stop(tt: 8, short: "Wed", phrase: "on Wed Nov 4", long: "Wed Nov 4"), Stop(tt: 9, short: "Thu", phrase: "on Thu Nov 5", long: "Thu Nov 5"),
+                Stop(tt: 9.9, short: "Nov 6", phrase: "at the Nov 6 close", long: "Fri Nov 6 close")]
+        }
+    }
+
+    /// The 20-day average and the month's high and low (the Technicals layer), from the sample's price series.
+    var technicals: (sma: Double?, hi: Double?, lo: Double?) {
+        let v = Array(SampleSeries.series(t).suffix(22))
+        guard v.count >= 20 else { return (nil, nil, nil) }
+        return (v.suffix(20).reduce(0, +) / 20, v.max(), v.min())
     }
 
     // MARK: Valuation (the prototype's: no rate, one IV per name)
@@ -108,7 +134,8 @@ struct PositionsModel {
         return (mn * 1.1 == 0 ? -1 : mn * 1.1, mx * 1.12 == 0 ? 1 : mx * 1.12)
     }
     /// Short at its priced move by Friday: the logo strip's orange dot (the same test as Home).
-    var shortByFriday: Bool { delta(S0 + sd, 2.9) < 0 }
+    var shortByFriday: Bool { delta(S0 + sd, weekend ? 5.9 : 2.9) < 0 }
+    var fridayStop: Int { stops.firstIndex { $0.short.contains(" ") } ?? 0 }
 
     // MARK: Fixes (only when short at the price and date)
 

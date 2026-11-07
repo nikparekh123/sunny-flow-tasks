@@ -25,6 +25,7 @@ struct BriefHomeScreen: View {
     var body: some View {
         let moment = brief.moment()
         let doc = BriefDebug.sample ? BriefSample.doc(moment, brief.account.sampleKey) : nil
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if brief.showsStrip {
@@ -34,8 +35,14 @@ struct BriefHomeScreen: View {
                 }
                 AccountChart(home: home, readTick: store.readTick)
                     .padding(.top, brief.showsStrip ? 0 : 14)
-                BriefDeck(moment: moment, doc: doc)
-                    .padding(.top, 24)
+                BriefDeck(moment: moment, doc: doc) { kind in
+                    // Aftershock opens its page; Earnings season and Holiday scroll Home to the last section.
+                    if kind == "aftershock" { if home.aftershock != nil { router.openAftershock() } }
+                    else if let last = doc?.sections.last {
+                        withAnimation(reduce ? nil : .timingCurve(0.45, 0, 0.25, 1, duration: 1.0)) { proxy.scrollTo("sec-\(last.id)", anchor: .top) }
+                    }
+                }
+                .padding(.top, 24)
                 if let doc {
                     BriefTitle(doc: doc, privacy: privacy)
                         .padding(.top, 24)
@@ -43,6 +50,7 @@ struct BriefHomeScreen: View {
                     ForEach(doc.sections) { s in
                         BriefSectionView(section: s, privacy: privacy)
                             .padding(.top, 56)
+                            .id("sec-\(s.id)")
                     }
                 } else {
                     BriefTitle(doc: nil, moment: moment, privacy: privacy)
@@ -58,6 +66,8 @@ struct BriefHomeScreen: View {
         .scrollIndicators(.hidden)
         .scrollPosition($pos)
         .overlay(alignment: .top) { BriefTopEdge() }
+        .environment(\.timeValueTap, { brief.sheet = .timeValue })
+        }
         .onChange(of: router.topTick[.home]) { _, _ in withAnimation(reduce ? nil : S.standard(0.45)) { pos.scrollTo(edge: .top) } }
         .task {
             // DEBUG audits: `-scroll 1600` opens Home scrolled that far, so a long page is shot in slices.

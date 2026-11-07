@@ -171,7 +171,14 @@ extension Array {
 
 // MARK: - View
 
+/// New Home (handoff 6 Nov, answer 2): "Time value ›" under the chart opens the Time value sheet.
+struct TimeValueTapKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
+extension EnvironmentValues {
+    var timeValueTap: (() -> Void)? { get { self[TimeValueTapKey.self] } set { self[TimeValueTapKey.self] = newValue } }
+}
+
 struct AccountChart: View {
+    @Environment(\.timeValueTap) private var timeValueTap
     let home: HomePayload
     /// Home opened or was pulled: Time value shows its read for a few seconds.
     var readTick = 0
@@ -659,7 +666,7 @@ struct AccountChart: View {
             // The read rolls in over "Time value" for a few seconds, then back.
             let word = readOn ? st.read : nil
             ZStack(alignment: .leading) {
-                Text(word?.word ?? st.label)
+                Text(word?.word ?? (st.label == "Time value" && timeValueTap != nil ? "Time value ›" : st.label))
                     .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
                     .foregroundStyle(word?.color ?? S.muted)
                     .lineLimit(1)
@@ -671,8 +678,11 @@ struct AccountChart: View {
             .frame(height: 16, alignment: .leading)
             .clipped()
         }
+        .contentShape(Rectangle())
+        .onTapGesture { if st.label == "Time value" { timeValueTap?() } }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(st.read?.word ?? st.label) \(hidden ? "hidden" : st.text ?? F.money(st.value))")
+        .accessibilityAddTraits(st.label == "Time value" && timeValueTap != nil ? .isButton : [])
     }
 
     private struct Minor { let label: String; let text: String; var color: Color = S.ink }

@@ -3,16 +3,18 @@
 //  Sunny
 //
 //  The deck (block 29, README 5.3): the day card is home base. One alert a moment slides in on top 1.8 s
-//  after Home opens, sits 8 s, then goes back behind the day card; the one that loses sits in the deck
-//  without sliding in (answer 5). Cards 200 tall, radius 24; dots under the stack.
+//  after Home opens (0.9 s after a moment change) from the right with a small tilt (0.62 s, slight
+//  overshoot), sits 8 s, then goes back behind the day card (0.5 s). A swipe, a tap, or closing what it opened
+//  also sends it back; X dismisses it for the moment; the dots switch cards; it arrives once a moment. The one
+//  that loses sits in the deck without sliding in (answer 5). Cards 200 tall, radius 24; with an alert the
+//  stack is 240 tall, the back card peeking 8 pt above. Reduce Motion: no slide, the card just comes to the top.
 //
 //  ⚠ THE DAY CARD IS DRAWN AS SunnyBriefs.dc.html DRAWS IT (rv32, "sky" on the sky ground), on its own
 //  340 × 200 grid stretched to the card: the horizon at y 150; the sun's path from 4:00 AM (x 34) to 8:00 PM
-//  (x 306), 62 high at noon-ish, dipping 16 below the horizon for the 4 hours either side; 49 ticks from
-//  x 6 to 334, tall (14) at 4:00, 9:30, 4:00 PM and 8:00 PM, the one under the sun 20 and bright, lit (90%)
-//  up to now and faint (30%) after. Six skies by the minute: night < 5:00, dawn < 6:40, morning < 11:00,
-//  day < 3:50 PM, sunset < 6:00 PM, dusk < 8:00 PM, then night. The caption on top: the session (13/16
-//  semibold) and what comes next (12/15 medium, 80% white), with a 6 pt orange dot when the close is near.
+//  (x 306), 62 high at the top of the arc, dipping 16 below the horizon for the 4 hours either side; 49 ticks
+//  from x 6 to 334, tall (14) at 4:00, 9:30, 4:00 PM and 8:00 PM, the one under the sun 20 and bright, lit
+//  (90%) up to now and faint (30%) after. Six skies by the minute: night < 5:00, dawn < 6:40, morning
+//  < 11:00, day < 3:50 PM, sunset < 6:00 PM, dusk < 8:00 PM, then night.
 //
 
 import SwiftUI
@@ -20,18 +22,133 @@ import SwiftUI
 struct BriefDeck: View {
     let moment: Moment
     let doc: BriefDoc?
+    var onAlert: (String) -> Void = { _ in }
+
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    @State private var alertOnTop = false
+    @State private var dismissed = false
+    /// Each moment's alert arrives once (per app run).
+    nonisolated(unsafe) private static var arrived: Set<String> = []
+
+    private var alert: JSONValue { dismissed ? .null : (doc?.alert ?? .null) }
 
     var body: some View {
+        let hasAlert = !alert.isNull
         VStack(spacing: 10) {
-            DayCard(moment: moment, caption: doc?.dayCaption, warn: doc?.dayCaptionOrange ?? false)
-                .frame(height: 200)
-                .padding(.horizontal, S.margin)
-            HStack(spacing: 6) {
-                Capsule().fill(S.ink).frame(width: 22, height: 8)
-                if !(doc?.alert.isNull ?? true) { Circle().fill(S.secondary.opacity(0.4)).frame(width: 8, height: 8) }
+            ZStack(alignment: .top) {
+                DayCard(moment: moment, caption: doc?.dayCaption, warn: doc?.dayCaptionOrange ?? false)
+                    .frame(height: 200)
+                    .scaleEffect(hasAlert && alertOnTop ? 0.96 : 1, anchor: .top)
+                    .offset(y: hasAlert ? (alertOnTop ? 0 : 16) : 0)
+                    .zIndex(alertOnTop ? 0 : 1)
+                    .onTapGesture { if alertOnTop { send(back: true) } }
+                if hasAlert {
+                    AlertCard(alert: alert, moment: moment, close: { withAnimation(S.standard(0.4)) { dismissed = true; alertOnTop = false } })
+                        .frame(height: 200)
+                        .scaleEffect(alertOnTop ? 1 : 0.96, anchor: .top)
+                        .offset(y: alertOnTop ? 16 : 0)
+                        .rotationEffect(.degrees(alertOnTop ? 0 : 0))
+                        .zIndex(alertOnTop ? 1 : 0)
+                        .onTapGesture {
+                            if alertOnTop { onAlert(alert["kind"].string ?? ""); send(back: true) } else { bring() }
+                        }
+                        .gesture(DragGesture(minimumDistance: 20).onEnded { v in if abs(v.translation.width) > 40 { send(back: alertOnTop) } })
+                        .transition(.opacity)
+                }
             }
-            .accessibilityHidden(true)
+            .frame(height: hasAlert ? 216 : 200, alignment: .top)
+            .padding(.horizontal, S.margin)
+            HStack(spacing: 6) {
+                dot(on: !alertOnTop) { send(back: true) }
+                if hasAlert { dot(on: alertOnTop) { bring() } }
+            }
         }
+        .task(id: moment) {
+            guard !alert.isNull, !Self.arrived.contains(moment.rawValue) else { return }
+            try? await Task.sleep(for: .milliseconds(1800))
+            guard !Task.isCancelled else { return }
+            Self.arrived.insert(moment.rawValue)
+            bring()
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+            send(back: true)
+        }
+    }
+
+    private func bring() {
+        withAnimation(reduce ? nil : .timingCurve(0.3, 1.25, 0.5, 1, duration: 0.62)) { alertOnTop = true }
+    }
+    private func send(back: Bool) {
+        withAnimation(reduce ? nil : S.standard(0.5)) { alertOnTop = !back }
+    }
+    private func dot(on: Bool, _ tap: @escaping () -> Void) -> some View {
+        Button(action: tap) {
+            Capsule().fill(on ? S.ink : S.grabber).frame(width: on ? 22 : 8, height: 8)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// An alert card: Earnings season and Holiday on white (kicker in caps, title 28/34 bold, sub, a 200 pt
+/// watermark of its mark at 6%, X); Aftershock in the deepest blue of the hour with its scan state and an arrow.
+private struct AlertCard: View {
+    let alert: JSONValue
+    let moment: Moment
+    let close: () -> Void
+
+    var body: some View {
+        let kind = alert["kind"].string ?? ""
+        let dark = kind == "aftershock"
+        let (title, sub) = texts(kind)
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(dark ? AnyShapeStyle(LinearGradient(colors: [Color(hex: 0x0E2F6B), Color(hex: 0x1A56B4)], startPoint: .top, endPoint: .bottom))
+                           : AnyShapeStyle(S.sheetFill))
+                // The watermark draws over the card's shape only, so it can never size the card.
+                .overlay(alignment: .bottomTrailing) {
+                    if let mark = alert["mark"].string {
+                        Text(mark).font(.system(size: 200, weight: .heavy)).foregroundStyle((dark ? Color.white : S.ink).opacity(0.06))
+                            .lineLimit(1).fixedSize()
+                            .offset(x: 24, y: 56)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text((alert["kicker"].string ?? "").uppercased())
+                        .font(.system(size: 13, weight: .bold)).tracking(0.78)
+                        .foregroundStyle(dark ? .white.opacity(0.85) : S.ink)
+                    Spacer()
+                    if dark {
+                        Text(alert["arrow"].string ?? "→").font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
+                    } else {
+                        Button(action: close) { Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).foregroundStyle(S.secondary) }
+                            .buttonStyle(.plain).accessibilityLabel("Dismiss")
+                    }
+                }
+                Spacer()
+                Text(title).font(.system(size: 28, weight: .bold)).foregroundStyle(dark ? .white : S.ink)
+                    .lineLimit(2).minimumScaleFactor(0.8)
+                Text(sub).font(.system(size: 13, weight: .medium)).foregroundStyle(dark ? .white.opacity(0.8) : S.ink)
+                    .lineLimit(2).padding(.top, 6)
+            }
+            .padding(22)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.12), radius: 14, y: 10)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// Aftershock has no fixed text: before the close it waits for the 4:15 scan, near the close it counts
+    /// down, after the close it reports what the scan found.
+    private func texts(_ kind: String) -> (String, String) {
+        if kind == "aftershock" {
+            let key: String = switch moment { case .last20, .last5: "soon"; case .post: "done"; default: "wait" }
+            let s = alert["states"][key].array.compactMap(\.string)
+            return ((s.first ?? "Aftershock").replacingOccurrences(of: "{mm:ss}", with: "18:00"), s.count > 1 ? s[1] : "")
+        }
+        return (alert["title"].string ?? "", alert["sub"].string ?? "")
     }
 }
 
