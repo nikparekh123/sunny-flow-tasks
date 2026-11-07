@@ -86,21 +86,35 @@ struct BriefSheetChrome<Content: View>: View {
 struct TimeValueSheet: View {
     let acct: String
     let privacy: Bool
+    /// The server's timeValue (brief.ts): every sold leg still open, with its time value left.
+    var live: JSONValue = .null
     let close: () -> Void
 
-    struct Row: Identifiable { let id: String; let t: String; let leg: String; let left: Double; let collected: Double; let intrinsic: Double; let perShare: Double }
+    struct Row: Identifiable { let id: String; let t: String; let name: String; let leg: String; let left: Double; let collected: Double; let intrinsic: Double; let perShare: Double }
 
-    var body: some View {
+    /// The sold legs: the server's real ones (answer 2), or the sample book's in a -sample run.
+    private var rows: [Row] {
+        if !BriefDebug.sample {
+            return live["legs"].array.enumerated().map { i, l in
+                let t = l["t"].string ?? "", k = l["K"].double ?? 0, q = l["q"].double ?? 0
+                return Row(id: "\(t)\(i)", t: t, name: l["name"].string ?? t, leg: "\(String(format: "%g", k)) \(l["put"].bool ? "puts" : "calls") ×\(Int(q))",
+                           left: l["tvLeft"].double ?? 0, collected: l["col"].double ?? 0, intrinsic: l["intr"].double ?? 0, perShare: l["tvPer"].double ?? 0)
+            }
+        }
         let book = SampleBook.book(acct)
-        let rows: [Row] = SampleBook.names.flatMap { t -> [Row] in
+        return SampleBook.names.flatMap { t -> [Row] in
             guard let b = book[t], let q = SampleBook.q[t] else { return [] }
             return b.sold.enumerated().map { i, s in
                 let intr = s.put ? max(0, s.k - q.0) : max(0, q.0 - s.k)
                 let tv = max(0, s.now - intr)
-                return Row(id: "\(t)\(i)", t: t, leg: "\(String(format: "%g", s.k)) \(s.put ? "puts" : "calls") ×\(s.q)",
+                return Row(id: "\(t)\(i)", t: t, name: SampleBook.company[t] ?? t, leg: "\(String(format: "%g", s.k)) \(s.put ? "puts" : "calls") ×\(s.q)",
                            left: tv * Double(s.q) * 100, collected: s.at * Double(s.q) * 100, intrinsic: intr, perShare: tv)
             }
         }
+    }
+
+    var body: some View {
+        let rows = rows
         let left = rows.reduce(0) { $0 + $1.left }, coll = rows.reduce(0) { $0 + $1.collected }
         let cap = coll > 0 ? 1 - left / coll : 0
         let ready = rows.filter { $0.perShare < 0.05 || ($0.collected > 0 && 1 - $0.left / $0.collected >= 0.9) || $0.intrinsic > 0 }
@@ -137,7 +151,7 @@ struct TimeValueSheet: View {
                             ForEach(ready) { r in
                                 VStack(alignment: .leading, spacing: 4) {
                                     BLogo(ticker: r.t, size: 28)
-                                    Text(SampleBook.company[r.t] ?? r.t).sType(BK.row, tabular: false).foregroundStyle(S.ink).padding(.top, 6)
+                                    Text(r.name).sType(BK.row, tabular: false).foregroundStyle(S.ink).padding(.top, 6)
                                     Text(r.leg).sType(BK.rowSub, tabular: false).foregroundStyle(S.secondary)
                                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                                         Text(BriefWords.plain("$" + SampleEngine.fn(r.left), privacy: privacy)).sType(SType(size: 22, weight: 800, line: 26, tracking: 0)).foregroundStyle(S.ink)
@@ -170,7 +184,7 @@ struct TimeValueSheet: View {
                         HStack(spacing: 12) {
                             BLogo(ticker: t, size: 28)
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("\(SampleBook.company[t] ?? t) · \(rs.map(\.leg).joined(separator: ", "))")
+                                Text("\(rs.first?.name ?? t) · \(rs.map(\.leg).joined(separator: ", "))")
                                     .sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink).lineLimit(1)
                                 HStack(spacing: 8) {
                                     GeometryReader { g in

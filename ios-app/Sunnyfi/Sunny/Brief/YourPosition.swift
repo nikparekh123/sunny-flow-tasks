@@ -18,7 +18,23 @@ struct YourPositionCard: View {
     @Environment(HomeRouter.self) private var router
 
     var body: some View {
-        let m = YourPositionModel.sample(acct: brief.account.sampleKey, moment: brief.moment())
+        if let m = BriefDebug.sample ? YourPositionModel.sample(acct: brief.account.sampleKey, moment: brief.moment()) : brief.live?.position {
+            filled(m)
+        } else {
+            // A book with nothing held (README 9.4 and the cousin's empty book): the title and one line, no chart.
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Your position").sType(BK.title, tabular: false).foregroundStyle(S.ink)
+                Text("Nothing held yet").sType(BK.sub, tabular: false).foregroundStyle(S.secondary).padding(.top, 2)
+                Text("Once shares or options are in the book, this shows where it stands by Friday’s close if the whole market moves together.")
+                    .sType(SType(size: 15, weight: 500, line: 21, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+                    .fixedSize(horizontal: false, vertical: true).padding(.top, 12)
+            }
+            .briefCard()
+            .padding(.horizontal, S.margin)
+        }
+    }
+
+    private func filled(_ m: YourPositionModel) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Your position").sType(BK.title, tabular: false).foregroundStyle(S.ink)
             Text(m.subtitle).sType(BK.sub, tabular: false).foregroundStyle(S.secondary).padding(.top, 2)

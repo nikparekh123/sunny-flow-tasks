@@ -156,7 +156,8 @@ struct HomeView: View {
         .sheet(item: Binding(get: { brief.sheet }, set: { brief.sheet = $0 })) { k in
             Group {
                 switch k {
-                case .timeValue: TimeValueSheet(acct: brief.account.sampleKey, privacy: UserDefaults.standard.bool(forKey: BriefPrivacy.key)) { brief.sheet = nil }
+                case .timeValue: TimeValueSheet(acct: brief.account.sampleKey, privacy: UserDefaults.standard.bool(forKey: BriefPrivacy.key),
+                                                live: brief.live?.timeValue ?? .null) { brief.sheet = nil }
                 case .economy: EconomySheet { brief.sheet = nil }
                 }
             }
@@ -173,6 +174,8 @@ struct HomeView: View {
         }
         .environment(brief)
         .onAppear(perform: briefSetup)
+        // The server's brief, decoded once per build (memoized; HomeStore ticks every 15 to 30 s).
+        .onChange(of: home.builtAt, initial: true) { _, _ in brief.ingest(home.brief, key: home.builtAt) }
     }
 
     /// Who sees which accounts. Sample mode (DEBUG): both books and Overview, as the design shows Nik.

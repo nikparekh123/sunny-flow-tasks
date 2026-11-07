@@ -132,6 +132,17 @@ final class BriefState {
     var sheet: BriefSheetKind?
     var ticker: String?
 
+    /// The server's brief for the book on screen, decoded once per update (memoized: never built in a body).
+    private(set) var live: BriefLive?
+    private var liveKey: String?
+
+    /// Called on each new Home payload: decodes the brief only when the build is new.
+    func ingest(_ brief: JSONValue?, key: String?) {
+        guard key != liveKey else { return }
+        liveKey = key
+        live = brief.map(BriefLive.init)
+    }
+
     var showsStrip: Bool { accounts.count > 1 }
     var onOverview: Bool { account == .overview }
 

@@ -23,7 +23,8 @@
  * the sunny-home-N cron sends {"book":"N"} for the cousin's book, BOOKS below).
  */
 import { buildBrief } from './brief.ts';
-const BUILD = '2026-11-06.2';
+import { buildDoc, type NameDay } from './doc.ts';
+const BUILD = '2026-11-07.2';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -525,7 +526,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   }
   const spotOf = new Map<string, number>();
   for (const q of quotes) if (q.spot != null) spotOf.set(String(q.ticker).toUpperCase(), Number(q.spot));
-  for (const m of market) if (m.price != null && !spotOf.has(String(m.symbol))) spotOf.set(String(m.symbol), Number(m.price));
+  /* Yahoo's 'name' rows carry pre-market and after-hours prices for New Home's words; never a spot. */
+  for (const m of market) if (m.price != null && m.kind !== 'name' && !spotOf.has(String(m.symbol))) spotOf.set(String(m.symbol), Number(m.price));
 
   step('legs+realized');
   // ── Account: IBKR's last close, moved by today's prices and fills ──
@@ -2981,6 +2983,66 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     brief = out.brief; briefInputs = out.inputs;
   } catch (e) { brief = { v: 1, error: String((e as Error)?.message ?? e) }; }
   step('brief');
+  /* ── NEW HOME'S PAGE (doc.ts): the sections and cards for the moment, from the same reads. The whole page
+     goes to owners (home_todo); the copy without orders to the snapshot (forOwners). ── */
+  let briefDocOpen: Row | null = null;
+  if (!brief.error) {
+    try {
+      const sectorRows = await get('market_sectors?select=symbol,sector,etf,name,market_cap,price,day_pct,week_base');
+      const lastSession = isTrading(today) ? today : prevTrading(today);
+      const dPrev = prevTrading(lastSession), monday = addDays(today, -((new Date(today + 'T12:00:00Z').getUTCDay() + 6) % 7));
+      /* What a leg is worth at the last close before the session: that day's mark, or what it cost if opened after. */
+      const prevMark = (l: Leg) => {
+        const rows = groups.get(`${l.ticker}|${l.type}|${l.side === 'sold' ? 'short' : 'long'}|${l.strike}|${l.expiry}`) ?? [];
+        if (l.opened > dPrev) return l.avg;
+        const g = greekOn(rows.filter((r) => r.action === 'open').map((r) => String(r.id)), dPrev);
+        return g?.mark != null ? Number(g.mark) : l.avg;
+      };
+      const yahooName = (t: string) => market.find((m) => m.symbol === t && m.kind === 'name');
+      const nameDays: NameDay[] = (brief.names as Row[]).map((b) => {
+        const t = String(b.t), ls = legs.filter((l) => l.ticker === t);
+        const td = { sh: Number(b.h?.sh?.[1] ?? 0), lp: 0, oc: 0, ip: 0, sc: 0, sp: 0 };
+        for (const l of ls) {
+          if (l.mark == null) continue;
+          const v = (l.side === 'sold' ? -1 : 1) * l.n * 100 * (l.mark - prevMark(l));
+          const k = l.side === 'sold' ? (l.type === 'call' ? 'sc' : 'sp') : l.type === 'put' ? 'ip' : isLeap(l) ? 'lp' : 'oc';
+          td[k] += v;
+        }
+        for (const k of Object.keys(td) as (keyof typeof td)[]) td[k] = Math.round(td[k]);
+        const y = yahooName(t), st = String(y?.market_state ?? '');
+        const ext = st.startsWith('PRE') && y?.pre_change_pct != null ? Number(y.pre_change_pct)
+          : y?.post_change_pct != null ? Number(y.post_change_pct) : null;
+        const wb = closes.filter((c) => c.ticker === t && String(c.date) < monday).at(-1);
+        return { t, shares: sharesHeld.get(t) ?? 0, leaps: ls.filter((l) => isLeap(l)).reduce((a, l) => a + l.n, 0),
+          S0: Number(b.S0), P0: Number(b.P0), weekBase: wb ? Number(wb.close_price) : null, ext, today: td,
+          soldCalls: ls.filter((l) => l.side === 'sold' && l.type === 'call').map((l) => ({ K: l.strike, n: l.n, ex: l.expiry })) };
+      });
+      /* README 9.2: the yield and payback base is the shares at cost plus what the LEAPS and OTM calls cost, as at
+         that day (insurance is a cost, not capital; a closed week keeps the base it had). */
+      const posDays = [...new Set(posAll.filter((r) => r.asset_category === 'STK').map((r) => String(r.report_date)))].sort();
+      const baseAt = (d: string) => {
+        const pd = posDays.filter((x) => x <= d).at(-1);
+        let sh = 0;
+        if (pd) for (const r of posAll) if (String(r.report_date) === pd && r.asset_category === 'STK' && Number(r.position) > 0) sh += Number(r.cost_basis_money ?? 0);
+        let calls = 0;
+        for (const [, rows] of groups) {
+          const f = rows[0];
+          if (f.direction !== 'long' || f.option_type !== 'call' || String(f.expiry) < d) continue;
+          let on = 0, cost = 0, off = 0;
+          for (const r of rows) { if (String(r.trade_date) > d) continue; if (r.action === 'open') { on += Number(r.contracts); cost += Number(r.contracts) * Number(r.premium) * 100; } else off += Number(r.contracts); }
+          if (on > off) calls += (on - off) * (cost / on);
+        }
+        return Math.round(sh + calls);
+      };
+      const docs = buildDoc({ moment: brief.moment, today, mins: now.mins, isTrading, addDays, cal, brief, names: nameDays,
+        market, sectors: sectorRows, futures, watch: watchlist as Row[], chart, yieldWeeks: yieldOut, payback, history,
+        earnings, macro, divs, trades, orders: [...thisWeek].sort((a, b) => (['roll', 'buy', 'sell', 'put'].indexOf(a.kind) - ['roll', 'buy', 'sell', 'put'].indexOf(b.kind))),
+        aftershock, baseNow: baseAt(today), baseAt });
+      brief = { ...brief, doc: docs.full, base: baseAt(today) };
+      briefDocOpen = docs.open;
+    } catch (e) { brief = { ...brief, doc: { v: 1, error: String((e as Error)?.message ?? e) } }; }
+  }
+  step('doc');
   const payload = {
     build: BUILD, built_at: new Date().toISOString(), today, trading_today: isTrading(today),
     calendar: cal.filter((c) => String(c.date) >= today)
@@ -3014,7 +3076,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     /* Daily closes per name for the Bought face (13f). */
     daily,
     /* New Home and Positions (handoff 6 Nov 2026): the brief, and the engine inputs sunny-positions prices on a grid. */
-    brief, brief_inputs: briefInputs,
+    brief, brief_inputs: briefInputs, brief_doc_open: briefDocOpen,
   };
   return { payload, ms: Date.now() - t0, steps };
 }
@@ -3054,6 +3116,9 @@ const isOrder = (x: Row) => x.key === 'hedge' && (x.kind === 'thin' || x.tag ===
 function forOwners(p: Row): { open: Row; owner: Row } {
   const open: Row = { ...p }, top: Row = {}, names: Row = {};
   for (const k of OWNER_TOP) if (k in open) { top[k] = open[k]; delete open[k]; }
+  /* New Home's page: the whole one (orders, To decide's question) for owners, the copy without them for everyone. */
+  delete open.brief_doc_open;
+  if (p.brief?.doc) { top.brief = { doc: p.brief.doc }; open.brief = { ...p.brief, doc: p.brief_doc_open ?? null }; }
   if (p.insights_all) {
     const { verdict: _v, todo: _t, ...rest } = p.insights_all as Row;
     top.insights_all = p.insights_all;
@@ -3126,7 +3191,7 @@ Deno.serve(async (req) => {
       if (!wt.ok) throw new Error(`home_todo ${wt.status} ${(await wt.text()).slice(0, 160)}`);
       const w = await fetch(`${URL_}/rest/v1/home_snapshot?on_conflict=id`, {
         method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify([{ id: BOOKS[book].id, book_id: book, payload: strip ? open : payload, built_at: payload.built_at, build: BUILD, ms }]),
+        body: JSON.stringify([{ id: BOOKS[book].id, book_id: book, payload: strip ? open : (({ brief_doc_open: _o, ...whole }) => whole)(payload as Row), built_at: payload.built_at, build: BUILD, ms }]),
       });
       if (!w.ok) throw new Error(`home_snapshot ${w.status} ${(await w.text()).slice(0, 160)}`);
       out.push({ ms, steps, legs: (payload.legs as unknown[]).length, value: (payload.account as Row).value ?? null });

@@ -63,6 +63,9 @@ struct HomePayload: Decodable {
     let flowProfile: Lenient<[String: FlowProfile]>?
     /// Daily closes per name, 160 days, for the Bought face (handoff 32, 13f).
     let daily: Lenient<[String: DailyCloses]>?
+    /// New Home and Positions (handoff 6 Nov 2026, Pass 2): the server's brief, read loosely. `doc` is Home's
+    /// page for the moment, `position` the Your position card, `timeValue` the sheet's sold legs.
+    let brief: JSONValue?
 }
 
 extension HomePayload {

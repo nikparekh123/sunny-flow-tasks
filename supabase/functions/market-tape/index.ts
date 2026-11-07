@@ -7,6 +7,9 @@
  *   SPY QQQ IWM            the Today row, through pre-market and after hours
  *   ^VIX                   a level, not a price
  *   ^N225 ^GDAXI ^NSEI 000001.SS   the Overnight card (pre-market only)
+ *   ^HSI ^TNX DX-Y.NYB CL=F GC=F BTC-USD   the rest of New Home's Overnight list and The world this
+ *                          week (Hang Seng, 10y yield, Dollar, Oil, Gold, Bitcoin; handoff 6 Nov 2026)
+ *   XLK XLE ... + 12 names each   Sectors and its 11 heat maps (market_sectors; tile = market cap)
  *   INTU ADBE PYPL VZ TMUS SPCX TSLA APP  the Watchlist (Nik, 12 and 14 Oct 2026)
  *   ES=F NQ=F RTY=F        front-month futures for the 18:00-9:30 cards (handoff 24,
  *                          block 09). Yahoo's are ~10 min delayed (measured 600 s);
@@ -33,7 +36,7 @@
  * not a JWT, so a verify_jwt function answers 401 to every scheduled call
  * (12 Oct 2026: the first deploys did exactly that).
  */
-const BUILD = '2026-10-25.1';
+const BUILD = '2026-11-07.2';
 const UA = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 '
     + '(KHTML, like Gecko) Version/17.0 Safari/605.1.15',
@@ -49,6 +52,12 @@ const SYMBOLS: { s: string; label: string; kind: 'index' | 'vix' | 'global' | 'w
   { s: '^GDAXI', label: 'DAX', kind: 'global' },
   { s: '^NSEI', label: 'Nifty 50', kind: 'global' },
   { s: '000001.SS', label: 'Shanghai Composite', kind: 'global' },
+  { s: '^HSI', label: 'Hang Seng', kind: 'global' },
+  { s: '^TNX', label: '10y yield', kind: 'global' },
+  { s: 'DX-Y.NYB', label: 'Dollar', kind: 'global' },
+  { s: 'CL=F', label: 'Oil', kind: 'global' },
+  { s: 'GC=F', label: 'Gold', kind: 'global' },
+  { s: 'BTC-USD', label: 'Bitcoin', kind: 'global' },
   { s: 'INTU', label: 'INTU', kind: 'watch' },
   { s: 'ADBE', label: 'ADBE', kind: 'watch' },
   { s: 'PYPL', label: 'PYPL', kind: 'watch' },
@@ -62,6 +71,48 @@ const SYMBOLS: { s: string; label: string; kind: 'index' | 'vix' | 'global' | 'w
   { s: 'RTY=F', label: 'RTY', kind: 'future' },
 ];
 const FUTURES = SYMBOLS.filter((x) => x.kind === 'future').map((x) => x.s);
+
+/* Sectors (handoff 6 Nov 2026, block 29): each SPDR's move is the sector's, and its 12 biggest names make
+   the heat map (tile area = Yahoo's market cap, colour = the move). The lists are the funds' top holdings as
+   of 2026; a name Yahoo stops answering for just drops off its map. */
+const SECTORS: { sector: string; etf: string; names: [string, string][] }[] = [
+  { sector: 'Technology', etf: 'XLK', names: [['NVDA', 'Nvidia'], ['AAPL', 'Apple'], ['MSFT', 'Microsoft'], ['AVGO', 'Broadcom'],
+    ['ORCL', 'Oracle'], ['PLTR', 'Palantir'], ['AMD', 'AMD'], ['CSCO', 'Cisco'], ['IBM', 'IBM'], ['MU', 'Micron'],
+    ['CRM', 'Salesforce'], ['LRCX', 'Lam Research']] },
+  { sector: 'Financials', etf: 'XLF', names: [['BRK-B', 'Berkshire'], ['JPM', 'JPMorgan'], ['V', 'Visa'], ['MA', 'Mastercard'],
+    ['BAC', 'Bank of America'], ['WFC', 'Wells Fargo'], ['GS', 'Goldman Sachs'], ['MS', 'Morgan Stanley'],
+    ['AXP', 'American Express'], ['C', 'Citigroup'], ['SCHW', 'Schwab'], ['BLK', 'BlackRock']] },
+  { sector: 'Health care', etf: 'XLV', names: [['LLY', 'Eli Lilly'], ['JNJ', 'Johnson & Johnson'], ['ABBV', 'AbbVie'],
+    ['UNH', 'UnitedHealth'], ['MRK', 'Merck'], ['ABT', 'Abbott'], ['TMO', 'Thermo Fisher'], ['ISRG', 'Intuitive Surgical'],
+    ['AMGN', 'Amgen'], ['BSX', 'Boston Scientific'], ['GILD', 'Gilead'], ['PFE', 'Pfizer']] },
+  { sector: 'Consumer discretionary', etf: 'XLY', names: [['AMZN', 'Amazon'], ['TSLA', 'Tesla'], ['HD', 'Home Depot'],
+    ['MCD', 'McDonald’s'], ['BKNG', 'Booking'], ['TJX', 'TJX'], ['LOW', 'Lowe’s'], ['SBUX', 'Starbucks'], ['NKE', 'Nike'],
+    ['ORLY', 'O’Reilly'], ['CMG', 'Chipotle'], ['ABNB', 'Airbnb']] },
+  { sector: 'Communication', etf: 'XLC', names: [['META', 'Meta'], ['GOOGL', 'Alphabet'], ['NFLX', 'Netflix'], ['DIS', 'Disney'],
+    ['TMUS', 'T-Mobile'], ['VZ', 'Verizon'], ['T', 'AT&T'], ['CMCSA', 'Comcast'], ['EA', 'Electronic Arts'],
+    ['TTWO', 'Take-Two'], ['CHTR', 'Charter'], ['WBD', 'Warner Bros.']] },
+  { sector: 'Industrials', etf: 'XLI', names: [['GE', 'GE Aerospace'], ['CAT', 'Caterpillar'], ['RTX', 'RTX'], ['UBER', 'Uber'],
+    ['GEV', 'GE Vernova'], ['BA', 'Boeing'], ['HON', 'Honeywell'], ['UNP', 'Union Pacific'], ['ETN', 'Eaton'],
+    ['DE', 'Deere'], ['LMT', 'Lockheed'], ['ADP', 'ADP']] },
+  { sector: 'Consumer staples', etf: 'XLP', names: [['WMT', 'Walmart'], ['COST', 'Costco'], ['PG', 'Procter & Gamble'],
+    ['KO', 'Coca-Cola'], ['PM', 'Philip Morris'], ['PEP', 'PepsiCo'], ['MDLZ', 'Mondelez'], ['MO', 'Altria'],
+    ['CL', 'Colgate'], ['MNST', 'Monster'], ['KR', 'Kroger'], ['KMB', 'Kimberly-Clark']] },
+  { sector: 'Energy', etf: 'XLE', names: [['XOM', 'Exxon'], ['CVX', 'Chevron'], ['COP', 'ConocoPhillips'], ['WMB', 'Williams'],
+    ['EOG', 'EOG'], ['KMI', 'Kinder Morgan'], ['SLB', 'SLB'], ['PSX', 'Phillips 66'], ['MPC', 'Marathon Petroleum'],
+    ['OKE', 'ONEOK'], ['VLO', 'Valero'], ['BKR', 'Baker Hughes']] },
+  { sector: 'Utilities', etf: 'XLU', names: [['NEE', 'NextEra'], ['SO', 'Southern'], ['CEG', 'Constellation'], ['DUK', 'Duke'],
+    ['VST', 'Vistra'], ['AEP', 'AEP'], ['SRE', 'Sempra'], ['D', 'Dominion'], ['EXC', 'Exelon'], ['XEL', 'Xcel'],
+    ['PEG', 'PSEG'], ['ETR', 'Entergy']] },
+  { sector: 'Real estate', etf: 'XLRE', names: [['PLD', 'Prologis'], ['AMT', 'American Tower'], ['WELL', 'Welltower'],
+    ['EQIX', 'Equinix'], ['SPG', 'Simon'], ['O', 'Realty Income'], ['DLR', 'Digital Realty'], ['PSA', 'Public Storage'],
+    ['CCI', 'Crown Castle'], ['CBRE', 'CBRE'], ['VTR', 'Ventas'], ['IRM', 'Iron Mountain']] },
+  { sector: 'Materials', etf: 'XLB', names: [['LIN', 'Linde'], ['SHW', 'Sherwin-Williams'], ['ECL', 'Ecolab'],
+    ['APD', 'Air Products'], ['NEM', 'Newmont'], ['FCX', 'Freeport'], ['CTVA', 'Corteva'], ['MLM', 'Martin Marietta'],
+    ['VMC', 'Vulcan'], ['NUE', 'Nucor'], ['DD', 'DuPont'], ['PPG', 'PPG']] },
+];
+const SECTOR_ROWS = SECTORS.flatMap((x) => [{ symbol: x.etf, sector: x.sector, etf: true, name: x.sector },
+  ...x.names.map(([symbol, name]) => ({ symbol, sector: x.sector, etf: false, name }))]);
+
 /* SPY, QQQ and IWM closes already come from mp-refresh's tapes. */
 const CLOSES_HERE = SYMBOLS.filter((x) => x.kind === 'vix' || x.kind === 'watch').map((x) => x.s);
 
@@ -80,11 +131,13 @@ async function newSession(): Promise<{ cookie: string; crumb: string }> {
 }
 
 // deno-lint-ignore no-explicit-any
-async function quotes(): Promise<any[]> {
+async function quotes(symbols: string[] = SYMBOLS.map((x) => x.s)): Promise<any[]> {
+  // deno-lint-ignore no-explicit-any
+  if (symbols.length > 60) { const out: any[] = []; for (let i = 0; i < symbols.length; i += 60) out.push(...await quotes(symbols.slice(i, i + 60))); return out; }
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!session) session = await newSession();
     const r = await fetch(`https://query2.finance.yahoo.com/v7/finance/quote?symbols=`
-      + `${encodeURIComponent(SYMBOLS.map((x) => x.s).join(','))}&crumb=${encodeURIComponent(session.crumb)}`,
+      + `${encodeURIComponent(symbols.join(','))}&crumb=${encodeURIComponent(session.crumb)}`,
       { headers: { ...UA, Cookie: session.cookie }, signal: AbortSignal.timeout(10_000) });
     if (r.status === 401 || r.status === 403) { await r.body?.cancel(); session = null; continue; }
     if (!r.ok) throw new Error(`yahoo quote ${r.status}`);
@@ -92,6 +145,36 @@ async function quotes(): Promise<any[]> {
     return j?.quoteResponse?.result ?? [];
   }
   throw new Error('yahoo refused twice');
+}
+
+/* Daily closes for up to 20 symbols a call (v8 spark), for each symbol's week base. */
+async function spark(symbols: string[]): Promise<Map<string, { d: string; c: number }[]>> {
+  const out = new Map<string, { d: string; c: number }[]>();
+  for (let i = 0; i < symbols.length; i += 20) {
+    const part = symbols.slice(i, i + 20);
+    if (!session) session = await newSession();
+    const r = await fetch(`https://query2.finance.yahoo.com/v8/finance/spark?symbols=${encodeURIComponent(part.join(','))}`
+      + `&range=1mo&interval=1d&crumb=${encodeURIComponent(session.crumb)}`,
+      { headers: { ...UA, Cookie: session.cookie }, signal: AbortSignal.timeout(10_000) });
+    if (!r.ok) { await r.body?.cancel(); continue; }
+    // deno-lint-ignore no-explicit-any
+    const j = await r.json() as Record<string, any>;
+    for (const sym of part) {
+      const x = j[sym] ?? (j.spark?.result ?? []).find((y: { symbol: string }) => y.symbol === sym)?.response?.[0];
+      const t: number[] = x?.timestamp ?? [];
+      const c: (number | null)[] = x?.close ?? x?.indicators?.quote?.[0]?.close ?? [];
+      /* ⚠ The bar's UTC date, not New York's: a daily bar is stamped at its session's open in local time,
+         so Tokyo's Monday (9:00 JST = 00:00 UTC) is Sunday evening in New York and would pass for last week. */
+      out.set(sym, t.map((v, k) => ({ d: new Date(v * 1000).toISOString().slice(0, 10), c: c[k] as number })).filter((y) => y.c != null));
+    }
+  }
+  return out;
+}
+/* Monday of the week a New York date falls in (Mon to Sun). */
+function mondayOf(date: string): string {
+  const d = new Date(`${date}T12:00:00Z`), wd = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - wd);
+  return d.toISOString().slice(0, 10);
 }
 
 const ts = (s?: number) => (s ? new Date(s * 1000).toISOString() : null);
@@ -171,13 +254,47 @@ Deno.serve(async (req) => {
         { headers: { 'Content-Type': 'application/json' } });
     }
 
+    /* The books' own names (New Home's pre-market lede and after-hours moves): every ticker mp-refresh prices,
+       less any already listed above. Kind 'name': no closes kept here (mp-refresh owns those). */
+    const known = new Set(SYMBOLS.map((x) => x.s));
+    const bookNames: { s: string; label: string; kind: 'name' }[] = await fetch(`${url}/rest/v1/ticker_quotes_live?select=ticker`, { headers: h })
+      .then((r) => (r.ok ? r.json() : [])).then((rs: { ticker: string }[]) => [...new Set(rs.map((x) => String(x.ticker).toUpperCase()))]
+        .filter((t) => /^[A-Z.]{1,6}$/.test(t) && !known.has(t)).map((t) => ({ s: t, label: t, kind: 'name' as const })))
+      .catch(() => []);
+
+    /* Each symbol's week base (the last close before this week's Monday), filled once a week per symbol. */
+    const monday = mondayOf(ny.date);
+    type Wk = { week_base: number | null; week_base_date: string | null; week_start: string | null };
+    const weekOf = new Map<string, Wk>();
+    let sparked = 0;
+    try {
+      for (const t of ['market_live', 'market_sectors']) {
+        const r = await fetch(`${url}/rest/v1/${t}?select=symbol,week_base,week_base_date,week_start`, { headers: h });
+        if (r.ok) for (const x of await r.json() as (Wk & { symbol: string })[]) weekOf.set(x.symbol, x);
+        else await r.body?.cancel();
+      }
+      const need = [...SYMBOLS.filter((x) => x.kind !== 'future').map((x) => x.s), ...bookNames.map((x) => x.s),
+        ...SECTOR_ROWS.map((x) => x.symbol)].filter((s) => weekOf.get(s)?.week_start !== monday);
+      if (need.length) {
+        const sp = await spark(need);
+        for (const s of need) {
+          const b = (sp.get(s) ?? []).filter((x) => x.d < monday).at(-1);
+          if (b) { weekOf.set(s, { week_base: b.c, week_base_date: b.d, week_start: monday }); sparked++; }
+        }
+      }
+    } catch { /* the week's moves wait for the next call */ }
+    const wk = (s: string) => {
+      const w = weekOf.get(s);
+      return w ? { week_base: w.week_base, week_base_date: w.week_base_date, week_start: w.week_start } : {};
+    };
+
     const passes: Record<string, unknown>[] = [];
     for (let pass = 0; pass < 2; pass++) {
       if (pass === 1) await new Promise((r) => setTimeout(r, 30_000 - (Date.now() % 30_000)));
       const t0 = Date.now();
-      const res = await quotes();
+      const res = await quotes([...SYMBOLS.map((x) => x.s), ...bookNames.map((x) => x.s)]);
       const now = new Date().toISOString();
-      const rows = SYMBOLS.map((x) => {
+      const rows = [...SYMBOLS, ...bookNames].map((x) => {
         const q = res.find((r) => r.symbol === x.s);
         if (!q || n(q.regularMarketPrice) == null) return null;
         const state = String(q.marketState ?? '');
@@ -194,10 +311,28 @@ Deno.serve(async (req) => {
           post_price: post, post_change_pct: n(q.postMarketChangePercent),
           regular_time: ts(q.regularMarketTime),
           ext_time: ts(state.startsWith('PRE') ? q.preMarketTime : q.postMarketTime),
+          market_cap: n(q.marketCap),
+          ...wk(x.s),
           captured_at: now,
         };
       }).filter(Boolean) as Record<string, unknown>[];
       await upsert('market_live', 'symbol', rows);
+
+      /* Sectors and their heat maps: never allowed to stop the rows above. */
+      let sectors = 0;
+      try {
+        const sq = await quotes(SECTOR_ROWS.map((x) => x.symbol));
+        const srows = SECTOR_ROWS.map((x) => {
+          const q = sq.find((r) => r.symbol === x.symbol);
+          if (!q || n(q.regularMarketPrice) == null) return null;
+          return { symbol: x.symbol, sector: x.sector, etf: x.etf, name: x.name, market_cap: n(q.marketCap),
+            price: n(q.regularMarketPrice), prev_close: n(q.regularMarketPreviousClose),
+            day_pct: n(q.regularMarketChangePercent), market_state: q.marketState ?? null,
+            regular_time: ts(q.regularMarketTime), ...wk(x.symbol), captured_at: now };
+        }).filter(Boolean) as Record<string, unknown>[];
+        await upsert('market_sectors', 'symbol', srows);
+        sectors = srows.length;
+      } catch { /* next pass */ }
 
       /* After the US close, today's regular close is final: keep it. */
       if (ny.mins >= 16 * 60 + 5) {
@@ -207,7 +342,7 @@ Deno.serve(async (req) => {
           .map((r) => ({ ticker: r.symbol, date: ny.date, close_price: r.regular_price }));
         await upsert('daily_closes', 'ticker,date', closes);
       }
-      passes.push({ pass, symbols: rows.length, ms: Date.now() - t0 });
+      passes.push({ pass, symbols: rows.length, sectors, ms: Date.now() - t0 });
     }
 
     /* Each future's 16:00 price, the base the morning cards divide by: the
@@ -239,7 +374,7 @@ Deno.serve(async (req) => {
 
     await upsert('sync_heartbeat', 'feed', [{
       feed: 'market-tape', ran_at: new Date().toISOString(), rows_written: Number(passes.at(-1)?.symbols ?? 0),
-      detail: `yahoo · ${passes.map((p) => p.symbols).join('/')} symbols${bases ? ` · ${bases} futures bases` : ''}`,
+      detail: `yahoo · ${passes.map((p) => p.symbols).join('/')} symbols · ${passes.map((p) => p.sectors).join('/')} sector rows${sparked ? ` · ${sparked} week bases` : ''}${bases ? ` · ${bases} futures bases` : ''}`,
     }]);
     return new Response(JSON.stringify({ ok: true, build: BUILD, passes }),
       { headers: { 'Content-Type': 'application/json' } });

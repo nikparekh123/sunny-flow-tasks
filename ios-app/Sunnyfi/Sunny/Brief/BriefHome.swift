@@ -24,7 +24,7 @@ struct BriefHomeScreen: View {
 
     var body: some View {
         let moment = brief.moment()
-        let doc = BriefDebug.sample ? BriefSample.doc(moment, brief.account.sampleKey) : nil
+        let doc = BriefDebug.sample ? BriefSample.doc(moment, brief.account.sampleKey) : brief.live?.doc
         ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {

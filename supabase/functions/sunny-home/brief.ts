@@ -233,12 +233,16 @@ export function buildBrief(x: BriefIn) {
     const now = l.now ?? 0, at = l.at ?? 0, q = -l.q;
     const itm = l.ty === 'C' ? nb.S0 > l.K : nb.S0 < l.K;
     const cap = at > 0 ? Math.round((1 - now / at) * 100) : 0;
+    /* The sheet's "time value left": what is still to decay, less what the leg is in the money. */
+    const intr = l.ty === 'C' ? Math.max(0, nb.S0 - l.K) : Math.max(0, l.K - nb.S0), tvPer = Math.max(0, now - intr);
     return { t: nb.t, name: company(nb.t), kind: l.kind, put: l.ty === 'P', K: l.K, q, ex: l.ex, exLabel: expLabel(l.ex, l.days),
       at, now, col: Math.round(q * 100 * at), left: Math.round(q * 100 * now), kept: Math.round(q * 100 * (at - now)), cap, itm,
-      ready: now < 0.05 || cap >= 90 || itm };
+      intr: +intr.toFixed(2), tvPer: +tvPer.toFixed(2), tvLeft: Math.round(q * 100 * tvPer),
+      ready: tvPer < 0.05 || cap >= 90 || itm };
   })).sort((a, b) => a.ex.localeCompare(b.ex) || b.left - a.left);
-  const col = sold.reduce((a, s) => a + s.col, 0), left = sold.reduce((a, s) => a + s.left, 0);
-  const timeValue = { col, left, kept: col - left, cap: col > 0 ? Math.round((col - left) / col * 100) : 0, legs: sold };
+  const col = sold.reduce((a, s) => a + s.col, 0), left = sold.reduce((a, s) => a + s.left, 0), tvLeft = sold.reduce((a, s) => a + s.tvLeft, 0);
+  const timeValue = { col, left, kept: col - left, cap: col > 0 ? Math.round((col - left) / col * 100) : 0, tvLeft,
+    tvCap: col > 0 ? Math.round((1 - tvLeft / col) * 100) : 0, legs: sold };
 
   return {
     brief: {

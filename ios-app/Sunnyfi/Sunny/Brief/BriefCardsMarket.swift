@@ -190,7 +190,8 @@ struct BOutToday: View {
 struct BSectorsRow: View {
     let card: JSONValue
     var body: some View {
-        let maps = BriefSample.sectorMaps(card["mapsRef"].string ?? "day").array
+        // The server sends its 11 maps on the card; the sample keeps them once per period.
+        let maps = card["maps"].isNull ? BriefSample.sectorMaps(card["mapsRef"].string ?? "day").array : card["maps"].array
         BRow {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
