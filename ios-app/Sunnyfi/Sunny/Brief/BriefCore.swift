@@ -92,6 +92,11 @@ enum BriefDebug {
     static let stop: Int? = value("-pstop").flatMap(Int.init)
     /// `-open timevalue|economy|ticker:NFLX` opens an overlay at launch.
     static let open: String? = value("-bopen")
+    /// `-pin pre` or `-pin open:week` (moment, then holiday week | early): the debug menu's pin, applied at launch.
+    static let pin: BriefPin? = value("-pin").flatMap { s in
+        let p = s.split(separator: ":").map(String.init)
+        return Moment(rawValue: p[0]).map { BriefPin(moment: $0, holiday: p.count > 1 ? p[1] : nil) }
+    }
 
     private static func flag(_ k: String) -> Bool {
         #if DEBUG && targetEnvironment(simulator)
@@ -145,6 +150,28 @@ final class BriefState {
     /// Overview (block 32): both books, from book S's last build (owners only). Kept while another book is on screen.
     private(set) var liveOverview: JSONValue?
 
+    // MARK: Pinned (the debug menu, Pass 3)
+    /// A moment pinned from the debug menu: its page replaces the live one until Back to live.
+    private(set) var pin: BriefPin?
+    /// The pinned New York day and minute: the day card's sky and clock follow it.
+    private(set) var pinnedAt: Date?
+    var pinLoading = false
+    var pinError: String?
+    var debugOpen = false
+    /// The live brief kept aside while a moment is pinned (new builds keep landing here).
+    private var realLive: BriefLive?
+    /// The time the brief screens draw: the pinned one, else the app's clock.
+    func now() -> Date { pinnedAt ?? SClock.now() }
+    func setPinned(_ p: BriefPin, live l: BriefLive, at: Date?, overview: JSONValue?) {
+        if pin == nil { realLive = live }
+        pin = p; pinnedAt = at; live = l
+        if let o = overview, case .object = o, o["error"].isNull { liveOverview = o }
+    }
+    func unpin() {
+        guard pin != nil else { return }
+        live = realLive; realLive = nil; pin = nil; pinnedAt = nil
+    }
+
     func ingest(_ brief: JSONValue?, key: String?, book: String? = nil, overview: JSONValue? = nil, books: [String] = []) {
         guard key != liveKey || book != self.book else { return }
         liveKey = key
@@ -157,7 +184,8 @@ final class BriefState {
             if account != .overview { account = book == "N" ? .nicolay : .sunny }
             if accounts.isEmpty { accounts = [account] }
         }
-        live = brief.map(BriefLive.init)
+        let decoded = brief.map(BriefLive.init)
+        if pin != nil { realLive = decoded } else { live = decoded }
     }
 
     var showsStrip: Bool { accounts.count > 1 }
@@ -168,11 +196,13 @@ final class BriefState {
         let from = accounts.firstIndex(of: account) ?? 0, to = accounts.firstIndex(of: a) ?? 0
         switchDir = to > from ? 1 : -1
         if account != .overview { lastBook = account }
+        // A pinned page is one book's: switching book drops the pin (Overview keeps it).
+        if pin != nil && a != .overview { unpin() }
         account = a
     }
 
     /// The moment on screen: pinned in a debug run, else the New York clock.
-    func moment(at date: Date = SClock.now()) -> Moment { BriefDebug.moment ?? Moment.at(date) }
+    func moment(at date: Date? = nil) -> Moment { pin?.moment ?? BriefDebug.moment ?? Moment.at(date ?? now()) }
 }
 
 /// Privacy (block 33): the eye beside the account value. One switch, kept on the phone, shared with Siri's

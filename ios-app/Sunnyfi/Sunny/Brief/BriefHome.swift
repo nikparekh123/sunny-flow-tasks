@@ -33,6 +33,7 @@ struct BriefHomeScreen: View {
                         withAnimation(reduce ? nil : S.standard(0.5)) { brief.pick(a) }
                     }
                 }
+                BriefPinBar().padding(.top, brief.pin == nil ? 0 : 8)
                 AccountChart(home: home, readTick: store.readTick)
                     .padding(.top, brief.showsStrip ? 0 : 14)
                 BriefDeck(moment: moment, doc: doc) { kind in
@@ -47,6 +48,8 @@ struct BriefHomeScreen: View {
                     BriefTitle(doc: doc, privacy: privacy)
                         .padding(.top, 24)
                         .padding(.horizontal, S.margin)
+                        // The debug menu (Pass 3): a long press on the title.
+                        .onLongPressGesture(minimumDuration: 1.0) { brief.debugOpen = true }
                     ForEach(doc.sections) { s in
                         BriefSectionView(section: s, privacy: privacy)
                             .padding(.top, 56)
@@ -56,6 +59,7 @@ struct BriefHomeScreen: View {
                     BriefTitle(doc: nil, moment: moment, privacy: privacy)
                         .padding(.top, 24)
                         .padding(.horizontal, S.margin)
+                        .onLongPressGesture(minimumDuration: 1.0) { brief.debugOpen = true }
                 }
             }
             .padding(.bottom, 128)
@@ -69,7 +73,15 @@ struct BriefHomeScreen: View {
         .environment(\.timeValueTap, { brief.sheet = .timeValue })
         }
         .onChange(of: router.topTick[.home]) { _, _ in withAnimation(reduce ? nil : S.standard(0.45)) { pos.scrollTo(edge: .top) } }
+        .sheet(isPresented: Binding(get: { brief.debugOpen }, set: { brief.debugOpen = $0 })) {
+            BriefDebugMenu().presentationDetents([.large])
+        }
         .task {
+            // DEBUG audits: `-pin open:week` pins a moment at launch (once the book is known).
+            if let p = BriefDebug.pin, brief.pin == nil {
+                for _ in 0..<20 where brief.book == nil { try? await Task.sleep(for: .milliseconds(250)) }
+                await brief.applyPin(p)
+            }
             // DEBUG audits: `-scroll 1600` opens Home scrolled that far, so a long page is shot in slices.
             if let y = BriefDebug.scroll {
                 try? await Task.sleep(for: .milliseconds(600))

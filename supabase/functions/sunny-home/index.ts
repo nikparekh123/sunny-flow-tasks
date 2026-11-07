@@ -27,7 +27,7 @@ import { buildDoc, type NameDay } from './doc.ts';
 import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
-const BUILD = '2026-11-07.8';
+const BUILD = '2026-11-07.10';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -276,8 +276,12 @@ async function rollFor(l: LegLite, oldTh: number, ratioNow: number | null, ratio
 /* opts.dry (admin, mode 'theta_check'): run the check now and write nothing to
    theta_checks or the heartbeat; opts.price prices the roll for that ticker's
    LEAPs (or '*' for all) whether or not they flag. For checking the check. */
+/* opts.clock / opts.holiday (Pass 3 debug menu, 7 Nov 2026): build as if it were that New York day and minute, and
+   with a made-up holiday this week or an early close today. A pinned build WRITES NOTHING (no report, no LEAPS
+   roll price, no weekly index close, no insight state); the handler returns its page and never stores it. */
 async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 'tick',
-                     opts: { dry?: boolean; price?: string; book?: string } = {}): Promise<{ payload: Row; ms: number; steps: Record<string, number> }> {
+                     opts: { dry?: boolean; price?: string; book?: string; clock?: { wd: string; mins: number; date: string };
+                             holiday?: 'week' | 'early' | null } = {}): Promise<{ payload: Row; ms: number; steps: Record<string, number> }> {
   const bookId = opts.book ?? 'S', BOOK_START = BOOKS[bookId].start, accountsN = BOOKS[bookId].accounts;
   let checkSummary: Row[] | null = null;
   /* Where the build's time goes, returned with the timings (no data). */
@@ -285,8 +289,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   let tStep = Date.now();
   const step = (label: string) => { const n = Date.now(); steps[label] = n - tStep; tStep = n; };
   const t0 = Date.now();
-  const now = ny();
+  const now = opts.clock ?? ny();
   const today = now.date;
+  const pinned = !!opts.clock || !!opts.holiday;
   const monthsBack = (iso: string, m: number) => {
     const [y, mo] = iso.split('-').map(Number);
     const d = new Date(Date.UTC(y, mo - 1 - m, 1));
@@ -344,6 +349,19 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
 
   step('reads');
   // ── Trading days (calendar-aware) ──
+  if (opts.holiday) {
+    /* The pinned holiday: an early close today at 1:00 PM, or a closed day this week (the first weekday after today,
+       else the last one before it), as Thanksgiving week reads. */
+    /* On a weekend the coming week's Thursday; on a weekday the first weekday after today in its week (Thursday
+       when today is earlier), else next week's Thursday. */
+    const wdI = new Date(today + 'T12:00:00Z').getUTCDay(), mon = addDays(today, -((wdI + 6) % 7));
+    const nextThu = addDays(mon, 10);
+    const off = wdI === 0 || wdI === 6 ? (wdI === 6 ? addDays(today, 5) : addDays(today, 4))
+      : wdI < 4 ? addDays(mon, 3) : wdI === 4 ? addDays(mon, 4) : nextThu;
+    (cal as Row[]).push(opts.holiday === 'early'
+      ? { date: today, kind: 'early_close', closes: '13:00:00', name: 'Early close' }
+      : { date: off, kind: 'closed', closes: null, name: 'Thanksgiving Day' });
+  }
   const closed = new Set(cal.filter((c) => c.kind === 'closed').map((c) => String(c.date)));
   const isTrading = (d: string) => {
     const wd = new Date(d + 'T12:00:00Z').getUTCDay();
@@ -1342,7 +1360,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       },
       built_from: { ibkr_close: lastDay },
     };
-    await fetch(`${URL_}/rest/v1/reports?on_conflict=book_id,kind,period_start`, {
+    if (!pinned) await fetch(`${URL_}/rest/v1/reports?on_conflict=book_id,kind,period_start`, {
       method: 'POST', headers: { ...H, Prefer: 'resolution=ignore-duplicates,return=minimal' },
       body: JSON.stringify([{ book_id: bookId, kind: r.kind, period_start: r.from, period_end: r.to, shown_on: today, payload: payloadR }]),
     });
@@ -1481,7 +1499,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
                 debit: Math.round((Number(pick.mid) - old) * l.n * 100),
                 tv: { old: Math.round(Math.max(0, old - Math.max(0, S - l.strike)) * l.n * 100),
                       new: Math.round(Math.max(0, Number(pick.mid) - Math.max(0, S - Number(pick.k))) * l.n * 100) } };
-              await fetch(`${URL_}/rest/v1/leaps_roll?on_conflict=ticker,expiry,strike`, { method: 'POST',
+              if (!pinned) await fetch(`${URL_}/rest/v1/leaps_roll?on_conflict=ticker,expiry,strike`, { method: 'POST',
                 headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
                 body: JSON.stringify([{ ticker: l.ticker, expiry: l.expiry, strike: l.strike, priced_at: new Date().toISOString(), data: d }]) }).catch(() => null);
             }
@@ -2513,7 +2531,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
           priced_move_pct: straddle == null ? null : r2(straddle / prior * 100) };
         /* Kept only once the week's close is final; a Friday evening before the
            17:30 close capture uses the tape and tries again. */
-        if (cl && straddle != null) {
+        if (cl && straddle != null && !pinned) {
           await fetch(`${URL_}/rest/v1/index_weekly?on_conflict=week_start,symbol`, {
             method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
             body: JSON.stringify([row]) });
@@ -2940,7 +2958,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const st = await get(`insight_state?ticker=in.(${ws.map((w) => w.ticker).join(',')})&day=gte.${addDays(today, -14)}&select=ticker,day,key,kind,tag&order=day.desc`);
       const hasToday = new Set(st.filter((r) => String(r.day) === today).map((r) => String(r.ticker)));
       const fresh = ws.filter((w) => !hasToday.has(w.ticker));
-      if (fresh.length) await fetch(`${URL_}/rest/v1/insight_state?on_conflict=ticker,day,key`, {
+      if (fresh.length && !pinned) await fetch(`${URL_}/rest/v1/insight_state?on_conflict=ticker,day,key`, {
         method: 'POST', headers: { ...H, Prefer: 'resolution=ignore-duplicates,return=minimal' },
         body: JSON.stringify(fresh.flatMap((w) => (w.insights.v2.points as Row[]).map((x) => ({ ticker: w.ticker, day: today, key: x.key, kind: x.kind, tag: x.tag })))),
       }).catch(() => null);
@@ -3200,10 +3218,49 @@ async function hasViewer(book: string): Promise<boolean> {
   return ((await r.json()) as Row[]).length > 0;
 }
 
+/* ── THE DEBUG MENU'S PAGE (Pass 3, README 2: "a debug menu that pins the clock, the account and the holiday") ──
+   POST { mode: 'doc', book, moment, holiday? } from the app with the user's token: New Home built as if it were that
+   moment (today if it trades, else the last session; the weekend = this week's Saturday), written nowhere. A member
+   of the book only (their own book_members row, read as them); the whole page for an owner, the copy without orders
+   for anyone else. */
+const PIN_MINS: Record<string, number> = { futures: 210, pre: 490, bell: 571, open: 680, last20: 941, last5: 956, post: 1030, weekend: 630 };
+const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+async function pinnedDoc(req: Request, body: Row): Promise<Response> {
+  const res = (s: number, b: unknown) => new Response(JSON.stringify(b), { status: s, headers: { 'Content-Type': 'application/json' } });
+  const book = String(body.book ?? 'S'), moment = String(body.moment ?? ''), holiday = body.holiday === 'week' || body.holiday === 'early' ? body.holiday : null;
+  if (!BOOKS[book] || !(moment in PIN_MINS)) return res(400, { error: 'send book and moment' });
+  let owner = await callerOk(req, false);   // the scheduler or the service key: an admin check
+  if (!owner) {
+    if (!(await callerOk(req, true))) return refused();
+    const r = await fetch(`${URL_}/rest/v1/book_members?book_id=eq.${book}&select=role`,
+      { headers: { apikey: Deno.env.get('SUPABASE_ANON_KEY') ?? '', Authorization: req.headers.get('authorization') ?? '' } });
+    const rows = r.ok ? await r.json() as Row[] : [];
+    if (!rows.length) return res(403, { error: 'not a member of this book' });
+    owner = rows.some((x) => x.role === 'owner');
+  }
+  const n = ny(), wdOf = (d: string) => new Date(d + 'T12:00:00Z').getUTCDay();
+  /* The day: the weekend = this week's Saturday; a weekday moment = today, or on a weekend the coming Monday (the
+     book as it stands is next week's), and Post-market on a Friday = Thursday (Friday after the close is the weekend). */
+  let date = n.date;
+  if (moment === 'weekend') { const w = wdOf(date); date = w === 6 ? date : w === 0 ? addDays(date, -1) : addDays(date, 6 - w); }
+  else {
+    while ([0, 6].includes(wdOf(date))) date = addDays(date, 1);
+    if (moment === 'post' && wdOf(date) === 5) date = addDays(date, -1);
+  }
+  const clock = { wd: WD[wdOf(date)], mins: PIN_MINS[moment], date };
+  try {
+    const { payload } = await build('tick', { book, clock, holiday });
+    const b = payload.brief as Row;
+    return res(200, { v: 1, pinned: { moment, holiday, date, mins: clock.mins }, built_at: payload.built_at,
+      brief: owner ? b : { ...b, doc: payload.brief_doc_open ?? null }, overview: owner ? payload.overview ?? null : null });
+  } catch (e) { return res(500, { error: String((e as Error)?.message ?? e) }); }
+}
+
 Deno.serve(async (req) => {
+  let body: { passes?: number; mode?: 'theta_check' | 'history' | 'last_week' | 'doc'; dry?: boolean; price?: string; book?: string } = {};
+  try { if (req.method === 'POST') body = await req.clone().json(); } catch { /* cron sends {} */ }
+  if (body.mode === 'doc') return await pinnedDoc(req, body as Row);
   if (req.method !== 'OPTIONS' && !(await callerOk(req, false))) return refused();
-  let body: { passes?: number; mode?: 'theta_check' | 'history' | 'last_week'; dry?: boolean; price?: string; book?: string } = {};
-  try { if (req.method === 'POST') body = await req.json(); } catch { /* cron sends {} */ }
   /* One book per call: the cron sends nothing for book S and {"book":"N"} for the cousin's (sunny-home-N). */
   const book = body.book ?? 'S';
   if (!BOOKS[book]) return new Response(JSON.stringify({ ok: false, error: `no book ${book}` }), { status: 400, headers: { 'Content-Type': 'application/json' } });

@@ -95,6 +95,7 @@ private struct AlertCard: View {
     let alert: JSONValue
     let moment: Moment
     let close: () -> Void
+    @Environment(BriefState.self) private var brief
 
     var body: some View {
         let kind = alert["kind"].string ?? ""
@@ -127,8 +128,12 @@ private struct AlertCard: View {
                     }
                 }
                 Spacer()
-                Text(title).font(.system(size: 28, weight: .bold)).foregroundStyle(dark ? .white : S.ink)
-                    .lineLimit(2).minimumScaleFactor(0.8)
+                // Aftershock near the close counts down to the 4:15 PM scan, each second.
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    Text(title.replacingOccurrences(of: "{mm:ss}", with: Self.toScan(brief.now())))
+                        .font(.system(size: 28, weight: .bold).monospacedDigit()).foregroundStyle(dark ? .white : S.ink)
+                        .lineLimit(2).minimumScaleFactor(0.8)
+                }
                 Text(sub).font(.system(size: 13, weight: .medium)).foregroundStyle(dark ? .white.opacity(0.8) : S.ink)
                     .lineLimit(2).padding(.top, 6)
             }
@@ -140,13 +145,21 @@ private struct AlertCard: View {
         .accessibilityAddTraits(.isButton)
     }
 
+    /// Minutes and seconds from now to 4:15 PM New York (the scan), never below 0:00.
+    static func toScan(_ d: Date) -> String {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "America/New_York")!
+        let c = cal.dateComponents([.hour, .minute, .second], from: d)
+        let s = max(0, (16 * 60 + 15) * 60 - ((c.hour ?? 0) * 3600 + (c.minute ?? 0) * 60 + (c.second ?? 0)))
+        return "\(s / 60):" + String(format: "%02d", s % 60)
+    }
+
     /// Aftershock has no fixed text: before the close it waits for the 4:15 scan, near the close it counts
     /// down, after the close it reports what the scan found.
     private func texts(_ kind: String) -> (String, String) {
         if kind == "aftershock" {
             let key: String = switch moment { case .last20, .last5: "soon"; case .post: "done"; default: "wait" }
             let s = alert["states"][key].array.compactMap(\.string)
-            return ((s.first ?? "Aftershock").replacingOccurrences(of: "{mm:ss}", with: "18:00"), s.count > 1 ? s[1] : "")
+            return (s.first ?? "Aftershock", s.count > 1 ? s[1] : "")
         }
         return (alert["title"].string ?? "", alert["sub"].string ?? "")
     }
@@ -156,10 +169,11 @@ struct DayCard: View {
     let moment: Moment
     let caption: String?
     let warn: Bool
+    @Environment(BriefState.self) private var brief
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { _ in
-            let u = Self.minuteNY(SClock.now())
+            let u = Self.minuteNY(brief.now())
             GeometryReader { g in
                 let sx = g.size.width / 340, sy = g.size.height / 200
                 let sun = CGPoint(x: Self.x(u) * sx, y: Self.y(u) * sy)
