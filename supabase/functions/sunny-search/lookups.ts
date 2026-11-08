@@ -14,7 +14,8 @@ export async function db(path: string): Promise<Row[]> {
 }
 
 /** Who is asking and which book they may see: the scheduler and the service key read Nik's book (S). */
-export async function caller(req: Request): Promise<{ book: string; owner: boolean; system: boolean; user?: string } | null> {
+export async function caller(req: Request): Promise<{ book: string; owner: boolean; system: boolean; user?: string;
+  books?: { book: string; owner: boolean }[] } | null> {
   const cron = Deno.env.get('CRON_SECRET');
   if (cron && (req.headers.get('x-cron-key') === cron || req.headers.get('x-admin-key') === cron)) return { book: 'S', owner: true, system: true };
   const auth = req.headers.get('authorization') ?? '';
@@ -23,9 +24,13 @@ export async function caller(req: Request): Promise<{ book: string; owner: boole
   const r = await fetch(`${SB_URL}/auth/v1/user`, { headers: { apikey: Deno.env.get('SUPABASE_ANON_KEY') ?? '', Authorization: auth } });
   if (!r.ok) { await r.body?.cancel(); return null; }
   const u = await r.json();
-  const m = await db(`book_members?user_id=eq.${u.id}&select=book_id,role`);
-  const own = m.find((x) => x.role === 'owner') ?? m[0];
-  return own ? { book: String(own.book_id), owner: own.role === 'owner', system: false, user: String(u.id) } : null;
+  const m = await db(`book_members?user_id=eq.${u.id}&select=book_id,role&order=book_id.asc`);
+  /* Nik owns his book S and his cousin's N (8 Nov 2026): Search reads S, as the app opens on S, never whichever row
+     comes first; a request may name another book the caller belongs to (`body.book`, checked in index.ts). */
+  const owned = m.filter((x) => x.role === 'owner');
+  const own = owned.find((x) => x.book_id === 'S') ?? owned[0] ?? m[0];
+  return own ? { book: String(own.book_id), owner: own.role === 'owner', system: false, user: String(u.id),
+    books: m.map((x) => ({ book: String(x.book_id), owner: x.role === 'owner' })) } : null;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────────────────────────

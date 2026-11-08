@@ -796,17 +796,19 @@ Deno.serve(async (req) => {
   }
   if (body.list) return json({ ok: true, build: BUILD, menu: MENU });
   try {
-    // The scheduler and the service key may name a book; a signed-in user only ever reads their own.
-    const book = who.system && body.book ? String(body.book) : who.book;
+    // The scheduler and the service key may name any book; a signed-in user only a book they belong to (else their own).
+    const named = !who.system && body.book ? who.books?.find((b) => b.book === String(body.book)) : undefined;
+    const book = who.system && body.book ? String(body.book) : named?.book ?? who.book;
+    const owner = named ? named.owner : who.owner;
     if (body.lookup === '_key_check') {
-      if (!who.owner) return json({ ok: false, error: 'not allowed' }, 401);
+      if (!owner) return json({ ok: false, error: 'not allowed' }, 401);
       const m = await client.models.retrieve(MODEL);
       return json({ ok: true, build: BUILD, model: m.id });
     }
     if (body.recents) return json({ ok: true, build: BUILD, recents: await recents(book, who.user) });
-    const c = await context(book, who.owner);
+    const c = await context(book, owner);
     if (Array.isArray(body.draws)) c.draws = body.draws.map(String).slice(0, 20);
-    if (body.questions) return json({ ok: true, build: BUILD, ...questions(c, who.owner) });
+    if (body.questions) return json({ ok: true, build: BUILD, ...questions(c, owner) });
     if (typeof body.answer_for === 'string') {
       const rid = encodeURIComponent(body.answer_for.slice(0, 64));
       const who2 = who.user ? `user_id=eq.${who.user}` : 'user_id=is.null';
@@ -817,8 +819,8 @@ Deno.serve(async (req) => {
         body: JSON.stringify({ client_error: String(body.client_error).slice(0, 500) }) }).then((x) => x.body?.cancel());
       return json({ ok: true, answer: { ...row.reply, id: row.id } });
     }
-    if (body.suggest) return json({ ok: true, build: BUILD, suggestions: await suggest(c, who.owner), hints: hints(c) });
-    if (body.lookup) return json({ ok: true, build: BUILD, card: await lookup(String(body.lookup), body.args ?? {}, c, who.owner) });
+    if (body.suggest) return json({ ok: true, build: BUILD, suggestions: await suggest(c, owner), hints: hints(c) });
+    if (body.lookup) return json({ ok: true, build: BUILD, card: await lookup(String(body.lookup), body.args ?? {}, c, owner) });
     if (body.ask) {
       const q = String(body.ask).trim().slice(0, 1000);
       if (!q) return json({ ok: false, error: 'empty question' }, 400);
@@ -830,7 +832,7 @@ Deno.serve(async (req) => {
       // Test settings only for the scheduler and service keys (the step 4 runs), never from the app.
       const run = async (emit?: Emit) => {
         const aid = typeof body.id === 'string' && ANSWER_ID.test(body.id) ? body.id : null;
-        const a = await ask(q, thread, !!body.deep, c, who.owner, who.system ? body.test ?? {} : {}, emit, !!body.voice, aid);
+        const a = await ask(q, thread, !!body.deep, c, owner, who.system ? body.test ?? {} : {}, emit, !!body.voice, aid);
         const rid = typeof body.rid === 'string' ? body.rid.slice(0, 64) : undefined;
         const id = body.test ? null : await logAsk(book, who.user, q, thread.length, !!body.deep, a, rid);
         return { ...a, id, cost_usd: Number(costOf(a.model, a.usage).toFixed(4)) };
