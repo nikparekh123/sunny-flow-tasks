@@ -13,6 +13,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct AccountStrip: View {
     let accounts: [BriefAccount]
@@ -25,6 +26,15 @@ struct AccountStrip: View {
     @State private var picks = 0
 
     private var index: Int { accounts.firstIndex(of: selected) ?? 0 }
+
+    /// The window's top inset (62 pt on a 402 pt phone).
+    @MainActor private static var safeTop: CGFloat {
+        UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first?.safeAreaInsets.top ?? 0
+    }
+    /// Where the strip rests: y 44, or the safe area top on a phone with less.
+    @MainActor static var restY: CGFloat { min(safeTop, 44) }
+    /// How far the strip sits above the safe area (18 pt on a 402 pt phone).
+    @MainActor static var lift: CGFloat { max(0, safeTop - 44) }
 
     var body: some View {
         GeometryReader { g in
@@ -60,7 +70,21 @@ struct AccountStrip: View {
         }
         .frame(height: 72)
         .contentShape(Rectangle())
-        .gesture(
+        // Scrolling away it is clipped at its resting top, never drawn under the clock (block 29: moves up 72, clipped).
+        .mask {
+            GeometryReader { g in
+                let cut = min(g.size.height, max(0, Self.restY - g.frame(in: .global).minY))
+                Rectangle().padding(.top, cut)
+            }
+        }
+        // Block 29: the strip starts at y 44 (min(safe area top, 44)), the status bar over it. Each page's scroll view
+        // starts under the safe area, so the strip draws `lift` higher and keeps its 72 pt slot: what a page puts
+        // under it stays put (Home pulls its chart up by `lift` to sit 4 under the strip, as the design does).
+        .padding(.top, -Self.lift)
+        .padding(.bottom, Self.lift)
+        // Simultaneous: a swipe that starts on a name's button, or inside the page's scroll view, still switches
+        // (Audit 6: with `.gesture` the strip took taps but never a swipe).
+        .simultaneousGesture(
             DragGesture(minimumDistance: 8)
                 .updating($drag) { v, s, _ in s = v.translation.width }
                 .onEnded { v in

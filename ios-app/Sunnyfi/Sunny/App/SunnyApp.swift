@@ -23,6 +23,7 @@ struct SunnyApp: App {
         WindowGroup {
             RootView(auth: auth, lock: lock, store: store)
                 .task { auth.start() }
+                .task { await AXDump.runIfAsked() }   // DEBUG simulator audits only
                 .onChange(of: scenePhase) { _, p in lock.onScenePhaseChange(p) }
         }
     }

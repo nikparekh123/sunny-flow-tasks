@@ -24,7 +24,7 @@ struct BriefPositionsScreen: View {
     @State private var price: Double?
     @State private var off: Set<String> = []
     @State private var legFilter = "All"
-    @State private var layer: String? = "Walls"
+    @State private var layer: String? = nil
     @State private var fix: String?
     @State private var totalsMode = 0
     @State private var wallsKind = "All"
@@ -73,8 +73,11 @@ struct BriefPositionsScreen: View {
                     AccountStrip(accounts: brief.accounts, selected: brief.account) { a in brief.pick(a) }
                 }
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Positions").sType(SType(size: 34, weight: 800, line: 40, tracking: -0.02), tabular: false)
-                        .foregroundStyle(S.ink).padding(.horizontal, S.margin).padding(.top, brief.showsStrip ? 4 : 16)
+                    // SunnyPositions.dc.html nav.isBar: 28/32 heavy (README 7 says 34; the design's CSS wins), its box
+                    // at y 148, 32 under the strip (44 + 72). The strip keeps a 72 pt slot under the safe area and draws
+                    // `lift` higher, so the page pulls up by `lift` (as Home does).
+                    Text("Positions").sType(SType(size: 28, weight: 800, line: 32, tracking: -0.02), tabular: false)
+                        .foregroundStyle(S.ink).padding(.horizontal, S.margin).padding(.top, brief.showsStrip ? 32 - AccountStrip.lift : 16)
                         .accessibilityAddTraits(.isHeader)
                     if live && names.isEmpty {
                         // An empty book (Nicolay's, until he trades): one line, as agreed.
@@ -85,16 +88,17 @@ struct BriefPositionsScreen: View {
                         .padding(.horizontal, S.margin).padding(.top, 16)
                     }
                     if !names.isEmpty {
-                        BookTotalsRow(hs: totals, mode: $totalsMode, privacy: privacy).padding(.top, 12)
+                        // Header gap 14 + the row's own 2 on top; 6 under it, then 20 to the logo strip.
+                        BookTotalsRow(hs: totals, mode: $totalsMode, privacy: privacy).padding(.top, 14)
                         LogoStrip(items: strip, selected: name) { t in
                             if t != name { logoPicks += 1 }
                             withAnimation(S.fade) { name = t; price = nil; off = []; fix = nil }
                         }
-                        .padding(.top, 16)
+                        .padding(.top, 20)
                         .sensoryFeedback(.selection, trigger: logoPicks)
                     }
                     if let m = model {
-                        NameRow(m: m).padding(.horizontal, S.margin).padding(.top, 14)
+                        NameRow(m: m).padding(.horizontal, S.margin).padding(.top, 16)
                         if live, let t = brief.asOf() {
                             Text("As of \(Self.asOfWords(t)) · IBKR data is late").sType(BK.sub, tabular: false).foregroundStyle(S.act)
                                 .padding(.horizontal, S.margin).padding(.top, 4)
@@ -106,7 +110,7 @@ struct BriefPositionsScreen: View {
                                             late: live && brief.asOf() != nil)
                                 .id("\(acct)-\(name)")
                         }
-                        .padding(.top, 12)
+                        .padding(.top, 16)
                     } else if live && !names.isEmpty, let b = brief.book {
                         Group {
                             if let e = brief.positions.error(b, name) { Text(e) } else { ProgressView().controlSize(.regular) }
@@ -121,7 +125,7 @@ struct BriefPositionsScreen: View {
                 .opacity(faded ? 0.15 : 1)
                 .offset(x: slid ? 28 * dipDir : 0)
             }
-            .padding(.bottom, 128)
+            .padding(.bottom, 120)
             .containerRelativeFrame(.horizontal)
         }
         .scrollIndicators(.hidden)
@@ -274,17 +278,29 @@ private struct BookTotalsRow: View {
         let sold: [(String, Double, Bool)] = [("Calls", sc, false), ("Puts", sp, false)].filter { $0.1 != 0 }
         Button { withAnimation(S.fade) { mode = (mode + 1) % 3 } } label: {
             ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 18) {
+                // The design's totGrid: groups and items 16 apart with a 1 pt rule on the left of each after the
+                // first; padding 2 top, 6 bottom, 40 right, and the last 36 pt fade out.
+                HStack(alignment: .top, spacing: 0) {
                     group("Long", shown.map { it in
                         let lbl = mode == 0 ? (it.name == "Shares" ? "Shares · gain" : it.name == "Insurance puts" ? "Insurance puts" : "\(it.name) · time value") : "\(it.name) · \(views[mode])"
                         return (lbl, it.v, mode == 1)
                     })
-                    Rectangle().fill(S.hairline).frame(width: 0.5, height: 56).padding(.top, 20)
-                    group("Sold · left to earn", sold)
+                    if !sold.isEmpty {
+                        group("Sold · left to earn", sold)
+                            .padding(.leading, 16)
+                            .overlay(alignment: .leading) { Rectangle().fill(Self.rule).frame(width: 1) }
+                    }
                 }
-                .padding(.horizontal, S.margin)
+                .padding(.leading, S.margin).padding(.trailing, 40)
+                .padding(.top, 2).padding(.bottom, 6)
             }
             .scrollIndicators(.hidden)
+            .mask {
+                HStack(spacing: 0) {
+                    Rectangle()
+                    LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 36)
+                }
+            }
         }
         .buttonStyle(.plain)
         // VoiceOver: the view on screen, then every figure with its sign as a word (money "hidden" with privacy on).
@@ -308,18 +324,24 @@ private struct BookTotalsRow: View {
         return parts.joined(separator: ". ")
     }
 
+    /// The design's TBL: rgba(29,29,31,.12) light, white 14% dark.
+    static let rule = S.ink.opacity(0.12)
+
     private func group(_ h: String, _ items: [(String, Double, Bool)]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(h).sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
-            HStack(alignment: .top, spacing: 18) {
+            HStack(alignment: .top, spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.offset) { i, it in
-                    if i > 0 { Rectangle().fill(S.hairline).frame(width: 0.5, height: 44) }
+                    // 22/28 bold, 2, then the label 13/16; 16 either side of each rule.
                     VStack(alignment: .leading, spacing: 2) {
                         BriefWords.line(it.2 ? String(format: "%.1f%%", abs(it.1)) : SampleEngine.fK(it.1), privacy: privacy)
-                            .sType(SType(size: 22, weight: 800, line: 26, tracking: -0.01))
+                            .sType(SType(size: 22, weight: 700, line: 28, tracking: -0.01))
                             .foregroundStyle(it.1 < 0 ? S.red : S.ink)
-                        Text(it.0).sType(SType(size: 12, weight: 500, line: 15, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+                        Text(it.0).sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary)
                     }
+                    .fixedSize()
+                    .padding(.leading, i > 0 ? 16 : 0).padding(.trailing, 16)
+                    .overlay(alignment: .leading) { if i > 0 { Rectangle().fill(Self.rule).frame(width: 1) } }
                 }
             }
         }
@@ -335,22 +357,38 @@ private struct LogoStrip: View {
     let pick: (String) -> Void
     var body: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 18) {
+            // The design's strip: 52 wide buttons 14 apart, padding 8 20 6; a white 44 circle, the logo at 72%, a
+            // 0.5 edge; the selected one ringed 2 pt in ink right on the circle; ticker 12/15 under it, 6 apart.
+            HStack(alignment: .top, spacing: 14) {
                 ForEach(items, id: \.t) { it in
                     let t = it.t, on = t == selected, warn = it.warn
                     Button { pick(t) } label: {
                         VStack(spacing: 6) {
                             ZStack(alignment: .topTrailing) {
-                                BLogo(ticker: t, size: 46)
-                                    .padding(3)
-                                    .overlay(Circle().strokeBorder(on ? S.ink : .clear, lineWidth: 2))
+                                ZStack {
+                                    Circle().fill(.white)
+                                    if let img = UIImage(named: "logo-\(t)") {
+                                        Image(uiImage: img).resizable().scaledToFit().frame(width: 44 * 0.72, height: 44 * 0.72)
+                                    } else {
+                                        Text(String(t.prefix(4))).font(.system(size: 11, weight: .bold)).foregroundStyle(Color(white: 0.11))
+                                    }
+                                }
+                                .frame(width: 44, height: 44)
+                                .overlay(Circle().stroke(Color.black.opacity(0.12), lineWidth: 0.5).padding(-0.25))
+                                .overlay { if on { Circle().stroke(S.ink, lineWidth: 2).padding(-1) } }
                                 if warn {
+                                    // 11 pt at right -1, top -1, with a 2 pt ring of the page under it.
                                     Circle().fill(S.act).frame(width: 11, height: 11)
-                                        .overlay(Circle().strokeBorder(S.sheetFill, lineWidth: 2)).offset(x: -1, y: 1)
+                                        .background(Circle().fill(S.sheetFill).padding(-2))
+                                        .offset(x: 1, y: -1)
                                 }
                             }
-                            Text(t).sFont(11, on ? .bold : .semibold).foregroundStyle(on ? S.ink : S.secondary)
+                            .accessibilityHidden(true)
+                            Text(t).sType(SType(size: 12, weight: on ? 700 : 600, line: 15, tracking: 0), tabular: false)
+                                .foregroundStyle(on ? S.ink : S.secondary)
                         }
+                        .frame(width: 52, alignment: .top)
+                        .frame(minHeight: 66, alignment: .top)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(it.company + (warn ? ", past its best if it rises its priced move by Friday" : ""))
@@ -358,6 +396,7 @@ private struct LogoStrip: View {
                 }
             }
             .padding(.horizontal, S.margin)
+            .padding(.top, 8).padding(.bottom, 6)
         }
         .scrollIndicators(.hidden)
     }
@@ -367,12 +406,18 @@ private struct NameRow: View {
     let m: PositionsModel
     var body: some View {
         let mv = (m.S0 - m.P0) / m.P0 * 100
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(m.t).sFont(17, .bold).foregroundStyle(S.ink)
-            Text(String(format: "%.2f", m.S0)).sFont(17, .medium, mono: true).foregroundStyle(S.secondary)
-            Text("\(mv < 0 ? "▼" : "▲") \(String(format: "%.1f", abs(mv)))%").sFont(13, .semibold, mono: true).foregroundStyle(mv < 0 ? S.red : S.green)
-            Spacer()
-            if !m.strategy.isEmpty { Text(m.strategy).sFont(13, .medium).foregroundStyle(S.secondary) }
+        // The design's name row: ticker 20/24 bold, price 20 medium, the move 15 semibold, a space apart; the
+        // strategy 15/20 medium on the right, centred on the row.
+        HStack(alignment: .center, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(m.t).sType(SType(size: 20, weight: 700, line: 24, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                Text(String(format: "%.2f", m.S0)).sType(SType(size: 20, weight: 500, line: 24, tracking: 0)).foregroundStyle(S.secondary)
+                Text("\(mv < 0 ? "▼" : "▲") \(String(format: "%.1f", abs(mv)))%").sType(SType(size: 15, weight: 600, line: 20, tracking: 0))
+                    .foregroundStyle(mv < 0 ? S.red : S.green)
+            }
+            .fixedSize()
+            Spacer(minLength: 0)
+            if !m.strategy.isEmpty { Text(m.strategy).sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.secondary) }
         }
         // One element: "Nike, 35 dollars 28, up 3.1 percent" (no arrow read).
         .accessibilityElement(children: .ignore)
@@ -405,96 +450,142 @@ private struct PositionsDetail: View {
         let fixes = m.fixes(px, tt, off: off)
         let picked = fixes.first { $0.id == fix }
         VStack(alignment: .leading, spacing: 0) {
-            // The chart card, edge to edge on its own fill.
+            // The chart card, edge to edge on its own fill: padding 16 20 12, 10 between parts, a 0.5 rule above
+            // and below (SunnyPositions.dc.html pay45).
             VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top) {
+                HStack(alignment: .center, spacing: 12) {
                     Text("\(pl < 0 ? "Down" : "Up") \(BriefWords.plain("$" + SampleEngine.fn(pl), privacy: privacy))")
-                        .sType(SType(size: 28, weight: 800, line: 32, tracking: -0.02))
+                        .sType(SType(size: 28, weight: 800, line: 36, tracking: -0.03))
                         .foregroundStyle(pl < 0 ? S.red : S.green)
+                        .lineLimit(1).fixedSize()
                         .accessibilityLabel(privacy ? "\(pl < 0 ? "Down" : "Up"), hidden" : "\(pl < 0 ? "Down" : "Up") \(PosSay.money(pl, false))")
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
+                    Spacer(minLength: 0)
+                    VStack(alignment: .trailing, spacing: 0) {
                         Text(pl < 0 ? (short ? "Losing, and rises cost you" : "Losing") : short ? "Making, past its best" : "Long and making")
-                            .sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false)
+                            .sType(SType(size: 13, weight: 700, line: 17, tracking: 0), tabular: false)
                             .foregroundStyle(pl < 0 ? S.red : short ? S.act : S.green)
-                        Text("\(m.t) at $\(String(format: "%.2f", px)) · \(st.long)").sType(BK.caption).foregroundStyle(S.secondary)
+                            .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)   // wraps, never cut (Audit 6)
+                        Text("\(m.t) at $\(String(format: "%.2f", px)) · \(st.long)").sType(SType(size: 12, weight: 600, line: 16, tracking: 0))
+                            .foregroundStyle(S.secondary).multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
                             .accessibilityLabel("\(m.company) at \(PosSay.price(px)), \(PosSay.words(st.long))")
                     }
                 }
-                HStack(alignment: .top) {
+                HStack(alignment: .top, spacing: 8) {
                     greek("Delta", SampleEngine.fn(g.d), g.d < 0 ? S.red : S.ink, said: PosSay.side(g.d))
                     greek("Theta", BriefWords.plain("$" + SampleEngine.fn(g.th), privacy: privacy), g.th < 0 ? S.red : S.green, said: PosSay.signed(g.th, privacy))
                     greek("Gamma", SampleEngine.fn(g.g), g.g < 0 ? S.red : S.ink, said: PosSay.side(g.g))
                     greek("Vega", BriefWords.plain("$" + SampleEngine.fn(g.vg), privacy: privacy), g.vg < 0 ? S.red : S.ink, said: PosSay.signed(g.vg, privacy))
                 }
+                // The plot 190, strike ticks to 206, 4, then the price axis 16.
                 PositionsChart(m: m, tt: tt, price: $price, off: off, flip: fl, extra: picked?.extra ?? [], layer: layer, chain: chain,
                                phrase: st.phrase, privacy: privacy)
-                    .frame(height: 190 + 40)
+                    .frame(height: 226)
                 DateSlider(m: m, stop: $stop)
             }
             .padding(.horizontal, S.margin)
-            .padding(.vertical, 18)
+            .padding(.top, 16).padding(.bottom, 12)
             .background(S.sheetFill)
+            .overlay(alignment: .top) { Rectangle().fill(S.hairline).frame(height: 0.5).offset(y: -0.5) }
+            .overlay(alignment: .bottom) { Rectangle().fill(S.hairline).frame(height: 0.5).offset(y: 0.5) }
 
-            VStack(alignment: .leading, spacing: 14) {
+            // Everything under the card: one column, 12 apart, padding 0 20; the legs, the summary, Walls by expiry
+            // and the whole book each open on a 1 pt rule.
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
                     ForEach(["Walls", "Technicals"], id: \.self) { l in
                         // Lines and labels come and go and the chain chips push the page down: moving, so instant under Reduce Motion.
                         Button { withAnimation(S.moving(S.fade, reduce)) { layer = layer == l ? nil : l } } label: {
-                            Text(l).sFont(14, .semibold).foregroundStyle(layer == l ? S.sheetFill : S.ink)
-                                .padding(.horizontal, 14).frame(height: 34)
-                                .background(Capsule().fill(layer == l ? S.ink : S.chip))
+                            Text(l).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false)
+                                .foregroundStyle(layer == l ? S.sheetFill : S.ink)
+                                .padding(.horizontal, 14).frame(height: 32)
+                                .background {
+                                    if layer == l { Capsule().fill(S.ink) }
+                                    else if scheme == .dark { Capsule().fill(S.track) }
+                                    else {
+                                        // White 55%, a white inner edge and a soft drop (the design's CHIP).
+                                        Capsule().fill(S.tile)
+                                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.9), lineWidth: 0.5))
+                                            .shadow(color: .black.opacity(0.06), radius: 1.5, y: 1)
+                                    }
+                                }
+                                .frame(height: 44).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(layer == l ? .isSelected : [])
                     }
                 }
+                .padding(.vertical, -6)
                 .sensoryFeedback(.selection, trigger: layer)
                 if layer == "Walls" && chainChips.isEmpty {
                     Text("No walls saved for \(m.t) yet").sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
                 } else if layer == "Walls" {
-                    HStack(spacing: 8) {
-                        ForEach(chainChips, id: \.0) { c in
-                            Button { withAnimation(S.moving(S.spring, reduce)) { chain = c.0 } } label: {
-                                Text(c.1).sFont(13, .semibold).foregroundStyle(S.ink)
-                                    .padding(.horizontal, 12).frame(height: 30)
-                                    .background(Capsule().fill(chain == c.0 ? S.chip : .clear))
-                                    .overlay(Capsule().strokeBorder(S.hairline, lineWidth: chain == c.0 ? 0 : 1))
-                            }.buttonStyle(.plain)
-                            .accessibilityLabel(PosSay.words(c.1))
-                            .accessibilityAddTraits(chain == c.0 ? .isSelected : [])
+                    // The design's wex row: "Weekly" then a chip per weekly chain, "Monthly" then the monthlies.
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 6) {
+                            ForEach(chainChips, id: \.0) { c in
+                                if c.2 {
+                                    Text(m.chains[c.0].kind).sType(SType(size: 12, weight: 600, line: 16, tracking: 0), tabular: false)
+                                        .foregroundStyle(S.secondary).padding(.leading, c.0 == chainChips.first?.0 ? 0 : 6)
+                                        .accessibilityHidden(true)
+                                }
+                                Button { withAnimation(S.moving(S.spring, reduce)) { chain = c.0 } } label: {
+                                    Text(c.1).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false)
+                                        .foregroundStyle(chain == c.0 ? S.sheetFill : S.ink)
+                                        .padding(.horizontal, 12).frame(height: 30)
+                                        .background(Capsule().fill(chain == c.0 ? S.ink : S.track))
+                                        .frame(height: 44).contentShape(Rectangle())
+                                }.buttonStyle(.plain)
+                                .accessibilityLabel(PosSay.words("\(m.chains[c.0].kind) · \(c.1)"))
+                                .accessibilityAddTraits(chain == c.0 ? .isSelected : [])
+                            }
                         }
+                        .padding(.horizontal, S.margin)
                     }
+                    .scrollIndicators(.hidden)
+                    .padding(.horizontal, -S.margin)
+                    .padding(.top, -10).padding(.bottom, -6)
                     .sensoryFeedback(.selection, trigger: chain)
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 10) {
-                        legend("—", "P&L on that date", S.ink); legend("--", "Today", S.secondary)
-                        legend("|", "Makes the most", S.act); legend("|", "Hurting", S.red)
+                // The key wraps as the design's flex-wrap does (12 across, 4 down); "Tap a leg" is its last item.
+                SXFlowGaps(column: 12, row: 4) {
+                        legend("P&L on that date") { RoundedRectangle(cornerRadius: 2).fill(S.ink).frame(width: 14, height: 3) }
+                        legend("Today") {
+                            Path { $0.move(to: CGPoint(x: 0, y: 1)); $0.addLine(to: CGPoint(x: 14, y: 1)) }
+                                .stroke(S.secondary, style: StrokeStyle(lineWidth: 2, dash: [4, 3])).frame(width: 14, height: 2)
+                        }
+                        legend("Makes the most") { RoundedRectangle(cornerRadius: 1).fill(S.act).frame(width: 2, height: 12) }
+                        legend("Hurting") { RoundedRectangle(cornerRadius: 2).fill(S.red).frame(width: 4, height: 12) }
+                        Text("Tap a leg to switch it off").sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    BHairline()
+                    LegsList(m: m, px: px, tt: tt, off: $off, filter: $legFilter, privacy: privacy).padding(.top, 14)
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    BHairline()
+                    VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            let head = "\(short ? "Short" : "Long") \(SampleEngine.fn(g.d)) Δ at $\(String(format: "%.2f", px)), \(st.long)"
+                            // "$917" is book money (the P&L a $1 rise costs): masked with privacy on, spoken "hidden".
+                            let what = short ? "Each $1 up costs about \(BriefWords.plain("$" + SampleEngine.fn(g.d), privacy: privacy)) here. Each fix below shows what it costs and where it leaves you."
+                                : late ? "Nothing to add here. The makes-the-most line comes back when IBKR data is live again."
+                                : fl.map { "Nothing to add here. Drag right: it makes the most at $" + String(format: "%.2f", $0) + ", and each $1 above costs you." } ?? "Nothing to add here. It keeps making more across the chart."
+                            Text(head)
+                                .sType(SType(size: 20, weight: 700, line: 24, tracking: 0)).foregroundStyle(short ? S.red : S.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityLabel(PosSay.words(head))
+                            Text(what)
+                                .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityLabel(BriefMask.spoken(what))
+                        }
+                        if !fixes.isEmpty {
+                            FixesTiles(m: m, px: px, tt: tt, off: off, fixes: fixes, picked: $fix, privacy: privacy)
+                        }
                     }
-                    Text("Tap a leg to switch it off").sType(BK.label, tabular: false).foregroundStyle(S.secondary)
+                    .padding(.top, 16)
                 }
-                BHairline()
-                LegsList(m: m, px: px, tt: tt, off: $off, filter: $legFilter, privacy: privacy)
-                BHairline()
-                VStack(alignment: .leading, spacing: 4) {
-                    let head = "\(short ? "Short" : "Long") \(SampleEngine.fn(g.d)) Δ at $\(String(format: "%.2f", px)), \(st.long)"
-                    // "$917" is book money (the P&L a $1 rise costs): masked with privacy on, spoken "hidden".
-                    let what = short ? "Each $1 up costs about \(BriefWords.plain("$" + SampleEngine.fn(g.d), privacy: privacy)) here. Each fix below shows what it costs and where it leaves you."
-                        : late ? "Nothing to add here. The makes-the-most line comes back when IBKR data is live again."
-                        : fl.map { "Nothing to add here. Drag right: it makes the most at $" + String(format: "%.2f", $0) + ", and each $1 above costs you." } ?? "Nothing to add here. It keeps making more across the chart."
-                    Text(head)
-                        .sType(SType(size: 20, weight: 700, line: 24, tracking: 0)).foregroundStyle(short ? S.red : S.ink)
-                        .accessibilityLabel(PosSay.words(head))
-                    Text(what)
-                        .sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false).foregroundStyle(S.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityLabel(BriefMask.spoken(what))
-                }
-                if !fixes.isEmpty {
-                    FixesTiles(m: m, px: px, tt: tt, off: off, fixes: fixes, picked: $fix, privacy: privacy)
-                }
-                WallsByExpiry(m: m, kind: $wallsKind)
+                WallsByExpiry(m: m, kind: $wallsKind, chain: $chain, layer: $layer)
                 WholeBook(m: m, privacy: privacy)
             }
             .padding(.horizontal, S.margin)
@@ -502,27 +593,31 @@ private struct PositionsDetail: View {
         }
     }
 
-    /// The Walls layer's two chains: the nearest weekly and the nearest monthly.
-    private var chainChips: [(Int, String)] {
-        [m.chains.firstIndex { $0.kind == "Weekly" }, m.chains.firstIndex { $0.kind == "Monthly" }].compactMap { $0 }
-            .map { ($0, "\(m.chains[$0].kind) · \(m.chains[$0].label)") }
+    @Environment(\.colorScheme) private var scheme
+
+    /// The Walls layer's chains: every weekly, then every monthly; `true` on the first of each kind (its label).
+    private var chainChips: [(Int, String, Bool)] {
+        let w = m.chains.indices.filter { m.chains[$0].kind == "Weekly" }, mo = m.chains.indices.filter { m.chains[$0].kind == "Monthly" }
+        return w.enumerated().map { ($1, m.chains[$1].label, $0 == 0) } + mo.enumerated().map { ($1, m.chains[$1].label, $0 == 0) }
     }
 
     /// A Greek and its value as one element, the sign said in words ("Delta, short 917"), not by colour only.
+    /// The design's: label 11/14 semibold, value 15/19 heavy, four equal columns 8 apart.
     private func greek(_ l: String, _ v: String, _ c: Color, said: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(l).sType(BK.caption, tabular: false).foregroundStyle(S.secondary)
-            Text(v).sType(SType(size: 15, weight: 700, line: 18, tracking: 0)).foregroundStyle(c)
+        VStack(alignment: .leading, spacing: 0) {
+            Text(l).sType(SType(size: 11, weight: 600, line: 14, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+            Text(v).sType(SType(size: 15, weight: 800, line: 19, tracking: 0)).foregroundStyle(c).lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(l)
         .accessibilityValue(said)
     }
-    private func legend(_ mark: String, _ t: String, _ c: Color) -> some View {
-        HStack(spacing: 4) {
-            Text(mark).sFont(12, .bold).foregroundStyle(c).accessibilityHidden(true)
-            Text(t).sType(BK.label, tabular: false).foregroundStyle(S.secondary)
+    /// A key: its mark (drawn, as in the design) 5 before the words, 12/16 medium.
+    private func legend<M: View>(_ t: String, @ViewBuilder mark: () -> M) -> some View {
+        HStack(spacing: 5) {
+            mark().accessibilityHidden(true)
+            Text(t).sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary)
         }
     }
 }
@@ -566,13 +661,14 @@ private struct PositionsChart: View {
         return []
     }
 
-    /// Greedy lanes: each label takes the first row where it clears the one before it.
+    /// The design's lane45: each label takes the first lane where it clears every label already there by 4 pt.
+    /// `x` is the label's left edge (clamped into the plot), `w` its width.
     static func lanes(_ items: [(x: CGFloat, w: CGFloat)]) -> [Int] {
-        var ends: [CGFloat] = [], out: [Int] = []
+        var placed: [(lane: Int, x0: CGFloat, x1: CGFloat)] = [], out: [Int] = []
         for it in items {
-            let left = it.x - it.w / 2
-            if let i = ends.firstIndex(where: { $0 + 4 < left }) { ends[i] = it.x + it.w / 2; out.append(i) }
-            else { ends.append(it.x + it.w / 2); out.append(ends.count - 1) }
+            var ln = 0
+            while placed.contains(where: { $0.lane == ln && it.x < $0.x1 + 4 && it.x + it.w > $0.x0 - 4 }) { ln += 1 }
+            placed.append((ln, it.x, it.x + it.w)); out.append(ln)
         }
         return out
     }
@@ -590,33 +686,42 @@ private struct PositionsChart: View {
             let X = { (px: Double) -> CGFloat in CGFloat((px - m.X0) / (m.X1 - m.X0)) * W }
             let px = price ?? m.S0
             let xs = m.grid, lines = layerLines
+            // The move priced to the date picked, shaded while Walls is on (one formula: iv × √(trading days ÷ 252)).
+            let sdx = m.S0 * m.v * (max(tt, 1) / 252).squareRoot()
+            let band: (CGFloat, CGFloat)? = layer == "Walls" ? (X(max(m.X0, m.S0 - sdx)), X(min(m.X1, m.S0 + sdx))) : nil
             ZStack(alignment: .topLeading) {
                 // The line, its dot and a fix's preview as one vector: a new date morphs them (S.lineMorph, 0.3 s,
                 // instant under Reduce Motion). A leg or a fix switched on or off redraws at once, as before.
                 PayoffCanvas(ys: PosVector(xs.map { m.pl($0, tt, off: off) } + [m.pl(px, tt, off: off)]
                                            + (extra.isEmpty ? [] : xs.map { m.pl($0, tt, off: off, extra: extra) })),
-                             m: m, xs: xs, tt: tt, off: off, flip: flip, px: px, W: W, H: H, mn: sc.mn, mx: sc.mx, lines: lines)
+                             m: m, xs: xs, tt: tt, off: off, flip: flip, px: px, W: W, H: H, mn: sc.mn, mx: sc.mx, lines: lines, band: band)
                     .animation(nil, value: off)
                     .animation(nil, value: extra)
                     .animation(S.moving(S.lineMorph, reduce), value: tt)
-                // Layer labels in lanes on chips, never overlapping. Keyed by label, so a new chain's labels fade
-                // in where they belong instead of sliding over from the old ones.
+                // Layer labels in lanes, never overlapping (lane45): walls from the top, left-aligned 2 right of their
+                // line, lanes going down 16; technicals centred on theirs from 16 above the axis, lanes going up.
+                // Keyed by label, so a new chain's labels fade in where they belong.
+                let walls = layer == "Walls"
                 let sorted = lines.sorted { $0.k < $1.k }
-                let lanes = Self.lanes(sorted.map { (X($0.k), CGFloat($0.label.count) * 5.6 + 14) })
+                let widths = sorted.map { CGFloat($0.label.count) * 6.6 + 8 }
+                let lefts = sorted.indices.map { i in min(max(0, walls ? X(sorted[i].k) + 2 : X(sorted[i].k) - widths[i] / 2), W - widths[i]) }
+                let lanes = Self.lanes(sorted.indices.map { (lefts[$0], widths[$0]) })
                 ForEach(Array(sorted.enumerated()), id: \.element.label) { i, l in
-                    let lane = lanes[i]
-                    Text(l.label).font(.system(size: 10, weight: .bold)).foregroundStyle(l.color)
-                        .padding(.horizontal, 6).frame(height: 18)
-                        .background(Capsule().fill(S.chip.opacity(0.95)))
-                        .fixedSize()
-                        .position(x: min(max(X(l.k), 40), W - 40), y: 10 + CGFloat(lane) * 22)
+                    Text(l.label).font(.system(size: 11, weight: .bold).monospacedDigit()).foregroundStyle(l.color)
+                        .lineLimit(1).fixedSize()
+                        .padding(.horizontal, 3).frame(height: 14)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(S.chartChip))
+                        .offset(x: lefts[i], y: walls ? -2 + CGFloat(lanes[i]) * 16 : H - 16 - CGFloat(lanes[i]) * 16)
                 }
-                // The price axis.
+                // The price axis: 12/16 semibold, 4 under the ticks; centred, or flush at either end.
                 let step = [0.5, 1, 2, 2.5, 5, 10, 20, 25, 50].first { (m.X1 - m.X0) / $0 <= 5 } ?? 50
                 ForEach(Array(stride(from: (m.X0 / step).rounded(.up) * step, through: m.X1, by: step)), id: \.self) { k in
+                    let x = X(k)
                     Text("$\(String(format: k.truncatingRemainder(dividingBy: 1) == 0 ? "%.0f" : "%.1f", k))")
-                        .font(.system(size: 11, weight: .medium).monospacedDigit()).foregroundStyle(S.secondary)
-                        .position(x: X(k), y: H + 26)
+                        .font(.system(size: 12, weight: .semibold).monospacedDigit()).foregroundStyle(S.secondary)
+                        .fixedSize().frame(height: 16)
+                        .alignmentGuide(.leading) { d in -(x < 14 ? x : x > W - 14 ? x - d.width : x - d.width / 2) }
+                        .offset(y: 210)
                 }
             }
             .contentShape(Rectangle())
@@ -658,6 +763,8 @@ private struct PayoffCanvas: View, Animatable {
     let mn: Double
     let mx: Double
     let lines: [PositionsChart.Line]
+    /// The priced move's band (x from, x to) while Walls is on.
+    var band: (CGFloat, CGFloat)? = nil
 
     var animatableData: PosVector {
         get { ys }
@@ -679,18 +786,33 @@ private struct PayoffCanvas: View, Animatable {
             }
             let y0 = Y(0)
             let line = path { i in i < v.count ? v[i] : m.pl(xs[i], tt, off: off) }
+            func vline(_ x: CGFloat) -> Path { Path { $0.move(to: CGPoint(x: x, y: 0)); $0.addLine(to: CGPoint(x: x, y: H)) } }
+            // The priced move while Walls is on (navy 7%).
+            if let b = band { ctx.fill(Path(CGRect(x: b.0, y: 0, width: max(0, b.1 - b.0), height: H)), with: .color(S.navy.opacity(0.07))) }
             var area = line; area.addLine(to: CGPoint(x: W, y: y0)); area.addLine(to: CGPoint(x: 0, y: y0)); area.closeSubpath()
-            ctx.drawLayer { c in c.clip(to: Path(CGRect(x: 0, y: -40, width: W, height: y0 + 40))); c.fill(area, with: .color(S.green.opacity(0.12))) }
-            ctx.drawLayer { c in c.clip(to: Path(CGRect(x: 0, y: y0, width: W, height: H - y0 + 40))); c.fill(area, with: .color(S.red.opacity(0.10))) }
-            ctx.stroke(Path { $0.move(to: CGPoint(x: 0, y: y0)); $0.addLine(to: CGPoint(x: W, y: y0)) }, with: .color(S.secondary.opacity(0.3)), lineWidth: 1)
-            if let f = flip, f <= m.X1 {
-                ctx.stroke(Path { $0.move(to: CGPoint(x: X(f), y: 0)); $0.addLine(to: CGPoint(x: X(f), y: H)) },
-                           with: .color(S.act), style: StrokeStyle(lineWidth: 1.5, dash: [2, 3]))
+            ctx.drawLayer { c in c.clip(to: Path(CGRect(x: -4, y: -40, width: W + 8, height: y0 + 40))); c.fill(area, with: .color(S.green.opacity(0.14))) }
+            ctx.drawLayer { c in c.clip(to: Path(CGRect(x: -4, y: y0, width: W + 8, height: 260))); c.fill(area, with: .color(S.red.opacity(0.12))) }
+            ctx.stroke(Path { $0.move(to: CGPoint(x: 0, y: y0)); $0.addLine(to: CGPoint(x: W, y: y0)) }, with: .color(S.secondary.opacity(0.45)), lineWidth: 1)
+            // The layer's lines: walls solid at 70%, technicals dashed 3 3 at 80%.
+            for l in lines {
+                ctx.stroke(vline(X(l.k)), with: .color(l.color.opacity(l.dashed ? 0.8 : 0.7)), style: StrokeStyle(lineWidth: 1, dash: l.dashed ? [3, 3] : []))
             }
-            if tt > 0 { ctx.stroke(path { m.pl(xs[$0], 0, off: off) }, with: .color(S.ink.opacity(0.6)), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])) }
-            if v.count >= 2 * n + 1 { ctx.stroke(path { v[n + 1 + $0] }, with: .color(S.green), style: StrokeStyle(lineWidth: 2, dash: [5, 3])) }
-            ctx.stroke(line, with: .color(S.ink), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-            // Strike ticks under the plot.
+            if let f = flip, f <= m.X1 {
+                ctx.stroke(vline(X(f)), with: .color(S.act), style: StrokeStyle(lineWidth: 1.5, dash: [2, 3]))
+            }
+            if tt > 0 { ctx.stroke(path { m.pl(xs[$0], 0, off: off) }, with: .color(S.secondary.opacity(0.9)), style: StrokeStyle(lineWidth: 1.5, dash: [4, 4])) }
+            if v.count >= 2 * n + 1 { ctx.stroke(path { v[n + 1 + $0] }, with: .color(S.green), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [6, 5])) }
+            ctx.stroke(line, with: .color(S.ink), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+            // Crosshair at the price: a 1 pt line; the dot r 5.5 stroked 2 in the card's fill (ink 9 across, ring to 13).
+            let cx = X(px)
+            ctx.stroke(vline(cx), with: .color(S.ink), lineWidth: 1)
+            let cy = max(0, min(H, Y(n < v.count ? v[n] : m.pl(px, tt, off: off))))
+            ctx.fill(Path(ellipseIn: CGRect(x: cx - 6.5, y: cy - 6.5, width: 13, height: 13)), with: .color(S.sheetFill))
+            ctx.fill(Path(ellipseIn: CGRect(x: cx - 4.5, y: cy - 4.5, width: 9, height: 9)), with: .color(S.ink))
+            // The axis rule, today's price on it, then the strike ticks (4 wide, round ends, from 195).
+            ctx.stroke(Path { $0.move(to: CGPoint(x: 0, y: H)); $0.addLine(to: CGPoint(x: W, y: H)) }, with: .color(S.hairline), lineWidth: 1)
+            let nx = X(m.S0)
+            ctx.fill(Path(ellipseIn: CGRect(x: nx - 3.5, y: H - 3.5, width: 7, height: 7)), with: .color(S.ink))
             var seen: [Double: Int] = [:]
             for l in m.legs where l.ty != .shares && l.K >= m.X0 && l.K <= m.X1 {
                 let i = seen[l.K, default: -1] + 1; seen[l.K] = i
@@ -698,18 +820,10 @@ private struct PayoffCanvas: View, Animatable {
                 let hurt = m.legPL(l, px, tt) < -0.5 && !off.contains(l.id)
                 let c: Color = hurt ? S.red : l.ty == .call ? S.navy : S.brown
                 let o: Double = off.contains(l.id) ? 0.12 : l.q < 0 ? 1 : 0.4
-                ctx.fill(Path(roundedRect: CGRect(x: x - 1.5, y: H + 5, width: 3, height: min(10, 3 + abs(l.q) / 60 * 7)), cornerRadius: 1.5), with: .color(c.opacity(o)))
+                let len = min(10, 3 + abs(l.q) / 60 * 7)
+                ctx.stroke(Path { $0.move(to: CGPoint(x: x, y: H + 5)); $0.addLine(to: CGPoint(x: x, y: H + 5 + len)) },
+                           with: .color(c.opacity(o)), style: StrokeStyle(lineWidth: 4, lineCap: .round))
             }
-            // The layer's lines, under the crosshair.
-            for l in lines {
-                ctx.stroke(Path { $0.move(to: CGPoint(x: X(l.k), y: 0)); $0.addLine(to: CGPoint(x: X(l.k), y: H)) },
-                           with: .color(l.color.opacity(0.85)), style: StrokeStyle(lineWidth: 1.2, dash: l.dashed ? [3, 3] : []))
-            }
-            // Crosshair.
-            let cx = X(px)
-            ctx.stroke(Path { $0.move(to: CGPoint(x: cx, y: 0)); $0.addLine(to: CGPoint(x: cx, y: H)) }, with: .color(S.ink), lineWidth: 1.5)
-            let cy = Y(n < v.count ? v[n] : m.pl(px, tt, off: off))
-            ctx.fill(Path(ellipseIn: CGRect(x: cx - 5, y: cy - 5, width: 10, height: 10)), with: .color(S.ink))
         }
     }
 }
@@ -732,6 +846,9 @@ private struct PosVector: VectorArithmetic {
 }
 
 /// One stop per trading day up to the last sold expiry; the expiry Fridays tall; the date and "N trading days on".
+/// The design's: the date 14/18 bold and the count 12/16, 2, a 40 pt slider (track 4 at 12, inset 14, ink up to a
+/// white 38 x 24 thumb at 14, ticks from 27: 10 on the Fridays, the first in ink, 5 elsewhere), then its labels
+/// 12/16, 2 up into it: the first flush left, the first Friday centred on its stop in ink, the last flush right.
 private struct DateSlider: View {
     let m: PositionsModel
     @Binding var stop: Int
@@ -739,25 +856,34 @@ private struct DateSlider: View {
     /// One per day the thumb steps (finger or VoiceOver), for the selection haptic; the app's own moves make none.
     @State private var steps = 0
     var body: some View {
-        let st = m.stops[stop]
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(st.long).sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                Spacer()
-                Text(stop == 0 ? (m.weekend ? "next week" : "now") : "\(stop) trading day\(stop == 1 ? "" : "s") on").sType(BK.label, tabular: false).foregroundStyle(S.secondary)
+        let st = m.stops[stop], n = max(1, m.stops.count - 1)
+        let firstFri = m.stops.dropLast().firstIndex(where: \.friday)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(st.long).sType(SType(size: 14, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                Spacer(minLength: 12)
+                Text(stop == 0 ? (m.weekend ? "next week" : "now") : "\(stop) trading day\(stop == 1 ? "" : "s") on")
+                    .sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary)
             }
             GeometryReader { g in
-                let n = m.stops.count - 1, w = g.size.width - 28
-                ZStack(alignment: .leading) {
-                    Capsule().fill(S.chip).frame(height: 4).padding(.horizontal, 14)
+                let w = g.size.width - 28, f = CGFloat(stop) / CGFloat(n)
+                ZStack(alignment: .topLeading) {
+                    Capsule().fill(S.secondary.opacity(0.2)).frame(width: w, height: 4).offset(x: 14, y: 12)
+                    Capsule().fill(S.ink).frame(width: max(0, w * f), height: 4).offset(x: 14, y: 12)
                     ForEach(m.stops.indices, id: \.self) { i in
-                        Rectangle().fill(S.secondary.opacity(m.stops[i].friday ? 0.9 : 0.5)).frame(width: m.stops[i].friday ? 2 : 1, height: m.stops[i].friday ? 14 : 7)
-                            .offset(x: 14 + w * CGFloat(i) / CGFloat(n) - 0.5, y: 14)
+                        let tall = m.stops[i].friday, first = i == firstFri
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(first ? S.ink : S.secondary.opacity(tall ? 0.7 : 0.5))
+                            .frame(width: 2, height: tall ? 10 : 5)
+                            .offset(x: 14 + w * CGFloat(i) / CGFloat(n) - 1, y: 27)
                     }
-                    Circle().fill(.white).frame(width: 28, height: 28).shadow(color: .black.opacity(0.18), radius: 4, y: 2)
-                        .offset(x: w * CGFloat(stop) / CGFloat(n))
+                    Capsule().fill(.white).frame(width: 38, height: 24)
+                        .overlay(Capsule().strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5))
+                        .shadow(color: .black.opacity(0.16), radius: 4, y: 3)
+                        .shadow(color: .black.opacity(0.08), radius: 1, y: 1)
+                        .offset(x: 14 + w * f - 19, y: 2)
                 }
-                .frame(height: 30)
+                .frame(width: g.size.width, height: 40, alignment: .topLeading)
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0).onChanged { v in
                     let i = Int(((v.location.x - 14) / w * CGFloat(n)).rounded())
@@ -765,16 +891,25 @@ private struct DateSlider: View {
                     if c != stop { withAnimation(S.moving(S.spring, reduce)) { stop = c }; steps += 1 }
                 })
             }
-            .frame(height: 30)
-            HStack {
-                Text(m.stops.first?.short ?? "").sType(BK.caption, tabular: false).foregroundStyle(S.secondary)
-                Spacer()
-                if let f = m.stops.dropLast().first(where: \.friday) {
-                    Text(f.short).sType(SType(size: 11, weight: 700, line: 13, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                    Spacer()
+            .frame(height: 40)
+            GeometryReader { g in
+                let w = g.size.width - 28
+                let lab = { (t: String, bold: Bool) in
+                    Text(t).sType(SType(size: 12, weight: bold ? 700 : 500, line: 16, tracking: 0), tabular: false)
+                        .foregroundStyle(bold ? S.ink : S.secondary).fixedSize()
                 }
-                Text(m.stops.last?.short ?? "").sType(BK.caption, tabular: false).foregroundStyle(S.secondary)
+                ZStack(alignment: .topLeading) {
+                    lab(m.stops.first?.short ?? "", false).offset(x: 14)
+                    if let i = firstFri {
+                        let x = 14 + w * CGFloat(i) / CGFloat(n)
+                        lab(m.stops[i].short, true).alignmentGuide(.leading) { d in -(x - d.width / 2) }
+                    }
+                    lab(m.stops.last?.short ?? "", false).alignmentGuide(.leading) { d in -(14 + w - d.width) }
+                }
+                .frame(width: g.size.width, alignment: .topLeading)
             }
+            .frame(height: 16)
+            .padding(.top, -2)
         }
         .sensoryFeedback(.selection, trigger: steps)
         .accessibilityElement()
@@ -797,25 +932,32 @@ private struct LegsList: View {
     @Binding var filter: String
     let privacy: Bool
     @Environment(\.accessibilityReduceMotion) private var reduce
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
+        // The design's legs: All · Sold · Long (32 tall, 6 apart), then "N legs off · Show all" on its own line,
+        // then a section per group, 12 apart.
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 ForEach(["All", "Sold", "Long"], id: \.self) { f in
                     // Sections come and go and the page reflows: moving, so instant under Reduce Motion.
                     Button { withAnimation(S.moving(S.fade, reduce)) { filter = f } } label: {
-                        Text(f).sFont(14, .semibold).foregroundStyle(filter == f ? S.sheetFill : S.ink)
-                            .padding(.horizontal, 14).frame(height: 32).background(Capsule().fill(filter == f ? S.ink : S.chip))
+                        Text(f).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false)
+                            .foregroundStyle(filter == f ? S.sheetFill : S.ink)
+                            .padding(.horizontal, 14).frame(height: 32).background(Capsule().fill(filter == f ? S.ink : S.track))
+                            .frame(height: 44).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(filter == f ? .isSelected : [])
                 }
-                Spacer()
-                if !off.isEmpty {
-                    Button { withAnimation(S.fade) { off = [] } } label: {
-                        Text("\(off.count) leg\(off.count > 1 ? "s" : "") off · Show all").sFont(13, .semibold).foregroundStyle(S.act)
-                    }.buttonStyle(.plain)
-                }
+            }
+            .padding(.vertical, -6)
+            if !off.isEmpty {
+                Button { withAnimation(S.fade) { off = [] } } label: {
+                    Text("\(off.count) leg\(off.count > 1 ? "s" : "") off · Show all")
+                        .sType(SType(size: 13, weight: 600, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                        .underline().frame(minHeight: 32)
+                }.buttonStyle(.plain)
             }
             let sold = m.legs.filter { $0.group == "s" }, long = m.legs.filter { $0.group == "l" }
             if filter != "Long" {
@@ -829,19 +971,26 @@ private struct LegsList: View {
         .sensoryFeedback(.selection, trigger: off)
     }
 
+    /// The design's leg row fill: ink 4% (white 6% in dark).
+    private var rowFill: Color { S.ink.opacity(scheme == .dark ? 0.06 : 0.04) }
+
     @State private var endedOpen = false
     /// The week that ended (weekend, answer 3): folded under "Ended Oct 30 · settled", each leg with how it ended.
     private var endedSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             // The legs push the page down as they unfold: moving, so instant under Reduce Motion.
             Button { withAnimation(S.moving(S.fade, reduce)) { endedOpen.toggle() } } label: {
-                HStack {
-                    Text(m.endedLabel).sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                    Spacer()
-                    Image(systemName: "chevron.down").sFont(13, .semibold).foregroundStyle(S.secondary)
+                HStack(spacing: 6) {
+                    Text(m.endedLabel).sType(SType(size: 13, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                    // The design's 10 x 10 chevron.
+                    Path { p in p.move(to: CGPoint(x: 2.5, y: 3.5)); p.addLine(to: CGPoint(x: 5, y: 6.5)); p.addLine(to: CGPoint(x: 7.5, y: 3.5)) }
+                        .stroke(S.ink, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                        .frame(width: 10, height: 10)
                         .rotationEffect(.degrees(endedOpen ? 180 : 0))
                         .accessibilityHidden(true)
+                    Spacer(minLength: 0)
                 }
+                .frame(minHeight: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(PosSay.words(m.endedLabel))
@@ -850,17 +999,19 @@ private struct LegsList: View {
             if endedOpen {
                 ForEach(m.ended) { l in
                     let itm = l.ty == .call ? px > l.K : px < l.K
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(l.title).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
                             .accessibilityLabel(PosSay.words(l.title))
-                        Text(m.endedNotes[l.id] ?? (itm ? "Ended Oct 30, $\(String(format: "%.2f", abs(px - l.K))) in the money at $\(String(format: "%.2f", px)). Rolled before the close, so no shares went."
-                                 : "Ended Oct 30, worth nothing at $\(String(format: "%.2f", px)): kept in full."))
-                            .sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+                        // The leg's own expiry (the model's ended day), never a fixed date.
+                        let ended = l.ex.isEmpty ? "Ended" : "Ended \(l.ex)"
+                        Text(m.endedNotes[l.id] ?? (itm ? "\(ended), $\(String(format: "%.2f", abs(px - l.K))) in the money at $\(String(format: "%.2f", px)). Rolled before the close, so no shares went."
+                                 : "\(ended), worth nothing at $\(String(format: "%.2f", px)): kept in full."))
+                            .sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false).foregroundStyle(S.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(14)
+                    .padding(.vertical, 12).padding(.horizontal, 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(S.chip.opacity(0.6)))
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(rowFill))
                 }
             }
         }
@@ -872,36 +1023,50 @@ private struct LegsList: View {
     }
     private func totalColor(_ ls: [PositionsModel.Leg]) -> Color { let v = sum(ls); return abs(v) < 0.5 ? S.secondary : v < 0 ? S.red : S.green }
 
+    /// A group: its head (13/18 bold, the total 13/18 semibold on the right, 28 tall), then its rows, 6 apart.
     private func section(_ h: String, _ v: String, _ c: Color, _ ls: [PositionsModel.Leg]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(h).sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                Spacer()
-                Text(v).sType(SType(size: 13, weight: 600, line: 16, tracking: 0)).foregroundStyle(c)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text(h).sType(SType(size: 13, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                Spacer(minLength: 0)
+                Text(v).sType(SType(size: 13, weight: 600, line: 18, tracking: 0)).foregroundStyle(c).lineLimit(1)
                     .accessibilityLabel(BriefMask.spoken(v))
             }
+            .frame(minHeight: 28)
             ForEach(ls) { l in legCard(l) }
         }
     }
 
+    /// A leg: padding 12 14, radius 14; the title 15/20 semibold and the P&L 15/20 bold on one baseline, 2, then
+    /// "Δ 1,925" 13/18 semibold (red when it hurts) and the rest 13/18 medium secondary; switched off it fades to 45%
+    /// and says so 6 under.
     private func legCard(_ l: PositionsModel.Leg) -> some View {
         let isOff = off.contains(l.id), p = isOff ? 0 : m.legPL(l, px, tt), d = m.legDelta(l, px, tt)
         let hurt = p < -0.5 && !isOff
-        let line: String = l.ty == .shares ? "Δ \(SampleEngine.fn(d)) · cost $\(String(format: "%.2f", l.K)), no decay" : "Δ \(SampleEngine.fn(d)) at $\(String(format: "%.2f", px))"
+        let rest: String = l.ty == .shares ? " · cost $\(String(format: "%.2f", l.K)), no decay" : " at $\(String(format: "%.2f", px))"
         return Button { withAnimation(S.fade) { if isOff { off.remove(l.id) } else { off.insert(l.id) } } } label: {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(l.title).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                    Text(isOff ? "Off · tap to add back" : line).sType(SType(size: 12, weight: 500, line: 16, tracking: 0))
-                        .foregroundStyle(isOff ? S.secondary : d < 0 ? S.red : S.ink)
+            VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(l.title).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        BriefWords.line(isOff ? "Off" : abs(p) < 0.5 ? "$0" : "$" + SampleEngine.fn(p), privacy: privacy && !isOff && abs(p) >= 0.5)
+                            .sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
+                            .foregroundStyle(isOff || abs(p) < 0.5 ? S.secondary : p < 0 ? S.red : S.green)
+                    }
+                    (Text("Δ \(SampleEngine.fn(d))").fontWeight(.semibold).foregroundStyle(d < 0 ? S.red : S.ink)
+                     + Text(rest).foregroundStyle(S.secondary))
+                        .sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
-                BriefWords.line(isOff ? "Off" : abs(p) < 0.5 ? "$0" : "$" + SampleEngine.fn(p), privacy: privacy && !isOff && abs(p) >= 0.5)
-                    .sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
-                    .foregroundStyle(isOff || abs(p) < 0.5 ? S.secondary : p < 0 ? S.red : S.green)
+                if isOff {
+                    Text("Off · tap to add back").sType(SType(size: 12, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                }
             }
-            .padding(14)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(hurt ? S.red.opacity(0.08) : S.chip.opacity(0.8)))
+            .padding(.vertical, 12).padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(hurt ? S.downTint : rowFill))
             .opacity(isOff ? 0.45 : 1)
         }
         .buttonStyle(.plain)
@@ -926,31 +1091,37 @@ private struct FixesTiles: View {
     @Binding var picked: String?
     let privacy: Bool
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Fixes").sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
+        // The design's fixes: one row each, 10 apart, padding 12 14, radius 14: the name and its cost 15/20 bold on
+        // one line, what it is 13/18, where it leaves you 13/18 bold; the picked one white with a 2 pt ink ring.
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Fixes").sType(SType(size: 13, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
                 .accessibilityAddTraits(.isHeader)
-            HStack(alignment: .top, spacing: 8) {
-                ForEach(fixes) { f in
-                    let ad = m.delta(px, tt, off: off, extra: f.extra), ap = m.pl(px, tt, off: off, extra: f.extra), on = picked == f.id
-                    Button { withAnimation(S.fade) { picked = on ? nil : f.id } } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(f.title).sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                            BriefWords.line("$" + SampleEngine.fn(f.cost), privacy: privacy).sType(SType(size: 17, weight: 800, line: 22, tracking: 0)).foregroundStyle(S.ink)
-                            Text(f.act).sType(SType(size: 11, weight: 500, line: 14, tracking: 0), tabular: false).foregroundStyle(S.secondary).fixedSize(horizontal: false, vertical: true)
-                            Text("Then \(ad < 0 ? "short" : "long") \(SampleEngine.fn(ad)) Δ · \(ap < 0 ? "down" : "up") \(BriefWords.plain("$" + SampleEngine.fn(ap), privacy: privacy))")
-                                .sType(SType(size: 11, weight: 700, line: 14, tracking: 0), tabular: false).foregroundStyle(ad < 0 ? S.red : S.green)
+            ForEach(fixes) { f in
+                let ad = m.delta(px, tt, off: off, extra: f.extra), ap = m.pl(px, tt, off: off, extra: f.extra), on = picked == f.id
+                Button { withAnimation(S.fade) { picked = on ? nil : f.id } } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(f.title).sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                            Spacer(minLength: 0)
+                            BriefWords.line("$" + SampleEngine.fn(f.cost), privacy: privacy).sType(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(S.ink)
                         }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(S.chip))
-                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(on ? S.ink : .clear, lineWidth: 2))
+                        Text(f.act).sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Then \(ad < 0 ? "short" : "long") \(SampleEngine.fn(ad)) Δ · \(ap < 0 ? "down" : "up") \(BriefWords.plain("$" + SampleEngine.fn(ap), privacy: privacy))")
+                            .sType(SType(size: 13, weight: 700, line: 18, tracking: 0)).foregroundStyle(ad < 0 ? S.red : S.green)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .buttonStyle(.plain)
-                    // One element; the picked fix is selected. Money "hidden" with privacy on.
-                    .accessibilityLabel("\(f.title), costs \(PosSay.money(f.cost, privacy)). \(PosSay.words(f.act)). Then \(PosSay.side(ad)) delta, \(PosSay.signed(ap, privacy))")
-                    .accessibilityAddTraits(on ? .isSelected : [])
-                    .accessibilityHint(on ? "Takes its preview off the chart" : "Previews it on the chart, dashed green")
+                    .padding(.vertical, 12).padding(.horizontal, 14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(on ? S.sheetFill : S.track))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(on ? S.ink : .clear, lineWidth: 2))
+                    .shadow(color: .black.opacity(on ? 0.08 : 0), radius: 6, y: 4)
                 }
+                .buttonStyle(.plain)
+                // One element; the picked fix is selected. Money "hidden" with privacy on.
+                .accessibilityLabel("\(f.title), costs \(PosSay.money(f.cost, privacy)). \(PosSay.words(f.act)). Then \(PosSay.side(ad)) delta, \(PosSay.signed(ap, privacy))")
+                .accessibilityAddTraits(on ? .isSelected : [])
+                .accessibilityHint(on ? "Takes its preview off the chart" : "Previews it on the chart, dashed green")
             }
         }
         .sensoryFeedback(.selection, trigger: picked)
@@ -962,99 +1133,163 @@ private struct FixesTiles: View {
 private struct WallsByExpiry: View {
     let m: PositionsModel
     @Binding var kind: String
+    /// The chain the chart draws, and the chart's layer: a row tapped draws that chain (Walls on).
+    @Binding var chain: Int
+    @Binding var layer: String?
     @Environment(\.accessibilityReduceMotion) private var reduce
+    @Environment(\.colorScheme) private var scheme
     /// One wall on a row, keyed by what it is, so a row keeps its markers when the filter changes.
-    private struct Mark: Identifiable { let id: String; let k: Double; let c: Color }
+    private struct Mark: Identifiable { let id: String; let k: Double; let c: Color; let o: Double }
+    /// The design's ladder: a 80 pt label column, rows 44 tall, the axis 22 under them.
+    private static let lw: CGFloat = 80, rowH: CGFloat = 44, axisH: CGFloat = 22
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Walls by expiry").sType(BK.title, tabular: false).foregroundStyle(S.ink)
-                .accessibilityAddTraits(.isHeader)
-            Text("Ceiling and floor for every chain, on the chart’s prices. Shaded is the move priced to that date. Tap a row to draw it on the chart.")
-                .sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false).foregroundStyle(S.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                ForEach(["All", "Weeklies", "Monthlies"], id: \.self) { k in
-                    // Rows come, go and close up: moving, so instant under Reduce Motion.
-                    Button { withAnimation(S.moving(S.fade, reduce)) { kind = k } } label: {
-                        Text(k).sFont(14, .semibold).foregroundStyle(kind == k ? S.sheetFill : S.ink)
-                            .padding(.horizontal, 14).frame(height: 32).background(Capsule().fill(kind == k ? S.ink : S.chip))
-                    }.buttonStyle(.plain)
-                    .accessibilityAddTraits(kind == k ? .isSelected : [])
-                }
-            }
-            .sensoryFeedback(.selection, trigger: kind)
-            let rows = m.chains.enumerated().filter { kind == "All" || (kind == "Weeklies" ? $0.element.kind == "Weekly" : $0.element.kind == "Monthly") }
-            if m.chains.isEmpty {
-                Text("No walls saved for \(m.t) yet").sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
-            }
-            GeometryReader { g in
-                let lw: CGFloat = 76, w = g.size.width - lw
-                let X = { (px: Double) -> CGFloat in lw + CGFloat((px - m.X0) / (m.X1 - m.X0)) * w }
-                ZStack(alignment: .topLeading) {
-                    // A row per chain, keyed by the chain (not its place in the list), so a filter change fades rows in
-                    // and out and closes them up instead of morphing one chain's markers into another's. Each row is
-                    // one VoiceOver element that says what it draws.
-                    ForEach(Array(rows.enumerated()), id: \.element.offset) { r, item in
-                        let ex = item.element, wl = ex, y = CGFloat(r) * 42
-                        let band = m.S0 * m.v * (Double(ex.trading) / 252).squareRoot()
-                        ZStack(alignment: .topLeading) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(ex.label).sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                                Text("\(ex.kind) · \(ex.days)d").sType(SType(size: 11, weight: 500, line: 13, tracking: 0), tabular: false).foregroundStyle(S.secondary)
-                            }
-                            .offset(y: 6)
-                            Capsule().fill(S.chip).frame(width: max(0, X(min(m.X1, m.S0 + band)) - X(max(m.X0, m.S0 - band))), height: 10)
-                                .offset(x: X(max(m.X0, m.S0 - band)), y: 16)
-                            if wl.c == nil && wl.f == nil && wl.a == nil && wl.flip == nil {
-                                // README 9.4: an expiry with no walls says so on its row.
-                                Text("No walls saved for \(ex.label)").sType(SType(size: 12, weight: 500, line: 15, tracking: 0), tabular: false)
-                                    .foregroundStyle(S.secondary).fixedSize().offset(x: lw + 8, y: 13)
-                            }
-                            if let fl = wl.flip, fl >= m.X0, fl <= m.X1 { Rectangle().fill(S.act).frame(width: 1, height: 18).opacity(0.8).offset(x: X(fl), y: 12) }
-                            // Labels in lanes: a wall within 30 pt of the one before it puts its number below the bar.
-                            let ms = [wl.a.map { Mark(id: "a", k: $0, c: S.brown.opacity(0.4)) }, wl.f.map { Mark(id: "f", k: $0, c: S.brown) },
-                                      wl.c.map { Mark(id: "c", k: $0, c: S.navy) }].compactMap { $0 }.sorted { $0.k < $1.k }
-                            ForEach(Array(ms.enumerated()), id: \.element.id) { i, mk in
-                                let px = { (j: Int) in X(min(max(ms[j].k, m.X0), m.X1)) }
-                                let close = i > 0 && abs(px(i) - px(i - 1)) < 30
-                                // A wall with the next one close on its right puts its number on its left.
-                                let left = !close && i + 1 < ms.count && abs(px(i + 1) - px(i)) < 30
-                                marker(mk.k, mk.c, X, 0, below: close, left: left)
-                            }
-                            if r < rows.count - 1 { Rectangle().fill(S.hairline).frame(height: 0.5).offset(y: 41) }
-                        }
-                        .frame(width: g.size.width, height: 42, alignment: .topLeading)
-                        .offset(y: y)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(rowWords(ex, band: band))
+        // Opens on a 1 pt rule, 16 above the title; 10 between parts (SunnyPositions.dc.html, Walls by expiry).
+        VStack(alignment: .leading, spacing: 0) {
+            BHairline()
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Walls by expiry").sType(BK.title, tabular: false).foregroundStyle(S.ink)
+                        .accessibilityAddTraits(.isHeader)
+                    // With no walls saved, only the title and "No walls saved for NKE yet" (README 9.4: nothing stands in).
+                    if !m.chains.isEmpty {
+                        Text("Ceiling and floor for every chain, on the chart’s prices. Shaded is the move priced to that date. Tap a row to draw it on the chart.")
+                            .sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false).foregroundStyle(S.secondary).fixedSize(horizontal: false, vertical: true)
                     }
-                    Rectangle().fill(S.ink).frame(width: 1, height: CGFloat(rows.count) * 42).offset(x: X(m.S0))
-                        .accessibilityHidden(true)
+                }
+                if !m.chains.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(["All", "Weeklies", "Monthlies"], id: \.self) { k in
+                        // Rows come, go and close up: moving, so instant under Reduce Motion.
+                        Button { withAnimation(S.moving(S.fade, reduce)) { kind = k } } label: {
+                            Text(k).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false)
+                                .foregroundStyle(kind == k ? S.sheetFill : S.ink)
+                                .padding(.horizontal, 12).frame(height: 30).background(Capsule().fill(kind == k ? S.ink : S.track))
+                                .frame(height: 44).contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                        .accessibilityAddTraits(kind == k ? .isSelected : [])
+                    }
+                }
+                .padding(.vertical, -6)
+                .sensoryFeedback(.selection, trigger: kind)
+                }
+                let rows = m.chains.enumerated().filter { kind == "All" || (kind == "Weeklies" ? $0.element.kind == "Weekly" : $0.element.kind == "Monthly") }
+                if m.chains.isEmpty {
+                    Text("No walls saved for \(m.t) yet").sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
+                } else {
+                    ladder(rows)
+                        // A chart drawn to its 44 pt rows: its labels and key keep their size at any text size (Pass 5).
+                        .environment(\.sTypeScales, false)
+                    SXFlowGaps(column: 12, row: 4) {
+                        key("Ceiling") { RoundedRectangle(cornerRadius: 3).fill(S.navy).frame(width: 6, height: 12) }
+                        key("Floor") { RoundedRectangle(cornerRadius: 3).fill(S.brown).frame(width: 6, height: 12) }
+                        key("Accelerator") { RoundedRectangle(cornerRadius: 3).fill(S.brown).opacity(0.45).frame(width: 6, height: 12) }
+                        key("Flip") { dashedTick(S.act).frame(width: 2, height: 12) }
+                        key("Today") { Rectangle().fill(S.ink).opacity(0.5).frame(width: 1.5, height: 12) }
+                    }
+                    .environment(\.sTypeScales, false)
                 }
             }
-            .frame(height: CGFloat(rows.count) * 42)
-            // A chart drawn to its 42 pt rows: its labels and key keep their size at any text size (Pass 5).
-            .environment(\.sTypeScales, false)
-            if !m.chains.isEmpty {
-                HStack(spacing: 10) {
-                    key(S.navy, "Ceiling"); key(S.brown, "Floor"); key(S.brown.opacity(0.4), "Accelerator"); key(S.act, "Flip"); key(S.ink, "Today")
-                }
-                .environment(\.sTypeScales, false)
-            }
+            .padding(.top, 16)
         }
-        .briefCard()
     }
 
-    @ViewBuilder private func marker(_ k: Double, _ c: Color, _ X: (Double) -> CGFloat, _ y: CGFloat, below: Bool = false, left: Bool = false) -> some View {
-        let inRange = k >= m.X0 && k <= m.X1
-        let x = X(min(max(k, m.X0), m.X1))
-        let label = inRange ? String(format: "%g", k) : "\(String(format: "%g", k)) \(k > m.X1 ? "→" : "←")"
-        RoundedRectangle(cornerRadius: 2).fill(c).frame(width: 5, height: 16).offset(x: x - 2.5, y: y + 13)
-        if left {
-            Text(label).font(.system(size: 10, weight: .bold).monospacedDigit()).foregroundStyle(c).fixedSize()
-                .frame(width: 44, alignment: .trailing).offset(x: x - 49, y: y + 14)
-        } else {
-            Text(label).font(.system(size: 10, weight: .bold).monospacedDigit()).foregroundStyle(c).fixedSize()
-                .offset(x: below ? x - 6 : x + 5, y: below ? y + 29 : y + 14)
+    private func ladder(_ rows: [EnumeratedSequence<[PositionsModel.Chain]>.Element]) -> some View {
+        GeometryReader { g in
+            let lw = Self.lw, w = g.size.width - lw
+            let X = { (px: Double) -> CGFloat in CGFloat((px - m.X0) / (m.X1 - m.X0)) * w }
+            ZStack(alignment: .topLeading) {
+                // A row per chain, keyed by the chain (not its place in the list), so a filter change fades rows in
+                // and out and closes them up instead of morphing one chain's markers into another's. Each row is one
+                // VoiceOver element that says what it draws; a tap draws its walls on the chart.
+                ForEach(Array(rows.enumerated()), id: \.element.offset) { r, item in
+                    let ex = item.element, idx = item.offset, on = layer == "Walls" && chain == idx
+                    let band = m.S0 * m.v * (Double(ex.trading) / 252).squareRoot()
+                    let lo = X(max(m.X0, m.S0 - band)), hi = X(min(m.X1, m.S0 + band))
+                    Button {
+                        withAnimation(S.moving(S.fade, reduce)) { chain = idx; layer = "Walls" }
+                    } label: {
+                        ZStack(alignment: .topLeading) {
+                            Rectangle().fill(on ? S.ink.opacity(scheme == .dark ? 0.08 : 0.05) : .clear)
+                            if r > 0 { Rectangle().fill(S.hairline).frame(height: 1) }
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(ex.label).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                                Text("\(ex.kind) · \(ex.days)d").sType(SType(size: 11, weight: 500, line: 14, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+                            }
+                            .fixedSize()
+                            .offset(x: 2, y: 7)
+                            ZStack(alignment: .topLeading) {
+                                Capsule().fill(S.track).frame(width: max(0, hi - lo), height: 12).offset(x: lo, y: 16)
+                                if ex.c == nil && ex.f == nil && ex.a == nil && ex.flip == nil {
+                                    // README 9.4: an expiry with no walls says so on its row.
+                                    Text("No walls saved for \(ex.label)").sType(SType(size: 12, weight: 500, line: 15, tracking: 0), tabular: false)
+                                        .foregroundStyle(S.secondary).fixedSize().offset(x: 8, y: 14)
+                                }
+                                if let fl = ex.flip, fl >= m.X0, fl <= m.X1 { dashedTick(S.act).frame(width: 2, height: 22).offset(x: X(fl) - 0.75, y: 11) }
+                                ForEach(marks(ex)) { mk in marker(mk, X, w) }
+                            }
+                            .offset(x: lw)
+                        }
+                        .frame(width: g.size.width, height: Self.rowH, alignment: .topLeading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .offset(y: CGFloat(r) * Self.rowH)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(rowWords(ex, band: band))
+                    .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityHint("Draws its walls on the chart")
+                }
+                Rectangle().fill(S.ink).opacity(0.5).frame(width: 1.5, height: CGFloat(rows.count) * Self.rowH)
+                    .offset(x: lw + X(m.S0) - 0.75)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                // The axis: a rule, the chart's prices 11/14 semibold 4 under it.
+                ZStack(alignment: .topLeading) {
+                    Rectangle().fill(S.hairline).frame(width: w, height: 1)
+                    let step = [0.5, 1, 2, 2.5, 5, 10, 20, 25, 50].first { (m.X1 - m.X0) / $0 <= 5 } ?? 50
+                    ForEach(Array(stride(from: (m.X0 / step).rounded(.up) * step, through: m.X1, by: step)), id: \.self) { k in
+                        let x = X(k)
+                        Text("$\(String(format: k.truncatingRemainder(dividingBy: 1) == 0 ? "%.0f" : "%.1f", k))")
+                            .font(.system(size: 11, weight: .semibold).monospacedDigit()).foregroundStyle(S.secondary)
+                            .fixedSize().frame(height: 14)
+                            .alignmentGuide(.leading) { d in -(x < 14 ? x : x > w - 14 ? x - d.width : x - d.width / 2) }
+                            .offset(y: 4)
+                    }
+                }
+                .frame(width: w, height: Self.axisH, alignment: .topLeading)
+                .offset(x: lw, y: CGFloat(rows.count) * Self.rowH)
+                .accessibilityHidden(true)
+            }
+        }
+        .frame(height: CGFloat(rows.count) * Self.rowH + Self.axisH)
+    }
+
+    /// A row's walls: accelerator (45%), floor, ceiling. In range the ceiling's number sits right of its marker, the
+    /// floor's left, the accelerator has none; a wall off the chart pins 3 in from the edge at 50% with "40 →".
+    private func marks(_ ex: PositionsModel.Chain) -> [Mark] {
+        [ex.a.map { Mark(id: "a", k: $0, c: S.brown, o: 0.45) }, ex.f.map { Mark(id: "f", k: $0, c: S.brown, o: 1) },
+         ex.c.map { Mark(id: "c", k: $0, c: S.navy, o: 1) }].compactMap { $0 }
+    }
+
+    @ViewBuilder private func marker(_ mk: Mark, _ X: (Double) -> CGFloat, _ w: CGFloat) -> some View {
+        let hiO = mk.k > m.X1, loO = mk.k < m.X0
+        let x = hiO ? w - 3 : loO ? 3 : X(mk.k)
+        let label = hiO ? "\(String(format: "%g", mk.k)) →" : loO ? "← \(String(format: "%g", mk.k))" : mk.id == "a" ? "" : String(format: "%g", mk.k)
+        RoundedRectangle(cornerRadius: 3).fill(mk.c).frame(width: 6, height: 14).opacity(hiO || loO ? 0.5 : mk.o).offset(x: x - 3, y: 15)
+        if !label.isEmpty {
+            // 11/18 bold: right of the ceiling (+3), left of the floor (-3), inward from a pinned one (6).
+            let right = !hiO && (loO || mk.id == "c")
+            // Offsets only, so a label past either end never moves the row's layout.
+            Text(label).font(.system(size: 11, weight: .bold).monospacedDigit()).foregroundStyle(mk.c).fixedSize()
+                .frame(width: 64, height: 18, alignment: right ? .leading : .trailing)
+                .offset(x: right ? x + (loO ? 6 : 3) : x - 64 - (hiO ? 6 : 3), y: 13)
+        }
+    }
+    /// The flip: a 1.5 pt dashed line, as the design's border-left dashed.
+    private func dashedTick(_ c: Color) -> some View {
+        GeometryReader { g in
+            Path { $0.move(to: CGPoint(x: 0.75, y: 0)); $0.addLine(to: CGPoint(x: 0.75, y: g.size.height)) }
+                .stroke(c, style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
         }
     }
     /// A row as VoiceOver says it: "October 30, weekly, 3 days, ceiling 38 dollars, floor 33 dollars, priced move
@@ -1068,8 +1303,11 @@ private struct WallsByExpiry: View {
         }
         return s + ", priced move \(PosSay.price(m.S0 - band)) to \(PosSay.price(m.S0 + band))"
     }
-    private func key(_ c: Color, _ t: String) -> some View {
-        HStack(spacing: 4) { RoundedRectangle(cornerRadius: 1.5).fill(c).frame(width: 4, height: 12); Text(t).sType(BK.caption, tabular: false).foregroundStyle(S.secondary) }
+    private func key<M: View>(_ t: String, @ViewBuilder mark: () -> M) -> some View {
+        HStack(spacing: 5) {
+            mark().accessibilityHidden(true)
+            Text(t).sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+        }
     }
 }
 
@@ -1080,36 +1318,56 @@ private struct WholeBook: View {
     let privacy: Bool
     var body: some View {
         let h = m.holdings()
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Whole \(m.t) book").sType(BK.title, tabular: false).foregroundStyle(S.ink)
-                .accessibilityAddTraits(.isHeader)
-            Text("Everything you hold in \(m.company), today").sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
-            Text("Long").sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink).padding(.top, 6)
-            ForEach([("Shares", h.sh), ("LEAPS", h.lp), ("OTM calls", h.oc), ("Insurance puts", h.ip)].filter { $0.1.value != 0 }, id: \.0) { r in
-                BHairline()
-                row(r.0, SampleEngine.fK(r.1.value), "\(r.1.today < 0 ? "▼" : "▲") \(SampleEngine.fK(r.1.today)) today", r.1.today < 0 ? S.red : S.green)
-            }
-            let sold = [("Calls", h.sc), ("Puts", h.sp)].filter { $0.1.value != 0 || $0.1.today != 0 }
-            if !sold.isEmpty {
-                Text("Sold · left to earn").sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink).padding(.top, 10)
-                ForEach(sold, id: \.0) { r in
-                    BHairline()
-                    row(r.0, SampleEngine.fK(r.1.value), "\(SampleEngine.fK(r.1.today)) kept", S.green, after: " left to earn")
+        // The design's whole book: a 1 pt rule, 16, the title 20/24 and its line 13/18 6 apart, then each group 8
+        // down: its head 13/18 bold, 4, rows of 9 + 20 + 9 on a rule.
+        VStack(alignment: .leading, spacing: 0) {
+            BHairline()
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Whole \(m.t) book").sType(BK.title, tabular: false).foregroundStyle(S.ink)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Everything you hold in \(m.company), today").sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+                let long = [("Shares", h.sh), ("LEAPS", h.lp), ("OTM calls", h.oc), ("Insurance puts", h.ip)].filter { $0.1.value != 0 || $0.1.today != 0 }
+                if !long.isEmpty {
+                    group("Long") {
+                        ForEach(long, id: \.0) { r in
+                            row(r.0, SampleEngine.fK(r.1.value), "\(r.1.today < 0 ? "▼" : "▲") \(SampleEngine.fK(r.1.today)) today", r.1.today < 0 ? S.red : S.green)
+                        }
+                    }
+                }
+                let sold = [("Calls", h.sc), ("Puts", h.sp)].filter { $0.1.value != 0 || $0.1.today != 0 }
+                if !sold.isEmpty {
+                    group("Sold · left to earn") {
+                        ForEach(sold, id: \.0) { r in
+                            row(r.0, SampleEngine.fK(r.1.value), "\(SampleEngine.fK(r.1.today)) kept", S.green, after: " left to earn")
+                        }
+                    }
                 }
             }
+            .padding(.top, 16)
         }
-        .briefCard()
+    }
+    private func group<C: View>(_ h: String, @ViewBuilder _ rows: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(h).sType(SType(size: 13, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink).padding(.bottom, 4)
+            rows()
+        }
+        .padding(.top, 8)
     }
     /// One element: "Shares, 210 thousand dollars, up 1.2 thousand dollars today" (arrows said as up and down,
     /// money "hidden" with privacy on). `after` follows the value in speech only.
     private func row(_ l: String, _ v: String, _ sub: String, _ c: Color, after: String = "") -> some View {
-        HStack {
-            Text(l).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
-            Spacer()
-            BriefWords.line(v, privacy: privacy).sType(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(S.ink)
-            BriefWords.line(sub, privacy: privacy).sType(SType(size: 13, weight: 600, line: 16, tracking: 0)).foregroundStyle(c).frame(minWidth: 100, alignment: .trailing)
+        VStack(spacing: 0) {
+            BHairline()
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(l).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                Spacer(minLength: 0)
+                BriefWords.line(v, privacy: privacy).sType(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(S.ink)
+                BriefWords.line(sub, privacy: privacy).sType(SType(size: 13, weight: 600, line: 18, tracking: 0)).foregroundStyle(c)
+                    .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)   // wraps at large text (Audit 6)
+                    .frame(minWidth: 96, alignment: .trailing)
+            }
+            .padding(.vertical, 9)
         }
-        .padding(.vertical, 6)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(l)
         .accessibilityValue(BriefWords.speech(BriefWords.plain(v, privacy: privacy) + after + ", " + BriefWords.plain(sub, privacy: privacy)))

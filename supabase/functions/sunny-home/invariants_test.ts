@@ -6,8 +6,8 @@
 //   deno test --allow-read supabase/functions/sunny-home/invariants_test.ts
 
 import { assert, assertEquals } from 'jsr:@std/assert@1';
-import { type BriefLeg, buildBrief, company, type Moment } from './brief.ts';
-import { buildDoc, type NameDay } from './doc.ts';
+import { type BriefLeg, buildBrief, company, type Moment, momentOf } from './brief.ts';
+import { buildDoc, type DocIn, type NameDay } from './doc.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { buildOverview, comingIn } from './overview.ts';
 
@@ -47,9 +47,9 @@ const WHEN: Record<Moment, [string, string, number]> = {
   post: ['2026-10-27', 'Tue', 17 * 60 + 10], weekend: ['2026-10-31', 'Sat', 10 * 60 + 30],
 };
 
-function page(moment: Moment, held = true, divs: Row[] = DIVS) {
+function page(moment: Moment, held = true, divs: Row[] = DIVS, extra: Partial<DocIn> = {}, legsIn: BriefLeg[] = LEGS) {
   const [today, wd, mins] = WHEN[moment];
-  const legs = held ? LEGS : [];
+  const legs = held ? legsIn : [];
   const { brief, inputs } = buildBrief({ today, wd, mins, isTrading, addDays, cal: [], legs, isLeap: (l) => l.expiry >= '2027-12-01',
     shares: held ? SHARES : new Map(), shareAvg: AVG, spot: SPOT, closes: CLOSES, chain: [], divRows: divs, strategies: { NKE: 'rebound' } });
   assertEquals(brief.moment, moment);
@@ -60,7 +60,7 @@ function page(moment: Moment, held = true, divs: Row[] = DIVS) {
   const { full, open } = buildDoc({ moment, today, mins, isTrading, addDays, cal: [], brief, names, market: [], sectors: [], futures: [], watch: [],
     chart: null, yieldWeeks: [{ week: '2026-10-26', fri: '2026-10-30', calls_sold: 3000, calls_back: 800, puts_sold: 900, puts_back: 100 }],
     payback: { made: 12000, series2: [['2026-08-31', 0, 0], ['2026-09-30', 0, 5000], ['2026-10-30', 0, 12000]], pace_recent: 1500, pace_start: 1200 },
-    history: null, earnings: [], macro: [], divs: held ? divs : [], trades: [], orders, aftershock: null, baseNow: BASE, baseAt: () => BASE });
+    history: null, earnings: [], macro: [], divs: held ? divs : [], trades: [], orders, aftershock: null, baseNow: BASE, baseAt: () => BASE, ...extra });
   return { brief: brief as Row, inputs: inputs as Row, full, open, orders };
 }
 
@@ -220,3 +220,48 @@ Deno.test('Overview · caught · Coming in that is not shares x per share', () =
   o.comingIn.raw[0].amount += 1;
   caught(checkOverview(o, sides, DIVS), 9);
 });
+
+// ── Audit 7 · README 9.4: a feed that has stopped hides what it feeds; stale prices are marked ──
+const cardsOf = (doc: Row) => (doc.sections as Row[]).flatMap((x) => x.cards as Row[]);
+Deno.test('Audit 7 · a stopped dividends feed hides the line, never "None ahead"', () => {
+  const live = cardsOf(page('post').full).find((c) => c.type === 'yourResults')!;
+  assert(live.bySegment.Today.dividends.line, 'the line shows while the feed runs');
+  const { full } = page('post', true, [], { feeds: { stopped: ['dividends'] } });
+  const yr = cardsOf(full).find((c) => c.type === 'yourResults')!;
+  assertEquals(yr.bySegment.Today.dividends.line, null);
+  assert(!JSON.stringify(full).includes('None ahead'), 'claims no dividends without a feed');
+});
+Deno.test('Audit 7 · a stopped earnings feed hides Earnings ahead', () => {
+  const earnings = [{ ticker: 'NKE', date: '2026-10-30', estimated: false, priced_move_pct: 8 }];
+  const on = JSON.stringify(page('pre', true, DIVS, { earnings }).full);
+  assert(on.includes('Nike reports'), 'shows while the feed runs');
+  const off = JSON.stringify(page('pre', true, DIVS, { earnings, feeds: { stopped: ['earnings'] } }).full);
+  assert(!off.includes('reports'), 'an earnings row from a stopped feed');
+});
+Deno.test('Audit 7 · index prices 25 minutes old read "As of", fresh ones "Live"', () => {
+  const market = ['SPY', 'QQQ', 'IWM', '^VIX'].map((symbol) => ({ symbol, price: 100, regular_price: 100, regular_change_pct: 0.4 }));
+  const foot = (at: string) => (cardsOf(page('open', true, DIVS, { market, feeds: { stopped: [], marketAt: at } }).full).find((c) => c.type === 'indexCards')!).footer;
+  assertEquals(foot('2026-10-27T15:10:00Z'), 'Live');            // 11:10 AM New York at 11:20
+  assertEquals(foot('2026-10-27T14:55:00Z'), 'As of 10:55 AM');  // 25 minutes old
+  assertEquals(foot('2026-10-26T20:00:00Z'), 'As of Mon Oct 26, 4:00 PM');  // yesterday's close at 11:20
+});
+Deno.test('Audit 7 · an early close moves the last 20, last 5 and post-market to 1:00 PM', () => {
+  assertEquals(momentOf('Thu', 12 * 60 + 30, 780), 'open');
+  assertEquals(momentOf('Thu', 12 * 60 + 41, 780), 'last20');
+  assertEquals(momentOf('Thu', 12 * 60 + 56, 780), 'last5');
+  assertEquals(momentOf('Thu', 13 * 60 + 10, 780), 'post');
+  assertEquals(momentOf('Fri', 13 * 60 + 5, 780), 'weekend');
+  assertEquals(momentOf('Thu', 15 * 60 + 41), 'last20');
+});
+
+for (const m of MOMENTS) {
+  Deno.test(`Audit 7 · nothing sold this week, shares and bought legs only · ${m}`, () => {
+    const bought = LEGS.filter((l) => l.side === 'bought');
+    const p = page(m, true, DIVS, { orders: [] }, bought);
+    assertEquals(checkInvariants({ ...p, orders: [] }).length, 0, show(checkInvariants({ ...p, orders: [] })));
+    const rows = p.brief.position.rows as Row[];
+    assert(rows.length > 0, 'Your position still shows the names');
+    assert(rows.every((r) => r.st < 2), 'nothing sold, so no name is past its best');
+    assert(!JSON.stringify(p.full).includes('NaN') && !JSON.stringify(p.full).includes('undefined'), 'no NaN or undefined on the page');
+  });
+}

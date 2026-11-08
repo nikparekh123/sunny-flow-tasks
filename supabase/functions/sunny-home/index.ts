@@ -27,7 +27,7 @@ import { buildDoc, type NameDay } from './doc.ts';
 import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
-const BUILD = '2026-11-07.10';
+const BUILD = '2026-11-08.3';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -1850,7 +1850,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         const heldQ = ls.filter((l) => l.side === 'bought' && l.type === 'call' && upside.has(l) && l.expiry === String(fq.exp)).reduce((a, l) => a + l.n, 0);
         const act = `Buy ${fq.n}${pkg?.q?.more ? ' more' : ''} ${mon(String(fq.exp))} ${usdK(Number(fq.k))} calls`;
         thisWeek.push({ id: `${t}|buy|${fq.exp}`, t, kind: 'buy', face: 'dg', held: heldQ, action: act, act, alt: null,
-          why: `${fq.short && fq.at != null ? `Short at +${fq.at}%` : 'Thin after Friday'} · ${mon(String(fq.exp))} calls ${heldQ} → ${heldQ + Number(fq.n)}`,
+          why: `${fq.short && fq.at != null ? `Makes the most at ↑${Number(fq.at).toFixed(1)}%` : 'Thin after Friday'} · ${mon(String(fq.exp))} calls ${heldQ} → ${heldQ + Number(fq.n)}`,
           cost: Math.round(Number(fq.n) * Number(fq.mid) * 100), credit: false, delta: Math.round(Number(fq.d) * spot), sh: dg?.sh ?? null });
       }
       /* Next Friday's sales wait for Friday (Nik, 20 Oct 2026: "should come on Friday or when one of
@@ -3023,6 +3023,16 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     try {
       const sectorRows = await get('market_sectors?select=symbol,sector,etf,name,market_cap,price,day_pct,week_base,sp_weight');
       const econRows = await get('econ_cards?select=id,ord,card,watch,last_period,landed_at&order=ord.asc');
+      /* README 9.4 (Audit 7): a feed with no run for 50 h has stopped (health-monitor's critical line); its cards hide. */
+      const beats = await get('sync_heartbeat?select=feed,ran_at&feed=in.(dividends-sync,earnings-sync,macro-sync,econ-sync)');
+      const FEED_KEY: Record<string, string> = { 'dividends-sync': 'dividends', 'earnings-sync': 'earnings', 'macro-sync': 'macro', 'econ-sync': 'econ' };
+      const stoppedFeeds = Object.entries(FEED_KEY).filter(([f]) => {
+        const b = beats.find((r) => r.feed === f);
+        return !b || Date.now() - Date.parse(String(b.ran_at)) > 50 * 3_600_000;
+      }).map(([, k]) => k);
+      if (stoppedFeeds.length) console.warn('sunny-home feeds stopped', stoppedFeeds.join(','));
+      // The index prices' own time (Yahoo runs ~10 min behind; Nik allows 20), for "Live" or "As of".
+      const marketAt = market.filter((m) => ['SPY', 'QQQ', 'IWM'].includes(String(m.symbol))).map((m) => String(m.regular_time ?? '')).filter(Boolean).sort().at(-1) ?? null;
       const lastSession = isTrading(today) ? today : prevTrading(today);
       const dPrev = prevTrading(lastSession), monday = addDays(today, -((new Date(today + 'T12:00:00Z').getUTCDay() + 6) % 7));
       /* What a leg is worth at the last close before the session: that day's mark, or what it cost if opened after. */
@@ -3071,7 +3081,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const docOrders = [...thisWeek].sort((a, b) => (['roll', 'buy', 'sell', 'put'].indexOf(a.kind) - ['roll', 'buy', 'sell', 'put'].indexOf(b.kind)));
       const docs = buildDoc({ moment: brief.moment, today, mins: now.mins, isTrading, addDays, cal, brief, names: nameDays,
         market, sectors: sectorRows, futures, watch: watchlist as Row[], chart, yieldWeeks: yieldOut, payback, history,
-        earnings, macro, divs, trades, orders: docOrders, aftershock, baseNow: baseAt(today), baseAt, econ: econRows });
+        earnings, macro, divs, trades, orders: docOrders, aftershock, baseNow: baseAt(today), baseAt, econ: econRows,
+        feeds: { stopped: stoppedFeeds, marketAt } });
       /* README 12: the same number reads the same everywhere. Checked on every build; failures kept with the
          brief (and logged) so a mismatch shows the day it happens, not when Nik spots it. */
       const failed = checkInvariants({ brief, full: docs.full, open: docs.open, inputs: briefInputs, orders: docOrders });
@@ -3247,7 +3258,9 @@ async function pinnedDoc(req: Request, body: Row): Promise<Response> {
     while ([0, 6].includes(wdOf(date))) date = addDays(date, 1);
     if (moment === 'post' && wdOf(date) === 5) date = addDays(date, -1);
   }
-  const clock = { wd: WD[wdOf(date)], mins: PIN_MINS[moment], date };
+  // On an early close the last 20 and 5 minutes come before 1:00 PM (12:41, 12:56), as on the day itself.
+  const pinMins = holiday === 'early' && (moment === 'last20' || moment === 'last5') ? PIN_MINS[moment] - 180 : PIN_MINS[moment];
+  const clock = { wd: WD[wdOf(date)], mins: pinMins, date };
   try {
     const { payload } = await build('tick', { book, clock, holiday });
     const b = payload.brief as Row;

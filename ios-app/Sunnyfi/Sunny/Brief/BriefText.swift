@@ -158,13 +158,15 @@ enum BriefMask {
     /// What VoiceOver says for a masked string: "hidden" in place of each $•••, the rest as it is.
     static func spoken(_ masked: String) -> String { masked.replacingOccurrences(of: shown, with: "hidden") }
 
-    /// Words that make the $ figure after them a price, not money.
-    private static let priceWords: Set<String> = ["above", "below", "at", "near", "today", "avg", "low", "high", "under", "over", "from", "to"]
+    /// Words that make the $ figure after them a price, not money (block 33, plus "under"/"over" for the Time value
+    /// sheet's "Under $0.05 a share"). Never "from"/"to": "Paying went from $885 to $2,217 a week" is book money.
+    private static let priceWords: Set<String> = ["above", "below", "at", "near", "today", "avg", "low", "high", "under", "over"]
 
     static func mask(_ s: String) -> String {
         guard s.contains("$") else { return s }
         let ns = s as NSString
-        let re = try! NSRegularExpression(pattern: #"\$\d[\d,]*(?:\.\d+)?[KMB]?"#)
+        // Thousands commas only (",ddd"), so the comma after "$1,275, calls" stays (AUDIT-LOG 5).
+        let re = try! NSRegularExpression(pattern: #"\$\d+(?:,\d{3})*(?:\.\d+)?[KMB]?"#)
         var out = s
         for m in re.matches(in: s, range: NSRange(location: 0, length: ns.length)).reversed() {
             // The word before the figure decides: a price stays.
@@ -193,6 +195,12 @@ struct BriefSentence: View {
     }
 
     var body: some View {
-        BriefWords.text(spans, base: scales ? base.scaled(dts) : base, baseColor: baseColor, boldWeight: boldWeight, privacy: privacy)
+        // The base's line height, as `.sType` gives plain text (Audit 1: sentences ran on the font's natural line,
+        // 17.9 for 15/21, so every sentence was short): leading between lines, half the rest above and below.
+        let t = scales ? base.scaled(dts) : base
+        let gap = t.line - t.uiFont().lineHeight
+        BriefWords.text(spans, base: t, baseColor: baseColor, boldWeight: boldWeight, privacy: privacy)
+            .lineSpacing(max(0, gap))
+            .padding(.vertical, gap / 2)
     }
 }

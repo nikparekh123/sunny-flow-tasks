@@ -7,7 +7,7 @@
 //  slight overshoot), sits 8 s, then goes back behind the day card (S.deckReturn, 0.5 s). A swipe, a tap, or
 //  closing what it opened also sends it back; X dismisses it for the moment; the dots switch cards; it arrives
 //  once a moment. The one that loses sits in the deck without sliding in (answer 5). Cards 200 tall, radius 24;
-//  with an alert the stack is 240 tall, the back card peeking 8 pt above. Reduce Motion: no slide or tilt, the
+//  with an alert the stack is 240 tall, the back card peeking 6 pt above. Reduce Motion: no slide or tilt, the
 //  card just becomes the top one.
 //
 //  VoiceOver (block 29, Accessibility): the deck is "Today's cards"; the dots are a tab bar, each tab named by
@@ -53,20 +53,22 @@ struct BriefDeck: View {
         let hasAlert = !alert.isNull
         let up = alertOnTop || arriving
         let away = arriving
-        VStack(spacing: 10) {
+        // The design's stack: one card is 200 tall; with an alert 240, the cards from y 16 and the dots at y 220.
+        // The card behind is 12 pt up and 94% (scaled about its centre), so 6 pt of it shows above the front one.
+        ZStack(alignment: .top) {
             ZStack(alignment: .top) {
                 DayCard(moment: moment, caption: doc?.dayCaption, warn: doc?.dayCaptionOrange ?? false)
                     .frame(height: 200)
-                    .scaleEffect(hasAlert && alertOnTop ? 0.96 : 1, anchor: .top)
-                    .offset(y: hasAlert ? (alertOnTop ? 0 : 16) : 0)
+                    .scaleEffect(hasAlert && alertOnTop ? 0.94 : 1)
+                    .offset(y: hasAlert ? (alertOnTop ? 4 : 16) : 0)
                     .zIndex(up ? 0 : 1)
                     .onTapGesture { if alertOnTop { show(top: false) } }
                     .accessibilityHidden(hasAlert && alertOnTop)
                 if hasAlert {
                     AlertCard(alert: alert, moment: moment, close: dismiss)
                         .frame(height: 200)
-                        .scaleEffect(up ? 1 : 0.96, anchor: .top)
-                        .offset(y: up ? 16 : 0)
+                        .scaleEffect(up ? 1 : 0.94)
+                        .offset(y: up ? 16 : 4)
                         .visualEffect { c, p in
                             c.rotationEffect(.degrees(away ? 3 : 0)).offset(x: away ? p.size.width * 1.08 : 0)
                         }
@@ -83,15 +85,19 @@ struct BriefDeck: View {
             }
             .frame(height: hasAlert ? 216 : 200, alignment: .top)
             .padding(.horizontal, S.margin)
-            HStack(spacing: 6) {
-                dot(on: !alertOnTop, label: "The day") { pick(top: false) }
-                if hasAlert { dot(on: alertOnTop, label: AlertCard.spoken(alert["kicker"].string ?? "Alert")) { pick(top: true) } }
+            // The dots only with two cards (deck.multi): 20 tall buttons, 18 / 6 pt bars, 6 apart.
+            if hasAlert {
+                HStack(spacing: 0) {
+                    dot(on: !alertOnTop, label: "The day") { pick(top: false) }
+                    dot(on: alertOnTop, label: AlertCard.spoken(alert["kicker"].string ?? "Alert")) { pick(top: true) }
+                }
+                .padding(.top, 220)
+                .accessibilityElement(children: .contain)
+                .accessibilityAddTraits(.isTabBar)
+                .sensoryFeedback(.selection, trigger: picks)
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityAddTraits(.isTabBar)
-            .accessibilityHidden(!hasAlert)
-            .sensoryFeedback(.selection, trigger: picks)
         }
+        .frame(height: hasAlert ? 240 : 200, alignment: .top)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Today's cards")
         .task(id: alertKey) { await arrive() }
@@ -142,7 +148,10 @@ struct BriefDeck: View {
     }
     private func dot(on: Bool, label: String, _ tap: @escaping () -> Void) -> some View {
         Button(action: tap) {
-            Capsule().fill(on ? S.ink : S.grabber).frame(width: on ? 22 : 8, height: 8)
+            Capsule().fill(on ? S.ink : S.grabber).frame(width: on ? 18 : 6, height: 6)
+                .padding(.horizontal, 3)
+                .frame(height: 20)
+                .contentShape(Rectangle().inset(by: -6))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
@@ -157,6 +166,10 @@ private struct AlertCard: View {
     let moment: Moment
     let close: () -> Void
     @Environment(BriefState.self) private var brief
+    @Environment(\.dynamicTypeSize) private var dts
+    @Environment(\.sTypeScales) private var scales
+    /// The title: 28/34 bold, -.02em, at most 280 wide and balanced (text-wrap: balance).
+    private static let titleType = SType(size: 28, weight: 700, line: 34, tracking: -0.02)
 
     var body: some View {
         let kind = alert["kind"].string ?? ""
@@ -179,7 +192,7 @@ private struct AlertCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     Text((alert["kicker"].string ?? "").uppercased())
-                        .sFont(13, .bold).tracking(0.78)
+                        .sType(SType(size: 13, weight: 700, line: 16, tracking: 0.06), tabular: false)
                         .foregroundStyle(dark ? .white.opacity(0.85) : S.ink)
                         .accessibilityLabel(Self.spoken(alert["kicker"].string ?? ""))
                     Spacer()
@@ -196,12 +209,16 @@ private struct AlertCard: View {
                 // Aftershock near the close counts down to the 4:15 PM scan, each second.
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
                     let at = brief.now()
-                    Text(title.replacingOccurrences(of: "{mm:ss}", with: Self.toScan(at)))
-                        .sFont(28, .bold, mono: true).foregroundStyle(dark ? .white : S.ink)
+                    Text(SWrap.lines(title.replacingOccurrences(of: "{mm:ss}", with: Self.toScan(at)),
+                                     scales ? Self.titleType.scaled(dts) : Self.titleType, width: 280, .balance))
+                        .sType(Self.titleType)
+                        .frame(maxWidth: 280, alignment: .leading)
+                        .foregroundStyle(dark ? .white : S.ink)
                         .lineLimit(2).minimumScaleFactor(0.8)
                         .accessibilityLabel(Self.spoken(title.replacingOccurrences(of: "{mm:ss}", with: Self.toScanSpoken(at))))
                 }
-                Text(sub).sFont(13, .medium).foregroundStyle(dark ? .white.opacity(0.8) : S.ink)
+                Text(sub).sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false)
+                    .foregroundStyle(dark ? .white.opacity(0.8) : S.ink)
                     .lineLimit(2).padding(.top, 6)
                     .accessibilityLabel(Self.spoken(sub))
             }
@@ -297,9 +314,10 @@ struct DayCard: View {
                         .font(.system(size: 11, weight: .semibold).monospacedDigit())
                         .foregroundStyle(.white)
                         .fixedSize()
+                        .shadow(color: Self.labelShade, radius: 2, y: 0.5)   // 4.5:1 on any hour's sky (Audit 4)
                         .position(x: min(max(sun.x, 34), g.size.width - 34), y: sun.y - 17)
                     VStack(spacing: 1) {
-                        Text(Self.session(moment)).sFont(13, .semibold)
+                        Text(Self.session(caption, moment)).sFont(13, .semibold)
                         HStack(spacing: 5) {
                             if warn { Circle().fill(Color(hex: 0xF2A93B)).frame(width: 6, height: 6) }
                             Text(Self.sub(caption, moment)).sFont(12, .medium)
@@ -308,6 +326,7 @@ struct DayCard: View {
                     }
                     .foregroundStyle(.white)
                     .lineLimit(1)
+                    .shadow(color: Self.labelShade, radius: 2, y: 0.5)
                     .frame(width: g.size.width)
                     .padding(.top, 18)
                 }
@@ -316,7 +335,7 @@ struct DayCard: View {
             .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(.black.opacity(0.06), lineWidth: 0.5))
             .shadow(color: Color(red: 8 / 255, green: 18 / 255, blue: 48 / 255).opacity(0.45), radius: 14, y: 12)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(Self.session(moment)), \(Self.sub(caption, moment)). \(Self.clock(u)).")
+            .accessibilityLabel("\(Self.session(caption, moment)), \(Self.sub(caption, moment)). \(Self.clock(u)).")
         }
     }
 
@@ -334,6 +353,10 @@ struct DayCard: View {
         return 150 - 62 * sin(.pi * (u - d0) / (d1 - d0))
     }
 
+    /// A soft night-blue shade under the day card's white words: the sky behind them moves with the hour, and at
+    /// some hours a bare white label sat just under 4.5:1 (4.41 on the weekend sky, Audit 4).
+    static let labelShade = Color(red: 8 / 255, green: 18 / 255, blue: 48 / 255).opacity(0.35)
+
     static func minuteNY(_ d: Date) -> Double {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "America/New_York")!
         let c = cal.dateComponents([.hour, .minute], from: d)
@@ -344,13 +367,16 @@ struct DayCard: View {
         return "\(h12):\(String(format: "%02d", m)) \(h < 12 ? "AM" : "PM")"
     }
 
-    static func session(_ m: Moment) -> String {
-        switch m {
-        case .futures: "Futures"
+    /// The caption's first part when the content sends one ("Pre-market" overnight, "Week in Review" on the weekend,
+    /// as the design's day card reads), else a plain default.
+    static func session(_ caption: String?, _ m: Moment) -> String {
+        if let c = caption, let first = c.components(separatedBy: " · ").first, c.contains(" · "), !first.isEmpty { return first }
+        return switch m {
+        case .futures: "Pre-market"
         case .pre: "Pre-market"
         case .bell, .open, .last20, .last5: "Market hours"
         case .post: "Post-market"
-        case .weekend: "Weekend"
+        case .weekend: "Week in Review"
         }
     }
     /// The caption's second line: the content's own words after the session name, else a plain default.

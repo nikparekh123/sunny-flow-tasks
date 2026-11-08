@@ -42,6 +42,22 @@ enum SampleSeries {
         }
         return s
     }
+    /// Weekday sessions ending Tue Oct 27, 2026 (the sample's today), oldest first, market holidays skipped.
+    static func dates(_ n: Int) -> [String] {
+        let hol: Set<String> = ["2026-09-07", "2026-07-03", "2026-06-19", "2026-05-25", "2026-04-03", "2026-02-16", "2026-01-19",
+                                "2026-01-01", "2025-12-25", "2025-11-27"]
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC") ?? .current
+        guard var d = cal.date(from: DateComponents(year: 2026, month: 10, day: 27)) else { return [] }
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = cal.timeZone; f.dateFormat = "yyyy-MM-dd"
+        var out: [String] = []
+        while out.count < n {
+            let wd = cal.component(.weekday, from: d), k = f.string(from: d)
+            if wd != 1 && wd != 7 && !hol.contains(k) { out.append(k) }
+            guard let p = cal.date(byAdding: .day, value: -1, to: d) else { break }
+            d = p
+        }
+        return out.reversed()
+    }
     /// About a year of weekday closes, the last 75 the series above.
     static func year(_ t: String) -> [Double] {
         let s0 = series(t), n = 470, m = n - s0.count
@@ -56,25 +72,60 @@ enum SampleSeries {
 
 // MARK: - Sheet chrome
 
+/// BLogo with the logo at another share of the circle (the ticker pill's is 70%, BLogo's 74%).
+struct BriefLogoDisc: View {
+    let t: String
+    let size: CGFloat
+    var pct: CGFloat = 0.74
+    var body: some View {
+        ZStack {
+            Circle().fill(.white)
+            if let img = UIImage(named: "logo-\(t)") {
+                Image(uiImage: img).resizable().scaledToFit().frame(width: size * pct, height: size * pct)
+            } else {
+                Text(String(t.prefix(4))).font(.system(size: size * 0.26, weight: .bold)).foregroundStyle(Color(white: 0.11))
+            }
+        }
+        .frame(width: size, height: size)
+        .overlay(Circle().stroke(Color.black.opacity(0.12), lineWidth: 0.5).padding(-0.25))
+        .accessibilityHidden(true)
+    }
+}
+
+/// The sheets' head (New Home iPhone Preview, tv and es): the grabber 36 x 5 at 8, 12 under it the title 22/28 bold
+/// (and a line 15/20 under it, 4 apart), the close button a 30 pt circle flush with the title's top and 20 from the
+/// edge (its 44 pt target reaches 7 past both); then `gap` to the content, which pads `side` and `bottom`.
 struct BriefSheetChrome<Content: View>: View {
     let title: String
+    var sub: String? = nil
+    var gap: CGFloat = 16
+    var side: CGFloat = 20
+    var bottom: CGFloat = 24
     let close: () -> Void
     @ViewBuilder let content: () -> Content
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Capsule().fill(S.grabber).frame(width: 36, height: 5).frame(maxWidth: .infinity).padding(.top, 8)
-            HStack {
-                Text(title).sType(SType(size: 22, weight: 700, line: 28, tracking: -0.01), tabular: false).foregroundStyle(S.ink)
-                Spacer()
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).sType(SType(size: 22, weight: 700, line: 28, tracking: -0.01), tabular: false).foregroundStyle(S.ink)
+                        .accessibilityAddTraits(.isHeader)
+                    if let sub { Text(sub).sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.secondary) }
+                }
+                Spacer(minLength: 0)
                 Button(action: close) {
-                    Image(systemName: "xmark").sFont(13, .bold).foregroundStyle(S.secondary)
+                    Path { p in p.move(to: CGPoint(x: 1, y: 1)); p.addLine(to: CGPoint(x: 10, y: 10)); p.move(to: CGPoint(x: 10, y: 1)); p.addLine(to: CGPoint(x: 1, y: 10)) }
+                        .stroke(S.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .frame(width: 11, height: 11)
                         .frame(width: 30, height: 30).background(Circle().fill(S.chip))
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .padding(.top, -7).padding(.trailing, -7)
                 .accessibilityLabel("Close")
             }
-            .padding(.horizontal, S.margin).padding(.top, 10)
-            ScrollView { content().padding(.horizontal, S.margin).padding(.top, 14).padding(.bottom, 40) }
+            .padding(.horizontal, S.margin).padding(.top, 12)
+            ScrollView { content().padding(.horizontal, side).padding(.top, gap).padding(.bottom, bottom) }
                 .scrollIndicators(.hidden)
         }
         .background(S.sheetFill)
@@ -114,6 +165,19 @@ struct TimeValueSheet: View {
         }
     }
 
+    /// The design's bar track: rgba(118,118,128,.2), .32 in dark (the system fill).
+    private let barTrack = Color(uiColor: .systemFill)
+
+    private func bar(_ k: Double, height h: CGFloat) -> some View {
+        GeometryReader { g in
+            ZStack(alignment: .leading) {
+                Capsule().fill(barTrack)
+                Capsule().fill(S.green).frame(width: g.size.width * CGFloat(min(1, max(0, k))))
+            }
+        }
+        .frame(height: h)
+    }
+
     var body: some View {
         let rows = rows
         let left = rows.reduce(0) { $0 + $1.left }, coll = rows.reduce(0) { $0 + $1.collected }
@@ -128,111 +192,89 @@ struct TimeValueSheet: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    BriefWords.line("$" + SampleEngine.fn(left), privacy: privacy)
-                        .sType(SType(size: 34, weight: 800, line: 40, tracking: -0.02)).foregroundStyle(S.ink)
-                    Text("left of \(BriefWords.plain("$" + SampleEngine.fn(coll), privacy: privacy)) collected")
-                        .accessibilityLabel(BriefMask.spoken("left of \(BriefWords.plain("$" + SampleEngine.fn(coll), privacy: privacy)) collected"))
-                        .sType(BK.body, tabular: false).foregroundStyle(S.secondary)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(privacy ? "Time value left, hidden" : BSay.words("$\(SampleEngine.fn(left)) left of $\(SampleEngine.fn(coll)) collected"))
-                VStack(alignment: .trailing, spacing: 4) {
-                    GeometryReader { g in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(S.chip)
-                            Capsule().fill(S.green).frame(width: g.size.width * CGFloat(min(1, max(0, cap))))
-                        }
+            // SunnyHomeChart view="tv": 16 between the total, Ready to roll and the list.
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        BriefWords.line("$" + SampleEngine.fn(left), privacy: privacy)
+                            .sType(SType(size: 34, weight: 800, line: 38, tracking: -0.02)).foregroundStyle(S.ink)
+                            .fixedSize()   // the number never breaks; the words beside it wrap at large text (Audit 6)
+                        Text("left of \(BriefWords.plain("$" + SampleEngine.fn(coll), privacy: privacy)) collected")
+                            .accessibilityLabel(BriefMask.spoken("left of \(BriefWords.plain("$" + SampleEngine.fn(coll), privacy: privacy)) collected"))
+                            .sType(SType(size: 15, weight: 500, line: 20, tracking: 0)).foregroundStyle(S.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .frame(height: 8)
-                    // Worth more than it was sold for: a loss so far, in red without a minus sign (colour carries the sign).
-                    Text("\(Int(abs(cap * 100).rounded()))% \(cap < -0.005 ? "given back" : "captured")").sType(SType(size: 13, weight: 700, line: 16, tracking: 0)).foregroundStyle(cap < -0.005 ? S.red : S.green)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text("Ready to roll").sType(SType(size: 17, weight: 700, line: 22, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                        Spacer()
-                        Text("\(ready.count) strike\(ready.count == 1 ? "" : "s")").sType(BK.small, tabular: false).foregroundStyle(S.secondary)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(privacy ? "Time value left, hidden" : BSay.words("$\(SampleEngine.fn(left)) left of $\(SampleEngine.fn(coll)) collected"))
+                    HStack(spacing: 10) {
+                        bar(cap, height: 10)
+                        // Worth more than it was sold for: a loss so far, in red without a minus sign (colour carries the sign).
+                        Text("\(Int(abs(cap * 100).rounded()))% \(cap < -0.005 ? "given back" : "captured")").sType(SType(size: 13, weight: 700, line: 16, tracking: 0))
+                            .foregroundStyle(cap < -0.005 ? S.red : S.green).fixedSize()
                     }
-                    Text("Under $0.05 a share left, or 90% captured").sType(BK.small, tabular: false).foregroundStyle(S.secondary)
                 }
-                if ready.isEmpty {
-                    Text("Nothing ready yet.").sType(BK.body, tabular: false).foregroundStyle(S.secondary)
-                } else {
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 10) {
-                            ForEach(ready) { r in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    BLogo(ticker: r.t, size: 28)
-                                    Text(r.name).sType(BK.row, tabular: false).foregroundStyle(S.ink).padding(.top, 6)
-                                    Text(r.leg).sType(BK.rowSub, tabular: false).foregroundStyle(S.secondary)
-                                        .accessibilityLabel(BSay.words(r.leg))
-                                    // At a large text size "left" drops under the amount rather than cutting it (Pass 5).
-                                    ViewThatFits(in: .horizontal) {
-                                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                                            BriefWords.line("$" + SampleEngine.fn(r.left), privacy: privacy)
-                                                .sType(SType(size: 22, weight: 800, line: 26, tracking: 0)).foregroundStyle(S.ink)
-                                            Text("left").sType(BK.rowSub, tabular: false).foregroundStyle(S.secondary)
-                                        }
-                                        VStack(alignment: .leading, spacing: 0) {
-                                            BriefWords.line("$" + SampleEngine.fn(r.left), privacy: privacy)
-                                                .sType(SType(size: 22, weight: 800, line: 26, tracking: 0)).foregroundStyle(S.ink)
-                                                .lineLimit(1).minimumScaleFactor(0.7)
-                                            Text("left").sType(BK.rowSub, tabular: false).foregroundStyle(S.secondary)
-                                        }
-                                    }
-                                    .padding(.top, 8)
-                                    if r.intrinsic > 0 {
-                                        Text("$\(String(format: "%.2f", r.intrinsic)) in the money").sType(SType(size: 12, weight: 600, line: 15, tracking: 0)).foregroundStyle(S.red)
-                                        Text("Roll before Friday").sType(SType(size: 12, weight: 600, line: 15, tracking: 0), tabular: false).foregroundStyle(S.red)
-                                    } else {
-                                        Text("\(Int(((1 - r.left / max(r.collected, 1)) * 100).rounded()))% captured").sType(SType(size: 12, weight: 600, line: 15, tracking: 0)).foregroundStyle(S.act)
-                                        Text("Roll to next week").sType(SType(size: 12, weight: 600, line: 15, tracking: 0), tabular: false).foregroundStyle(S.act)
-                                    }
-                                }
-                                .padding(14)
-                                .frame(width: 148, alignment: .leading)
-                                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(S.chip))
-                                .accessibilityElement(children: .combine)
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("Ready to roll").sType(SType(size: 17, weight: 700, line: 22, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                            Spacer(minLength: 0)
+                            if !ready.isEmpty {   // "Nothing ready yet" below says it; no "0 strikes"
+                                Text("\(ready.count) strike\(ready.count == 1 ? "" : "s")").sType(SType(size: 13, weight: 600, line: 16, tracking: 0)).foregroundStyle(S.secondary)
                             }
                         }
+                        Text("Under $0.05 a share left, or 90% captured").sType(SType(size: 13, weight: 500, line: 17, tracking: 0)).foregroundStyle(S.secondary)
                     }
-                    .scrollIndicators(.hidden)
+                    if ready.isEmpty {
+                        Text("Nothing ready yet.").sType(BK.body, tabular: false).foregroundStyle(S.secondary)
+                    } else {
+                        ScrollView(.horizontal) {
+                            // 148 wide cards, 10 apart, padding 14, radius 16, all as tall as the tallest.
+                            HStack(alignment: .top, spacing: 10) {
+                                ForEach(ready) { r in rollCard(r) }
+                            }
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, S.margin).padding(.bottom, 2)
+                        }
+                        .scrollIndicators(.hidden)
+                        .padding(.horizontal, -S.margin)
+                    }
                 }
                 let byName = Dictionary(grouping: rows, by: \.t)
                 let order = byName.keys.sorted { byName[$0]!.reduce(0) { $0 + $1.left } > byName[$1]!.reduce(0) { $0 + $1.left } }
+                // A row per name between 1 pt rules: logo 26, the name 15/18 and its legs 13/16 over a bar 8 and its
+                // percent 12/15, left and "of" on the right (64 wide at least), 10 across. The rows render 69 apart
+                // in screen 24 (its CSS sums to 65): 13 above and below, 9 down to the bar, 3 down to "of".
                 VStack(spacing: 0) {
+                    BHairline()
                     ForEach(order, id: \.self) { t in
                         let rs = byName[t]!, l = rs.reduce(0) { $0 + $1.left }, c = rs.reduce(0) { $0 + $1.collected }
                         let k = c > 0 ? 1 - l / c : 0
-                        BHairline()
-                        HStack(spacing: 12) {
-                            BLogo(ticker: t, size: 28)
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("\(rs.first?.name ?? t) · \(rs.map(\.leg).joined(separator: ", "))")
-                                    .sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                                    .lineLimit(dts > .large ? 3 : 1)   // one line as designed; wraps at a large text size (Pass 5)
+                        HStack(spacing: 10) {
+                            BLogo(ticker: t, size: 26)
+                            VStack(alignment: .leading, spacing: 9) {
+                                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                                    Text(rs.first?.name ?? t).sType(SType(size: 15, weight: 600, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                                        .lineLimit(1).layoutPriority(1)
+                                    Text("· \(rs.map(\.leg).joined(separator: ", "))").sType(SType(size: 13, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.secondary)
+                                        .lineLimit(dts > .large ? nil : 1)   // one line as designed; wraps in full at a large text size (Audit 6)
+                                }
                                 HStack(spacing: 8) {
-                                    GeometryReader { g in
-                                        ZStack(alignment: .leading) {
-                                            Capsule().fill(S.chip)
-                                            Capsule().fill(S.green).frame(width: g.size.width * CGFloat(min(1, max(0, k))))
-                                        }
-                                    }
-                                    .frame(height: 6)
-                                    Text("\(Int(abs(k * 100).rounded()))%").sType(SType(size: 12, weight: 700, line: 15, tracking: 0)).foregroundStyle(k < -0.005 ? S.red : S.green)
+                                    bar(k, height: 8)
+                                    Text("\(Int(abs(k * 100).rounded()))%").sType(SType(size: 12, weight: 700, line: 15, tracking: 0))
+                                        .foregroundStyle(k < -0.005 ? S.red : S.green).frame(minWidth: 34, alignment: .trailing)
                                 }
                             }
-                            VStack(alignment: .trailing, spacing: 1) {
-                                BriefWords.line("$" + SampleEngine.fn(l), privacy: privacy).sType(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(S.ink)
+                            VStack(alignment: .trailing, spacing: 3) {
+                                BriefWords.line("$" + SampleEngine.fn(l), privacy: privacy).sType(SType(size: 15, weight: 800, line: 18, tracking: 0)).foregroundStyle(S.ink)
                                 Text("of \(BriefWords.plain("$" + SampleEngine.fn(c), privacy: privacy))")
                                     .accessibilityLabel(BriefMask.spoken("of \(BriefWords.plain("$" + SampleEngine.fn(c), privacy: privacy))"))
-                                    .sType(BK.rowSub).foregroundStyle(S.secondary)
+                                    .sType(SType(size: 12, weight: 500, line: 15, tracking: 0)).foregroundStyle(S.secondary)
                             }
-                            .frame(width: 72, alignment: .trailing)
+                            .fixedSize()
+                            .frame(minWidth: 64, alignment: .trailing)
                         }
-                        .padding(.vertical, 10)
+                        .padding(.vertical, 13)
+                        .frame(minHeight: 44)
                         // One stop per name, the sign in words: "Nike, 36 calls, 71 contracts, 81% captured, $412 left of $2,130".
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(BSay.join([
@@ -240,11 +282,57 @@ struct TimeValueSheet: View {
                             "\(Int(abs(k * 100).rounded()))% \(k < -0.005 ? "given back" : "captured")",
                             privacy ? "amounts hidden" : BSay.words("$\(SampleEngine.fn(l)) left of $\(SampleEngine.fn(c))"),
                         ]))
+                        BHairline()
                     }
                 }
             }
             }
         }
+    }
+
+    /// A Ready to roll card: logo 32, 10, the name 15/19 and leg 13/17, then at the foot what is left 24/28 heavy and
+    /// why, 13/17 bold and semibold.
+    private func rollCard(_ r: Row) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            BLogo(ticker: r.t, size: 32)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(r.name).sType(SType(size: 15, weight: 600, line: 19, tracking: 0), tabular: false).foregroundStyle(S.ink).lineLimit(1)
+                Text(r.leg).sType(SType(size: 13, weight: 500, line: 17, tracking: 0)).foregroundStyle(S.secondary).lineLimit(1)
+                    .accessibilityLabel(BSay.words(r.leg))
+            }
+            Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 4) {
+                // At a large text size "left" drops under the amount rather than cutting it (Pass 5).
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        BriefWords.line("$" + SampleEngine.fn(r.left), privacy: privacy)
+                            .sType(SType(size: 24, weight: 800, line: 28, tracking: -0.01)).foregroundStyle(S.ink)
+                        Text("left").sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 0) {
+                        BriefWords.line("$" + SampleEngine.fn(r.left), privacy: privacy)
+                            .sType(SType(size: 24, weight: 800, line: 28, tracking: -0.01)).foregroundStyle(S.ink)
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                        Text("left").sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    if r.intrinsic > 0 {
+                        Text("$\(String(format: "%.2f", r.intrinsic)) in the money").sType(SType(size: 13, weight: 700, line: 17, tracking: 0)).foregroundStyle(S.red)
+                        Text("Roll before Friday").sType(SType(size: 13, weight: 600, line: 17, tracking: 0), tabular: false).foregroundStyle(S.red)
+                    } else {
+                        Text("\(Int(((1 - r.left / max(r.collected, 1)) * 100).rounded()))% captured").sType(SType(size: 13, weight: 700, line: 17, tracking: 0)).foregroundStyle(S.act)
+                        Text("Roll to next week").sType(SType(size: 13, weight: 600, line: 17, tracking: 0), tabular: false).foregroundStyle(S.act)
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(width: 148, alignment: .leading)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(S.chip))
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -256,9 +344,9 @@ struct EconomySheet: View {
     let close: () -> Void
     var body: some View {
         let e = BriefDebug.sample || live.isNull ? BriefSample.sheets["economy"] : live
-        BriefSheetChrome(title: e["title"].string ?? "The economy", close: close) {
-            VStack(alignment: .leading, spacing: 14) {
-                Text(e["sub"].string ?? "").sType(BK.small, tabular: false).foregroundStyle(S.secondary)
+        // The design's es sheet: the line under the title in the head, 14 to the cards, 12 apart, 16 from the sides.
+        BriefSheetChrome(title: e["title"].string ?? "The economy", sub: e["sub"].string, gap: 14, side: 16, bottom: 32, close: close) {
+            VStack(alignment: .leading, spacing: 12) {
                 ForEach(Array(e["indicators"].array.enumerated()), id: \.offset) { _, c in
                     BIndicatorCard(c: c, width: nil)
                 }
@@ -286,6 +374,17 @@ struct TickerChartPage: View {
     private static let rangeWords = ["1W": "1 week", "1M": "1 month", "3M": "3 months", "YTD": "year to date", "1Y": "1 year", "All": "all"]
     private static let rangePhrase = ["1W": "past week", "1M": "past month", "3M": "past 3 months", "YTD": "this year", "1Y": "past year", "All": "since the start"]
 
+    /// A date under the chart, as the design writes it for the range: "Mon", "Aug 3", "Aug", "Aug ’25".
+    static func dateLabel(_ iso: String, _ range: String) -> String {
+        let p = iso.prefix(10).split(separator: "-").compactMap { Int($0) }
+        guard p.count == 3 else { return "" }
+        var c = DateComponents(); c.year = p[0]; c.month = p[1]; c.day = p[2]
+        guard let d = Calendar(identifier: .gregorian).date(from: c) else { return "" }
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = range == "1W" ? "EEE" : range == "1M" || range == "3M" ? "MMM d" : range == "All" ? "MMM ’yy" : "MMM"
+        return f.string(from: d)
+    }
+
     /// The chart as one spoken line: "Nike price, past 3 months, from $33.10 to $35.28, now $35.28. Lines: Sold call 36, ...".
     private func chartSays(_ name: String, _ pts: [Double], _ now: Double, _ lines: [(k: Double, label: String, solid: Bool)]) -> String {
         guard let a = pts.first, let b = pts.last else { return "\(name) price chart, no data" }
@@ -308,29 +407,37 @@ struct TickerChartPage: View {
         let ch = (pts.last ?? 0) - (pts.first ?? 0), chp = (pts.first ?? 0) > 0 ? ch / pts[0] * 100 : 0
         let lines = layerLines()
         let name = live ? (wire?.name ?? t) : (SampleBook.company[t] ?? t)
+        let dates = Array((live ? (wire?.dates ?? []) : SampleSeries.dates(all.count)).suffix(n + 1))
         ZStack(alignment: .top) {
             SBackground()
-            VStack(alignment: .leading, spacing: 10) {
+            // SunnyTickerChart.dc.html: the head 44 at the top (padding 0 16), the name and the move 14 under it
+            // (padding 20), the chart 12 under that, the dates 8 under it, the ranges 8 under those, then the layers
+            // 8 under and 34 off the bottom (here the safe area).
+            VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 10) {
                     Button(action: close) {
-                        Image(systemName: "xmark").sFont(16, .semibold).foregroundStyle(S.ink)
+                        Path { p in p.move(to: CGPoint(x: 2, y: 2)); p.addLine(to: CGPoint(x: 12, y: 12)); p.move(to: CGPoint(x: 12, y: 2)); p.addLine(to: CGPoint(x: 2, y: 12)) }
+                            .stroke(S.ink, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .frame(width: 14, height: 14)
                             .frame(width: 44, height: 44).glassEffect(.regular, in: .circle)
                     }
                     .buttonStyle(.plain).accessibilityLabel("Back")
                     HStack(spacing: 8) {
-                        BLogo(ticker: t, size: 24)
-                        Text(t).sFont(15, .bold).foregroundStyle(S.ink)
-                        Text(String(format: "$%.2f", q.0)).sFont(15, .semibold, mono: true).foregroundStyle(S.ink)
-                        Text(String(format: "%.2f%%", abs(mv))).sFont(15, .semibold, mono: true).foregroundStyle(mv < 0 ? S.red : S.green)
+                        BriefLogoDisc(t: t, size: 32, pct: 0.7)
+                        Text(t).sType(SType(size: 15, weight: 800, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                        Text(String(format: "$%.2f", q.0)).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(S.ink)
+                        Text(String(format: "%.2f%%", abs(mv))).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(mv < 0 ? S.red : S.green)
                     }
-                    .padding(.horizontal, 12).frame(height: 44).glassEffect(.regular, in: .capsule)
+                    .lineLimit(1)
+                    .padding(.leading, 6).padding(.trailing, 16).frame(height: 44).glassEffect(.regular, in: .capsule)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(live && wire == nil ? name
                         : BSay.join([name, String(format: "$%.2f", q.0), "\(mv < 0 ? "down" : "up") \(String(format: "%.2f%%", abs(mv))) today"]))
                     .accessibilityAddTraits(.isHeader)
                 }
+                .padding(.horizontal, 16)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(name).sType(BK.small, tabular: false).foregroundStyle(S.secondary)
+                    Text(name).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary)
                     HStack(spacing: 6) {
                         Text(String(format: "$%.2f %.2f%%", abs(ch), abs(chp))).sType(SType(size: 17, weight: 700, line: 22, tracking: 0)).foregroundStyle(ch < 0 ? S.red : S.green)
                         Text(Self.rangePhrase[range] ?? "")
@@ -340,12 +447,14 @@ struct TickerChartPage: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("\(ch < 0 ? "down" : "up") \(String(format: "$%.2f, %.2f%%", abs(ch), abs(chp))), \(Self.rangePhrase[range] ?? "")")
                 }
+                .padding(.horizontal, S.margin).padding(.top, 14)
                 if live && wire == nil {
                     Group { if failed { Text("Could not load \(t). Try again in a moment.") } else { ProgressView() } }
                         .sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    TickerLine(pts: pts, lines: lines, up: ch >= 0, key: range).frame(maxHeight: .infinity)
+                    TickerLine(pts: pts, lines: lines, up: ch >= 0, key: range, layer: layer).frame(maxHeight: .infinity)
+                        .padding(.top, 12)
                         // One stop for the chart; its line labels and the last-price chip are in the summary.
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(chartSays(name, pts, q.0, lines))
@@ -353,38 +462,71 @@ struct TickerChartPage: View {
                             if live && lines.isEmpty {
                                 Text(layer == "Positions" ? "Nothing held in \(t)" : layer == "Walls" ? "No walls saved for \(t)" : "")
                                     .sType(BK.small, tabular: false).foregroundStyle(S.secondary)
+                                    .padding(.horizontal, S.margin).padding(.top, 12)
                             }
                         }
+                    // The dates under it: 12/16, at 8, 36, 64 and 92% of the plot (the price column is 56).
+                    GeometryReader { g in
+                        let w = g.size.width - 56
+                        ForEach(Array([0.08, 0.36, 0.64, 0.92].enumerated()), id: \.offset) { _, f in
+                            let i = Int((f * Double(max(0, dates.count - 1))).rounded())
+                            if dates.indices.contains(i) {
+                                Text(Self.dateLabel(dates[i], range)).sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false)
+                                    .foregroundStyle(S.secondary).fixedSize()
+                                    .position(x: w * f, y: 8)
+                            }
+                        }
+                    }
+                    .frame(height: 16).padding(.top, 8)
+                    .environment(\.sTypeScales, false)
+                    .accessibilityHidden(true)
                 }
-                HStack {
+                // Ranges: six equal 44 pt targets, 2 apart, padding 8 12 0; the chip 32 tall, 10 a side, 14 bold picked.
+                HStack(spacing: 2) {
                     ForEach(["1W", "1M", "3M", "YTD", "1Y", "All"], id: \.self) { r in
                         // The chips' colour fades (S.fade); the line crossfades and its labels move in TickerLine.
                         Button { withAnimation(S.fade) { range = r } } label: {
-                            Text(r).sFont(14, r == range ? .bold : .medium).foregroundStyle(r == range ? S.sheetFill : S.secondary)
-                                .frame(width: 44, height: 30).background(Capsule().fill(r == range ? S.ink : .clear))
+                            Text(r).sType(SType(size: 14, weight: r == range ? 700 : 600, line: 14, tracking: 0), tabular: false)
+                                .foregroundStyle(r == range ? S.sheetFill : S.secondary)
+                                .padding(.horizontal, 10).frame(height: 32).background(Capsule().fill(r == range ? S.ink : .clear))
+                                .frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
                         }.buttonStyle(.plain)
                         .accessibilityLabel(Self.rangeWords[r] ?? r)
                         .accessibilityAddTraits(r == range ? .isSelected : [])
-                        if r != "All" { Spacer() }
                     }
                 }
+                .padding(.horizontal, 12).padding(.top, 8)
                 .sensoryFeedback(.selection, trigger: range)
+                // Layers: 48 tall, 8 apart, padding 8 16; a 14 x 3 swatch 8 before the words (15 semibold).
                 HStack(spacing: 8) {
                     ForEach(["Positions", "Technicals", "Walls"], id: \.self) { l in
+                        let on = layer == l
                         Button { withAnimation(S.fade) { layer = l } } label: {
-                            Text(l).sFont(15, .semibold).foregroundStyle(layer == l ? S.sheetFill : S.ink)
-                                .padding(.horizontal, 16).frame(height: 44)
-                                .background(Capsule().fill(layer == l ? S.ink : .clear))
-                                .glassEffect(.regular, in: .capsule)
+                            HStack(spacing: 8) {
+                                Group {
+                                    switch l {
+                                    case "Technicals": Capsule().fill(S.teal)
+                                    case "Walls": HStack(spacing: 0) { Rectangle().fill(S.navy); Rectangle().fill(S.brown) }.clipShape(Capsule())
+                                    default: Capsule().fill(on ? S.sheetFill : S.ink)
+                                    }
+                                }
+                                .frame(width: 14, height: 3)
+                                .accessibilityHidden(true)
+                                Text(l).sType(SType(size: 15, weight: 600, line: 15, tracking: 0), tabular: false).foregroundStyle(on ? S.sheetFill : S.ink)
+                            }
+                            // flex 1 0 auto: never under its own width, the rest shared.
+                            .padding(.horizontal, 16).fixedSize()
+                            .frame(maxWidth: .infinity).frame(height: 48)
+                            .background { if on { Capsule().fill(S.ink) } }
+                            .glassEffect(on ? .identity : .regular, in: .capsule)
                         }.buttonStyle(.plain)
                         .accessibilityLabel("\(l) lines")
-                        .accessibilityAddTraits(layer == l ? .isSelected : [])
+                        .accessibilityAddTraits(on ? .isSelected : [])
                     }
                 }
+                .padding(.horizontal, 16).padding(.top, 8)
                 .sensoryFeedback(.selection, trigger: layer)
-                .padding(.bottom, 8)
             }
-            .padding(.horizontal, S.margin)
         }
         // A full-screen page over Home: VoiceOver stays on it until Back.
         .accessibilityAddTraits(.isModal)
@@ -417,26 +559,23 @@ struct TickerChartPage: View {
 }
 
 private struct TickerLine: View {
-    /// Label columns: a label within 14 pt of one above it in the same column moves one column right.
-    static func columns(_ ys: [CGFloat]) -> [Int] {
-        var last: [CGFloat] = [], out: [Int] = []
-        for y in ys {
-            if let c = last.firstIndex(where: { abs($0 - y) >= 14 }) { last[c] = y; out.append(c) }
-            else { last.append(y); out.append(last.count - 1) }
-        }
-        return out.map { min($0, 2) }
-    }
-
     /// A labelled line keyed by what it is (label and strike), not its place in the list: a layer switch fades the
-    /// old lines out and the new ones in instead of sliding one label into another.
-    struct Mark: Identifiable { let id: String; let k: Double; let label: String; let solid: Bool; let col: Int }
-    static func marks(_ shown: [(k: Double, label: String, solid: Bool)], _ cols: [Int]) -> [Mark] {
-        var seen: [String: Int] = [:]
-        return shown.enumerated().map { i, l in
-            let base = "\(l.label)|\(l.k)", n = seen[base, default: 0]
-            seen[base] = n + 1
-            return Mark(id: n == 0 ? base : "\(base)#\(n)", k: l.k, label: l.label, solid: l.solid, col: cols[i])
+    /// old lines out and the new ones in instead of sliding one label into another. `y` is where its tag sits.
+    struct Mark: Identifiable { let id: String; let k: Double; let label: String; let solid: Bool; let y: CGFloat }
+
+    /// The design's spr: tags sorted top to bottom inside [lo, hi], each at least `gap` under the one above, the
+    /// last pushed back up if it runs past the bottom.
+    static func spread(_ ys: [CGFloat], lo: CGFloat, hi: CGFloat, gap: CGFloat = 19) -> [CGFloat] {
+        let order = ys.indices.sorted { ys[$0] < ys[$1] }
+        var v = order.map { min(hi, max(lo, ys[$0])) }
+        for i in v.indices.dropFirst() where v[i] - v[i - 1] < gap { v[i] = v[i - 1] + gap }
+        if let last = v.last, last > hi {
+            v[v.count - 1] = hi
+            for i in stride(from: v.count - 2, through: 0, by: -1) where v[i + 1] - v[i] < gap { v[i] = v[i + 1] - gap }
         }
+        var out = ys
+        for (j, i) in order.enumerated() { out[i] = v[j] }
+        return out
     }
 
     let pts: [Double]
@@ -444,47 +583,91 @@ private struct TickerLine: View {
     let up: Bool
     /// The range on screen: a new range redraws the line (a 0.3 s crossfade, S.lineMorph).
     var key: String = ""
+    /// Positions tag on the left in ink; Technicals (teal) and Walls on the right.
+    var layer = "Positions"
     @Environment(\.accessibilityReduceMotion) private var reduce
     var body: some View {
         GeometryReader { g in
-            let lo0 = pts.min() ?? 0, hi0 = pts.max() ?? 1
-            let inRange = lines.map(\.k).filter { $0 >= lo0 * 0.9 && $0 <= hi0 * 1.1 }
-            let lo = min(lo0, inRange.min() ?? lo0) * 0.98, hi = max(hi0, inRange.max() ?? hi0) * 1.02
-            let W = g.size.width - 40, H = g.size.height
+            // The plot is the width less the 56 pt price column; 14 clear on top, 12 under (PT, PB).
+            // The design's scale: the closes, stretched to lines within 8% of the price beyond them, plus 5% of the span.
+            let px = pts.last ?? 0, c0 = pts.min() ?? 0, c1 = pts.max() ?? 1
+            let near = lines.map(\.k).filter { $0 >= c0 - px * 0.08 && $0 <= c1 + px * 0.08 }
+            let lo1 = min(c0, near.min() ?? c0), hi1 = max(c1, near.max() ?? c1)
+            let sp = hi1 - lo1 > 0 ? hi1 - lo1 : max(0.01, px * 0.02)
+            let lo = lo1 - sp * 0.05, hi = hi1 + sp * 0.05
+            let W = g.size.width - 56, H = g.size.height, PT: CGFloat = 14, PB: CGFloat = 12
             let X = { (i: Int) -> CGFloat in CGFloat(i) / CGFloat(max(1, pts.count - 1)) * W }
-            let Y = { (p: Double) -> CGFloat in CGFloat((hi - p) / (hi - lo)) * H }
+            let Y = { (p: Double) -> CGFloat in PT + CGFloat((hi - p) / max(1e-9, hi - lo)) * (H - PT - PB) }
+            let left = layer == "Positions", tint = layer == "Technicals" ? S.teal : S.ink
             let shown = lines.filter { $0.k >= lo && $0.k <= hi }.sorted { $0.k > $1.k }
-            let marks = Self.marks(shown, Self.columns(shown.map { Y($0.k) }))
+            let tagY = Self.spread(shown.map { Y($0.k) }, lo: PT + 7, hi: H - PB - 7)
+            let marks: [Mark] = {
+                var seen: [String: Int] = [:]
+                return shown.enumerated().map { i, l in
+                    let base = "\(l.label)|\(l.k)", n = seen[base, default: 0]
+                    seen[base] = n + 1
+                    return Mark(id: n == 0 ? base : "\(base)#\(n)", k: l.k, label: l.label, solid: l.solid, y: tagY[i])
+                }
+            }()
+            // The price grid: about five steps of 1, 2, 2.5, 5 or 10 times a power of ten, labelled at the right
+            // (12/14) unless within 14 of the last-price pill.
+            let raw = max(1e-9, (hi - lo) / 5), mag = pow(10, floor(log10(raw)))
+            let stp = [1, 2, 2.5, 5, 10].map { $0 * mag }.first { $0 >= raw } ?? 10 * mag
+            let dec = stp >= 1 ? (stp.truncatingRemainder(dividingBy: 1) == 0 ? 0 : 1) : 2
+            let grid = stride(from: (lo / stp).rounded(.up) * stp, through: hi + 1e-9, by: stp).filter { Y($0) >= 4 && Y($0) <= H - 4 }
+            let pyC = max(PT, min(H - PB, Y(pts.last ?? lo)))
             // A plain Path does not interpolate, so a new line (range, or a scale change from a layer) crossfades.
             let lineKey = "\(key)|\(pts.count)|\(pts.first ?? 0)|\(pts.last ?? 0)|\(lo)|\(hi)"
             ZStack(alignment: .topLeading) {
+                ForEach(grid, id: \.self) { v in
+                    Path { $0.move(to: CGPoint(x: 0, y: Y(v))); $0.addLine(to: CGPoint(x: W, y: Y(v))) }.stroke(S.pRule, lineWidth: 1)
+                    if abs(Y(v) - pyC) > 14 {
+                        Text(String(format: "%.\(dec)f", v)).font(.system(size: 12, weight: .medium).monospacedDigit()).foregroundStyle(S.secondary)
+                            .fixedSize().frame(width: 48, height: 14, alignment: .trailing)
+                            .offset(x: W + 56 - 8 - 48, y: Y(v) - 7)
+                    }
+                }
+                // The range's first close, dotted (the design's ref line).
+                if let first = pts.first {
+                    Path { $0.move(to: CGPoint(x: 0, y: Y(first))); $0.addLine(to: CGPoint(x: W, y: Y(first))) }
+                        .stroke(S.secondary.opacity(0.8), style: StrokeStyle(lineWidth: 1.25, lineCap: .round, dash: [1, 4]))
+                        .animation(S.moving(S.lineMorph, reduce), value: Y(first))
+                }
                 ForEach(marks) { m in
                     ZStack(alignment: .topLeading) {
-                        Path { $0.move(to: .zero); $0.addLine(to: CGPoint(x: W, y: 0)) }
-                            .stroke(S.ink.opacity(m.solid ? 0.8 : 0.5), style: StrokeStyle(lineWidth: 1, dash: m.solid ? [] : [2, 3]))
-                            .offset(y: Y(m.k))
-                        Text(m.label).font(.system(size: 10, weight: .bold)).foregroundStyle(S.ink)
+                        // Sold solid, bought dotted (1 on, 4 off), 1.5 pt.
+                        Path { $0.move(to: CGPoint(x: 0, y: Y(m.k))); $0.addLine(to: CGPoint(x: W, y: Y(m.k))) }
+                            .stroke(tint, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: m.solid ? [] : [1, 4]))
+                        // The tag: 11/14 bold, padding 1 6, radius 7, on the chart chip; left at 12, or right 6 in.
+                        Text(m.label).font(.system(size: 11, weight: .bold).monospacedDigit()).foregroundStyle(tint)
                             .lineLimit(1).fixedSize()
-                            .padding(.horizontal, 4).background(S.dyn(0xF1F2F4, 0x0A0F0C))
-                            // Left-aligned in its column: the centre sits half the label's width in.
-                            .position(x: 4 + CGFloat(m.col) * (W / 2.6) + (CGFloat(m.label.count) * 5.6 + 8) / 2, y: Y(m.k))
+                            .padding(.horizontal, 6).frame(height: 16)
+                            .background(RoundedRectangle(cornerRadius: 7).fill(S.chartChip))
+                            .frame(width: W - 18, height: 16, alignment: left ? .leading : .trailing)
+                            .offset(x: 12, y: m.y - 8)
                     }
                     // A line that stays moves to its new height with the redraw; nothing slides under Reduce Motion.
-                    .animation(S.moving(S.lineMorph, reduce), value: [Y(m.k), CGFloat(m.col)])
+                    .animation(S.moving(S.lineMorph, reduce), value: [Y(m.k), m.y])
                     .transition(.opacity)
                 }
                 ZStack {
                     Path { p in for (i, v) in pts.enumerated() { let pt = CGPoint(x: X(i), y: Y(v)); i == 0 ? p.move(to: pt) : p.addLine(to: pt) } }
-                        .stroke(up ? S.green : S.red, style: StrokeStyle(lineWidth: 1.6, lineJoin: .round))
+                        .stroke(up ? S.green : S.red, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                         .id(lineKey)
                         .transition(.opacity)
                 }
                 .animation(S.lineMorph, value: lineKey)
                 if let last = pts.last {
-                    Text(String(format: "%.2f", last)).font(.system(size: 11, weight: .bold).monospacedDigit()).foregroundStyle(S.onSignal)
-                        .padding(.horizontal, 5).frame(height: 18).background(RoundedRectangle(cornerRadius: 4).fill(up ? S.green : S.red))
-                        .position(x: W + 22, y: Y(last))
-                        .animation(S.moving(S.lineMorph, reduce), value: Y(last))
+                    // The last close: a 9 pt dot ringed 2 in the page, and its pill at the right (12/14 bold, padding 3 6).
+                    Circle().fill(up ? S.green : S.red).frame(width: 9, height: 9)
+                        .background(Circle().fill(S.dyn(0xF1F2F4, 0x0A0F0C)).padding(-2))
+                        .offset(x: W - 4.5, y: Y(last) - 4.5)
+                    Text(String(format: "%.2f", last)).font(.system(size: 12, weight: .bold).monospacedDigit()).foregroundStyle(S.onSignal)
+                        .fixedSize().padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(up ? S.green : S.red))
+                        .frame(width: 52, alignment: .trailing)
+                        .offset(x: W, y: pyC - 10)
+                        .animation(S.moving(S.lineMorph, reduce), value: pyC)
                 }
             }
         }

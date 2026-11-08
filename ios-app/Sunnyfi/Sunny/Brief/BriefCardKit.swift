@@ -13,6 +13,7 @@ import SwiftUI
 enum BK {
     static let title = SType(size: 20, weight: 700, line: 24, tracking: 0)
     static let sub = SType(size: 13, weight: 500, line: 16, tracking: 0)
+    static let cardSub = SType(size: 15, weight: 500, line: 20, tracking: 0)   // the design's card sub line, under the title
     static let body = SType(size: 15, weight: 500, line: 21, tracking: 0)
     static let row = SType(size: 15, weight: 600, line: 20, tracking: 0)
     static let rowSub = SType(size: 12, weight: 500, line: 16, tracking: 0)
@@ -83,6 +84,27 @@ enum BSay {
 
 // MARK: - Text pieces
 
+extension View {
+    /// One line of text in a box exactly its CSS line height. sType's box lands a fraction taller (the font's own
+    /// line rounds to the pixel), which adds up down a long list (Overnight's nine rows ran 3 pt long). At a larger
+    /// text size the line is free to wrap, as before.
+    func bLine(_ t: SType, tabular: Bool = true) -> some View { modifier(BLineModifier(t: t, tabular: tabular)) }
+}
+
+private struct BLineModifier: ViewModifier {
+    let t: SType
+    let tabular: Bool
+    @Environment(\.dynamicTypeSize) private var dts
+    @Environment(\.sTypeScales) private var scales
+    func body(content: Content) -> some View {
+        if scales && t.scaled(dts).size != t.size {
+            content.sType(t, tabular: tabular).fixedSize(horizontal: false, vertical: true)
+        } else {
+            content.sType(t, tabular: tabular).lineLimit(1).frame(height: t.line)
+        }
+    }
+}
+
 struct BTitle: View {
     let t: String?
     var body: some View {
@@ -93,10 +115,12 @@ struct BTitle: View {
 struct BSub: View {
     let t: String?
     var privacy = false
+    /// 13/16 for a sub beside a title (the overnight list); a card's own sub line under its title is 15/20 (`BK.cardSub`).
+    var type = BK.sub
     var body: some View {
         if let t {
             BriefWords.line(t, privacy: privacy)
-                .sType(BK.sub, tabular: false).foregroundStyle(S.secondary).fixedSize(horizontal: false, vertical: true)
+                .sType(type, tabular: false).foregroundStyle(S.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -116,32 +140,65 @@ struct BBody: View {
 struct BFooter: View {
     let v: JSONValue
     var privacy = false
+    var type = SType(size: 12, weight: 600, line: 15, tracking: 0)
     var body: some View {
         if !v.isNull {
-            BriefSentence(BriefSpan.list(v), base: SType(size: 12, weight: 600, line: 15, tracking: 0), baseColor: S.secondary, privacy: privacy)
+            BriefSentence(BriefSpan.list(v), base: type, baseColor: S.secondary, privacy: privacy)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
 
+/// The rule between rows: the design's `border-top: 1px solid var(--line)`.
 struct BHairline: View {
-    var body: some View { Rectangle().fill(S.hairline).frame(height: 0.5) }
+    var body: some View { Rectangle().fill(S.hairline).frame(height: 1) }
+}
+
+/// The design's CSS triangle (borders on a zero box): point up, or turned 180° for down.
+struct BTriangle: Shape {
+    var up = true
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        if up {
+            p.move(to: CGPoint(x: r.midX, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.maxY)); p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+        } else {
+            p.move(to: CGPoint(x: r.minX, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.minY)); p.addLine(to: CGPoint(x: r.midX, y: r.maxY))
+        }
+        p.closeSubpath()
+        return p
+    }
 }
 
 /// A move with its triangle, coloured: "▲ 0.40%" green, "▼ 0.18%" red. Content that already carries an arrow
-/// (↑ ↓) is shown as is.
+/// (↑ ↓) is shown as is. The triangle is the design's: 10 × 7.5, 4 before the figure, unless a card says otherwise.
 struct BMove: View {
     let text: String?
     let color: String?
     var signed: Double? = nil
     var type = SType(size: 15, weight: 700, line: 18, tracking: 0)
+    var tri = CGSize(width: 10, height: 7.5)
+    var gap: CGFloat = 4
+    @Environment(\.dynamicTypeSize) private var dts
+    @Environment(\.sTypeScales) private var scales
     var body: some View {
         if let t = text {
             let hasArrow = t.contains("↑") || t.contains("↓") || t.contains("▲") || t.contains("▼")
             let up = (signed ?? 0) >= 0 && color != "red"
-            Text(hasArrow ? t : "\(up ? "▲" : "▼") \(t)")
-                .sType(type).foregroundStyle(BK.color(color))
-                .accessibilityLabel(BSay.move(t, color: color, signed: signed))
+            // The triangle grows with the text when the screen follows the phone's text size.
+            let k = scales ? SDynamic.scaled(type.size, dts) / type.size : 1
+            Group {
+                if hasArrow {
+                    Text(t).bLine(type)
+                } else {
+                    HStack(spacing: gap * k) {
+                        BTriangle(up: up).frame(width: tri.width * k, height: tri.height * k)
+                        Text(t).bLine(type)
+                    }
+                }
+            }
+            .foregroundStyle(BK.color(color))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(BSay.move(t, color: color, signed: signed))
         }
     }
 }
@@ -154,31 +211,34 @@ struct BLogo: View {
         ZStack {
             Circle().fill(.white)
             if let t = ticker, let img = UIImage(named: "logo-\(t)") {
-                Image(uiImage: img).resizable().scaledToFit().frame(width: size * 0.62, height: size * 0.62)
+                Image(uiImage: img).resizable().scaledToFit().frame(width: size * 0.74, height: size * 0.74)   // design: center/74%
             } else if let t = ticker {
                 Text(String(t.prefix(4))).font(.system(size: size * 0.26, weight: .bold)).foregroundStyle(Color(hex: 0x1D1D1F))
             }
         }
         .frame(width: size, height: size)
-        .overlay(Circle().strokeBorder(Color.black.opacity(0.06), lineWidth: 0.5))
+        .overlay(Circle().stroke(Color.black.opacity(0.12), lineWidth: 0.5).padding(-0.25))   // box-shadow 0 0 0 .5px, outside
         .accessibilityHidden(true)
     }
 }
 
 // MARK: - Stats
 
-/// Three stats side by side: the value (17 heavy, coloured), the label above or the sub under (11 secondary).
+/// Three stats side by side: the value (heavy, coloured), the label above or the sub under (12/15 secondary).
+/// The design's Results grid: 12 apart, 1 between lines, 22/27. Earnings ahead and Thesis check: 10 apart, 20/25.
 struct BStats: View {
     let stats: [JSONValue]
     var privacy = false
     var labelFirst = true
+    var value = SType(size: 22, weight: 800, line: 27, tracking: -0.02)
+    var spacing: CGFloat = 12
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: spacing) {
             ForEach(Array(stats.enumerated()), id: \.offset) { _, s in
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     if labelFirst, let l = s["label"].string { Text(l).sType(BK.label, tabular: false).foregroundStyle(S.secondary) }
                     BriefWords.line(s["value"].string, privacy: privacy)
-                        .sType(SType(size: 22, weight: 800, line: 26, tracking: -0.01))
+                        .sType(value)
                         .foregroundStyle(BK.color(s["valueColor"].string))
                         .lineLimit(1).minimumScaleFactor(0.7)
                     if let sub = s["sub"].string { BriefWords.line(sub, privacy: privacy).sType(BK.label, tabular: false).foregroundStyle(S.secondary) }
@@ -234,9 +294,10 @@ struct BSegmented: View {
 
 // MARK: - Bars
 
-/// A row of value bars with labels under them; the highlighted one is full green, the rest pale green.
+/// A row of value bars with labels under them, 10 apart; the highlighted one is full green, the rest green at 35%.
 struct BBars: View {
     let bars: [JSONValue]
+    @Environment(\.dynamicTypeSize) private var dts
     var height: CGFloat = 70
     var privacy = false
     /// The chart's title, the start of its spoken summary ("Yield, week by week: Sep 28 0.48%, ...").
@@ -257,21 +318,24 @@ struct BBars: View {
         // red, its label without a minus sign. Else the label's own number.
         let vals = bars.map { $0["n"].double ?? $0["signed"].double ?? $0["value"].double ?? 0 }
         let mx = max(vals.map(abs).max() ?? 1, 0.0001)
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .bottom, spacing: 10) {
             ForEach(Array(bars.enumerated()), id: \.offset) { i, b in
                 let hl = b["highlight"].bool, neg = vals[i] < 0, tint = neg ? S.red : S.green
                 VStack(spacing: 4) {
                     BriefWords.line(b["value"].string, privacy: privacy)
-                        .sType(SType(size: 11, weight: 700, line: 13, tracking: 0))
+                        .sType(SType(size: 11, weight: hl ? 800 : 700, line: 14, tracking: 0))
                         .foregroundStyle(hl ? tint : BK.color(b["valueColor"].string))
                         .lineLimit(1).minimumScaleFactor(0.7)
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(b["empty"].bool ? S.chip : hl ? tint : tint.opacity(0.3))
+                        .fill(b["empty"].bool ? S.chip : hl ? tint : tint.opacity(0.35))
                         .frame(height: max(4, height * CGFloat(abs(vals[i]) / mx)))
                         // Bar fills on the page curve (never the segmented spring), instant under Reduce Motion.
                         .animation(S.moving(S.page, reduce), value: vals[i])
-                    Text(b["label"].string ?? "").sType(SType(size: 11, weight: hl ? 700 : 500, line: 13, tracking: 0))
-                        .foregroundStyle(hl ? S.ink : S.secondary).lineLimit(1).minimumScaleFactor(0.8)
+                    Text(b["label"].string ?? "").sType(SType(size: 11, weight: hl ? 800 : 500, line: 14, tracking: 0))
+                        .foregroundStyle(hl ? S.ink : S.secondary)
+                        // One line (a touch smaller if needed) as designed; at large text it wraps, never "This..." (Audit 6).
+                        .lineLimit(dts > .large ? nil : 1).minimumScaleFactor(dts > .large ? 1 : 0.8)
+                        .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: dts > .large)
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -287,6 +351,21 @@ struct BBars: View {
 struct BHeatMap: View {
     let page: JSONValue
     @Environment(BriefState.self) private var brief
+
+    /// The design's type steps for a tile (SunnyEconomy mapCard): ticker and move 15/14, 13/12 or 12/11 when both fit,
+    /// else the ticker alone, else nothing. `w`, `h` are the tile's own size. The design's alone step is 10, but its
+    /// layout never leaves a tile that small (it grows the floor first); the server's can, so 11, the README's least.
+    static func tier(_ ticker: String, _ w: CGFloat, _ h: CGFloat) -> (tf: CGFloat, pf: CGFloat) {
+        let n = CGFloat(ticker.count)
+        func tw(_ f: CGFloat) -> CGFloat { n * f * 0.66 + 8 }
+        func pw(_ f: CGFloat) -> CGFloat { 5 * f * 0.6 + 8 + f * 0.6 + 3 }
+        if w >= tw(15), w >= pw(14), h >= 52 { return (15, 14) }
+        if w >= tw(13), w >= pw(12), h >= 40 { return (13, 12) }
+        if w >= tw(12), w >= pw(11), h >= 34 { return (12, 11) }
+        if w >= tw(11), h >= 16 { return (11, 0) }
+        return (0, 0)
+    }
+
     var body: some View {
         let size = page["mapSize"].array.compactMap(\.double)
         let mw = size.first ?? 305, mh = size.count > 1 ? size[1] : 196
@@ -297,20 +376,27 @@ struct BHeatMap: View {
                     let r = t["rect"].array.compactMap(\.double)
                     if r.count == 4 {
                         let w = r[2] * sx, h = r[3] * sy
+                        let tk = t["ticker"].string ?? t["name"].string ?? ""
+                        let f = Self.tier(tk, w, h)
                         ZStack {
-                            RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Self.fill(t))
-                            VStack(spacing: 1) {
-                                Text(t["ticker"].string ?? t["name"].string ?? "")
-                                    .font(.system(size: w < 50 || h < 40 ? 10 : 13, weight: .bold))
-                                if t["showsMove"].bool, let m = t["moveText"].string {
-                                    Text("\((t["move"].double ?? 0) >= 0 ? "▲" : "▼")\(m)")
-                                        .font(.system(size: w < 50 || h < 40 ? 9 : 12, weight: .medium).monospacedDigit())
+                            RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Self.fill(t))
+                            if f.tf > 0 {
+                                // Centred column, 3 apart, each line 1.1 of its size; the move's triangle as the design draws it.
+                                VStack(spacing: 3) {
+                                    Text(tk).sType(SType(size: f.tf, weight: 700, line: f.tf * 1.1, tracking: 0), tabular: false)
+                                    if f.pf > 0, t["showsMove"].bool, let m = t["moveText"].string {
+                                        let tw = (f.pf * 0.6).rounded() / 2, th = (f.pf * 0.9).rounded() / 2
+                                        HStack(spacing: f.pf >= 13 ? 3 : 2) {
+                                            BTriangle(up: (t["move"].double ?? 0) >= 0).frame(width: tw * 2, height: th)
+                                            Text(m).sType(SType(size: f.pf, weight: 500, line: f.pf * 1.1, tracking: 0))
+                                        }
+                                    }
                                 }
+                                .foregroundStyle(S.ink)
+                                .lineLimit(1)   // never wrap the % onto its own line (FIS ▼26.04%): shrink a little first
+                                .minimumScaleFactor(0.8)
+                                .padding(2)
                             }
-                            .foregroundStyle(S.ink)
-                            .lineLimit(1)   // shrink to fit, never wrap the % onto its own line (FIS ▼26.04%)
-                            .minimumScaleFactor(0.6)
-                            .padding(2)
                         }
                         .frame(width: w, height: h)
                         .contentShape(Rectangle())
@@ -322,6 +408,7 @@ struct BHeatMap: View {
             }
         }
         .aspectRatio(mw / mh, contentMode: .fit)
+        .environment(\.sTypeScales, false)   // tiles keep their size: their boxes are drawn to it
         // One stop with the map's summary; each tile's tap is an action ("Open Nike chart") in the Actions rotor.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(BSay.words(page["aria"].string))
@@ -347,10 +434,12 @@ struct BHeatMap: View {
 /// Cards in a sideways row: the first full width less a peek of the next (block 29 rows).
 struct BRow<Content: View>: View {
     var width: CGFloat? = nil
+    /// 12 between cards; the index cards sit 8 apart.
+    var spacing: CGFloat = 12
     @ViewBuilder let content: () -> Content
     var body: some View {
         ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 12) { content() }
+            HStack(alignment: .top, spacing: spacing) { content() }
                 .scrollTargetLayout()
                 .padding(.horizontal, S.margin)
         }

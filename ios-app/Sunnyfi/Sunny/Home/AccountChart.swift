@@ -218,11 +218,10 @@ struct AccountChart: View {
     private var pnl: Bool { compare && !fresh }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 16) {
-                headline.padding(.horizontal, S.margin)
-                plotBox
-            }
+        // The design's chart is one column 16 apart: headline, line box, ranges, panel (SunnyHomeChart isMain).
+        VStack(alignment: .leading, spacing: 16) {
+            headline.padding(.horizontal, S.margin)
+            plotBox
             rangesRow
             panel
         }
@@ -705,7 +704,7 @@ struct AccountChart: View {
                 .transition(.opacity)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)   // the design's panel: min-height 112
     }
 
     private struct Stat {

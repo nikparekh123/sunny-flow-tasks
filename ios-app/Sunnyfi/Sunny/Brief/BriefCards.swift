@@ -38,29 +38,35 @@ struct BriefCardView: View {
     }
 }
 
-/// Title (20/24 bold), sub line (13/16 medium secondary), then whatever rows the card carries, then a
-/// small source line. Rows are label · value pairs, or a list of strings.
+/// Title (20/24 bold) over its sub line (15/20 medium secondary) 4 apart, then whatever the card carries,
+/// blocks 16 apart (SunnyBriefs), then a small source line. Rows are label · value pairs, or a list of strings.
 struct GenericBriefCard: View {
     let card: JSONValue
     let privacy: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let t = card["title"].string {
-                Text(t).sType(SType(size: 20, weight: 700, line: 24, tracking: 0), tabular: false).foregroundStyle(S.ink)
-            }
-            if let s = card["subtitle"].string ?? card["sub"].string {
-                BriefWords.line(s, privacy: privacy).sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
-                    .foregroundStyle(S.secondary)
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                if let t = card["title"].string {
+                    Text(t).sType(SType(size: 20, weight: 700, line: 24, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                }
+                if let s = card["subtitle"].string ?? card["sub"].string {
+                    BriefWords.line(s, privacy: privacy).sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
+                        .foregroundStyle(S.secondary)
+                }
             }
             let body = card["body"].isNull ? card["text"] : card["body"]
             if !body.isNull {
                 BriefSentence(BriefSpan.list(body), base: SType(size: 15, weight: 500, line: 21, tracking: 0), privacy: privacy)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            ForEach(Array(card["rows"].array.enumerated()), id: \.offset) { i, r in
-                if i > 0 { Rectangle().fill(S.hairline).frame(height: 0.5) }
-                row(r)
+            if !card["rows"].array.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(card["rows"].array.enumerated()), id: \.offset) { i, r in
+                        if i > 0 { BHairline() }
+                        row(r).padding(.vertical, 9)
+                    }
+                }
             }
             if let f = card["footer"].string ?? card["source"].string {
                 Text(f).sType(SType(size: 11, weight: 600, line: 13, tracking: 0), tabular: false).foregroundStyle(S.secondary)

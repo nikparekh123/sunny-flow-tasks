@@ -33,6 +33,9 @@ export interface DocIn {
   earnings: Row[]; macro: Row[]; divs: Row[]; trades: Row[]; orders: Row[]; aftershock: Row | null;
   econ?: Row[];                    // econ_cards (econ-sync, FRED): the twelve indicators
   baseNow: number; baseAt: (d: string) => number;
+  /* README 9.4 (Audit 7): feeds that have stopped (no run for 50 h, health-monitor's "stopped") hide what they feed
+     rather than show an old claim ("None ahead", "3 names still to report"); marketAt = the tape's last capture. */
+  feeds?: { stopped?: string[]; marketAt?: string | null };
 }
 
 // ── Words and numbers ──
@@ -42,6 +45,12 @@ const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const NUM = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
 const ymd = (d: string) => { const [y, m, dd] = d.split('-').map(Number); return { y, m, d: dd, wd: new Date(Date.UTC(y, m - 1, dd)).getUTCDay() }; };
+/** An ISO time on the New York clock: its date and minutes since midnight. */
+const nyClock = (iso: string) => {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
+  return { date: `${p.year}-${p.month}-${p.day}`, mins: Number(p.hour) * 60 + Number(p.minute) };
+};
 const dayDiff = (a: string, b: string) => Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / 864e5);
 const md = (d: string) => `${MON[ymd(d).m - 1]} ${ymd(d).d}`;
 const dmd = (d: string) => `${DOW[ymd(d).wd]} ${md(d)}`;
@@ -102,6 +111,9 @@ function heatMap(title: string, items: { ticker: string; name: string; move: num
 }
 
 export function buildDoc(x: DocIn): { full: Row; open: Row } {
+  const stopped = new Set(x.feeds?.stopped ?? []);
+  x = { ...x, earnings: stopped.has('earnings') ? [] : x.earnings, macro: stopped.has('macro') ? [] : x.macro,
+    divs: stopped.has('dividends') ? [] : x.divs, econ: stopped.has('econ') ? [] : x.econ };
   const { moment, today, mins, addDays, isTrading } = x;
   const B = x.brief, F: string = B.friday, wk = moment === 'weekend';
   const session = ['bell', 'open', 'last20', 'last5'].includes(moment);
@@ -179,7 +191,13 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
       const move = moment === 'post' ? num(m.regular_change_pct) : num(m.regular_change_pct);
       return idxCard(s, l, num(moment === 'post' ? m.regular_price : m.price) ?? num(m.price), move);
     }).filter(Boolean);
-    return cards.length ? { type: 'indexCards', cards, footer: pre ? 'Implied by futures · since the 4:00 PM close' : moment === 'post' ? 'At the 4:00 PM close' : 'Live' } : null;
+    // In session the prices are "Live" only while fresh (Yahoo runs ~10 min behind; Nik allows 20); else their own time.
+    const at = x.feeds?.marketAt, atNy = at ? nyClock(at) : null;
+    // A price from before today's open counts from 9:30, so the bell's first minutes still read "Live".
+    const since = atNy ? (atNy.date === today ? atNy.mins : 570) : 0;
+    const late = session && x.feeds != null && (!atNy || mins - since > 20);
+    const live = late ? (atNy ? `As of ${atNy.date === today ? '' : `${dmd(atNy.date)}, `}${hm(atNy.mins)}` : null) : 'Live';
+    return cards.length ? { type: 'indexCards', cards, footer: pre ? 'Implied by futures · since the 4:00 PM close' : moment === 'post' ? 'At the 4:00 PM close' : live } : null;
   };
   const futuresCards = () => {
     const cards = [['SPY', 'ES'], ['QQQ', 'NQ'], ['IWM', 'RTY']].map(([l, b]) => {
@@ -388,6 +406,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   const keptOf = (w: Row | undefined) => (w ? w.calls_sold - w.calls_back + w.puts_sold - w.puts_back : 0);
   const soldOf = (w: Row | undefined) => (w ? w.calls_sold + w.puts_sold : 0);
   const divNext = () => {
+    if (stopped.has('dividends')) return null;      // no dividends feed: no line, never "None ahead"
     const v = x.divs.map((d) => ({ d, n: names.find((y) => y.t === String(d.ticker).toUpperCase()) })).filter((r) => r.n && r.n.shares > 0)
       .sort((a, b) => String(a.d.ex_date).localeCompare(String(b.d.ex_date)))[0];
     return v ? [sp(`Next: ${v.n!.name}, ex ${dmd(String(v.d.ex_date))}, ${$0(v.n!.shares * Number(v.d.cash_amount))} · kept out of Made`, false, 'secondary')]

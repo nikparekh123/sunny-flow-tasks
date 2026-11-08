@@ -187,6 +187,7 @@ struct HomeView: View {
         .onChange(of: home.builtAt, initial: true) { _, _ in
             brief.fresh = (SXClient.parseDate(home.fresh.marks ?? ""), SXClient.parseDate(home.fresh.trades ?? ""))
             brief.ingest(home.brief, key: home.builtAt, book: store.bookIDNow, overview: home.overview, books: store.books)
+            brief.calendar = home.calendar   // early closes move the moments (Audit 7)
         }
         // The strip picked a book: read its Home (Overview stays on S's last build).
         .onChange(of: brief.account) { _, a in
@@ -441,7 +442,7 @@ struct HomeUnavailable: View {
     let store: HomeStore
     var body: some View {
         VStack(spacing: 14) {
-            Text("Can't reach Sunny").sType(.headline, tabular: false).foregroundStyle(S.ink)
+            Text("Can’t reach Sunny").sType(.headline, tabular: false).foregroundStyle(S.ink)
             Text("Check the connection and try again.").sType(.body, tabular: false).foregroundStyle(S.muted)
             Button { Task { await store.refresh() } } label: {
                 Text("Try again").sType(.label, tabular: false).foregroundStyle(S.ink)

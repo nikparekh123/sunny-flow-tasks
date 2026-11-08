@@ -155,7 +155,7 @@ export function buildOverview(books: BookSide[], today: string, mins: number, co
     : basePace.length > 1 ? [sp(`${nm(onPace[0].b)} is `), sp('on pace', true), sp(`, ${nm(basePace.find((p) => !onPace.includes(p))!.b)} is behind`)]
     : [sp(`${nm(basePace[0].b)} is `), sp(onPace.length ? 'on pace' : 'behind pace', true), sp(' this week')];
   const sentence: Span[] = held.length === 0 ? [sp('Nothing held yet in either book.')]
-    : [...paceWords, sp('. A bad week would cost '), sp(downPct.toFixed(1).replace(/\.0$/, '') + '%', true),
+    : [...paceWords, sp('. A bad week would cost '), sp(downPct.toFixed(1) + '%', true),
       ...(shAll > 0 ? [sp(`, and the puts cover `), sp(coverWords(coverAll), true), sp(' of the shares.')] : [sp('.')]),
       ...(books.length > 1 && empty.length ? [sp(` ${list(empty.map(nm))} ${empty.length === 1 ? 'holds' : 'hold'} nothing yet.`)] : [])];
 

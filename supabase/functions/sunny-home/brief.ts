@@ -31,17 +31,18 @@ export interface BriefIn {
   strategies: Record<string, string>;
 }
 
-/** The moment, as the app's clock has it (BriefCore Moment.at). */
-export function momentOf(wd: string, m: number): Moment {
+/** The moment, as the app's clock has it (BriefCore Moment.at). `close` is the day's close in minutes: 960, or 780 on
+ *  an early close, so the last 20 and 5 minutes and post-market follow it ("Post-market takes over at 1:00 PM"). */
+export function momentOf(wd: string, m: number, close = 960): Moment {
   if (wd === 'Sat') return 'weekend';
   if (wd === 'Sun') return m >= 18 * 60 ? 'futures' : 'weekend';
-  if (wd === 'Fri' && m >= 16 * 60) return 'weekend';
+  if (wd === 'Fri' && m >= close) return 'weekend';
   if (m < 4 * 60) return 'futures';
   if (m < 9 * 60 + 30) return 'pre';
   if (m < 9 * 60 + 35) return 'bell';
-  if (m < 15 * 60 + 40) return 'open';
-  if (m < 15 * 60 + 55) return 'last20';
-  if (m < 16 * 60) return 'last5';
+  if (m < close - 20) return 'open';
+  if (m < close - 5) return 'last20';
+  if (m < close) return 'last5';
   if (m < 20 * 60) return 'post';
   return 'futures';
 }
@@ -68,9 +69,9 @@ export interface NameInput { t: string; S0: number; P0: number; iv: number; legs
 
 export function buildBrief(x: BriefIn) {
   const { today, mins, addDays, isTrading } = x;
-  const moment = momentOf(x.wd, mins);
   const early = new Map(x.cal.filter((c) => c.kind === 'early_close' && c.closes).map((c) => [String(c.date), Number(String(c.closes).slice(0, 2)) * 60 + Number(String(c.closes).slice(3, 5))]));
   const closeMin = (d: string) => early.get(d) ?? 960;
+  const moment = momentOf(x.wd, mins, closeMin(today));
   /** Calendar days from now to a date's close (options stop at the early close too). */
   const daysTo = (d: string) => dayDiff(today, d) + (closeMin(d) - mins) / 1440;
   const lastTradingOnOrBefore = (d: string) => { let y = d; while (!isTrading(y)) y = addDays(y, -1); return y; };

@@ -34,7 +34,9 @@ enum Moment: String, CaseIterable, Identifiable {
     /// The regular session is open (live prices, What's moving, To decide).
     var isSession: Bool { [.bell, .open, .last20, .last5].contains(self) }
 
-    static func at(_ date: Date) -> Moment {
+    /// `close` = that day's close in New York minutes: 960 (4:00 PM), or 780 on an early close (the last 20 and 5 minutes
+    /// and post-market follow it, as "Post-market takes over at 1:00 PM" says). Same rule as sunny-home `momentOf`.
+    static func at(_ date: Date, close: Int = 960) -> Moment {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "America/New_York")!
         let c = cal.dateComponents([.weekday, .hour, .minute], from: date)
@@ -44,14 +46,14 @@ enum Moment: String, CaseIterable, Identifiable {
         case 1: return m >= 18 * 60 ? .futures : .weekend         // Sunday: futures open at 6:00 PM
         default: break
         }
-        if wd == 6 && m >= 16 * 60 { return .weekend }            // Friday after the close
+        if wd == 6 && m >= close { return .weekend }              // Friday after the close
         switch m {
         case ..<(4 * 60): return .futures
         case ..<(9 * 60 + 30): return .pre
         case ..<(9 * 60 + 35): return .bell
-        case ..<(15 * 60 + 40): return .open
-        case ..<(15 * 60 + 55): return .last20
-        case ..<(16 * 60): return .last5
+        case ..<(close - 20): return .open
+        case ..<(close - 5): return .last20
+        case ..<close: return .last5
         case ..<(20 * 60): return .post
         default: return .futures
         }
@@ -217,7 +219,13 @@ final class BriefState {
     }
 
     /// The moment on screen: pinned in a debug run, else the New York clock.
-    func moment(at date: Date? = nil) -> Moment { pin?.moment ?? BriefDebug.moment ?? Moment.at(date ?? now()) }
+    /// The exchange calendar (closed days, early closes), set with each Home build.
+    var calendar: [CalendarDay] = []
+    func moment(at date: Date? = nil) -> Moment {
+        if let m = pin?.moment ?? BriefDebug.moment { return m }
+        let d = date ?? now()
+        return Moment.at(d, close: MarketClock.closeMinutes(MarketClock.ny(d).date, calendar))
+    }
 }
 
 /// Privacy (block 33): the eye beside the account value. One switch, kept on the phone, shared with Siri's
