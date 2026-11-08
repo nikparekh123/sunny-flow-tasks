@@ -147,6 +147,11 @@ enum S {
     // Handoff 6 Nov 2026 (New Home, Positions, Overview; block 34): the design's own tokens, light / dark.
     static let secondary       = dyn(0x6E6E73, 0x98989D)   // sub lines, labels, kickers
     static let secondaryOnTint = dyn(0x6E6E73, 0xAEAEB2)   // text on tinted tiles and pills
+    /// Gray text straight on Home's page, not in a card (kickers, the date line, the account strip, the chart's
+    /// words): lighter in dark, where #98989D over the fixed green glow fell to 4.35:1 (Pass 4, Nik's pick A,
+    /// 7 Nov 2026). Light is unchanged.
+    static let secondaryOnPage = dyn(0x6E6E73, 0xAEAEB2)
+    static let mutedOnPage     = dyn(0x646469, 0xAEAEB2)
     static let hairline        = dyn(0xE3E5E8, 0x3A3A3C)   // rules between rows
     static let act             = dyn(0xA34B00, 0xFF9F0A)   // orange: thin, act, turns short, Watch
     /// Text on a filled S.act, S.red or S.green: white on the deep light fills, ink on the bright dark ones

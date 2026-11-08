@@ -318,7 +318,7 @@ struct AccountChart: View {
                         .contentTransition(.numericText(value: roc))
                         .blur(radius: hidden ? 9 : 0)
                     Text(scrubbing ? "on capital" : "on capital · \(range.words)")
-                        .sType(Self.changeWords, tabular: false).foregroundStyle(S.muted)
+                        .sType(Self.changeWords, tabular: false).foregroundStyle(S.mutedOnPage)
                 } else {
                     let first = m.nav(s), d = bigValue - first - m.deposited(s, i)
                     let p = first != 0 ? d / abs(first) * 100 : 0
@@ -328,13 +328,13 @@ struct AccountChart: View {
                         .contentTransition(.numericText(value: d))
                         .blur(radius: hidden ? 9 : 0)
                     if !scrubbing {
-                        Text(range.words).sType(Self.changeWords, tabular: false).foregroundStyle(S.muted)
+                        Text(range.words).sType(Self.changeWords, tabular: false).foregroundStyle(S.mutedOnPage)
                     }
                 }
             } else {
                 Text("$0 · 0.0%").sType(Self.changeValue).foregroundStyle(S.ink)
                     .blur(radius: hidden ? 9 : 0)
-                Text("first day of the book").sType(Self.changeWords, tabular: false).foregroundStyle(S.muted)
+                Text("first day of the book").sType(Self.changeWords, tabular: false).foregroundStyle(S.mutedOnPage)
             }
         }
         .lineLimit(1)
@@ -348,7 +348,7 @@ struct AccountChart: View {
             let (s, _) = bounds, dep = m.deposited(s, at)
             if abs(dep) >= 1 {
                 Text("\(F.money(abs(dep))) \(dep > 0 ? "deposited" : "withdrawn") \(scrubbing ? "by then" : range.words)")
-                    .sType(Self.changeWords, tabular: false).foregroundStyle(S.muted)
+                    .sType(Self.changeWords, tabular: false).foregroundStyle(S.mutedOnPage)
                     .blur(radius: hidden ? 9 : 0)
                     .lineLimit(1)
             }
@@ -489,7 +489,7 @@ struct AccountChart: View {
                     SHLine(y: Self.top + Self.plotH * 0.62).stroke(S.chartBase, style: Self.dotted)
                     Text("The chart starts after your first close")
                         .sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false)
-                        .foregroundStyle(S.muted)
+                        .foregroundStyle(S.mutedOnPage)
                         .multilineTextAlignment(.center)
                         .frame(width: max(0, w - 40))
                         .offset(x: 20, y: 34)
@@ -536,7 +536,7 @@ struct AccountChart: View {
             SVLine(x: x, from: 20, to: Self.boxH).stroke(S.ink.opacity(0.28), lineWidth: 1)
             Text(m.label(at, range))
                 .sType(SType(size: 12, weight: 600, line: 16, tracking: 0))
-                .foregroundStyle(S.muted)
+                .foregroundStyle(S.mutedOnPage)
                 .fixedSize()
                 .position(x: min(max(x, 48), w - 48), y: 8)
             if let d = L.dot {
@@ -563,7 +563,7 @@ struct AccountChart: View {
                 } label: {
                     Text(r.rawValue)
                         .sType(SType(size: 13, weight: sel ? 800 : 600, line: 13, tracking: 0), tabular: false)
-                        .foregroundStyle(sel ? S.ink : S.muted)
+                        .foregroundStyle(sel ? S.ink : S.mutedOnPage)
                         .padding(.horizontal, 8)
                         .frame(minWidth: 40, minHeight: 28)
                         .contentShape(Rectangle().inset(by: -8))
@@ -687,7 +687,7 @@ struct AccountChart: View {
             ZStack(alignment: .leading) {
                 Text(word?.word ?? (st.label == "Time value" && timeValueTap != nil ? "Time value ›" : st.label))
                     .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
-                    .foregroundStyle(word?.color ?? S.muted)
+                    .foregroundStyle(word?.color ?? S.mutedOnPage)
                     .lineLimit(1)
                     .id(word?.word ?? st.label)
                     .transition(reduce ? .identity : .asymmetric(
@@ -734,7 +734,7 @@ struct AccountChart: View {
     private func minor(_ mn: Minor) -> some View {
         HStack(spacing: 5) {
             Text(mn.label).sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false)
-                .foregroundStyle(S.muted)
+                .foregroundStyle(S.mutedOnPage)
             Text(mn.text).sType(SType(size: 13, weight: 700, line: 18, tracking: 0))
                 .foregroundStyle(mn.color)
                 .contentTransition(.numericText())

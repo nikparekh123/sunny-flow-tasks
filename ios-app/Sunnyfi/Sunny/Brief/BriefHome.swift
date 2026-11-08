@@ -126,7 +126,7 @@ struct BriefTitle: View {
                 .accessibilityAddTraits(.isHeader)
             if let d = doc?.dateLine, !d.isEmpty {
                 Text(d).sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
-                    .foregroundStyle(S.secondary)
+                    .foregroundStyle(S.secondaryOnPage)
                     .padding(.top, 2)
             }
             if let doc, !doc.lede.isEmpty {
@@ -150,7 +150,7 @@ struct BriefSectionView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("\(section.num) · \(section.kicker)")
                 .sType(SType(size: 13, weight: 700, line: 16, tracking: 0.02), tabular: false)
-                .foregroundStyle(S.secondary)
+                .foregroundStyle(S.secondaryOnPage)
                 .padding(.horizontal, S.margin)
             BriefWords.text(privacy ? (section.headlinePrivacy ?? section.headline) : section.headline,
                             base: SType(size: 24, weight: 700, line: 30, tracking: -0.015), privacy: privacy)

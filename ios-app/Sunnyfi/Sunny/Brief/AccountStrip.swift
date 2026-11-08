@@ -29,7 +29,7 @@ struct AccountStrip: View {
                     Button { pick(a) } label: {
                         Text(a.name)
                             .font(.system(size: 14, weight: on ? .semibold : .medium))
-                            .foregroundStyle(on ? S.ink : S.secondary)
+                            .foregroundStyle(on ? S.ink : S.secondaryOnPage)
                             .padding(.horizontal, 12)
                             .frame(height: 30)
                             .background {
