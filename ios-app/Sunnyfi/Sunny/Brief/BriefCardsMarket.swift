@@ -19,16 +19,16 @@ struct BIndexRow: View {
                 ForEach(Array(card["cards"].array.enumerated()), id: \.offset) { _, c in
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 6) {
-                            Text(c["symbol"].string ?? "").font(.system(size: 15, weight: .semibold)).foregroundStyle(S.ink)
+                            Text(c["symbol"].string ?? "").sFont(15, .semibold).foregroundStyle(S.ink)
                             Spacer(minLength: 0)
                             if let b = c["badge"].string {
-                                Text(b).font(.system(size: 11, weight: .bold)).foregroundStyle(Color(hex: 0x1D1D1F))
+                                Text(b).sFont(11, .bold).foregroundStyle(Color(hex: 0x1D1D1F))
                                     .padding(.horizontal, 6).frame(height: 18)
                                     .background(Capsule().fill(S.yellow))
                             }
                         }
                         Spacer(minLength: 24)
-                        Text(c["price"].string ?? "").font(.system(size: 15, weight: .semibold).monospacedDigit()).foregroundStyle(S.ink)
+                        Text(c["price"].string ?? "").sFont(15, .semibold, mono: true).foregroundStyle(S.ink)
                         BMove(text: c["move"].string, color: c["moveColor"].string, signed: c["moveSigned"].double,
                               type: SType(size: 15, weight: 700, line: 18, tracking: 0))
                     }
@@ -92,21 +92,24 @@ struct BIndicatorCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(c["label"].string ?? c["name"].string ?? "").sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.secondary)
-                Spacer()
+                    .fixedSize(horizontal: false, vertical: true)   // wraps before the tag is cut (Pass 5)
+                Spacer(minLength: 8)
                 if let tag = c["tag"].string {
                     let yellow = c["tagStyle"].string == "yellow"
                     HStack(spacing: 4) {
-                        if yellow { Image(systemName: "eye").font(.system(size: 10, weight: .semibold)) }
-                        Text(tag).font(.system(size: 11, weight: .semibold))
+                        if yellow { Image(systemName: "eye").sFont(10, .semibold).accessibilityHidden(true) }
+                        Text(tag).sFont(11, .semibold)
                     }
                         .foregroundStyle(yellow ? S.badgeInk : S.ink)
-                        .padding(.horizontal, 8).frame(height: 20)
+                        .padding(.horizontal, 8).frame(minHeight: 20)
+                        .fixedSize()
                         .background(Capsule().fill(yellow ? S.yellow : .clear))
                         .overlay(Capsule().strokeBorder(yellow ? .clear : S.ink, lineWidth: 1))
                 }
             }
             Text(c["value"].string ?? "").sType(SType(size: 34, weight: 800, line: 38, tracking: -0.02)).foregroundStyle(S.ink)
             Text("\(c["arrow"].string ?? "") \(c["trend"].string ?? "")").sType(BK.small, tabular: false).foregroundStyle(S.ink)
+                .accessibilityLabel(c["trend"].string ?? "")
             let pts = c["chart"]["points"].array
             if !pts.isEmpty {
                 let vals = pts.map { $0["value"].double ?? 0 }
@@ -125,6 +128,10 @@ struct BIndicatorCard: View {
                     }
                 }
                 .padding(.top, 4)
+                // The four bars as one spoken line: the content's own chartAria, else "<name>: Oct 16 3.31, ...".
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(c["chartAria"].string ?? BSay.join([c["label"].string ?? c["name"].string,
+                    pts.map { BSay.join([$0["label"].string, $0["value"].string], " ") }.joined(separator: ", ")], ": "))
             }
             if let n = c["note"].string {
                 BHairline().padding(.vertical, 4)
@@ -158,12 +165,17 @@ struct BEconomyRow: View {
                                 .frame(width: 8, height: 8).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(r["name"].string ?? "").sType(BK.row, tabular: false).foregroundStyle(S.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Text(r["trend"].string ?? "").sType(BK.rowSub, tabular: false).foregroundStyle(S.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer()
                             Text(r["value"].string ?? "").sType(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(S.ink)
                         }
                         .padding(.vertical, 3)
+                        // The yellow dot in words: one stop per row, "watching" on the ones worth watching.
+                        .accessibilityElement(children: .combine)
+                        .accessibilityValue(watching.contains(r["name"].string ?? "") || (watching.isEmpty && i < 3) ? "watching" : "")
                     }
                 }
                 .frame(width: 300, alignment: .leading)
@@ -176,6 +188,7 @@ struct BEconomyRow: View {
                     Text("\(b) ›").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(b)
                 .padding(.horizontal, S.margin)
             }
         }
@@ -193,6 +206,15 @@ struct BOutToday: View {
 
 struct BSectorsRow: View {
     let card: JSONValue
+
+    /// A Leads or Trails row spoken: the content's aria ("Leads: Technology, up 1.83%"), else built from the row.
+    static func rowSays(_ r: JSONValue) -> String {
+        if let a = r["aria"].string {
+            return a.replacingOccurrences(of: #"\.?\s*Show its map\.?$"#, with: "", options: .regularExpression)
+        }
+        return "\(r["label"].string ?? ""): " + BSay.join([r["sector"].string, BSay.move(r["move"].string, color: r["moveColor"].string)])
+    }
+
     var body: some View {
         // The server sends its 11 maps on the card; the sample keeps them once per period.
         let maps = card["maps"].isNull ? BriefSample.sectorMaps(card["mapsRef"].string ?? "day").array : card["maps"].array
@@ -216,9 +238,12 @@ struct BSectorsRow: View {
                         }
                         Spacer()
                         BMove(text: r["move"].string, color: r["moveColor"].string, type: SType(size: 15, weight: 700, line: 18, tracking: 0))
-                        Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(S.secondary)
+                        Image(systemName: "chevron.right").sFont(13, .semibold).foregroundStyle(S.secondary)
                     }
                     .padding(.vertical, 4)
+                    // The row's own aria, less its "Show its map" (the row does nothing on a tap, so no button trait).
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Self.rowSays(r))
                 }
             }
             .frame(width: 300, alignment: .leading)
@@ -236,6 +261,9 @@ struct BSectorsRow: View {
                         Spacer()
                         BMove(text: m["move"].string, color: m["moveColor"].string, type: SType(size: 15, weight: 700, line: 18, tracking: 0))
                     }
+                    // "Technology, 32% of the S&P 500, up 1.83%": the triangle speaks as a word (BMove).
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isHeader)
                     BHeatMap(page: m)
                 }
                 .frame(width: 300, alignment: .leading)
@@ -259,6 +287,8 @@ struct BNamesRow: View {
                         Spacer()
                         BMove(text: p["move"].string, color: p["moveColor"].string, type: SType(size: 15, weight: 700, line: 18, tracking: 0))
                     }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isHeader)
                     BHeatMap(page: p)
                 }
                 .frame(width: 322, alignment: .leading)

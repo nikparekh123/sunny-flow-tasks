@@ -108,6 +108,8 @@ struct HomeView: View {
             guard scenePhase == .active else { return }
             await store.live()
         }
+        // The opening bell at 9:30:00 New York on a trading day, while the app is open (block 29, Pass 5).
+        .openingBell(calendar: store.home?.calendar ?? [])
     }
 
     /// The four tabs (block 12a, 12c). The system's bar is hidden: Sunny draws its own (SunnyTabBar), so Search
@@ -142,6 +144,7 @@ struct HomeView: View {
             }
             if brief.onOverview {
                 OverviewScreen()
+                    .accessibilityAddTraits(.isModal)   // VoiceOver stays on Overview, not the page under it
                     .transition(reduce ? .opacity : .move(edge: .leading).combined(with: .opacity))
                     .zIndex(1)
             }
@@ -152,7 +155,9 @@ struct HomeView: View {
                     .zIndex(3)
             }
         }
-        .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.5), value: brief.onOverview)
+        // Text on New Home, Positions, Overview and the ticker chart follows the phone's text size (Pass 5).
+        .environment(\.sTypeScales, true)
+        .animation(reduce ? S.fade : S.page, value: brief.onOverview)
         .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.45), value: brief.ticker)
         .sheet(item: Binding(get: { brief.sheet }, set: { brief.sheet = $0 })) { k in
             Group {
@@ -162,6 +167,7 @@ struct HomeView: View {
                 case .economy: EconomySheet(live: brief.live?.economy ?? .null) { brief.sheet = nil }
                 }
             }
+            .environment(\.sTypeScales, true)
             .presentationDetents([.large])
             .presentationCornerRadius(38)
             .presentationBackground(S.sheetFill)
@@ -171,7 +177,9 @@ struct HomeView: View {
                 .offset(y: barDown || brief.onOverview || brief.ticker != nil ? 120 : 0)
                 .opacity(barGone || brief.onOverview || brief.ticker != nil ? 0 : 1)
                 .allowsHitTesting(!router.searchOpen && !brief.onOverview && brief.ticker == nil)
-                .animation(reduce ? .easeOut(duration: 0.2) : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: brief.onOverview)
+                .animation(reduce ? S.fade : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: brief.onOverview)
+                // A ticker chart pushed from a tile: the bar leaves with it (it used to vanish at once).
+                .animation(reduce ? S.fade : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: brief.ticker != nil)
         }
         .environment(brief)
         .onAppear(perform: briefSetup)
@@ -218,23 +226,23 @@ struct HomeView: View {
     }
 
     /// Search opens over the tab you are on; the tab bar and the search button slide down 120 pt (0.45 s) and
-    /// fade (0.3 s). Reduce Motion cross-fades.
+    /// fade (0.2 s, README 11.4). Reduce Motion fades only.
     private func openSearch(listening: Bool) {
         guard !router.searchOpen else { return }
         router.searchFrom = router.tab
         if listening { router.listenTick += 1 }
         router.searchOpen = true
-        if reduce { withAnimation(.easeOut(duration: 0.25)) { barGone = true }; return }
+        if reduce { withAnimation(S.fade) { barGone = true }; return }
         withAnimation(.timingCurve(0.32, 0.72, 0, 1, duration: 0.45)) { barDown = true }
-        withAnimation(.easeOut(duration: 0.3)) { barGone = true }
+        withAnimation(S.fade) { barGone = true }
     }
 
     /// The page has started fading out (0.22 s after a 0.08 s wait); the tab bar slides back up from 0.05 s.
     private func closeSearch() {
-        if reduce { withAnimation(.easeOut(duration: 0.25)) { barGone = false } }
+        if reduce { withAnimation(S.fade) { barGone = false } }
         else {
             withAnimation(.timingCurve(0.32, 0.72, 0, 1, duration: 0.45).delay(0.05)) { barDown = false }
-            withAnimation(.easeIn(duration: 0.3).delay(0.05)) { barGone = false }
+            withAnimation(S.fade.delay(0.05)) { barGone = false }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { router.searchOpen = false }
     }

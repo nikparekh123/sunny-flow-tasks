@@ -102,6 +102,65 @@ struct SType {
     var tight: Bool { line < uiFont().lineHeight - 0.5 }
 }
 
+// MARK: - Dynamic Type (handoff 6 Nov 2026, Pass 5)
+
+/// Text grows with the phone's text size up to the largest standard size (xxxLarge), never the accessibility
+/// sizes. Each size follows the curve of Apple's text style nearest it (13 pt follows Footnote, 22 pt Title 2), so
+/// small labels grow more than big numbers, as in Apple's own apps. Only where a screen asks for it
+/// (`.environment(\.sTypeScales, true)`: New Home, Positions, Overview and their sheets); chart labels, heat
+/// tiles and logo letters keep their size, since their boxes are drawn to it.
+enum SDynamic {
+    static func style(_ size: CGFloat) -> UIFont.TextStyle {
+        switch size {
+        case ..<11.5: .caption2
+        case ..<12.5: .caption1
+        case ..<14: .footnote
+        case ..<15.5: .subheadline
+        case ..<16.5: .callout
+        case ..<19: .body
+        case ..<21: .title3
+        case ..<25: .title2
+        case ..<31: .title1
+        default: .largeTitle
+        }
+    }
+    static func scaled(_ size: CGFloat, _ d: DynamicTypeSize) -> CGFloat {
+        let d = min(d, .xxxLarge)
+        guard d != .large else { return size }
+        let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(d))
+        return (UIFontMetrics(forTextStyle: style(size)).scaledValue(for: size, compatibleWith: traits) * 2).rounded() / 2
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var sTypeScales: Bool = false
+}
+
+extension SType {
+    /// This style at the phone's text size: the size on its text style's curve, the line box grown with it.
+    func scaled(_ d: DynamicTypeSize) -> SType {
+        let s = SDynamic.scaled(size, d)
+        return s == size ? self : SType(size: s, weight: weight, line: (line * s / size).rounded(), tracking: tracking)
+    }
+}
+
+extension View {
+    /// The system font at a size that follows the phone's text size where the screen allows it (see SDynamic).
+    func sFont(_ size: CGFloat, _ weight: Font.Weight = .regular, mono: Bool = false) -> some View {
+        modifier(SFontModifier(size: size, weight: weight, mono: mono))
+    }
+}
+
+private struct SFontModifier: ViewModifier {
+    let size: CGFloat, weight: Font.Weight, mono: Bool
+    @Environment(\.dynamicTypeSize) private var dts
+    @Environment(\.sTypeScales) private var scales
+    func body(content: Content) -> some View {
+        let f = Font.system(size: scales ? SDynamic.scaled(size, dts) : size, weight: weight)
+        content.font(mono ? f.monospacedDigit() : f)
+    }
+}
+
 extension View {
     /// Apply a type style. Numbers default to tabular figures (README, Type).
     func sType(_ t: SType, tabular: Bool = true) -> some View {
@@ -112,12 +171,15 @@ extension View {
 private struct STypeModifier: ViewModifier {
     let t: SType
     let tabular: Bool
+    @Environment(\.dynamicTypeSize) private var dts
+    @Environment(\.sTypeScales) private var scales
     func body(content: Content) -> some View {
         // CSS centres the glyphs in the line box: half the difference above,
         // half below, even when the box is tighter than the font. So the
         // font keeps its natural line, extra lines get the leading, and the
         // box is trimmed or grown evenly top and bottom (negative padding
         // for a tight box, which never clips a wrapped line).
+        let t = scales ? self.t.scaled(dts) : self.t
         let natural = t.uiFont().lineHeight
         content
             .font(t.font(tabular: tabular))

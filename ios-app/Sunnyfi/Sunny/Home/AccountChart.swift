@@ -12,7 +12,8 @@
 //
 //  Geometry as the design file draws it: the line box is 148 tall, the line
 //  sits between 26 from the top and 8 from the bottom with 4% headroom, 240
-//  samples per line so any two shapes morph into each other (0.56 s).
+//  samples per line so any two shapes morph into each other (S.lineMorph,
+//  0.3 s). Reduce Motion: the line and the numbers swap at once, fades stay.
 //
 
 import SwiftUI
@@ -28,6 +29,13 @@ enum ChartRange: String, CaseIterable, Identifiable {
         switch self {
         case .w1: "past week"; case .m1: "past month"; case .m3: "past 3 months"
         case .ytd: "this year"; case .y1: "past year"; case .all: "all time"
+        }
+    }
+    /// What VoiceOver says for the button (it shows "1W").
+    var spoken: String {
+        switch self {
+        case .w1: "1 week"; case .m1: "1 month"; case .m3: "3 months"
+        case .ytd: "year to date"; case .y1: "1 year"; case .all: "all"
         }
     }
 }
@@ -196,6 +204,10 @@ struct AccountChart: View {
     /// The finger, 0...1 across the line (continuous; numbers snap to a day).
     @State private var finger: CGFloat? = DebugPreset.double("chart.scrub").map { CGFloat($0) }
     @State private var drawn: CGFloat = 0
+    /// Counts each range, filter, legend or half picked by hand: one selection haptic each (not on appear).
+    @State private var picked = 0
+    /// VoiceOver on the chart: when its focus leaves, the scrub lets go.
+    @AccessibilityFocusState private var chartFocus: Bool
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     private var model: ChartModel? {
@@ -214,6 +226,7 @@ struct AccountChart: View {
             rangesRow
             panel
         }
+        .sensoryFeedback(.selection, trigger: picked)
         .onAppear {
             if let m = model, !m.available(range) { range = .all }
             if DebugPreset.gallery != nil || !DebugPreset.values.isEmpty { hidden = DebugPreset.bool("eye") }
@@ -222,9 +235,9 @@ struct AccountChart: View {
             guard readTick > 0, Self.timeValueRead(home) != nil else { return }
             try? await Task.sleep(for: .milliseconds(1200))    // after the loading screen has gone
             guard !Task.isCancelled else { return }
-            withAnimation(reduce ? nil : S.standard(0.4)) { readOn = true }
+            withAnimation(S.moving(S.fade, reduce)) { readOn = true }
             try? await Task.sleep(for: .seconds(3))
-            withAnimation(reduce ? nil : S.standard(0.4)) { readOn = false }
+            withAnimation(S.moving(S.fade, reduce)) { readOn = false }
         }
     }
 
@@ -267,9 +280,17 @@ struct AccountChart: View {
         return s + Int((f * CGFloat(e - s)).rounded())
     }
     private var scrubbing: Bool { finger != nil }
+    /// A range or filter change redraws the line (S.lineMorph). Under Reduce Motion only the fades run (S.fade):
+    /// the line swaps at once (SLine and SHLine stop morphing) and the numbers swap without rolling.
+    /// A real change of choice plays one selection haptic.
     private func toMorph(_ change: () -> Void) {
-        withAnimation(reduce ? .easeOut(duration: 0.2) : S.morph) { change() }
+        let was = choice
+        withAnimation(reduce ? S.fade : S.lineMorph) { change() }
+        if choice != was { picked &+= 1 }
     }
+    private var choice: String { "\(range.rawValue)|\(compare)|\(single?.rawValue ?? "")|\(half.rawValue)" }
+    /// Under Reduce Motion a number swaps, it never rolls.
+    private func still(_ t: inout Transaction) { if reduce { t.animation = nil } }
 
     // MARK: Headline
 
@@ -278,14 +299,17 @@ struct AccountChart: View {
             HStack(alignment: .center, spacing: 10) {
                 let v = bigValue
                 SNumber(value: v, format: { F.money($0) })
+                    .transaction(still)
                     .sType(.largeNumber)
                     .foregroundStyle(pnl ? S.lossInk(v) : S.ink)
                     .lineLimit(1).minimumScaleFactor(0.5)
                     .blur(radius: hidden ? 9 : 0)
-                    .accessibilityLabel(hidden ? "Hidden" : F.money(v))
+                    .accessibilityLabel(hidden ? "hidden" : pnl ? Self.signedDollars(v) : Self.dollars(v))
                 eyeButton.padding(.leading, -4)
                 Spacer(minLength: 8)
-                if pnl { titlePill.transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .trailing))) }
+                if pnl {
+                    titlePill.transition(reduce ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .trailing)))
+                }
             }
             .frame(minHeight: 34)
             changeLine
@@ -293,9 +317,12 @@ struct AccountChart: View {
         }
     }
 
-    private var bigValue: Double {
+    private var bigValue: Double { value(at) }
+
+    /// The big number on day i: the account value, or the P&L from the range start when comparing.
+    private func value(_ i: Int) -> Double {
         guard let m = model, m.n > 0 else { return home.account.value ?? 0 }
-        let (s, _) = bounds, i = at
+        let (s, _) = bounds
         if fresh { return m.nav(m.n - 1) }
         if let g = single { return m.line(g, half, i) - m.line(g, half, s) }
         if compare { return shownGroups.reduce(0) { $0 + m.line($1, .both, i) - m.line($1, .both, s) } }
@@ -315,7 +342,7 @@ struct AccountChart: View {
                     Text(F.pct(roc, places: 1))
                         .sType(Self.changeValue)
                         .foregroundStyle(roc < 0 ? S.red : S.green)
-                        .contentTransition(.numericText(value: roc))
+                        .contentTransition(reduce ? .identity : .numericText(value: roc))
                         .blur(radius: hidden ? 9 : 0)
                     Text(scrubbing ? "on capital" : "on capital · \(range.words)")
                         .sType(Self.changeWords, tabular: false).foregroundStyle(S.mutedOnPage)
@@ -325,7 +352,7 @@ struct AccountChart: View {
                     Text("\(F.money(d)) · \(F.pct(p, places: 1))")
                         .sType(Self.changeValue)
                         .foregroundStyle(S.signed(d.rounded()))
-                        .contentTransition(.numericText(value: d))
+                        .contentTransition(reduce ? .identity : .numericText(value: d))
                         .blur(radius: hidden ? 9 : 0)
                     if !scrubbing {
                         Text(range.words).sType(Self.changeWords, tabular: false).foregroundStyle(S.mutedOnPage)
@@ -339,8 +366,41 @@ struct AccountChart: View {
         }
         .lineLimit(1)
         .frame(minHeight: 20)
-        .animation(.smooth(duration: S.roll), value: at)
+        .animation(S.moving(S.fade, reduce), value: at)
+        // One element; book dollars say "hidden" under privacy (the blur alone left them spoken).
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(changeSpoken)
     }
+
+    /// The change line as VoiceOver says it: "up 571 dollars, 0.6 percent, past month"; privacy:
+    /// "hidden, up 0.6 percent, past month"; comparing: "up 2.1 percent on capital, past month".
+    private var changeSpoken: String {
+        guard let m = model, !fresh else { return "No change yet, first day of the book" }
+        let (s, _) = bounds, i = at
+        let words = scrubbing ? "" : ", \(range.words)"
+        if pnl {
+            let cap = m.capital(single, i), roc = cap > 0 ? bigValue / cap * 100 : 0
+            return "\(Self.way(roc)) \(Self.percent(roc)) on capital" + words
+        }
+        let first = m.nav(s), d = bigValue - first - m.deposited(s, i)
+        return change(d, pct: first != 0 ? d / abs(first) * 100 : 0) + words
+    }
+
+    /// "up 571 dollars, 0.6 percent"; privacy "hidden, up 0.6 percent" (the percentage stays).
+    private func change(_ d: Double, pct p: Double) -> String {
+        if d.rounded() == 0 { return hidden ? "hidden, no change" : "no change" }
+        return hidden ? "hidden, \(Self.way(d)) \(Self.percent(p))" : "\(Self.way(d)) \(Self.dollars(d)), \(Self.percent(p))"
+    }
+
+    // Spoken money: words, never a minus sign.
+    private static func way(_ v: Double) -> String { v.rounded() < 0 ? "down" : "up" }
+    private static func dollars(_ v: Double) -> String {
+        let n = String(F.money(v).dropFirst())
+        return n == "1" ? "1 dollar" : "\(n) dollars"
+    }
+    /// "down 500 dollars" for a loss, "1,200 dollars" for a gain.
+    private static func signedDollars(_ v: Double) -> String { (v.rounded() < 0 ? "down " : "") + dollars(v) }
+    private static func percent(_ p: Double) -> String { String(format: "%.1f percent", abs(p)) }
 
     /// Money paid in or out in the range, on its own line (never in the change above it).
     @ViewBuilder private var depositLine: some View {
@@ -351,14 +411,15 @@ struct AccountChart: View {
                     .sType(Self.changeWords, tabular: false).foregroundStyle(S.mutedOnPage)
                     .blur(radius: hidden ? 9 : 0)
                     .lineLimit(1)
+                    .accessibilityLabel("\(hidden ? "hidden" : Self.dollars(dep)) \(dep > 0 ? "deposited" : "withdrawn") \(scrubbing ? "by then" : range.words)")
             }
         }
     }
 
     private var eyeButton: some View {
-        Button { withAnimation(.easeOut(duration: 0.35)) { hidden.toggle() } } label: {
+        Button { withAnimation(S.fade) { hidden.toggle() } } label: {
             Image(systemName: hidden ? "eye.slash" : "eye")
-                .font(.system(size: 15, weight: .medium))
+                .sFont(15, .medium)
                 .foregroundStyle(S.muted)
                 .opacity(hidden ? 1 : 0.55)
                 .frame(width: 28, height: 28)
@@ -468,19 +529,20 @@ struct AccountChart: View {
                     let L = lines(m)
                     let shown = shownGroups
                     // Dotted zero line (compare only).
-                    SHLine(y: L.base).stroke(S.chartBase, style: Self.dotted).opacity(pnl ? 1 : 0)
+                    // Under Reduce Motion the lines swap at once; only their opacity fades.
+                    SHLine(y: L.base, morphs: !reduce).stroke(S.chartBase, style: Self.dotted).opacity(pnl ? 1 : 0)
                     // The four group lines.
                     ForEach(Array(ChartGroup.allCases.enumerated()), id: \.offset) { k, g in
-                        SLine(ys: L.groups[k], from: 0, to: 1)
+                        SLine(ys: L.groups[k], from: 0, to: 1, morphs: !reduce)
                             .stroke(single == g ? L.tone : g.color, style: Self.lineStyle)
                             .opacity(pnl && shown.contains(g) ? (single == nil || single == g ? 1 : 0.14) : 0)
                     }
                     // The account line: solid to the finger, 22% after it.
                     let cut = finger ?? 1
-                    SLine(ys: L.main, from: cut, to: 1)
+                    SLine(ys: L.main, from: cut, to: 1, morphs: !reduce)
                         .stroke(L.tone, style: Self.lineStyle)
                         .opacity(pnl || finger == nil ? 0 : 0.22)
-                    SLine(ys: L.main, from: 0, to: cut)
+                    SLine(ys: L.main, from: 0, to: cut, morphs: !reduce)
                         .stroke(L.tone, style: Self.lineStyle)
                         .opacity(pnl ? 0 : 1)
                     scrubMarks(m, L: L, w: w)
@@ -512,21 +574,40 @@ struct AccountChart: View {
             guard drawn == 0 else { return }
             if reduce { drawn = 1 } else { withAnimation(S.standard(0.9)) { drawn = 1 } }
         }
-        .accessibilityElement()
+        // One element: a summary for the range that holds still, and the day under the scrub as its value.
+        // Swipe up or down moves a day; when VoiceOver moves on, the scrub lets go.
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(chartSummary)
+        .accessibilityValue(chartValue)
         .accessibilityAdjustableAction { dir in
             let (s, e) = bounds
             guard e > s else { return }
             let i = min(max(at + (dir == .increment ? 1 : -1), s), e)
             finger = CGFloat(i - s) / CGFloat(e - s)
         }
+        .accessibilityFocused($chartFocus)
+        .onChange(of: chartFocus) { _, on in if !on, finger != nil { finger = nil } }
     }
 
+    /// "Account value, past month, up 571 dollars, 0.6 percent", from the range start to its last close
+    /// (not the scrub). Privacy: "Account value, past month, hidden, up 0.6 percent". Comparing:
+    /// "Total P&L, past month, up 4,321 dollars, 2.1 percent on capital".
     private var chartSummary: String {
-        guard let m = model, !fresh else { return "The chart starts after your first close" }
-        if hidden { return "Account chart, numbers hidden" }
-        let (s, _) = bounds
-        return "\(m.label(at, range)), \(F.money(bigValue)), from \(m.label(s, range))"
+        guard let m = model, !fresh else { return "Account value, the chart starts after your first close" }
+        let (s, e) = bounds
+        if pnl {
+            let v = value(e), cap = m.capital(single, e)
+            return "\(pillTitle), \(range.words), " + change(v, pct: cap > 0 ? v / cap * 100 : 0) + (v.rounded() == 0 ? "" : " on capital")
+        }
+        let first = m.nav(s), d = m.nav(e) - first - m.deposited(s, e)
+        return "Account value, \(range.words), " + change(d, pct: first != 0 ? d / abs(first) * 100 : 0)
+    }
+
+    /// The day under the scrub (else the last close) and its number: "Oct 5, 1,234,567 dollars"; privacy "Oct 5, hidden".
+    private var chartValue: String {
+        guard let m = model, !fresh else { return "" }
+        let v = bigValue
+        return "\(m.label(at, range)), " + (hidden ? "hidden" : pnl ? Self.signedDollars(v) : Self.dollars(v))
     }
 
     /// Hairline, the date over it and the dot riding the line.
@@ -569,6 +650,7 @@ struct AccountChart: View {
                         .contentShape(Rectangle().inset(by: -8))
                 }
                 .buttonStyle(SPressStyle())
+                .accessibilityLabel(r.spoken)
                 .accessibilityAddTraits(sel ? .isSelected : [])
             }
             if !fresh {
@@ -604,8 +686,14 @@ struct AccountChart: View {
                         }
                     }
                     HStack(spacing: 12) {
-                        HStack(spacing: 16) {
-                            ForEach(Array(minors.enumerated()), id: \.offset) { _, mn in minor(mn) }
+                        // One line; at a large text size, one under another (Pass 5: never wider than the page).
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 16) {
+                                ForEach(Array(minors.enumerated()), id: \.offset) { _, mn in minor(mn) }
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(Array(minors.enumerated()), id: \.offset) { _, mn in minor(mn) }
+                            }
                         }
                         Spacer(minLength: 0)
                         if let g = single, g.splits { halfToggle.transition(.opacity) }
@@ -676,6 +764,7 @@ struct AccountChart: View {
                         SNumber(value: st.value, format: { F.money($0) }, countUp: false)
                         SNumber(value: st.value, format: { F.moneyK($0) }, countUp: false)
                     }
+                    .transaction(still)
                 }
             }
             .sType(SType(size: 20, weight: 700, line: 24, tracking: -0.01))
@@ -699,8 +788,10 @@ struct AccountChart: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { if st.label == "Time value" { timeValueTap?() } }
+        // The stat's own label and its value, never the rolled read word ("LULU up" is a few seconds of colour).
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(st.read?.word ?? st.label) \(hidden ? "hidden" : st.text ?? F.money(st.value))")
+        .accessibilityLabel(st.label)
+        .accessibilityValue(hidden ? "hidden" : st.text.map { $0 == "-" ? "none" : $0 } ?? Self.signedDollars(st.value))
         .accessibilityAddTraits(st.label == "Time value" && timeValueTap != nil ? .isButton : [])
     }
 
@@ -737,7 +828,7 @@ struct AccountChart: View {
                 .foregroundStyle(S.mutedOnPage)
             Text(mn.text).sType(SType(size: 13, weight: 700, line: 18, tracking: 0))
                 .foregroundStyle(mn.color)
-                .contentTransition(.numericText())
+                .contentTransition(reduce ? .identity : .numericText())
                 .blur(radius: hidden ? 9 : 0)
         }
         .fixedSize()
@@ -784,19 +875,20 @@ struct AccountChart: View {
                         Spacer(minLength: 0)
                         Text(F.money(v)).sType(SType(size: 13, weight: 700, line: 18, tracking: 0))
                             .foregroundStyle(S.lossInk(v))
-                            .contentTransition(.numericText(value: v))
+                            .contentTransition(reduce ? .identity : .numericText(value: v))
                             .blur(radius: hidden ? 9 : 0)
                     }
                     .frame(height: 36)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(SPressStyle())
-                .accessibilityLabel("\(g.rawValue) \(hidden ? "hidden" : F.money(v))")
+                .accessibilityLabel(g.rawValue)
+                .accessibilityValue(hidden ? "hidden" : Self.signedDollars(v))
                 .accessibilityHint("Shows \(g.rawValue) on its own")
             }
         }
         .padding(.horizontal, S.margin)
-        .animation(.smooth(duration: S.roll), value: i)
+        .animation(S.moving(S.fade, reduce), value: i)
     }
 }
 
@@ -804,19 +896,21 @@ struct AccountChart: View {
 
 /// A line through 240 samples between two fractions of the width. The
 /// samples animate, so a range or filter change morphs the old shape into
-/// the new one instead of redrawing it.
+/// the new one instead of redrawing it. `morphs: false` (Reduce Motion) swaps
+/// the shape at once while the same transaction still fades its opacity.
 struct SLine: Shape {
     var ys: AnimatableVector
     var from: CGFloat
     var to: CGFloat
+    var morphs = true
 
-    init(ys: [CGFloat], from: CGFloat, to: CGFloat) {
+    init(ys: [CGFloat], from: CGFloat, to: CGFloat, morphs: Bool = true) {
         self.ys = AnimatableVector(ys.map(Double.init))
-        self.from = from; self.to = to
+        self.from = from; self.to = to; self.morphs = morphs
     }
     var animatableData: AnimatableVector {
-        get { ys }
-        set { ys = newValue }
+        get { morphs ? ys : .zero }
+        set { if morphs { ys = newValue } }
     }
     func path(in rect: CGRect) -> Path {
         var p = Path()
@@ -839,12 +933,14 @@ struct SLine: Shape {
     }
 }
 
-/// The full-width dotted base line; its height animates with the morph.
+/// The full-width dotted base line; its height animates with the morph
+/// (not under Reduce Motion: `morphs: false`).
 struct SHLine: Shape {
     var y: CGFloat
+    var morphs = true
     var animatableData: CGFloat {
-        get { y }
-        set { y = newValue }
+        get { morphs ? y : 0 }
+        set { if morphs { y = newValue } }
     }
     func path(in rect: CGRect) -> Path {
         Path { $0.move(to: CGPoint(x: 0, y: y)); $0.addLine(to: CGPoint(x: rect.width, y: y)) }

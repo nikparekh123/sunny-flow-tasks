@@ -50,12 +50,12 @@ struct GenericBriefCard: View {
                 Text(t).sType(SType(size: 20, weight: 700, line: 24, tracking: 0), tabular: false).foregroundStyle(S.ink)
             }
             if let s = card["subtitle"].string ?? card["sub"].string {
-                Text(BriefWords.plain(s, privacy: privacy)).sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
+                BriefWords.line(s, privacy: privacy).sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
                     .foregroundStyle(S.secondary)
             }
             let body = card["body"].isNull ? card["text"] : card["body"]
             if !body.isNull {
-                BriefWords.text(BriefSpan.list(body), base: SType(size: 15, weight: 500, line: 21, tracking: 0), privacy: privacy)
+                BriefSentence(BriefSpan.list(body), base: SType(size: 15, weight: 500, line: 21, tracking: 0), privacy: privacy)
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(Array(card["rows"].array.enumerated()), id: \.offset) { i, r in
@@ -76,25 +76,25 @@ struct GenericBriefCard: View {
             let sub = r["sub"].string ?? r["line"].string ?? r["text"].string ?? r["what"].string
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(BriefWords.plain(label, privacy: privacy)).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(S.ink)
-                    if let sub { Text(BriefWords.plain(sub, privacy: privacy)).sType(SType(size: 13, weight: 500, line: 18, tracking: 0)).foregroundStyle(S.secondary) }
+                    BriefWords.line(label, privacy: privacy).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(S.ink)
+                    if let sub { BriefWords.line(sub, privacy: privacy).sType(SType(size: 13, weight: 500, line: 18, tracking: 0)).foregroundStyle(S.secondary) }
                 }
                 Spacer(minLength: 8)
                 if !value.isEmpty {
-                    Text(BriefWords.plain(value, privacy: privacy)).sType(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(S.ink)
+                    BriefWords.line(value, privacy: privacy).sType(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(S.ink)
                 }
             }
         } else if case .array(let a) = r {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 ForEach(Array(a.enumerated()), id: \.offset) { i, x in
-                    Text(BriefWords.plain(x.string ?? "", privacy: privacy))
+                    BriefWords.line(x.string ?? "", privacy: privacy)
                         .sType(SType(size: 15, weight: i == 0 ? 600 : 500, line: 20, tracking: 0))
                         .foregroundStyle(i == 0 ? S.ink : S.secondary)
                     if i == 0 { Spacer(minLength: 8) }
                 }
             }
         } else {
-            Text(BriefWords.plain(r.string ?? "", privacy: privacy)).sType(SType(size: 15, weight: 500, line: 20, tracking: 0)).foregroundStyle(S.ink)
+            BriefWords.line(r.string ?? "", privacy: privacy).sType(SType(size: 15, weight: 500, line: 20, tracking: 0)).foregroundStyle(S.ink)
         }
     }
 }

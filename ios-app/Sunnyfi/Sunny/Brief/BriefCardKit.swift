@@ -36,6 +36,51 @@ enum BK {
     }
 }
 
+// MARK: - Spoken words (VoiceOver, Pass 5)
+
+/// What VoiceOver says for a figure or a line: BriefWords.speech (the mask speaks "hidden", arrows "up" and
+/// "down", "$6.2K" "6.2 thousand dollars", "%" "percent", " · " a pause), plus the card glyphs it leaves:
+/// "×71" speaks "71 contracts", "3.9×" speaks "3.9 times", "→" "to", and "●" "›" "↗" "↘" are silent.
+/// The words themselves stay the server's.
+enum BSay {
+    static func words(_ s: String?, privacy: Bool = false) -> String {
+        guard let s, !s.isEmpty else { return "" }
+        var t = BriefWords.speech(BriefWords.plain(s, privacy: privacy))
+        for (g, w) in [("→", " to "), ("↗", " "), ("↘", " "), ("●", " "), ("›", " ")] {
+            t = t.replacingOccurrences(of: g, with: w)
+        }
+        t = t.replacingOccurrences(of: #"\s*×(\d+(?:,\d{3})*)"#, with: ", $1 contracts", options: .regularExpression)
+        t = t.replacingOccurrences(of: "×", with: " times")
+        t = t.replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+        return t.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Rich spans as one spoken line.
+    static func spans(_ v: JSONValue, privacy: Bool = false) -> String {
+        words(BriefSpan.list(v).map(\.t).joined(), privacy: privacy)
+    }
+
+    /// A move as the screen colours it: "0.40%" in green speaks "up 0.40%", in red "down 0.40%".
+    static func move(_ text: String?, color: String?, signed: Double? = nil) -> String {
+        guard let t = text, !t.isEmpty else { return "" }
+        if t.contains(where: { "↑↓▲▼".contains($0) }) { return words(t) }
+        let up = (signed ?? 0) >= 0 && color != "red"
+        return words("\(up ? "up" : "down") \(t)")
+    }
+
+    /// A book figure whose red carries the loss (shown without a minus sign): "down" in front, never "minus".
+    static func figure(_ s: String?, color: String?, privacy: Bool) -> String {
+        let w = words(s, privacy: privacy)
+        guard color == "red", !w.isEmpty, !w.hasPrefix("down"), !w.hasPrefix("up") else { return w }
+        return "down " + w
+    }
+
+    /// Items joined for one spoken label, the empty ones left out.
+    static func join(_ parts: [String?], _ sep: String = ", ") -> String {
+        parts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: sep)
+    }
+}
+
 // MARK: - Text pieces
 
 struct BTitle: View {
@@ -49,7 +94,10 @@ struct BSub: View {
     let t: String?
     var privacy = false
     var body: some View {
-        if let t { Text(BriefWords.plain(t, privacy: privacy)).sType(BK.sub, tabular: false).foregroundStyle(S.secondary).fixedSize(horizontal: false, vertical: true) }
+        if let t {
+            BriefWords.line(t, privacy: privacy)
+                .sType(BK.sub, tabular: false).foregroundStyle(S.secondary).fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
@@ -60,7 +108,7 @@ struct BBody: View {
     var type = BK.body
     var body: some View {
         if !v.isNull {
-            BriefWords.text(BriefSpan.list(v), base: type, privacy: privacy).fixedSize(horizontal: false, vertical: true)
+            BriefSentence(BriefSpan.list(v), base: type, privacy: privacy).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -70,7 +118,7 @@ struct BFooter: View {
     var privacy = false
     var body: some View {
         if !v.isNull {
-            BriefWords.text(BriefSpan.list(v), base: SType(size: 12, weight: 600, line: 15, tracking: 0), baseColor: S.secondary, privacy: privacy)
+            BriefSentence(BriefSpan.list(v), base: SType(size: 12, weight: 600, line: 15, tracking: 0), baseColor: S.secondary, privacy: privacy)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -93,6 +141,7 @@ struct BMove: View {
             let up = (signed ?? 0) >= 0 && color != "red"
             Text(hasArrow ? t : "\(up ? "▲" : "▼") \(t)")
                 .sType(type).foregroundStyle(BK.color(color))
+                .accessibilityLabel(BSay.move(t, color: color, signed: signed))
         }
     }
 }
@@ -128,14 +177,18 @@ struct BStats: View {
             ForEach(Array(stats.enumerated()), id: \.offset) { _, s in
                 VStack(alignment: .leading, spacing: 2) {
                     if labelFirst, let l = s["label"].string { Text(l).sType(BK.label, tabular: false).foregroundStyle(S.secondary) }
-                    Text(BriefWords.plain(s["value"].string, privacy: privacy))
+                    BriefWords.line(s["value"].string, privacy: privacy)
                         .sType(SType(size: 22, weight: 800, line: 26, tracking: -0.01))
                         .foregroundStyle(BK.color(s["valueColor"].string))
                         .lineLimit(1).minimumScaleFactor(0.7)
-                    if let sub = s["sub"].string { Text(BriefWords.plain(sub, privacy: privacy)).sType(BK.label, tabular: false).foregroundStyle(S.secondary) }
+                    if let sub = s["sub"].string { BriefWords.line(sub, privacy: privacy).sType(BK.label, tabular: false).foregroundStyle(S.secondary) }
                     if !labelFirst, let l = s["label"].string { Text(l).sType(BK.label, tabular: false).foregroundStyle(S.secondary) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // One stop per stat: "Long, down $14,560, unrealized" (or "down hidden" under privacy).
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(BSay.join([s["label"].string, BSay.figure(s["value"].string, color: s["valueColor"].string, privacy: privacy),
+                                               BSay.words(s["sub"].string, privacy: privacy)]))
             }
         }
     }
@@ -148,26 +201,34 @@ struct BSegmented: View {
     @Binding var selected: String
     @Environment(\.accessibilityReduceMotion) private var reduce
     var body: some View {
+        let at = items.firstIndex(of: selected), n = CGFloat(max(1, items.count))
         HStack(spacing: 0) {
             ForEach(items, id: \.self) { s in
-                Button { withAnimation(reduce ? nil : .timingCurve(0.3, 1.4, 0.5, 1, duration: 0.45)) { selected = s } } label: {
-                    Text(s).font(.system(size: 13, weight: s == selected ? .semibold : .medium))
+                // The card under the control reflows on the page curve (bars fill on it too); only the thumb springs.
+                Button { withAnimation(S.moving(S.page, reduce)) { selected = s } } label: {
+                    Text(s).sFont(13, s == selected ? .semibold : .medium)
                         .foregroundStyle(S.ink)
                         .frame(maxWidth: .infinity).frame(height: 30)
-                        .background {
-                            if s == selected {
-                                Capsule().fill(S.dynA(0xFFFFFF, 0.88, 0xFFFFFF, 0.20))
-                                    .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
-                            }
-                        }
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(s == selected ? .isSelected : [])
             }
         }
+        .background(alignment: .leading) {
+            // One thumb that slides between the segments (S.spring, 0.45 s), instant under Reduce Motion.
+            GeometryReader { g in
+                Capsule().fill(S.dynA(0xFFFFFF, 0.88, 0xFFFFFF, 0.20))
+                    .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+                    .frame(width: g.size.width / n)
+                    .offset(x: g.size.width / n * CGFloat(at ?? 0))
+                    .opacity(at == nil ? 0 : 1)
+                    .animation(S.moving(S.spring, reduce), value: selected)
+            }
+        }
         .padding(2)
         .background(Capsule().fill(S.dynA(0x767680, 0.12, 0x767680, 0.24)))
+        .sensoryFeedback(.selection, trigger: selected)
     }
 }
 
@@ -178,6 +239,19 @@ struct BBars: View {
     let bars: [JSONValue]
     var height: CGFloat = 70
     var privacy = false
+    /// The chart's title, the start of its spoken summary ("Yield, week by week: Sep 28 0.48%, ...").
+    var title: String? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    /// One spoken line for the whole chart: each bar's label and value, a loss as "down", money "hidden" under privacy.
+    private func summary(_ vals: [Double]) -> String {
+        let items = bars.enumerated().map { i, b -> String in
+            let v = BSay.words(b["value"].string, privacy: privacy)
+            return BSay.join([b["label"].string, v.isEmpty ? (b["empty"].bool ? "none yet" : nil) : (vals[i] < 0 ? "down " + v : v)], " ")
+        }
+        return BSay.join([title, items.joined(separator: ", ")], ": ")
+    }
+
     var body: some View {
         // The signed number when the server sends one (`n` money, `signed` a yield): a month or week that lost draws
         // red, its label without a minus sign. Else the label's own number.
@@ -187,19 +261,23 @@ struct BBars: View {
             ForEach(Array(bars.enumerated()), id: \.offset) { i, b in
                 let hl = b["highlight"].bool, neg = vals[i] < 0, tint = neg ? S.red : S.green
                 VStack(spacing: 4) {
-                    Text(BriefWords.plain(b["value"].string, privacy: privacy))
+                    BriefWords.line(b["value"].string, privacy: privacy)
                         .sType(SType(size: 11, weight: 700, line: 13, tracking: 0))
                         .foregroundStyle(hl ? tint : BK.color(b["valueColor"].string))
                         .lineLimit(1).minimumScaleFactor(0.7)
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(b["empty"].bool ? S.chip : hl ? tint : tint.opacity(0.3))
                         .frame(height: max(4, height * CGFloat(abs(vals[i]) / mx)))
+                        // Bar fills on the page curve (never the segmented spring), instant under Reduce Motion.
+                        .animation(S.moving(S.page, reduce), value: vals[i])
                     Text(b["label"].string ?? "").sType(SType(size: 11, weight: hl ? 700 : 500, line: 13, tracking: 0))
                         .foregroundStyle(hl ? S.ink : S.secondary).lineLimit(1).minimumScaleFactor(0.8)
                 }
                 .frame(maxWidth: .infinity)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(summary(vals))
     }
 }
 
@@ -237,16 +315,26 @@ struct BHeatMap: View {
                         .frame(width: w, height: h)
                         .contentShape(Rectangle())
                         // The ticker chart is the sample's until its real series lands (Pass 2); real tiles do not open it yet.
-                        .onTapGesture { if let t = t["ticker"].string, !BriefDebug.sample || SampleBook.q[t] != nil { brief.ticker = t } }
+                        .onTapGesture { if let t = t["ticker"].string, Self.opens(t) { brief.ticker = t } }
                         .offset(x: r[0] * sx, y: r[1] * sy)
                     }
                 }
             }
         }
         .aspectRatio(mw / mh, contentMode: .fit)
-        .accessibilityElement()
-        .accessibilityLabel(page["aria"].string ?? "")
+        // One stop with the map's summary; each tile's tap is an action ("Open Nike chart") in the Actions rotor.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(BSay.words(page["aria"].string))
+        .accessibilityActions {
+            ForEach(Array(page["tiles"].array.enumerated()), id: \.offset) { _, t in
+                if let tk = t["ticker"].string, Self.opens(tk) {
+                    Button("Open \(t["name"].string ?? tk) chart") { brief.ticker = tk }
+                }
+            }
+        }
     }
+
+    private static func opens(_ t: String) -> Bool { !BriefDebug.sample || SampleBook.q[t] != nil }
 
     static func fill(_ t: JSONValue) -> Color {
         // The move picks the step in both themes; the server's light hex is only a fallback.

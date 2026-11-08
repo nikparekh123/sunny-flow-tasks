@@ -92,26 +92,72 @@ struct BriefSpan: Hashable {
 
 enum BriefWords {
     /// Spans as one Text: each run keeps its colour and weight; the base style comes from the caller.
+    /// When privacy masks an amount, VoiceOver reads the whole sentence with "hidden" in place of each $•••
+    /// (Pass 5: it read "dollar bullet bullet bullet"). The label is set on the Text itself, so it holds
+    /// inside a parent that combines its children too.
     static func text(_ spans: [BriefSpan], base: SType, baseColor: Color = S.ink, boldWeight: CGFloat = 700,
                      privacy: Bool = false) -> Text {
         var a = AttributedString()
+        var said = "", masked = false
         for s in spans {
-            var r = AttributedString(privacy ? BriefMask.mask(s.t) : s.t)
+            let shown = privacy ? BriefMask.mask(s.t) : s.t
+            if shown != s.t { masked = true }
+            said += shown
+            var r = AttributedString(shown)
             let t = s.b ? base.weighted(boldWeight) : base
             r.font = t.font(tabular: true)
             r.foregroundColor = s.c == nil ? baseColor : s.color
             a += r
         }
-        return Text(a)
+        let t = Text(a)
+        return masked ? t.accessibilityLabel(BriefMask.spoken(said)) : t
     }
 
     /// A plain string with the mask applied when privacy is on.
     static func plain(_ s: String?, privacy: Bool) -> String { privacy ? BriefMask.mask(s ?? "") : (s ?? "") }
+
+    /// The same string as VoiceOver should say it: each masked amount reads "hidden". For an
+    /// `.accessibilityLabel` next to `Text(BriefWords.plain(s, privacy:))`.
+    static func spoken(_ s: String?, privacy: Bool) -> String { BriefMask.spoken(plain(s, privacy: privacy)) }
+
+    /// A plain string as one Text: masked when privacy is on, and spoken with "hidden" for each mask.
+    /// A drop-in for `Text(BriefWords.plain(s, privacy:))`.
+    static func line(_ s: String?, privacy: Bool) -> Text {
+        let shown = plain(s, privacy: privacy)
+        let t = Text(shown)
+        return shown.contains(BriefMask.shown) ? t.accessibilityLabel(BriefMask.spoken(shown)) : t
+    }
+
+    /// Card words as VoiceOver should say them, for a spoken label built from what the card shows: the mask
+    /// reads "hidden", "$15K" reads "15 thousand dollars", arrows read "up" and "down", "Δ" reads "delta",
+    /// "%" reads "percent" and "·" is a pause. The words on screen never change.
+    static func speech(_ s: String) -> String {
+        var o = BriefMask.spoken(s)
+        if let re = try? NSRegularExpression(pattern: #"\$(\d[\d,]*(?:\.\d+)?)([KMB])"#) {
+            for m in re.matches(in: o, range: NSRange(o.startIndex..., in: o)).reversed() {
+                guard let r = Range(m.range, in: o), let n = Range(m.range(at: 1), in: o), let u = Range(m.range(at: 2), in: o) else { continue }
+                let unit = o[u] == "K" ? "thousand" : o[u] == "M" ? "million" : "billion"
+                o.replaceSubrange(r, with: "\(o[n]) \(unit) dollars")
+            }
+        }
+        for (g, w) in [("↑", " up "), ("▲", " up "), ("↓", " down "), ("▼", " down "), ("Δ", " delta "), ("%", " percent "), (" · ", ", ")] {
+            o = o.replacingOccurrences(of: g, with: w)
+        }
+        while o.contains("  ") { o = o.replacingOccurrences(of: "  ", with: " ") }
+        return o.replacingOccurrences(of: " ,", with: ",").replacingOccurrences(of: " .", with: ".")
+            .trimmingCharacters(in: .whitespaces)
+    }
 }
 
 // MARK: - The privacy mask
 
 enum BriefMask {
+    /// What a masked amount shows.
+    static let shown = "$•••"
+
+    /// What VoiceOver says for a masked string: "hidden" in place of each $•••, the rest as it is.
+    static func spoken(_ masked: String) -> String { masked.replacingOccurrences(of: shown, with: "hidden") }
+
     /// Words that make the $ figure after them a price, not money.
     private static let priceWords: Set<String> = ["above", "below", "at", "near", "today", "avg", "low", "high", "under", "over", "from", "to"]
 
@@ -125,8 +171,28 @@ enum BriefMask {
             let before = ns.substring(to: m.range.location).trimmingCharacters(in: .whitespaces)
             let prev = before.split(whereSeparator: { $0 == " " || $0 == "·" || $0 == "(" }).last.map { String($0).lowercased() } ?? ""
             if priceWords.contains(prev) || before.hasSuffix(":") && prev.hasSuffix(":") { continue }
-            if let r = Range(m.range, in: out) { out.replaceSubrange(r, with: "$•••") }
+            if let r = Range(m.range, in: out) { out.replaceSubrange(r, with: shown) }
         }
         return out
+    }
+}
+
+/// `BriefWords.text` at the phone's text size (Pass 5). The runs carry their own fonts, so the outer `.sType`
+/// never reaches them; the sentence reads the text size here and scales its base style itself.
+struct BriefSentence: View {
+    let spans: [BriefSpan]
+    let base: SType
+    var baseColor: Color = S.ink
+    var boldWeight: CGFloat = 700
+    var privacy = false
+    @Environment(\.dynamicTypeSize) private var dts
+    @Environment(\.sTypeScales) private var scales
+
+    init(_ spans: [BriefSpan], base: SType, baseColor: Color = S.ink, boldWeight: CGFloat = 700, privacy: Bool = false) {
+        self.spans = spans; self.base = base; self.baseColor = baseColor; self.boldWeight = boldWeight; self.privacy = privacy
+    }
+
+    var body: some View {
+        BriefWords.text(spans, base: scales ? base.scaled(dts) : base, baseColor: baseColor, boldWeight: boldWeight, privacy: privacy)
     }
 }

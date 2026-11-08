@@ -245,6 +245,29 @@ enum S {
     static func thumb(_ d: Double = 0.45) -> Animation { .timingCurve(0.34, 1.4, 0.4, 1, duration: d) }
     /// Bar heights shrinking and growing (Week | Month) and morphing (‹ ›).
     static let grow: Double = 0.7
+
+    // MARK: Motion, README 11.4 (handoff 6 Nov 2026, Pass 5). New Home, Positions, Overview and their overlays use
+    // these, never their own curves. Under Reduce Motion: no movement, instant swaps, fades only (`S.moving`).
+
+    /// 0.2 s: taps, fades, colour.
+    static let fade: Animation = .easeOut(duration: 0.2)
+    /// 0.45 s spring cubic-bezier(.3,1.4,.5,1): segmented thumbs and sliders only.
+    static let spring: Animation = .timingCurve(0.3, 1.4, 0.5, 1, duration: 0.45)
+    /// 0.5 s cubic-bezier(.22,1,.36,1): pages, sheets, pushes, bar fills.
+    static let page: Animation = .timingCurve(0.22, 1, 0.36, 1, duration: 0.5)
+    /// 0.3 s: a chart line redrawn for a new date or range.
+    static let lineMorph: Animation = .easeInOut(duration: 0.3)
+    /// The deck: an alert arrives in 0.62 s with a slight overshoot, returns in 0.5 s.
+    static let deckArrive: Animation = .timingCurve(0.3, 1.25, 0.5, 1, duration: 0.62)
+    static let deckReturn: Animation = page
+    /// The account switch: the page dips to 15% (0.4 s) while it slides 28 pt (0.5 s).
+    static let switchFade: Animation = .easeInOut(duration: 0.4)
+    static let switchMove: Animation = page
+
+    /// An animation that moves things: nil (an instant swap) under Reduce Motion.
+    static func moving(_ a: Animation, _ reduce: Bool) -> Animation? { reduce ? nil : a }
+    /// An animation that only fades or recolours: kept under Reduce Motion.
+    static func fading(_ a: Animation = fade) -> Animation { a }
 }
 
 // MARK: - Hex helpers (tokens only; views never take a hex)

@@ -3,11 +3,16 @@
 //  Sunny
 //
 //  The deck (block 29, README 5.3): the day card is home base. One alert a moment slides in on top 1.8 s
-//  after Home opens (0.9 s after a moment change) from the right with a small tilt (0.62 s, slight
-//  overshoot), sits 8 s, then goes back behind the day card (0.5 s). A swipe, a tap, or closing what it opened
-//  also sends it back; X dismisses it for the moment; the dots switch cards; it arrives once a moment. The one
-//  that loses sits in the deck without sliding in (answer 5). Cards 200 tall, radius 24; with an alert the
-//  stack is 240 tall, the back card peeking 8 pt above. Reduce Motion: no slide, the card just comes to the top.
+//  after Home opens (0.9 s after a moment change) from the right with a small tilt (S.deckArrive, 0.62 s,
+//  slight overshoot), sits 8 s, then goes back behind the day card (S.deckReturn, 0.5 s). A swipe, a tap, or
+//  closing what it opened also sends it back; X dismisses it for the moment; the dots switch cards; it arrives
+//  once a moment. The one that loses sits in the deck without sliding in (answer 5). Cards 200 tall, radius 24;
+//  with an alert the stack is 240 tall, the back card peeking 8 pt above. Reduce Motion: no slide or tilt, the
+//  card just becomes the top one.
+//
+//  VoiceOver (block 29, Accessibility): the deck is "Today's cards"; the dots are a tab bar, each tab named by
+//  its card's kicker, the shown one selected; the card behind is hidden. The alert card is one button whose
+//  action is what a tap does, with Dismiss as a named action where it has an X.
 //
 //  ⚠ THE DAY CARD IS DRAWN AS SunnyBriefs.dc.html DRAWS IT (rv32, "sky" on the sky ground), on its own
 //  340 × 200 grid stretched to the card: the horizon at y 150; the sun's path from 4:00 AM (x 34) to 8:00 PM
@@ -26,66 +31,122 @@ struct BriefDeck: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var alertOnTop = false
-    @State private var dismissed = false
+    /// The arrival's first frame: the alert off to the right, tilted 3°, above the day card (the design's
+    /// translateX(108%) rotate(3deg)); the next frame it slides home.
+    @State private var arriving = false
+    /// The alert X dismissed, by moment and kind, so a later moment's alert still comes in.
+    @State private var dismissed: String?
+    /// The moment the arrival last ran for: a new one arrives 0.9 s after the change, Home opening 1.8 s.
+    @State private var lastMoment: Moment?
+    /// From an arrival until anything is touched: only then does the 8 s timer send the alert back.
+    @State private var resting = false
+    /// Bumped when a dot picks the other card (the selection haptic).
+    @State private var picks = 0
     /// Each moment's alert arrives once (per app run).
     nonisolated(unsafe) private static var arrived: Set<String> = []
 
-    private var alert: JSONValue { dismissed ? .null : (doc?.alert ?? .null) }
+    /// The alert this moment brings (its kind, so one that lands after Home opened restarts the arrival).
+    private var alertKey: String { "\(moment.rawValue)|\(doc?.alert["kind"].string ?? "")" }
+    private var alert: JSONValue { dismissed == alertKey ? .null : (doc?.alert ?? .null) }
 
     var body: some View {
         let hasAlert = !alert.isNull
+        let up = alertOnTop || arriving
+        let away = arriving
         VStack(spacing: 10) {
             ZStack(alignment: .top) {
                 DayCard(moment: moment, caption: doc?.dayCaption, warn: doc?.dayCaptionOrange ?? false)
                     .frame(height: 200)
                     .scaleEffect(hasAlert && alertOnTop ? 0.96 : 1, anchor: .top)
                     .offset(y: hasAlert ? (alertOnTop ? 0 : 16) : 0)
-                    .zIndex(alertOnTop ? 0 : 1)
-                    .onTapGesture { if alertOnTop { send(back: true) } }
+                    .zIndex(up ? 0 : 1)
+                    .onTapGesture { if alertOnTop { show(top: false) } }
+                    .accessibilityHidden(hasAlert && alertOnTop)
                 if hasAlert {
-                    AlertCard(alert: alert, moment: moment, close: { withAnimation(S.standard(0.4)) { dismissed = true; alertOnTop = false } })
+                    AlertCard(alert: alert, moment: moment, close: dismiss)
                         .frame(height: 200)
-                        .scaleEffect(alertOnTop ? 1 : 0.96, anchor: .top)
-                        .offset(y: alertOnTop ? 16 : 0)
-                        .rotationEffect(.degrees(alertOnTop ? 0 : 0))
-                        .zIndex(alertOnTop ? 1 : 0)
-                        .onTapGesture {
-                            if alertOnTop { onAlert(alert["kind"].string ?? ""); send(back: true) } else { bring() }
+                        .scaleEffect(up ? 1 : 0.96, anchor: .top)
+                        .offset(y: up ? 16 : 0)
+                        .visualEffect { c, p in
+                            c.rotationEffect(.degrees(away ? 3 : 0)).offset(x: away ? p.size.width * 1.08 : 0)
                         }
-                        .gesture(DragGesture(minimumDistance: 20).onEnded { v in if abs(v.translation.width) > 40 { send(back: alertOnTop) } })
+                        .zIndex(arriving ? 2 : alertOnTop ? 1 : 0)
+                        .onTapGesture(perform: tapAlert)
+                        .gesture(DragGesture(minimumDistance: 20).onEnded { v in if abs(v.translation.width) > 40 { show(top: !alertOnTop) } })
                         .transition(.opacity)
+                        .accessibilityHidden(!alertOnTop)
+                        .accessibilityAction { tapAlert() }
+                        .accessibilityActions {
+                            if alert["kind"].string != "aftershock" { Button("Dismiss", action: dismiss) }
+                        }
                 }
             }
             .frame(height: hasAlert ? 216 : 200, alignment: .top)
             .padding(.horizontal, S.margin)
             HStack(spacing: 6) {
-                dot(on: !alertOnTop) { send(back: true) }
-                if hasAlert { dot(on: alertOnTop) { bring() } }
+                dot(on: !alertOnTop, label: "The day") { pick(top: false) }
+                if hasAlert { dot(on: alertOnTop, label: AlertCard.spoken(alert["kicker"].string ?? "Alert")) { pick(top: true) } }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isTabBar)
+            .accessibilityHidden(!hasAlert)
+            .sensoryFeedback(.selection, trigger: picks)
         }
-        .task(id: moment) {
-            guard !alert.isNull, !Self.arrived.contains(moment.rawValue) else { return }
-            try? await Task.sleep(for: .milliseconds(1800))
-            guard !Task.isCancelled else { return }
-            Self.arrived.insert(moment.rawValue)
-            bring()
-            try? await Task.sleep(for: .seconds(8))
-            guard !Task.isCancelled else { return }
-            send(back: true)
-        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Today's cards")
+        .task(id: alertKey) { await arrive() }
     }
 
-    private func bring() {
-        withAnimation(reduce ? nil : .timingCurve(0.3, 1.25, 0.5, 1, duration: 0.62)) { alertOnTop = true }
+    /// The arrival: 1.8 s after Home opens, 0.9 s after a moment change, once a moment; on top for 8 s.
+    private func arrive() async {
+        let changed = lastMoment != nil && lastMoment != moment
+        if changed && alertOnTop { show(top: false) }      // a new moment starts from the day card
+        lastMoment = moment
+        guard !alert.isNull, !Self.arrived.contains(moment.rawValue) else { return }
+        try? await Task.sleep(for: .milliseconds(changed ? 900 : 1800))
+        guard !Task.isCancelled, !alert.isNull else { return }
+        Self.arrived.insert(moment.rawValue)
+        guard !alertOnTop else { return }                   // already brought up by hand
+        resting = true
+        if reduce {
+            alertOnTop = true                               // no slide or tilt: it just becomes the top card
+        } else {
+            arriving = true
+            try? await Task.sleep(for: .milliseconds(34))   // two frames, so the jump draws before the slide
+            guard !Task.isCancelled else { arriving = false; return }
+            withAnimation(S.deckArrive) { alertOnTop = true; arriving = false }
+        }
+        try? await Task.sleep(for: .seconds(8))
+        guard !Task.isCancelled, resting, alertOnTop else { return }
+        show(top: false)
     }
-    private func send(back: Bool) {
-        withAnimation(reduce ? nil : S.standard(0.5)) { alertOnTop = !back }
+
+    /// The alert up (0.5 s) or back behind the day card (S.deckReturn). Anything touched ends the 8 s rest.
+    private func show(top: Bool) {
+        resting = false
+        withAnimation(S.moving(top ? S.page : S.deckReturn, reduce)) { alertOnTop = top }
     }
-    private func dot(on: Bool, _ tap: @escaping () -> Void) -> some View {
+    /// A tap on the alert: on top it opens what it points at and goes back; behind, it comes up.
+    private func tapAlert() {
+        if alertOnTop { onAlert(alert["kind"].string ?? ""); show(top: false) } else { show(top: true) }
+    }
+    /// X: gone for this moment (0.5 s; Reduce Motion at once, as the deck below moves up).
+    private func dismiss() {
+        resting = false
+        withAnimation(S.moving(S.page, reduce)) { dismissed = alertKey; alertOnTop = false }
+    }
+    private func pick(top: Bool) {
+        guard top != alertOnTop else { return }
+        picks += 1
+        show(top: top)
+    }
+    private func dot(on: Bool, label: String, _ tap: @escaping () -> Void) -> some View {
         Button(action: tap) {
             Capsule().fill(on ? S.ink : S.grabber).frame(width: on ? 22 : 8, height: 8)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
 
@@ -111,31 +172,38 @@ private struct AlertCard: View {
                         Text(mark).font(.system(size: 200, weight: .heavy)).foregroundStyle((dark ? Color.white : S.ink).opacity(0.06))
                             .lineLimit(1).fixedSize()
                             .offset(x: 24, y: 56)
+                            .accessibilityHidden(true)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     Text((alert["kicker"].string ?? "").uppercased())
-                        .font(.system(size: 13, weight: .bold)).tracking(0.78)
+                        .sFont(13, .bold).tracking(0.78)
                         .foregroundStyle(dark ? .white.opacity(0.85) : S.ink)
+                        .accessibilityLabel(Self.spoken(alert["kicker"].string ?? ""))
                     Spacer()
                     if dark {
-                        Text(alert["arrow"].string ?? "→").font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
+                        Text(alert["arrow"].string ?? "→").sFont(17, .semibold).foregroundStyle(.white)
+                            .accessibilityHidden(true)
                     } else {
-                        Button(action: close) { Image(systemName: "xmark").font(.system(size: 13, weight: .semibold)).foregroundStyle(S.secondary) }
-                            .buttonStyle(.plain).accessibilityLabel("Dismiss")
+                        // VoiceOver reaches this as the card's Dismiss action (BriefDeck).
+                        Button(action: close) { Image(systemName: "xmark").sFont(13, .semibold).foregroundStyle(S.secondary) }
+                            .buttonStyle(.plain).accessibilityHidden(true)
                     }
                 }
                 Spacer()
                 // Aftershock near the close counts down to the 4:15 PM scan, each second.
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    Text(title.replacingOccurrences(of: "{mm:ss}", with: Self.toScan(brief.now())))
-                        .font(.system(size: 28, weight: .bold).monospacedDigit()).foregroundStyle(dark ? .white : S.ink)
+                    let at = brief.now()
+                    Text(title.replacingOccurrences(of: "{mm:ss}", with: Self.toScan(at)))
+                        .sFont(28, .bold, mono: true).foregroundStyle(dark ? .white : S.ink)
                         .lineLimit(2).minimumScaleFactor(0.8)
+                        .accessibilityLabel(Self.spoken(title.replacingOccurrences(of: "{mm:ss}", with: Self.toScanSpoken(at))))
                 }
-                Text(sub).font(.system(size: 13, weight: .medium)).foregroundStyle(dark ? .white.opacity(0.8) : S.ink)
+                Text(sub).sFont(13, .medium).foregroundStyle(dark ? .white.opacity(0.8) : S.ink)
                     .lineLimit(2).padding(.top, 6)
+                    .accessibilityLabel(Self.spoken(sub))
             }
             .padding(22)
         }
@@ -145,13 +213,25 @@ private struct AlertCard: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    /// Minutes and seconds from now to 4:15 PM New York (the scan), never below 0:00.
-    static func toScan(_ d: Date) -> String {
+    /// Seconds from now to 4:15 PM New York (the scan), never below 0.
+    static func secondsToScan(_ d: Date) -> Int {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "America/New_York")!
         let c = cal.dateComponents([.hour, .minute, .second], from: d)
-        let s = max(0, (16 * 60 + 15) * 60 - ((c.hour ?? 0) * 3600 + (c.minute ?? 0) * 60 + (c.second ?? 0)))
+        return max(0, (16 * 60 + 15) * 60 - ((c.hour ?? 0) * 3600 + (c.minute ?? 0) * 60 + (c.second ?? 0)))
+    }
+    /// Minutes and seconds to the scan, as the card shows them: "12:05".
+    static func toScan(_ d: Date) -> String {
+        let s = secondsToScan(d)
         return "\(s / 60):" + String(format: "%02d", s % 60)
     }
+    /// The same, as VoiceOver says it: "12 minutes 5 seconds".
+    static func toScanSpoken(_ d: Date) -> String {
+        let s = secondsToScan(d), m = s / 60, r = s % 60
+        let mins = m == 1 ? "1 minute" : "\(m) minutes", secs = r == 1 ? "1 second" : "\(r) seconds"
+        return m == 0 ? secs : r == 0 ? mins : "\(mins) \(secs)"
+    }
+    /// A line as VoiceOver says it: " · " is a pause, not a word.
+    static func spoken(_ s: String) -> String { s.replacingOccurrences(of: " · ", with: ", ") }
 
     /// Aftershock has no fixed text: before the close it waits for the 4:15 scan, near the close it counts
     /// down, after the close it reports what the scan found.
@@ -219,10 +299,10 @@ struct DayCard: View {
                         .fixedSize()
                         .position(x: min(max(sun.x, 34), g.size.width - 34), y: sun.y - 17)
                     VStack(spacing: 1) {
-                        Text(Self.session(moment)).font(.system(size: 13, weight: .semibold))
+                        Text(Self.session(moment)).sFont(13, .semibold)
                         HStack(spacing: 5) {
                             if warn { Circle().fill(Color(hex: 0xF2A93B)).frame(width: 6, height: 6) }
-                            Text(Self.sub(caption, moment)).font(.system(size: 12, weight: .medium))
+                            Text(Self.sub(caption, moment)).sFont(12, .medium)
                                 .foregroundStyle(.white.opacity(0.8))
                         }
                     }

@@ -78,6 +78,7 @@ extension BriefState {
             let b = account == .nicolay ? "N" : accounts.contains(.sunny) ? "S" : (book ?? "S")
             let r = try await BriefPinClient.fetch(book: b, pin: p)
             setPinned(p, live: BriefLive(r.brief), at: BriefPinClient.date(r.pinned.date, r.pinned.mins), overview: r.overview)
+            if p.moment == .bell { OpeningBell.ring() }   // the prototype rings on that moment
         } catch {
             pinError = "Could not build that moment. Try again."
         }
@@ -87,6 +88,7 @@ extension BriefState {
 struct BriefDebugMenu: View {
     @Environment(BriefState.self) private var brief
     @AppStorage(BriefPrivacy.key) private var privacy = false
+    @AppStorage(OpeningBell.key) private var bell = true
     @Environment(\.dismiss) private var dismiss
     @State private var moment: Moment?
     @State private var holiday: String?
@@ -109,6 +111,10 @@ struct BriefDebugMenu: View {
                     }
                 }
                 Section("Privacy") { Toggle("Hide book money", isOn: $privacy) }
+                Section("Sound") {
+                    Toggle("Ring the opening bell", isOn: $bell)
+                    Button("Ring it now") { OpeningBell.ring() }.disabled(!bell)
+                }
                 Section {
                     Text("A pinned moment shows the book as it stands now, as Home would write it at that moment. Positions stays live. Sample data is a launch option (-sample).")
                         .font(.footnote).foregroundStyle(.secondary)

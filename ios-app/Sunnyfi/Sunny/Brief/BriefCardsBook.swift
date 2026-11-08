@@ -16,6 +16,18 @@ import SwiftUI
 struct BWhatsMoving: View {
     let card: JSONValue
     let privacy: Bool
+
+    /// A row spoken: "Nike, down 1.7%, priced move 2.2%", or "..., past its priced move of 3.0%".
+    static func rowSays(_ r: JSONValue) -> String {
+        let t = r["ticker"].string ?? ""
+        let name = r["name"].string ?? SampleBook.company[t] ?? t
+        let mv = r["movePct"].double
+        let move = BSay.move(r["move"].string ?? mv.map { String(format: "%.1f%%", abs($0)) }, color: r["moveColor"].string, signed: mv)
+        let priced = r["pricedPct"].double.map { String(format: "%.1f%%", $0) }
+        let band = priced.map { r["pastPricedMove"].bool ? "past its priced move of \($0)" : "priced move \($0)" }
+        return BSay.join([name, move, band])
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             BTitle(t: card["title"].string)
@@ -37,8 +49,12 @@ struct BWhatsMoving: View {
                         }
                         .frame(height: 20)
                         Text(r["move"].string ?? "").sType(SType(size: 15, weight: 700, line: 18, tracking: 0))
-                            .foregroundStyle(BK.color(r["moveColor"].string)).frame(width: 64, alignment: .trailing)
+                            .foregroundStyle(BK.color(r["moveColor"].string)).lineLimit(1).fixedSize()
+                            .frame(minWidth: 64, alignment: .trailing)   // one line at any text size (Pass 5)
                     }
+                    // One stop per name (the logo is hidden, so the name is said here): "Nike, down 1.7%, priced move 2.2%".
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Self.rowSays(r))
                 }
                 HStack {
                     let ax = card["axis"].array.compactMap(\.string)
@@ -48,6 +64,7 @@ struct BWhatsMoving: View {
                     }
                 }
                 .padding(.leading, 38).padding(.trailing, 74)
+                .accessibilityHidden(true)   // the scale; each row says its own move
             }
             .padding(.top, 6)
             if let l = card["legend"].string {
@@ -55,6 +72,7 @@ struct BWhatsMoving: View {
                     Capsule().fill(S.chip).frame(width: 22, height: 8)
                     Text(l).sType(SType(size: 12, weight: 600, line: 15, tracking: 0), tabular: false).foregroundStyle(S.ink)
                 }
+                .accessibilityElement(children: .combine)
             }
             if let w = card["watchlistLine"].string {
                 BHairline().padding(.vertical, 4)
@@ -80,12 +98,13 @@ struct BToDecide: View {
             if !w.isNull {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
-                        Text(w["label"].string ?? "What if").font(.system(size: 12, weight: .semibold)).foregroundStyle(S.ink)
+                        Text(w["label"].string ?? "What if").sFont(12, .semibold).foregroundStyle(S.ink)
                             .padding(.horizontal, 8).frame(height: 22).background(Capsule().fill(S.sheetFill))
-                        Text(w["title"].string ?? "").font(.system(size: 13, weight: .semibold)).foregroundStyle(S.ink)
+                        Text(w["title"].string ?? "").sFont(13, .semibold).foregroundStyle(S.ink)
                         Spacer()
                         Text(w["by"].string ?? "").sType(BK.label, tabular: false).foregroundStyle(S.secondary)
                     }
+                    .accessibilityElement(children: .combine)
                     BWhatIfChart(labels: w["chartLabels"].array).frame(height: 120)
                     HStack(spacing: 14) {
                         ForEach(Array(w["legend"].array.enumerated()), id: \.offset) { i, l in
@@ -134,7 +153,14 @@ struct BWhatIfChart: View {
             ctx.stroke(line(keep, 0), with: .color(S.secondary), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
             ctx.stroke(line(roll, 0.4), with: .color(S.green), lineWidth: 2)
         }
-        .accessibilityLabel("What if: keep the calls or roll them up")
+        // The picture as one stop, from its own labels: where each choice caps the gain, and the walls.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(BSay.join([
+            "What if chart",
+            strikes.isEmpty ? "keep the calls or roll them up"
+                : "keeping the calls caps the gain at \(String(format: "%g", keep)), rolling up moves the cap to \(String(format: "%g", roll))",
+            nums.filter { $0.3 == "wall" }.isEmpty ? nil : "walls at " + nums.filter { $0.3 == "wall" }.map(\.0).joined(separator: ", "),
+        ]))
     }
 }
 
@@ -173,6 +199,21 @@ struct BDatedRows: View {
 struct BEarningsAhead: View {
     let card: JSONValue
     let privacy: Bool
+
+    /// One earnings column spoken: "Q3 2025, beat, actual above expected", "Tue, reports, expected only".
+    static func columnSays(_ col: String, _ d: JSONValue?) -> String {
+        let day = col.replacingOccurrences(of: "’", with: "20").replacingOccurrences(of: "'", with: "20")
+        guard let d else { return day }
+        let e = d["expectedTop"].double, a = d["actualTop"].double
+        // The dots' tops are points down from the plot's top: a smaller top sits higher.
+        let vs: String? = e != nil && a != nil ? (a! < e! ? "actual above expected" : a! > e! ? "actual below expected" : "actual at expected") : nil
+        switch d["result"].string {
+        case "beat": return BSay.join([day, "beat", vs])
+        case "missed": return BSay.join([day, "missed", vs])
+        default: return BSay.join([day, a == nil ? "not reported yet, expected only" : vs])
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             BTitle(t: card["title"].string)
@@ -197,6 +238,7 @@ struct BEarningsAhead: View {
                             }
                         }
                     }
+                    .accessibilityHidden(true)   // each column says expected against actual
                     HStack(alignment: .bottom, spacing: 0) {
                         ForEach(Array(ch["columns"].array.compactMap(\.string).enumerated()), id: \.offset) { _, col in
                             let d = ch["dots"].array.first { $0["col"].string == col }
@@ -211,6 +253,8 @@ struct BEarningsAhead: View {
                                 Text(col).font(.system(size: 11, weight: col == "Tue" ? .bold : .medium)).foregroundStyle(col == "Tue" ? S.ink : S.secondary)
                             }
                             .frame(maxWidth: .infinity)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(Self.columnSays(col, d))
                         }
                     }
                     if let c = ch["caption"].string { Text(c).sType(BK.label, tabular: false).foregroundStyle(S.secondary) }
@@ -237,7 +281,7 @@ struct BNotes: View {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(n["label"].string ?? "").sType(SType(size: 13, weight: 600, line: 18, tracking: 0), tabular: false)
                         .foregroundStyle(S.secondary).frame(width: 90, alignment: .leading)
-                    Text(BriefWords.plain(n["text"].string, privacy: privacy)).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
+                    BriefWords.line(n["text"].string, privacy: privacy).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
                         .foregroundStyle(S.ink).fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
                 }
@@ -267,7 +311,7 @@ struct BResults: View {
             }
             if let b = s["big"].string {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(BriefWords.plain(b, privacy: privacy)).sType(BK.big).foregroundStyle(BK.color(s["bigColor"].string))
+                    BriefWords.line(b, privacy: privacy).sType(BK.big).foregroundStyle(BK.color(s["bigColor"].string))
                     BSub(t: s["bigSub"].string, privacy: privacy)
                 }
             }
@@ -282,7 +326,7 @@ struct BResults: View {
                         BBody(v: dv["line"], privacy: privacy, type: SType(size: 12, weight: 500, line: 16, tracking: 0))
                     }
                     Spacer()
-                    Text(BriefWords.plain(dv["right"].string, privacy: privacy)).sType(SType(size: 17, weight: 700, line: 22, tracking: 0))
+                    BriefWords.line(dv["right"].string, privacy: privacy).sType(SType(size: 17, weight: 700, line: 22, tracking: 0))
                         .foregroundStyle(BK.color(dv["rightColor"].string))
                 }
             }
@@ -292,15 +336,15 @@ struct BResults: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text(c["title"].string ?? "").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
                         Spacer()
-                        if let sub = c["sub"].string { Text(BriefWords.plain(sub, privacy: privacy)).sType(BK.label, tabular: false).foregroundStyle(S.secondary) }
+                        if let sub = c["sub"].string { BriefWords.line(sub, privacy: privacy).sType(BK.label, tabular: false).foregroundStyle(S.secondary) }
                     }
                     if !c["bars"].array.isEmpty {
-                        BBars(bars: c["bars"].array, height: 56, privacy: privacy)
+                        BBars(bars: c["bars"].array, height: 56, privacy: privacy, title: c["title"].string)
                     } else if !c["groups"].array.isEmpty {
                         BBars(bars: c["groups"].array.map { g in
                             JSONValue.object(["label": g["label"], "highlight": g["highlight"],
                                               "value": g["values"][0]["value"], "valueColor": g["values"][0]["valueColor"]])
-                        }, height: 56, privacy: privacy)
+                        }, height: 56, privacy: privacy, title: c["title"].string)
                     }
                     if let n = c["note"].string { Text(n).sType(BK.small, tabular: false).foregroundStyle(S.ink) }
                 }
@@ -331,7 +375,7 @@ struct BClosedRolled: View {
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 1) {
-                            Text(BriefWords.plain(r["value"].string, privacy: privacy)).sType(SType(size: 17, weight: 800, line: 22, tracking: 0))
+                            BriefWords.line(r["value"].string, privacy: privacy).sType(SType(size: 17, weight: 800, line: 22, tracking: 0))
                                 .foregroundStyle(BK.color(r["valueColor"].string))
                             Text(r["valueLabel"].string ?? "").sType(BK.rowSub, tabular: false).foregroundStyle(S.secondary)
                         }
@@ -361,10 +405,13 @@ struct BAfterHours: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(card["name"].string ?? "").sType(SType(size: 17, weight: 700, line: 22, tracking: 0), tabular: false).foregroundStyle(S.ink)
                     Text(card["source"].string ?? "").sType(BK.small, tabular: false).foregroundStyle(S.secondary)
+                        .accessibilityLabel(BSay.words(card["source"].string))
                 }
                 Spacer()
                 Text(card["move"].string ?? "").sType(SType(size: 20, weight: 800, line: 24, tracking: 0)).foregroundStyle(BK.color(card["moveColor"].string))
+                    .accessibilityLabel("after hours " + BSay.move(card["move"].string, color: card["moveColor"].string))
             }
+            .accessibilityElement(children: .combine)
             BBody(v: card["body"], privacy: privacy)
             let r = card["range"]
             if !r.isNull {
@@ -396,6 +443,10 @@ struct BAfterHours: View {
                         Text(r["high"].string ?? "").sType(BK.label, tabular: false).foregroundStyle(S.secondary)
                     }
                 }
+                // One stop in words, the "●" and "|" marks left out: "Today $65.09, average $84, 29% above, low $55, ...".
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(BSay.join([r["today"].string, r["avg"].string?.replacingOccurrences(of: "Avg", with: "analysts' average"),
+                                               r["low"].string, r["high"].string, r["analysts"].string].map { BSay.words($0) }))
                 .padding(12)
                 .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(S.chip.opacity(0.7)))
             }
@@ -429,7 +480,7 @@ struct BOrders: View {
                     }
                     Spacer(minLength: 6)
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text(BriefWords.plain(r["amount"].string, privacy: privacy)).sType(SType(size: 17, weight: 800, line: 22, tracking: 0)).foregroundStyle(S.ink)
+                        BriefWords.line(r["amount"].string, privacy: privacy).sType(SType(size: 17, weight: 800, line: 22, tracking: 0)).foregroundStyle(S.ink)
                         Text(r["amountLabel"].string ?? "").sType(BK.rowSub, tabular: false).foregroundStyle(S.secondary)
                     }
                 }
@@ -459,6 +510,7 @@ struct BThetaMonth: View {
                     }
                 }
             }
+            .accessibilityHidden(true)   // the bars' summary names both
             let weeks = card["weeks"].array
             let mx = weeks.compactMap { Double(($0["ratio"].string ?? "").replacingOccurrences(of: "×", with: "")) }.max() ?? 1
             HStack(alignment: .bottom, spacing: 10) {
@@ -476,10 +528,19 @@ struct BThetaMonth: View {
                     .frame(maxWidth: .infinity)
                 }
             }
+            // The weeks as one stop: "Collected against paid in decay, week by week: Sep 28 3.9 times, ...".
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Self.weeksSay(card["legend"].array.compactMap(\.string), weeks))
             BBody(v: card["body"], privacy: privacy)
         }
         .briefCard()
         .padding(.horizontal, S.margin)
+    }
+
+    private static func weeksSay(_ legend: [String], _ weeks: [JSONValue]) -> String {
+        let what = legend.enumerated().map { $0.offset == 0 ? $0.element : $0.element.lowercased() }.joined(separator: " against ")
+        let head = what.isEmpty ? "Week by week" : what + ", week by week"
+        return head + ": " + weeks.map { BSay.join([$0["label"].string, BSay.words($0["ratio"].string)], " ") }.joined(separator: ", ")
     }
 }
 
@@ -497,16 +558,16 @@ struct BPayback: View {
             let ch = card["chart"]
             if !ch.isNull {
                 Text(ch["title"].string ?? "").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink).padding(.top, 6)
-                BBars(bars: ch["bars"].array, height: 64, privacy: privacy)
+                BBars(bars: ch["bars"].array, height: 64, privacy: privacy, title: ch["title"].string)
             }
             ForEach(Array(card["rows"].array.enumerated()), id: \.offset) { _, r in
                 BHairline()
                 HStack(alignment: .firstTextBaseline) {
-                    Text(BriefWords.plain(r["label"].string, privacy: privacy)).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
+                    BriefWords.line(r["label"].string, privacy: privacy).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
                         .foregroundStyle(S.ink).fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text(BriefWords.plain(r["value"].string, privacy: privacy)).sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
+                        BriefWords.line(r["value"].string, privacy: privacy).sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
                             .foregroundStyle(BK.color(r["valueColor"].string))
                         if let s = r["valueSub"].string { Text(s).sType(BK.rowSub, tabular: false).foregroundStyle(BK.color(r["valueColor"].string)) }
                     }

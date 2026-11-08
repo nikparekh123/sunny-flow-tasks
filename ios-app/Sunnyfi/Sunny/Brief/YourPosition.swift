@@ -23,7 +23,7 @@ struct YourPositionCard: View {
         } else {
             // A book with nothing held (README 9.4 and the cousin's empty book): the title and one line, no chart.
             VStack(alignment: .leading, spacing: 0) {
-                Text("Your position").sType(BK.title, tabular: false).foregroundStyle(S.ink)
+                Text("Your position").sType(BK.title, tabular: false).foregroundStyle(S.ink).accessibilityAddTraits(.isHeader)
                 Text("Nothing held yet").sType(BK.sub, tabular: false).foregroundStyle(S.secondary).padding(.top, 2)
                 Text("Once shares or options are in the book, this shows where it stands by Friday’s close if the whole market moves together.")
                     .sType(SType(size: 15, weight: 500, line: 21, tracking: 0), tabular: false).foregroundStyle(S.secondary)
@@ -36,9 +36,9 @@ struct YourPositionCard: View {
 
     private func filled(_ m: YourPositionModel) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Your position").sType(BK.title, tabular: false).foregroundStyle(S.ink)
+            Text("Your position").sType(BK.title, tabular: false).foregroundStyle(S.ink).accessibilityAddTraits(.isHeader)
             Text(m.subtitle).sType(BK.sub, tabular: false).foregroundStyle(S.secondary).padding(.top, 2)
-            BriefWords.text(m.sentence, base: SType(size: 15, weight: 500, line: 21, tracking: 0), privacy: privacy)
+            BriefSentence(m.sentence, base: SType(size: 15, weight: 500, line: 21, tracking: 0), privacy: privacy)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 12)
             PayoffChart(m: m).frame(height: 150).padding(.top, 16)
@@ -48,6 +48,7 @@ struct YourPositionCard: View {
                 }
             }
             .padding(.top, 6)
+            .accessibilityHidden(true)   // the payoff's spoken summary covers the axis
             HStack(spacing: 6) {
                 Rectangle().fill(S.ink).frame(width: 14, height: 2.5)
                 Text("Shares and options by Friday’s close").sType(BK.caption, tabular: false).foregroundStyle(S.secondary)
@@ -55,6 +56,7 @@ struct YourPositionCard: View {
                 Text("Today").sType(BK.caption, tabular: false).foregroundStyle(S.secondary)
             }
             .padding(.top, 6)
+            .accessibilityHidden(true)
             BHairline().padding(.vertical, 14)
             HStack(alignment: .top) {
                 ForEach(Array(m.stats.enumerated()), id: \.offset) { _, s in
@@ -63,6 +65,8 @@ struct YourPositionCard: View {
                         Text(s.label).sType(BK.caption, tabular: false).foregroundStyle(S.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(statSpoken(s))
                 }
             }
             Text(m.cover).sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false).foregroundStyle(S.secondary)
@@ -74,6 +78,7 @@ struct YourPositionCard: View {
             BHairline().padding(.vertical, 14)
             HStack(alignment: .firstTextBaseline) {
                 Text("By name").sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                    .accessibilityAddTraits(.isHeader)
                 Spacer()
                 Text(m.count).sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(BK.color(m.countColor))
             }
@@ -109,8 +114,20 @@ struct YourPositionCard: View {
         }
         .padding(.vertical, 10)
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(BriefWords.speech("\(r.name), \(r.line), \(r.right) \(r.at)"))
         .accessibilityHint("Opens Positions")
+    }
+
+    /// "15 thousand dollars if up 5 percent"; a red figure is a loss: "lost 8 thousand dollars if down 5 percent";
+    /// privacy: "hidden if up 5 percent".
+    private func statSpoken(_ s: (value: String, label: String, color: String)) -> String {
+        var v = s.value.trimmingCharacters(in: .whitespaces)
+        let neg = v.hasPrefix("-") || v.hasPrefix("\u{2212}")
+        if neg { v.removeFirst() }
+        let shown = BriefWords.plain(v, privacy: privacy)
+        let lost = !shown.contains(BriefMask.shown) && (neg || s.color == "red")
+        return BriefWords.speech((lost ? "lost " : "") + shown + " " + s.label)
     }
 
     /// A row opens Positions on that name at the Friday close stop; the button on the last name, at today.
@@ -159,7 +176,7 @@ struct PayoffChart: View {
                 ctx.fill(Path(ellipseIn: CGRect(x: p.x - 5, y: p.y - 5, width: 10, height: 10)), with: .color(S.ink))
             }
         }
-        .accessibilityElement()
-        .accessibilityLabel(m.aria)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(m.aria.isEmpty ? "Your position, P&L by Friday if the market moves 10% down to 10% up." : m.aria)
     }
 }

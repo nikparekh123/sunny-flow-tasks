@@ -48,6 +48,7 @@ struct SunnyTabBar: View {
                 }
                 .buttonStyle(SunnyTabPress())
                 .accessibilityLabel(t.title)
+                .accessibilityValue("tab \(HomeRouter.Tab.bar.firstIndex(of: t).map { $0 + 1 } ?? 1) of \(HomeRouter.Tab.bar.count)")
                 .accessibilityAddTraits(t == tab ? [.isSelected] : [])
             }
         }
@@ -56,9 +57,10 @@ struct SunnyTabBar: View {
                 .overlay(Capsule().strokeBorder(Self.thumbEdge, lineWidth: 0.5))
                 .frame(width: 70, height: 54)
                 .offset(x: CGFloat(index) * 70)
-                .animation(reduce ? nil : .timingCurve(0.3, 1.5, 0.5, 1, duration: 0.45), value: index)
+                .animation(S.moving(S.spring, reduce), value: index)   // README 11.4: the thumb spring, (.3,1.4,.5,1) 0.45 s
         }
-        .animation(.easeOut(duration: 0.25), value: tab)
+        .animation(S.fade, value: tab)
+        .sensoryFeedback(.selection, trigger: tab)
         .padding(4)
         .glassEffect(.regular, in: .capsule)
         .accessibilityElement(children: .contain)
@@ -87,10 +89,12 @@ struct SunnyTabBar: View {
     private static let thumbEdge = S.dynA(0x000000, 0.04, 0xFFFFFF, 0.10)
 }
 
-/// Pressed: the tab or the button grows 8%.
+/// Pressed: the tab or the button grows 8%; under Reduce Motion it dims instead.
 struct SunnyTabPress: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduce
     func makeBody(configuration c: Configuration) -> some View {
-        c.label.scaleEffect(c.isPressed ? 1.08 : 1).animation(.easeOut(duration: 0.2), value: c.isPressed)
+        c.label.scaleEffect(c.isPressed && !reduce ? 1.08 : 1).opacity(c.isPressed && reduce ? 0.6 : 1)
+            .animation(S.fade, value: c.isPressed)
     }
 }
 
