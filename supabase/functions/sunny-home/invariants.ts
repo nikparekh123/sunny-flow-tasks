@@ -66,7 +66,7 @@ export function checkInvariants(x: CheckIn): Check[] {
     for (const n of x.inputs.names as Row[]) {
       const r = rows.find((y) => y.id === n.t); if (!r || r.fp == null || r.fp === n.S0) continue;
       const st = n.stops?.[n.fridayStop]; if (!st) continue;
-      const nb = new NameBook({ t: n.t, S0: n.S0, P0: n.P0, iv: n.iv, legs: n.legs as Leg[], divs: n.divs, r: x.inputs.r });
+      const nb = new NameBook({ t: n.t, S0: n.S0, P0: n.P0, iv: n.iv, legs: n.legs as Leg[], divs: n.divs, r: x.inputs.r, noIv: !!n.noIv });
       const hi = n.S0 * 1.12 * 1.05;
       if (r.fp > hi) continue;   // past the Positions chart's search: it shows no line there
       const p = nb.turnsShort(st.tt, hi)?.price ?? null;
@@ -106,7 +106,7 @@ export function checkInvariants(x: CheckIn): Check[] {
     if (nOrders && (!card || parseInt(String(card.count)) !== nOrders || card.rows?.length !== nOrders)) fail(5, 'To do', `Tomorrow's orders card ${card?.count} vs ${nOrders}`);
   }
   if (moment === 'weekend' && names.length) {
-    const lw = lede.match(/, and (\w+) sales? comes? Monday/), hw = text(section(x.full, 'Next week')?.headline).match(/^(\w+) sales? Monday/);
+    const lw = lede.match(/, and (\w+) sales? comes? \w+day/), hw = text((section(x.full, 'Next week') ?? section(x.full, 'Coming up'))?.headline).match(/^(\w+) sales? \w+day/);
     if ((lw ? count(lw[1]) : 0) !== nSells) fail(5, 'To do', `weekend lede sales ${lw?.[1]} vs ${nSells}`);
     if (nSells && (hw ? count(hw[1]) : 0) !== nSells) fail(5, 'To do', `Next week headline vs ${nSells} sales`);
   }
@@ -130,7 +130,7 @@ export function checkInvariants(x: CheckIn): Check[] {
 
   // 7 · the weekend yield
   if (moment === 'weekend') {
-    const ly = lede.match(/^A ([\d.]+%) week/)?.[1];
+    const ly = lede.match(/^(?:So far, a|A) ([\d.]+%) week/)?.[1];
     const rc = cards(x.full).find((c) => c.type === 'results');
     const sub = String(rc?.bySegment?.['This week']?.bigSub ?? '');
     if (ly && !sub.includes(`${ly} yield`)) fail(7, 'weekend yield', `lede ${ly} vs Results "${sub}"`);

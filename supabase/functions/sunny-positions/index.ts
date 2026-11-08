@@ -23,7 +23,7 @@ const json = (s: number, b: unknown) => new Response(JSON.stringify(b), { status
 
 type NameInput = { t: string; S0: number; P0: number; iv: number; legs: Leg[]; divs: Div[]; stops: Stop[]; fridayStop: number;
   otm: { K: number; ex: string; days: number; label: string } | null;
-  walls?: unknown[]; tech?: unknown; ended?: unknown[] };
+  walls?: unknown[]; tech?: unknown; ended?: unknown[]; noIv?: boolean };
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
   const divs = n.divs.map((d) => ({ ...d, days: d.days - gone }));
   const stops = n.stops.map((s) => ({ ...s, tt: s.tt === 0 ? 0 : Math.max(0, s.tt - gone) }));
   const otm = n.otm ? { ...n.otm, days: n.otm.days - gone } : null;
-  const nb = new NameBook({ t, S0: n.S0, P0: n.P0, iv: n.iv, legs, divs, r: inp.r });
+  const nb = new NameBook({ t, S0: n.S0, P0: n.P0, iv: n.iv, legs, divs, r: inp.r, noIv: !!n.noIv });
   const g = positionsGrid(nb, stops, otm);
   /* Walls by chain, the 20-day line and the month's range, and on the weekend the legs that ended Friday:
      sunny-home's reads (positions.ts), passed through as they are. */

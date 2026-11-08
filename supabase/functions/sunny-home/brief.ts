@@ -7,7 +7,7 @@
 //
 // No em dashes in any words written here (Nik).
 
-import { type Div, holdings, type Holdings, type Kind, type Leg, NameBook, otmStrike, type Stop, yourPosition } from '../_shared/book-engine.ts';
+import { bsValue, type Div, holdings, type Holdings, type Kind, type Leg, NameBook, otmStrike, type Stop, yourPosition } from '../_shared/book-engine.ts';
 
 type Row = Record<string, any>;
 export type Moment = 'futures' | 'pre' | 'bell' | 'open' | 'last20' | 'last5' | 'post' | 'weekend';
@@ -33,9 +33,11 @@ export interface BriefIn {
 
 /** The moment, as the app's clock has it (BriefCore Moment.at). `close` is the day's close in minutes: 960, or 780 on
  *  an early close, so the last 20 and 5 minutes and post-market follow it ("Post-market takes over at 1:00 PM"). */
-export function momentOf(wd: string, m: number, close = 960): Moment {
+export function momentOf(wd: string, m: number, close = 960, closedToday = false, nextTomorrow = true): Moment {
+  /* A market holiday on a weekday is a day off like Saturday (Nik, 8 Nov 2026: the weekend's "markets closed"
+     state, the Holiday card on top). Futures open at 6:00 PM only on the evening before a trading day. */
   if (wd === 'Sat') return 'weekend';
-  if (wd === 'Sun') return m >= 18 * 60 ? 'futures' : 'weekend';
+  if (wd === 'Sun' || closedToday) return m >= 18 * 60 && nextTomorrow ? 'futures' : 'weekend';
   if (wd === 'Fri' && m >= close) return 'weekend';
   if (m < 4 * 60) return 'futures';
   if (m < 9 * 60 + 30) return 'pre';
@@ -44,7 +46,7 @@ export function momentOf(wd: string, m: number, close = 960): Moment {
   if (m < close - 5) return 'last20';
   if (m < close) return 'last5';
   if (m < 20 * 60) return 'post';
-  return 'futures';
+  return nextTomorrow ? 'futures' : 'weekend';   // the night before a holiday is a day off, not futures
 }
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -65,13 +67,14 @@ const CO: Record<string, string> = { BABA: 'Alibaba', LULU: 'Lululemon', NKE: 'N
 export const company = (t: string) => CO[t] ?? t;
 
 export interface NameInput { t: string; S0: number; P0: number; iv: number; legs: Leg[]; divs: Div[]; stops: Stop[]; fridayStop: number;
-  otm: { K: number; ex: string; days: number; label: string } | null }
+  otm: { K: number; ex: string; days: number; label: string } | null; noIv?: boolean }
 
 export function buildBrief(x: BriefIn) {
   const { today, mins, addDays, isTrading } = x;
   const early = new Map(x.cal.filter((c) => c.kind === 'early_close' && c.closes).map((c) => [String(c.date), Number(String(c.closes).slice(0, 2)) * 60 + Number(String(c.closes).slice(3, 5))]));
   const closeMin = (d: string) => early.get(d) ?? 960;
-  const moment = momentOf(x.wd, mins, closeMin(today));
+  const wdIdx = ymd(today).wd, closedToday = wdIdx >= 1 && wdIdx <= 5 && !isTrading(today);
+  const moment = momentOf(x.wd, mins, closeMin(today), closedToday, isTrading(addDays(today, 1)));
   /** Calendar days from now to a date's close (options stop at the early close too). */
   const daysTo = (d: string) => dayDiff(today, d) + (closeMin(d) - mins) / 1440;
   const lastTradingOnOrBefore = (d: string) => { let y = d; while (!isTrading(y)) y = addDays(y, -1); return y; };
@@ -79,9 +82,12 @@ export function buildBrief(x: BriefIn) {
 
   // ── The Friday the card is about: this week's until its close, then next week's ──
   const wdN = ymd(today).wd, pastClose = isTrading(today) && mins >= closeMin(today);
-  const nextFriday = wdN === 6 || wdN === 0 || (wdN === 5 && pastClose);
+  /* A holiday with no session left this week (Good Friday) ends the week like Friday's close: the card is about next
+     Friday. A mid-week holiday (Thanksgiving) keeps this Friday, whose calls are still live. */
+  const weekDone = closedToday && lastTradingOnOrBefore(addDays(today, 5 - wdN)) < today;
+  const nextFriday = wdN === 6 || wdN === 0 || (wdN === 5 && pastClose) || weekDone;
   let F = addDays(today, (5 - wdN + 7) % 7);
-  if (wdN === 5 && pastClose) F = addDays(F, 7);
+  if ((wdN === 5 && pastClose) || weekDone) F = addDays(F, 7);
   F = lastTradingOnOrBefore(F);
   const th = Math.max(0, daysTo(F));
 
@@ -134,7 +140,21 @@ export function buildBrief(x: BriefIn) {
       if (ivs.length) return ivs.reduce((a, b) => a + b, 0) / ivs.length;
     }
     const leg = [...ls].filter((l) => good(l.iv)).sort((a, b) => a.expiry.localeCompare(b.expiry))[0];
-    return leg?.iv ?? 0.35;
+    if (leg) return leg.iv!;
+    // No chain and no leg IV: the IV the legs' own IBKR marks imply, else none (never a stand-in; Nik, 8 Nov 2026).
+    const imp = ls.map((l) => impliedOf(l, S0)).filter((v): v is number => v != null);
+    return imp.length ? imp.reduce((a, b) => a + b, 0) / imp.length : null;
+  };
+  /** The IV a leg's mark implies (bisection on the same Black-Scholes), when it has a mark and time left. */
+  const impliedOf = (l: BriefLeg, S0: number): number | null => {
+    const T = Math.max(0, daysTo(l.expiry)) / 365;
+    if (!(l.mark != null && l.mark > 0 && T > 0 && S0 > 0)) return null;
+    const put = l.type === 'put', intrinsic = Math.max(0, put ? l.strike - S0 : S0 - l.strike);
+    if (l.mark <= intrinsic) return null;
+    let lo = 0.01, hi = 5;
+    for (let i = 0; i < 60; i++) { const mid = (lo + hi) / 2; if (bsValue(S0, l.strike, T, mid, put, RATE) > l.mark) hi = mid; else lo = mid; }
+    const v = (lo + hi) / 2;
+    return good(v) ? v : null;
   };
 
   // ── Date-slider stops: now, then each session's close to the last sold expiry (at least the Friday) ──
@@ -177,7 +197,7 @@ export function buildBrief(x: BriefIn) {
     const ls = legsOpen.filter((l) => l.ticker === t);
     const S0 = x.spot.get(t) ?? closeOf.get(t) ?? 0;
     if (!(S0 > 0)) continue;
-    const P0 = prevOf.get(t) ?? S0, ivN = ivOf(t, S0, ls), sh = x.shares.get(t) ?? 0;
+    const P0 = prevOf.get(t) ?? S0, ivFound = ivOf(t, S0, ls), noIv = ivFound == null, ivN = ivFound ?? 0, sh = x.shares.get(t) ?? 0;
     const legs: Leg[] = [];
     if (sh > 0) { const avg = x.shareAvg.get(t) ?? 0; legs.push({ k: 'sh', kind: 'shares', ty: 'S', K: avg, q: sh, days: 0, iv: 0, ex: '', label: `Shares ${n0(sh)}${avg > 0 ? ` at $${avg.toFixed(2)}` : ''}` }); }
     for (const l of ls) {
@@ -185,14 +205,14 @@ export function buildBrief(x: BriefIn) {
       const days = daysTo(l.expiry), el = expLabel(l.expiry, days);
       const nm = kind === 'sc' ? 'Calls' : kind === 'sp' ? 'Puts' : kind === 'ins' ? 'Insurance puts' : kind === 'leaps' ? 'LEAPS' : 'OTM calls';
       legs.push({ k: `${kind}-${fk(l.strike)}-${l.expiry}`, kind, ty: l.type === 'call' ? 'C' : 'P', K: l.strike, q: l.side === 'sold' ? -l.n : l.n,
-        days: +days.toFixed(4), iv: good(l.iv) ? l.iv! : ivN, ex: l.expiry, label: `${nm} ${fk(l.strike)} ×${l.n}, ${el}`,
+        days: +days.toFixed(4), iv: good(l.iv) ? l.iv! : impliedOf(l, S0) ?? (noIv ? 1e-4 : ivN), ex: l.expiry, label: `${nm} ${fk(l.strike)} ×${l.n}, ${el}`,
         at: l.avg, ...(l.mark != null ? { now: l.mark } : {}) });
     }
     if (!legs.length) continue;
     const divs = divsOf(t), { stops, fri } = stopsFor(ls);
-    const nb = new NameBook({ t, S0, P0, iv: ivN, legs, divs, r: RATE });
+    const nb = new NameBook({ t, S0, P0, iv: ivN, legs, divs, r: RATE, noIv });
     books.push(nb);
-    inputs.push({ t, S0, P0, iv: ivN, legs, divs, stops, fridayStop: fri, otm: otmFor(S0) });
+    inputs.push({ t, S0, P0, iv: ivN, legs, divs, stops, fridayStop: fri, otm: otmFor(S0), ...(noIv ? { noIv } : {}) });
   }
 
   // ── Your position ──
@@ -212,11 +232,13 @@ export function buildBrief(x: BriefIn) {
     const hit = nb.legs.some((l) => l.kind === 'sc' && l.ex >= ex && nb.S0 > l.K && (l.now ?? 0) - (nb.S0 - l.K) < amt);
     if (hit) assign.push({ t: nb.t, exLabel: longDay(ex) });
   }
-  const sub = moment === 'weekend' ? (weekend ? 'Calls ended Friday · to next Friday' : 'Next week · by next Friday’s close')
+  const endedOn = DAYNAME[ymd(lastTradingOnOrBefore(today)).wd], salesOn = DAYNAME[ymd(nextTradingAfter(today)).wd];
+  const sub = moment === 'weekend' ? (!nextFriday ? 'Closed today · by Friday’s close'
+      : weekend ? `Calls ended ${endedOn} · to next Friday` : 'Next week · by next Friday’s close')
     : moment === 'post' ? 'At the close · by Friday'
     : moment === 'pre' || moment === 'futures' ? 'Before the bell · by Friday’s close' : 'Now · by Friday’s close';
   const position = books.length
-    ? yourPosition(books, { th, weekend, nextFriday, sub }, company, { shares: shT, covered: cvT }, assign)
+    ? yourPosition(books, { th, weekend, nextFriday, sub, endedOn, salesOn }, company, { shares: shT, covered: cvT }, assign)
     : null;
 
   // ── Per name: the logo strip (short at its priced move by Friday), the strategy, the holdings ──

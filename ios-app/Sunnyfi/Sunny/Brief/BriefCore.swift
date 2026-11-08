@@ -36,16 +36,15 @@ enum Moment: String, CaseIterable, Identifiable {
 
     /// `close` = that day's close in New York minutes: 960 (4:00 PM), or 780 on an early close (the last 20 and 5 minutes
     /// and post-market follow it, as "Post-market takes over at 1:00 PM" says). Same rule as sunny-home `momentOf`.
-    static func at(_ date: Date, close: Int = 960) -> Moment {
+    /// `closedToday`: a market holiday on a weekday, a day off like Saturday (Nik, 8 Nov 2026). `nextTomorrow`: the next
+    /// session is tomorrow, so futures open at 6:00 PM (not the night before a holiday). Same rule as sunny-home `momentOf`.
+    static func at(_ date: Date, close: Int = 960, closedToday: Bool = false, nextTomorrow: Bool = true) -> Moment {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "America/New_York")!
         let c = cal.dateComponents([.weekday, .hour, .minute], from: date)
         let wd = c.weekday ?? 2, m = (c.hour ?? 0) * 60 + (c.minute ?? 0)
-        switch wd {
-        case 7: return .weekend                                   // Saturday
-        case 1: return m >= 18 * 60 ? .futures : .weekend         // Sunday: futures open at 6:00 PM
-        default: break
-        }
+        if wd == 7 { return .weekend }                                                       // Saturday
+        if wd == 1 || closedToday { return m >= 18 * 60 && nextTomorrow ? .futures : .weekend }  // Sunday, a holiday
         if wd == 6 && m >= close { return .weekend }              // Friday after the close
         switch m {
         case ..<(4 * 60): return .futures
@@ -55,7 +54,7 @@ enum Moment: String, CaseIterable, Identifiable {
         case ..<(close - 5): return .last20
         case ..<close: return .last5
         case ..<(20 * 60): return .post
-        default: return .futures
+        default: return nextTomorrow ? .futures : .weekend    // the night before a holiday is a day off
         }
     }
 }
@@ -223,8 +222,11 @@ final class BriefState {
     var calendar: [CalendarDay] = []
     func moment(at date: Date? = nil) -> Moment {
         if let m = pin?.moment ?? BriefDebug.moment { return m }
-        let d = date ?? now()
-        return Moment.at(d, close: MarketClock.closeMinutes(MarketClock.ny(d).date, calendar))
+        let d = date ?? now(), t = MarketClock.ny(d)
+        let tomorrow = MarketClock.ny(d.addingTimeInterval(86_400))
+        let closedToday = t.weekday >= 2 && t.weekday <= 6 && !MarketClock.isTradingDay(t.date, weekday: t.weekday, calendar)
+        return Moment.at(d, close: MarketClock.closeMinutes(t.date, calendar), closedToday: closedToday,
+                         nextTomorrow: MarketClock.isTradingDay(tomorrow.date, weekday: tomorrow.weekday, calendar))
     }
 }
 

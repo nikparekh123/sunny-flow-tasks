@@ -122,7 +122,11 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   const lastTrading = (d: string) => { let y = d; while (!isTrading(y)) y = addDays(y, -1); return y; };
   const nextTrading = (d: string) => { let y = addDays(d, 1); while (!isTrading(y)) y = addDays(y, 1); return y; };
   const mondayOf = (d: string) => addDays(d, -((ymd(d).wd + 6) % 7));
-  const monday = mondayOf(today), weekFri = lastTrading(addDays(monday, 4));
+  /* The weekend page reviews the week of the last session: Saturday's is this week, a Monday holiday's the week before.
+     On a mid-week holiday (Thanksgiving) the week is still open: "so far", and what comes next starts tomorrow. */
+  const monday = mondayOf(wk ? lastTrading(today) : today), weekFri = lastTrading(addDays(monday, 4));
+  const weekOpen = wk && weekFri > today, closedDay = !isTrading(today) && ymd(today).wd >= 1 && ymd(today).wd <= 5;
+  const salesDay = DAY[ymd(nextTrading(today)).wd];
   const mk = (s: string) => x.market.find((m) => m.symbol === s);
   const owner: { key: string; spans?: Span[] }[] = [];   // what the open copy leaves out
 
@@ -212,7 +216,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
       const m = mk(s), w = weekPct(m);
       return m ? idxCard(s, l, num(m.regular_price) ?? num(m.price), w, {}, ' this week') : null;
     }).filter(Boolean);
-    return cards.length ? { type: 'theWeekIndexes', cards, footer: `Week of ${md(monday)} to ${ymd(weekFri).d} · at Friday’s close` } : null;
+    return cards.length ? { type: 'theWeekIndexes', cards, footer: `Week of ${md(monday)} to ${ymd(weekFri).d} · ${weekOpen ? 'so far' : 'at Friday’s close'}` } : null;
   };
   /* The design's overnight list, in its order. */
   const WORLD: [string, string, string][] = [['^N225', 'Nikkei', 'Japan'], ['^HSI', 'Hang Seng', 'Hong Kong'], ['000001.SS', 'Shanghai', 'China'],
@@ -529,22 +533,25 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
       footer: 'Payback isn’t profit until what you bought holds its value. Dividends stay out of it.' };
   };
   const remember = () => {
-    const nm = nextTrading(weekFri), to = addDays(mondayOf(nm), 4), rows = comingRows(nm, to, 6);
+    const nw = nextTrading(weekFri), nm = weekOpen ? nextTrading(today) : nw, to = addDays(mondayOf(nw), 4), rows = comingRows(nm, to, 6);
     const sells = x.orders.filter((o) => o.kind === 'sell' || o.kind === 'put').length;
     const later = x.earnings.filter((e) => String(e.date) > to && dayDiff(today, String(e.date)) <= 30)
       .map((e) => ({ date: dmd(String(e.date)), logo: e.ticker, text: [sp(`${company(e.ticker)} reports, inside 30 days`, true)] }));
     const all = [...(sells ? [{ date: dmd(nm), text: [sp(`${word(sells)} ${sells === 1 ? 'sale' : 'sales'} to place`, true)], owner: true }] : []), ...rows, ...later];
-    return all.length ? { type: 'remember', title: 'Remember for next week', rows: all } : null;
+    return all.length ? { type: 'remember', title: weekOpen ? 'Coming up' : 'Remember for next week', rows: all } : null;
   };
 
   // ════ The deck: Aftershock, Earnings season, Holiday ════
   const holiday = (() => {
     const wkStart = wk ? nextTrading(today) : monday, from = mondayOf(wkStart), to = addDays(from, 4);
-    const closed = x.cal.find((c) => c.kind === 'closed' && String(c.date) >= from && String(c.date) <= to && String(c.date) >= today);
+    // Today's own closure first (Good Friday sits outside next week's range), then this week's.
+    const closed = x.cal.find((c) => c.kind === 'closed' && String(c.date) === today)
+      ?? x.cal.find((c) => c.kind === 'closed' && String(c.date) >= from && String(c.date) <= to && String(c.date) >= today);
     const ec = x.cal.find((c) => c.kind === 'early_close' && String(c.date) >= from && String(c.date) <= to && String(c.date) >= today);
     if (ec && String(ec.date) === today) return { kind: 'holiday', kicker: `Early close · ${dmd(today)}`, title: `Closes at ${tm(ec.closes)} today`, sub: `Stock options stop at ${tm(ec.closes)} too`, mark: String(ymd(today).d), today: true };
     if (closed) return { kind: 'holiday', kicker: `Holiday · ${dmd(String(closed.date))}`, title: `Closed for ${closed.name}`,
-      sub: ec ? `${DAY[ymd(String(ec.date)).wd]} closes early, at ${tm(ec.closes)}` : 'Markets closed all day', mark: String(ymd(String(closed.date)).d) };
+      sub: ec ? `${DAY[ymd(String(ec.date)).wd]} closes early, at ${tm(ec.closes)}` : 'Markets closed all day', mark: String(ymd(String(closed.date)).d),
+      ...(String(closed.date) === today ? { today: true } : {}) };
     return null;
   })();
   const season = (() => {
@@ -577,7 +584,8 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   const left = (to: number) => { const m = Math.max(0, to - mins); return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`; };
   const cap = moment === 'futures' ? ['Pre-market', 'Futures trading since 6:00 PM'] : moment === 'pre' ? ['Pre-market', `Opens in ${left(570)}`]
     : moment === 'bell' ? ['Market hours', 'The bell just rang'] : session ? ['Market hours', `Closes in ${left(closeMin)}`]
-    : moment === 'post' ? ['Post-market', 'After hours until 8:00 PM'] : ['Week in Review', `The week of ${md(monday)} to ${ymd(weekFri).d}`];
+    : moment === 'post' ? ['Post-market', 'After hours until 8:00 PM']
+    : closedDay ? ['Markets closed', `Opens ${salesDay} at 9:30 AM`] : ['Week in Review', `The week of ${md(monday)} to ${ymd(weekFri).d}`];
   const dayCaption = { session: cap[0], caption: cap[1], text: `${cap[0]} · ${cap[1]}`, clock: hm(mins), orange: moment === 'last20' || moment === 'last5',
     aria: `Time of day, ${hm(mins)}, ${cap[0]}` };
 
@@ -622,10 +630,10 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const mkt = `Stocks ${spw >= 0 ? 'rose' : 'fell'}${on && Math.sign(on.move) === Math.sign(spw) ? ` on ${short(on.sector)}` : ''}`;
     both((p) => [
       ...(held && r.sold > 0 ? (r.kept >= 0
-        ? [sp(`A ${p2(r.yieldPct)} week: you kept `), sp(p ? `${Math.round((r.kept / r.sold) * 100)}%` : $0(r.kept), true, 'green'), sp(p ? ' of what you sold. ' : ` of ${$0(r.sold)} sold. `)]
-        : [sp('A losing week: buying back cost '), ...(p ? [sp('more than you sold. ')] : [sp($0(-r.kept), true, 'red'), sp(` more than the ${$0(r.sold)} sold. `)])])
+        ? [sp(`${weekOpen ? 'So far, a' : 'A'} ${p2(r.yieldPct)} week: you kept `), sp(p ? `${Math.round((r.kept / r.sold) * 100)}%` : $0(r.kept), true, 'green'), sp(p ? ' of what you sold. ' : ` of ${$0(r.sold)} sold. `)]
+        : [sp(`${weekOpen ? 'So far, a' : 'A'} losing week: buying back cost `), ...(p ? [sp('more than you sold. ')] : [sp($0(-r.kept), true, 'red'), sp(` more than the ${$0(r.sold)} sold. `)])])
         : []),
-      sp(mkt), ...(held && sells ? [sp(`, and ${word(sells).toLowerCase()} ${sells === 1 ? 'sale comes' : 'sales come'} Monday.`)] : [sp('.')])]);
+      sp(mkt), ...(held && sells ? [sp(`, and ${word(sells).toLowerCase()} ${sells === 1 ? 'sale comes' : 'sales come'} ${salesDay}.`)] : [sp('.')])]);
     if (held && sells) owner.push({ key: 'lede' });
   }
 
@@ -636,8 +644,9 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const ss = sec(wk).sort((u, v) => v.move - u.move), lead = ss[0], trail = ss[ss.length - 1];
     if (wk) {
       const spw = weekPct(spy) ?? 0;
-      if (spw >= 0) return [sp(`Stocks rose for the week${lead && lead.move > 0 ? ` on ${short(lead.sector)}` : ''}.${trail && trail.move < 0 ? ` ${trail.sector} fell the most.` : ''}`, true)];
-      return [sp(`Stocks fell for the week${trail && trail.move < 0 ? `, ${short(trail.sector)} the most` : ''}.${lead && lead.move > 0 ? ` ${lead.sector} rose.` : ''}`, true)];
+      const per = weekOpen ? 'so far this week' : 'for the week';
+      if (spw >= 0) return [sp(`Stocks rose ${per}${lead && lead.move > 0 ? ` on ${short(lead.sector)}` : ''}.${trail && trail.move < 0 ? ` ${trail.sector} fell the most.` : ''}`, true)];
+      return [sp(`Stocks fell ${per}${trail && trail.move < 0 ? `, ${short(trail.sector)} the most` : ''}.${lead && lead.move > 0 ? ` ${lead.sector} rose.` : ''}`, true)];
     }
     const small = iwmDay < spyDay ? 'Small caps lag' : 'Small caps keep up';
     if (moment === 'post') return [sp(`Closed ${spyDay >= 0 ? 'higher' : 'lower'}${lead ? `, ${short(lead.sector)} led` : ''}. ${iwmDay < spyDay ? 'Small caps lagged' : 'Small caps kept up'}.`, true)];
@@ -699,7 +708,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     if (held && (pb || tm2)) S.push({ kicker: mName, headline: [sp(`${mName} ${done ? 'is done' : 'so far'}: ${pbPct >= 0 ? `${p1(pbPct)} of what you bought is paid back` : `${p1(pbPct)} of what you bought is given back`}.`, true)], cards: [tm2, pb] });
     const rem = remember(), sells = x.orders.filter((o) => o.kind === 'sell' || o.kind === 'put').length, ne = earningsAhead(7);
     const first = rem?.rows.find((r: Row) => !r.owner);
-    S.push({ kicker: 'Next week', headline: [sp(sells ? `${word(sells)} ${sells === 1 ? 'sale' : 'sales'} Monday.` : first ? `${leadOf(first.text)}, ${first.date}.` : 'A quiet week ahead.', true)],
+    S.push({ kicker: weekOpen ? 'Coming up' : 'Next week', headline: [sp(sells ? `${word(sells)} ${sells === 1 ? 'sale' : 'sales'} ${salesDay}.` : first ? `${leadOf(first.text)}, ${first.date}.` : 'A quiet week ahead.', true)],
       openHeadline: [sp(first ? `${leadOf(first.text)}, ${first.date}.` : 'A quiet week ahead.', true)], cards: [ne, rem] });
   }
 
@@ -716,7 +725,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
       return { num: String(n), kicker: s.kicker, headline, ...(s.privacy ? { privacy: { headline: s.privacy } } : {}), cards };
     }).filter(Boolean);
     const strip = (l: Span[]) => (forOwner || !owner.some((o) => o.key === 'lede') ? l
-      : l.filter((s) => !/to place at the open/.test(s.t)).map((s) => ({ ...s, t: s.t.replace(/, and \w+ sales? comes? Monday\./, '.') })));
+      : l.filter((s) => !/to place at the open/.test(s.t)).map((s) => ({ ...s, t: s.t.replace(/, and \w+ sales? comes? \w+day\./, '.') })));
     return { v: 1, moment, built_for: today, title: TITLE[moment], dateLine, dayCaption, lede: strip(lede), privacy: { lede: strip(ledeP) },
       alert, deckCards, sections, hidden: [...(econ.length ? [] : ['economy', 'outToday']), 'afterHours', 'thesisCheck'],
       // The economy sheet: all twelve, watch first, then new, then steady.

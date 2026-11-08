@@ -146,7 +146,9 @@ struct YourPositionCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 0) {
                 Text(r.right).sType(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(BK.color(r.rightColor)).lineLimit(1)
-                Text(r.at).sType(SType(size: 12, weight: 500, line: 15, tracking: 0)).foregroundStyle(S.secondary).lineLimit(1)
+                if !r.at.isEmpty {   // empty for a name with no option prices (no priced move)
+                    Text(r.at).sType(SType(size: 12, weight: 500, line: 15, tracking: 0)).foregroundStyle(S.secondary).lineLimit(1)
+                }
             }
             .fixedSize()
         }

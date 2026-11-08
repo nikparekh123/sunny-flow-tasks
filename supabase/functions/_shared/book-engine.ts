@@ -48,6 +48,7 @@ export interface NameIn {
   divs?: Div[];
   r?: number;         // rate (4% in the app; 0 reproduces the prototype)
   t0?: number;        // days into today the "now" values sit at (the prototype's moment offset; 0 in the app)
+  noIv?: boolean;     // no IV anywhere (no chain, no leg IV, no option mark): no priced move, never short or thin
 }
 
 // ── Black-Scholes, as the prototype writes it (Abramowitz-Stegun 7.1.26) ────
@@ -75,13 +76,14 @@ export interface Opt { off?: Set<string>; extra?: Leg[]; earned?: boolean }
 
 /** One name's book: every leg, valued at any price S and any time tt days on. */
 export class NameBook {
-  t: string; S0: number; P0: number; iv: number; legs: Leg[]; divs: Div[]; r: number; t0: number;
+  t: string; S0: number; P0: number; iv: number; legs: Leg[]; divs: Div[]; r: number; t0: number; noIv: boolean;
   constructor(x: NameIn) {
     this.t = x.t; this.S0 = x.S0; this.P0 = x.P0 ?? x.S0; this.iv = x.iv; this.legs = x.legs;
-    this.divs = x.divs ?? []; this.r = x.r ?? 0; this.t0 = x.t0 ?? 0;
+    this.divs = x.divs ?? []; this.r = x.r ?? 0; this.t0 = x.t0 ?? 0; this.noIv = !!x.noIv;
   }
-  /** The weekly priced move in %: IV × √(5/252) (Nik: one weekly SD all week). */
-  get sd(): number { return (this.iv || 0.3) * Math.sqrt(5 / 252) * 100; }
+  /** The weekly priced move in %: IV × √(5/252) (Nik: one weekly SD all week). None without an IV (never a stand-in;
+   *  Nik, 8 Nov 2026: a made-up 35% gave a made-up "at ↑4.9%"). */
+  get sd(): number { return this.noIv || !(this.iv > 0) ? 0 : this.iv * Math.sqrt(5 / 252) * 100; }
   private T(l: Leg, tt: number) { return Math.max(0, l.days - tt) / 365; }
   private dpv(l: Leg, tt: number) {
     let s = 0;
@@ -138,6 +140,7 @@ export class NameBook {
    *  below zero on the date viewed, searched up to `hiS`. Home, To decide and the Positions chart all ask
    *  this one function, so they say the same price to the cent. `now` = already short at today's price. */
   turnsShort(tt: number, hiS: number, o?: Opt): { price: number; now: boolean } | null {
+    if (this.noIv) return null;   // options priced without an IV say nothing about where the name peaks
     const f = (S: number) => this.delta(S, tt, o);
     if (f(this.S0) < 0) return { price: this.S0, now: true };
     const step = this.S0 * 0.0005;
@@ -172,6 +175,8 @@ export interface PositionClock {
   weekend: boolean;      // this week's calls have ended and next week's are not sold yet
   nextFriday: boolean;   // the Friday is next week's (the weekend)
   sub: string;           // the subtitle for the moment
+  endedOn?: string;      // the day this week's calls ended ("Friday"; "Thursday" before a Good Friday)
+  salesOn?: string;      // the day the next sales go in ("Monday"; "Tuesday" after a Monday holiday)
 }
 export interface CoverIn { shares: number; covered: number }
 export interface AssignIn { t: string; exLabel: string }
@@ -197,10 +202,17 @@ export function yourPosition(names: NameBook[], clk: PositionClock, name: (t: st
   const M: number[] = []; for (let m = -10; m <= 10.001; m += 0.25) M.push(+m.toFixed(2));
   const bk = (m: number, tt: number) => names.reduce((a, x) => { const r = x.at(m, tt); return { p: a.p + r.p, n: a.n + r.n, d$: a.d$ + r.n * x.S0 * (1 + m / 100) / 100 }; }, { p: 0, n: 0, d$: 0 });
   const F = M.map((m) => bk(m, th)), Nw = M.map((m) => bk(m, t0));
-  const fi = M.findIndex((m, i) => m > 0 && F[i].n < 0), fm = fi >= 0 ? M[fi] : null, now = bk(0, t0);
+  // Options priced without any IV (no chain, no leg IV, no mark): the book's peak is unknown, so no makes-the-most line.
+  const partial = names.some((x) => x.noIv && x.legs.some((l) => l.ty !== 'S'));
+  const fi = M.findIndex((m, i) => m > 0 && F[i].n < 0), fm = !partial && fi >= 0 ? M[fi] : null, now = bk(0, t0);
   const fri = clk.nextFriday ? 'next Friday' : 'Friday';
 
   const rows: PositionRow[] = names.map((x) => {
+    if (x.noIv) {   // no option prices: today's delta, no priced move, never counted short or thin
+      const r = x.at(0, th);
+      return { id: x.t, name: name(x.t), st: 0, fp: null, n: r.n, lg: r.lg, frac: 1, sd: 0, line: 'No option prices yet', lineColor: 'secondary',
+        right: (r.n < 0 ? 'Short ' : 'Long ') + fn(r.n) + ' Δ', rightColor: r.n < 0 ? 'red' : 'ink', at: '' } as PositionRow;
+    }
     const r = x.at(x.sd, th), thin = r.n >= 0 && r.n < 0.25 * r.lg, short = r.n < 0;
     const ts = x.turnsShort(th, x.S0 * (1 + x.sd * 3 / 100));
     const fp = ts ? ts.price : null, st = short ? 2 : thin ? 1 : 0;
@@ -217,8 +229,8 @@ export function yourPosition(names: NameBook[], clk: PositionClock, name: (t: st
 
   const nS = rows.filter((r) => r.st === 2).length, nT = rows.filter((r) => r.st === 1).length, first = rows.find((r) => r.st > 0);
   const story: Span[] = wk
-    ? [sp('This week’s calls ended Friday, so you are '), sp('long only', true), sp(' until Monday’s sales: a 1% rise makes you '), sp(fK(now.d$), true, 'green'), sp('. Selling again caps how much a rise can make.')]
-    : [sp('Long now: a 1% rise makes you '), sp(fK(now.d$), true, 'green'), sp('. ')].concat(fm != null
+    ? [sp(`This week’s calls ended ${clk.endedOn ?? 'Friday'}, so you are `), sp('long only', true), sp(` until ${clk.salesOn ?? 'Monday'}’s sales: a 1% rise makes you `), sp(fK(now.d$), true, 'green'), sp('. Selling again caps how much a rise can make.')]
+    : [sp('Long now: a 1% rise makes you '), sp(fK(now.d$), true, 'green'), sp(partial ? '.' : '. ')].concat(partial ? [] : fm != null
       ? [sp('Your book makes the most if the market rises '), sp(f1(fm) + '%', true, 'orange'), sp(' by ' + fri + (first ? '. ' + first.name + ' gets there first.' : '.'))]
       : [sp('Your book keeps making more even if the market rises 10% by ' + fri)].concat(first
         ? [sp(', but '), sp(first.name, true, first.st === 2 ? 'red' : 'orange'), sp(first.st === 2 && first.fp != null ? ' makes the most at $' + f2(first.fp) + '.' : ' runs thin.')]

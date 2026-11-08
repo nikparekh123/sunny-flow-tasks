@@ -265,3 +265,90 @@ for (const m of MOMENTS) {
     assert(!JSON.stringify(p.full).includes('NaN') && !JSON.stringify(p.full).includes('undefined'), 'no NaN or undefined on the page');
   });
 }
+
+// ── Weekday market holidays (Nik, 8 Nov 2026): the weekend's "markets closed" page, the Holiday card on top ──
+function holidayPage(today: string, wd: string, mins: number, closed: string[], early: string | null, legsIn: BriefLeg[] = LEGS) {
+  const cal: Row[] = [...closed.map((d) => ({ date: d, kind: 'closed', name: 'Test Holiday' })), ...(early ? [{ date: early, kind: 'early_close', closes: '13:00:00', name: 'Early close' }] : [])];
+  const trading = (d: string) => isTrading(d) && !closed.includes(d);
+  const { brief } = buildBrief({ today, wd, mins, isTrading: trading, addDays, cal, legs: legsIn, isLeap: (l) => l.expiry >= '2027-12-01',
+    shares: SHARES, shareAvg: AVG, spot: SPOT, closes: CLOSES, chain: [], divRows: DIVS, strategies: { NKE: 'rebound' } });
+  const names: NameDay[] = (brief.names as Row[]).map((b) => ({ t: b.t, shares: SHARES.get(b.t) ?? 0, leaps: 0, S0: b.S0, P0: b.P0,
+    weekBase: b.P0 * 0.98, ext: 0, today: { sh: b.h.sh[1], lp: b.h.lp[1], oc: b.h.oc[1], ip: b.h.ip[1], sc: 0, sp: 0 },
+    soldCalls: legsIn.filter((l) => l.ticker === b.t && l.side === 'sold' && l.type === 'call').map((l) => ({ K: l.strike, n: l.n, ex: l.expiry })) }));
+  const { full, open } = buildDoc({ moment: brief.moment as Moment, today, mins, isTrading: trading, addDays, cal, brief, names, market: [], sectors: [], futures: [], watch: [],
+    chart: null, yieldWeeks: [{ week: '2026-10-26', fri: '2026-10-30', calls_sold: 3000, calls_back: 800, puts_sold: 900, puts_back: 100 }],
+    payback: null, history: null, earnings: [], macro: [], divs: DIVS, trades: [], orders: ORDERS, aftershock: null, baseNow: BASE, baseAt: () => BASE });
+  return { brief: brief as Row, full, open, fails: checkInvariants({ brief, full, open, inputs: {}, orders: ORDERS }) };
+}
+const words = (x: unknown) => JSON.stringify(x);
+
+Deno.test('Holiday · the clock: a closed weekday is a day off; futures only the evening before a session', () => {
+  assertEquals(momentOf('Thu', 11 * 60 + 20, 960, true, true), 'weekend');
+  assertEquals(momentOf('Thu', 19 * 60, 960, true, true), 'futures');
+  assertEquals(momentOf('Wed', 21 * 60, 960, false, false), 'weekend');   // the night before Thanksgiving
+  assertEquals(momentOf('Sun', 19 * 60, 960, false, false), 'weekend');   // Sunday before a Monday holiday
+});
+Deno.test('Holiday · mid-week (Thanksgiving): markets closed, Friday still live, "so far", opens Friday', () => {
+  const p = holidayPage('2026-10-29', 'Thu', 11 * 60 + 20, ['2026-10-29'], '2026-10-30');
+  assertEquals(p.brief.moment, 'weekend');
+  assertEquals(p.brief.friday, '2026-10-30');
+  assertEquals(p.brief.weekend, false);
+  assertEquals(p.brief.position.subtitle, 'Closed today · by Friday’s close');
+  assertEquals(p.full.dayCaption.text, 'Markets closed · Opens Friday at 9:30 AM');
+  assertEquals(p.full.alert?.kind, 'holiday');
+  assert(p.full.alert?.today, 'the Holiday card is about today');
+  assert(!words(p.full).includes('Monday'), 'nothing says Monday mid-week');
+  assert((p.full.sections as Row[]).some((s) => s.kicker === 'Coming up') && !(p.full.sections as Row[]).some((s) => s.kicker === 'Next week'));
+  assertEquals(p.fails.length, 0, show(p.fails));
+});
+Deno.test('Holiday · Monday: last week in review, sales come Tuesday', () => {
+  const p = holidayPage('2026-10-26', 'Mon', 11 * 60 + 20, ['2026-10-26'], null);
+  assertEquals(p.brief.moment, 'weekend');
+  assertEquals(p.brief.friday, '2026-10-30');
+  assertEquals(p.full.dayCaption.text, 'Markets closed · Opens Tuesday at 9:30 AM');
+  assert(!words(p.full.lede).includes('Monday'), words(p.full.lede));
+  assertEquals(p.fails.length, 0, show(p.fails));
+});
+Deno.test('Holiday · Good Friday: the week ended Thursday, the card is about next Friday', () => {
+  const thu = LEGS.map((l) => (l.expiry === '2026-10-30' ? { ...l, expiry: '2026-10-29' } : l));
+  const p = holidayPage('2026-10-30', 'Fri', 11 * 60 + 20, ['2026-10-30'], null, thu);
+  assertEquals(p.brief.moment, 'weekend');
+  assertEquals(p.brief.nextFriday, true);
+  assertEquals(p.brief.friday, '2026-11-06');
+  assert(String(p.brief.position.subtitle).startsWith('Calls ended Thursday'), p.brief.position.subtitle);
+  assert(p.full.alert?.kind === 'holiday' && p.full.alert?.today, 'today’s Holiday card');
+  assertEquals(p.full.dayCaption.text, 'Markets closed · Opens Monday at 9:30 AM');
+  assertEquals(p.fails.length, 0, show(p.fails));
+});
+
+// ── No IV anywhere (Nik, 8 Nov 2026): never a made-up priced move ──
+function ivBook(extraLegs: BriefLeg[], extraShares: [string, number][]) {
+  const shares = new Map([...SHARES, ...extraShares]), spot = new Map([...SPOT, ['PEP', 141.2]]), avg = new Map([...AVG, ['PEP', 150]]);
+  const closes = [...CLOSES, ...['2026-10-23', '2026-10-26'].map((date) => ({ ticker: 'PEP', date, close_price: 140.6 }))];
+  const { brief } = buildBrief({ today: '2026-10-27', wd: 'Tue', mins: 680, isTrading, addDays, cal: [], legs: [...LEGS, ...extraLegs],
+    isLeap: (l) => l.expiry >= '2027-12-01', shares, shareAvg: avg, spot, closes, chain: [], divRows: DIVS, strategies: {} });
+  return brief as Row;
+}
+const pepRow = (b: Row) => (b.position.rows as Row[]).find((r) => r.id === 'PEP')!;
+Deno.test('No IV · shares only: "No option prices yet", no priced move, never short or thin', () => {
+  const b = ivBook([], [['PEP', 800]]);
+  const r = pepRow(b);
+  assertEquals(r.line, 'No option prices yet');
+  assertEquals(r.at, '');
+  assertEquals(r.st, 0);
+  assert(String(r.right).startsWith('Long 800'), r.right);
+  assert(String(b.position.count).includes('past') || String(b.position.count).includes('long'), 'count still reads');
+});
+Deno.test('No IV · an option with an IBKR mark: the IV its price implies, a normal row', () => {
+  const b = ivBook([leg('PEP', 'call', 'sold', 145, '2026-10-30', 8, 0.7, 0.51, NaN)], [['PEP', 800]]);
+  const r = pepRow(b);
+  assert(r.line !== 'No option prices yet', r.line);
+  assert(String(r.at).startsWith('at ↑'), r.at);
+});
+Deno.test('No IV · an option with no IV and no mark: no makes-the-most line for the book', () => {
+  const b = ivBook([{ ...leg('PEP', 'call', 'sold', 145, '2026-10-30', 8, 0.7, 0, NaN), mark: null as unknown as number }], [['PEP', 800]]);
+  assertEquals(pepRow(b).line, 'No option prices yet');
+  const s = (b.position.sentence as Row[]).map((x) => x.t).join('');
+  assert(!/makes the most/.test(s), s);
+  assertEquals(b.position.shortAt ?? null, null);
+});

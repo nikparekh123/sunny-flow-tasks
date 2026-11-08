@@ -53,7 +53,7 @@ export function buildOverview(books: BookSide[], today: string, mins: number, co
     const gaps: { t: string; f: number }[] = [], values = new Map<string, number>();
     for (const n of (I.names ?? []) as Row[]) {
       const legs = n.legs as Leg[];
-      const nb = new NameBook({ t: n.t, S0: n.S0, P0: n.P0, iv: n.iv, legs, divs: n.divs, r: I.r });
+      const nb = new NameBook({ t: n.t, S0: n.S0, P0: n.P0, iv: n.iv, legs, divs: n.divs, r: I.r, noIv: !!n.noIv });
       downside += nb.at(-nb.sd, th).p;
       if (nb.delta(nb.S0, 0) > 0) longNow++;
       const sh = legs.filter((l) => l.kind === 'shares').reduce((a, l) => a + l.q, 0);
