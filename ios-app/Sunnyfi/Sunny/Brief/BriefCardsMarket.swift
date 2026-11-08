@@ -95,7 +95,11 @@ struct BIndicatorCard: View {
                 Spacer()
                 if let tag = c["tag"].string {
                     let yellow = c["tagStyle"].string == "yellow"
-                    Text(tag).font(.system(size: 11, weight: .semibold)).foregroundStyle(yellow ? Color(hex: 0x1D1D1F) : S.ink)
+                    HStack(spacing: 4) {
+                        if yellow { Image(systemName: "eye").font(.system(size: 10, weight: .semibold)) }
+                        Text(tag).font(.system(size: 11, weight: .semibold))
+                    }
+                        .foregroundStyle(yellow ? S.badgeInk : S.ink)
                         .padding(.horizontal, 8).frame(height: 20)
                         .background(Capsule().fill(yellow ? S.yellow : .clear))
                         .overlay(Capsule().strokeBorder(yellow ? .clear : S.ink, lineWidth: 1))
@@ -113,7 +117,7 @@ struct BIndicatorCard: View {
                         VStack(spacing: 4) {
                             Text(p["value"].string ?? "").font(.system(size: 11, weight: cur ? .bold : .medium).monospacedDigit())
                                 .foregroundStyle(cur ? S.ink : S.secondary)
-                            RoundedRectangle(cornerRadius: 3).fill(cur ? S.ink : S.chip)
+                            RoundedRectangle(cornerRadius: 3).fill(cur ? S.ink : width == nil ? S.econBar : S.econBarGlass)
                                 .frame(height: 20 + 40 * CGFloat((vals[i] - lo) / max(hi - lo, 0.0001)))
                             Text(p["label"].string ?? "").font(.system(size: 11, weight: .medium)).foregroundStyle(S.secondary)
                         }

@@ -189,7 +189,7 @@ struct BriefCardChrome: ViewModifier {
                 if BriefGlass.still { shape.fill(.ultraThinMaterial) }
             }
             .modifier(LiveGlass(shape: shape))
-            .shadow(color: .black.opacity(0.08), radius: 12, y: 8)
+            .shadow(color: S.dynA(0x000000, 0.10, 0x000000, 0.40), radius: 12, y: 8)   // block 34: .1 light, .4 dark
     }
 
     private struct LiveGlass: ViewModifier {

@@ -145,11 +145,11 @@ struct BriefPinBar: View {
     var body: some View {
         if let p = brief.pin {
             HStack(spacing: 10) {
-                Text("Pinned · \(p.words)").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                Text("Pinned · \(p.words)").font(.system(size: 13, weight: .semibold)).foregroundStyle(S.onSignal)
                     .lineLimit(1).minimumScaleFactor(0.8)
                 Spacer()
                 Button("Back to live") { Task { await brief.applyPin(nil) } }
-                    .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                    .font(.system(size: 13, weight: .bold)).foregroundStyle(S.onSignal)
             }
             .padding(.horizontal, 14).frame(height: 34)
             .background(Capsule().fill(S.act))

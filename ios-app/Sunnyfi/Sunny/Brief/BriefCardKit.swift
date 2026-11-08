@@ -229,7 +229,7 @@ struct BHeatMap: View {
                                         .font(.system(size: w < 50 || h < 40 ? 9 : 12, weight: .medium).monospacedDigit())
                                 }
                             }
-                            .foregroundStyle(Color(hex: 0x1D1D1F))
+                            .foregroundStyle(S.ink)
                             .lineLimit(1)   // shrink to fit, never wrap the % onto its own line (FIS ▼26.04%)
                             .minimumScaleFactor(0.6)
                             .padding(2)
@@ -249,6 +249,8 @@ struct BHeatMap: View {
     }
 
     static func fill(_ t: JSONValue) -> Color {
+        // The move picks the step in both themes; the server's light hex is only a fallback.
+        if let m = t["move"].double { return S.heatTile(m) }
         if let hex = t["bg"].string?.replacingOccurrences(of: "#", with: ""), let v = UInt32(hex, radix: 16) { return Color(hex: v) }
         return S.chip
     }

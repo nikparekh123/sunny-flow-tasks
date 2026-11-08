@@ -183,6 +183,8 @@ final class BriefState {
         return late ? (fresh.marks ?? fresh.trades) : nil
     }
 
+    private var debugAccountApplied = false
+
     func ingest(_ brief: JSONValue?, key: String?, book: String? = nil, overview: JSONValue? = nil, books: [String] = []) {
         guard key != liveKey || book != self.book else { return }
         liveKey = key
@@ -194,6 +196,8 @@ final class BriefState {
             accounts = (liveOverview != nil && accts.contains(.sunny) ? [.overview] : []) + accts
             if account != .overview { account = book == "N" ? .nicolay : .sunny }
             if accounts.isEmpty { accounts = [account] }
+            // A test run's -acct opens that account once the real books are in (simulator only).
+            if let a = BriefDebug.account, !debugAccountApplied, accounts.contains(a) { account = a; debugAccountApplied = true }
         }
         let decoded = brief.map(BriefLive.init)
         if pin != nil { realLive = decoded } else { live = decoded }

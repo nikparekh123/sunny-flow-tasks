@@ -107,7 +107,7 @@ struct BriefPositionsScreen: View {
         .task {
             if let y = BriefDebug.scroll { try? await Task.sleep(for: .milliseconds(600)); pos.scrollTo(y: y) }
         }
-        .background(SBackground())
+        .background(SBackground(glows: false))
         .overlay(alignment: .top) { BriefTopEdge() }
         // The nav bar's small title once the large one has scrolled under it (block 31): "NKE Positions".
         .overlay(alignment: .top) {

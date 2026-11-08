@@ -149,12 +149,26 @@ enum S {
     static let secondaryOnTint = dyn(0x6E6E73, 0xAEAEB2)   // text on tinted tiles and pills
     static let hairline        = dyn(0xE3E5E8, 0x3A3A3C)   // rules between rows
     static let act             = dyn(0xA34B00, 0xFF9F0A)   // orange: thin, act, turns short, Watch
+    /// Text on a filled S.act, S.red or S.green: white on the deep light fills, ink on the bright dark ones
+    /// (white on #FF9F0A is 2.1:1, on #FF6961 2.7:1, on #65C466 2.2:1; ink on each is 6:1 or better).
+    static let onSignal        = dyn(0xFFFFFF, 0x1D1D1F)
     static let navy            = dyn(0x2F5AA8, 0x86A8F0)   // call walls and call strikes (charts only)
     static let brown           = dyn(0x995123, 0xE8975C)   // put walls (charts only)
     static let teal            = dyn(0x0B6F75, 0x4CC9D0)   // technicals, accelerator
     static let sheetFill       = dyn(0xFFFFFF, 0x1C1C1E)   // sheets, the Positions chart card
     static let chip            = dyn(0xF1F2F4, 0x2C2C2E)   // close buttons, quiet fills
     static let grabber         = dynA(0x3C3C43, 0.3, 0xEBEBF5, 0.3)   // sheet grabber, inactive deck dots
+    /// The economy's older readings (SunnyEconomy --bar): solid on a sheet, see-through on glass; the latest is ink.
+    static let econBar      = dyn(0xD1D1D6, 0x48484A)
+    static let econBarGlass = dynA(0x1D1D1F, 0.16, 0xFFFFFF, 0.24)
+    /// Heat-map tiles (Your names, Sectors; SunnyEconomy tc(), Nik 4 Nov): the app's green and red, pale to full,
+    /// four steps by the size of the move (under 0.5%, 1.5%, 3%, then more). Ink text on them in light, white in dark.
+    static let heatTileUp   = [dyn(0xE2F2E0, 0x1D3521), dyn(0xC2E4BE, 0x22492A), dyn(0x8FCF89, 0x2A6232), dyn(0x4FA554, 0x347D3A)]
+    static let heatTileDown = [dyn(0xFBE3E2, 0x3D2322), dyn(0xF6C4C2, 0x572927), dyn(0xEE9B97, 0x77302D), dyn(0xE26F6A, 0xA53A35)]
+    static func heatTile(_ move: Double) -> Color {
+        let a = abs(move), i = a < 0.5 ? 0 : a < 1.5 ? 1 : a < 3 ? 2 : 3
+        return (move >= 0 ? heatTileUp : heatTileDown)[i]
+    }
 
     /// A figure on the chart and its stats: red when below zero, else ink.
     static func lossInk(_ v: Double) -> Color { v < 0 ? red : ink }

@@ -389,7 +389,7 @@ private struct TickerLine: View {
                 Path { p in for (i, v) in pts.enumerated() { let pt = CGPoint(x: X(i), y: Y(v)); i == 0 ? p.move(to: pt) : p.addLine(to: pt) } }
                     .stroke(up ? S.green : S.red, style: StrokeStyle(lineWidth: 1.6, lineJoin: .round))
                 if let last = pts.last {
-                    Text(String(format: "%.2f", last)).font(.system(size: 11, weight: .bold).monospacedDigit()).foregroundStyle(.white)
+                    Text(String(format: "%.2f", last)).font(.system(size: 11, weight: .bold).monospacedDigit()).foregroundStyle(S.onSignal)
                         .padding(.horizontal, 5).frame(height: 18).background(RoundedRectangle(cornerRadius: 4).fill(up ? S.green : S.red))
                         .position(x: W + 22, y: Y(last))
                 }
