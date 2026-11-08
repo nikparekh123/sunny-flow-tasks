@@ -193,7 +193,8 @@ final class BriefState {
         if !BriefDebug.sample {
             // The strip on the real books: Overview (when S's build carried one), then each book this login is in.
             if let o = overview, case .object = o, o["error"].isNull { liveOverview = o }
-            let accts: [BriefAccount] = books.compactMap { $0 == "S" ? .sunny : $0 == "N" ? .nicolay : nil }
+            // Sunny always before Nicolay (Nik, 8 Nov 2026), whatever order the memberships come in.
+            let accts: [BriefAccount] = [(BriefAccount.sunny, "S"), (.nicolay, "N")].filter { books.contains($0.1) }.map(\.0)
             accounts = (liveOverview != nil && accts.contains(.sunny) ? [.overview] : []) + accts
             if account != .overview { account = book == "N" ? .nicolay : .sunny }
             if accounts.isEmpty { accounts = [account] }

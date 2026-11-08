@@ -47,6 +47,8 @@ final class HomeStore {
     /// toast's count: "Positions updated · 3 changed". Price moves are not a
     /// change (Nik, 14 Oct 2026: on every tick they were "just noise").
     private(set) var changedLegs: Set<String> = []
+    /// The book `home` was read for, so a switch of book is never counted as legs changing.
+    private var homeBook: String?
     private(set) var toast: String?
     private var toastTask: Task<Void, Never>?
     private(set) var health: Health = .fresh
@@ -80,11 +82,11 @@ final class HomeStore {
     private let path = NWPathMonitor()
 
     #if DEBUG && targetEnvironment(simulator)
-    /// Frame gaps over 100 ms, printed (SUNNY-PERF): what the phone's hang detector reports.
+    /// Frame gaps over 25 ms, printed (SUNNY-PERF hitch): swipe and count them to measure scrolling (8 Nov 2026).
     private final class Hitch: NSObject {
         var last: CFTimeInterval = 0
         @objc func tick(_ l: CADisplayLink) {
-            if last > 0, l.timestamp - last > 0.05 { print("SUNNY-PERF hitch \(Int((l.timestamp - last) * 1000)) ms at \(Int(l.timestamp * 1000) % 100000)") }
+            if last > 0, l.timestamp - last > 0.025 { print("SUNNY-PERF hitch \(Int((l.timestamp - last) * 1000)) ms at \(Int(l.timestamp * 1000) % 100000)") }
             last = l.timestamp
         }
     }
@@ -127,7 +129,8 @@ final class HomeStore {
 
     private func fetch(_ reason: Reason) async {
         do {
-            let data = try await Self.source(book: try await bookID())
+            let bookNow = try await bookID()
+            let data = try await Self.source(book: bookNow)
             #if DEBUG && targetEnvironment(simulator)
             let t0 = CFAbsoluteTimeGetCurrent()
             #endif
@@ -135,7 +138,10 @@ final class HomeStore {
             #if DEBUG && targetEnvironment(simulator)
             print("SUNNY-PERF decode \(Int((CFAbsoluteTimeGetCurrent() - t0) * 1000)) ms, \(data.count / 1024) KB")
             #endif
-            if let old = home, reason == .tick || reason == .pull {
+            // Only the same book's legs are compared: switching Sunny ⇄ Nicolay is not "positions updated"
+            // (Nik, 8 Nov 2026: it said "26 changed" on every switch).
+            if homeBook != bookNow { changedLegs = [] }
+            if let old = home, homeBook == bookNow, reason == .tick || reason == .pull {
                 let before = Dictionary(old.legs.map { ($0.id, $0.n) }, uniquingKeysWith: +)
                 let after = Dictionary(payload.legs.map { ($0.id, $0.n) }, uniquingKeysWith: +)
                 let changed = Set(after.keys.filter { before[$0] != after[$0] })
@@ -144,6 +150,7 @@ final class HomeStore {
                 if !changed.isEmpty { showToast("Positions updated · \(changed.count) changed") }
             }
             home = payload
+            homeBook = bookNow
             if reason != .tick || words == nil || !MarketClock.isRegular(SClock.now(), calendar: payload.calendar) {
                 words = payload
             }
