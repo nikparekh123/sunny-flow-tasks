@@ -59,7 +59,10 @@ const row = (yp: ReturnType<typeof card>, t: string) => yp.rows.find((r) => r.id
 Deno.test('Your position · pre · Sunny', () => {
   const yp = card(BOOK_A, 'pre');
   assertEquals(fK(yp.dollarDelta), '$9.3K');
-  assertEquals(yp.stats.map((s) => s.v), ['$40K', '$3.8K', '$52K']);
+  // Money in K and M, the design's money() (8 Nov 2026): $624, $5.9K, $13.7K, $379K, $1.2M, no trailing .0, no sign.
+  assertEquals([624, 5920, 13740, 379000, 1.2e6, 1960, -4180, 999.4, 999.6, 99949, 99950, 999499, 999500].map(fK),
+    ['$624', '$5.9K', '$13.7K', '$379K', '$1.2M', '$2K', '$4.2K', '$999', '$1K', '$99.9K', '$100K', '$999K', '$1M']);
+  assertEquals(yp.stats.map((s) => s.v), ['$40.2K', '$3.8K', '$52K']);
   assertEquals(yp.stats.map((s) => s.c), ['green', 'green', 'red']);
   assertEquals(yp.cover, 'Insurance puts cover 4,000 of your 15,000 shares, 27%. Shares have no floor below that.');
   assertEquals(yp.count, '1 past its best, 2 thin at a priced move');
@@ -82,9 +85,9 @@ Deno.test('Your position · pre · Sunny', () => {
 Deno.test('Your position · open · Sunny and Nicolay', () => {
   const a = card(BOOK_A, 'open'), b = card(BOOK_B, 'open');
   assertEquals(fK(a.dollarDelta), '$9.4K');
-  assertEquals(a.stats.map((s) => s.v), ['$40K', '$3.4K', '$52K']);
+  assertEquals(a.stats.map((s) => s.v), ['$39.9K', '$3.4K', '$52.3K']);
   assertEquals(fK(b.dollarDelta), '$2.8K');
-  assertEquals(b.stats.map((s) => s.v), ['$12K', '$863', '$15K']);
+  assertEquals(b.stats.map((s) => s.v), ['$12K', '$863', '$15.4K']);
   assertEquals(b.cover, 'Insurance puts cover 1,200 of your 5,300 shares, 23%. Shares have no floor below that.');
   assertEquals(b.count, '2 past their best at a priced move');
   assertEquals(b.rows.slice(0, 2).map((r) => r.id), ['NKE', 'BABA']);
@@ -97,21 +100,21 @@ Deno.test('Your position · open · Sunny and Nicolay', () => {
 });
 
 Deno.test('Your position · post', () => {
-  assertEquals(card(BOOK_A, 'post').stats.map((s) => s.v), ['$40K', '$3.2K', '$53K']);
+  assertEquals(card(BOOK_A, 'post').stats.map((s) => s.v), ['$39.6K', '$3.2K', '$52.6K']);
   assertEquals(fK(card(BOOK_A, 'post').dollarDelta), '$9.5K');
   assertEquals(card(BOOK_B, 'post').stats[1].v, '$799');
 });
 
 Deno.test('Your position · weekend', () => {
   const a = card(BOOK_A, 'weekend'), b = card(BOOK_B, 'weekend');
-  assertEquals(text(a.sentence), 'This week’s calls ended Friday, so you are long only until Monday’s sales: a 1% rise makes you $11K. Selling again caps how much a rise can make.');
-  assertEquals(a.stats.map((s) => s.v), ['$55K', '$1.2K', '$56K']);
+  assertEquals(text(a.sentence), 'This week’s calls ended Friday, so you are long only until Monday’s sales: a 1% rise makes you $11.1K. Selling again caps how much a rise can make.');
+  assertEquals(a.stats.map((s) => s.v), ['$55.4K', '$1.2K', '$55.6K']);
   assertEquals(a.stats[1].l, 'flat to next Fri');
   assertEquals(a.count, 'Every name long at a priced move');
   assertEquals(row(a, 'NKE').right, 'Long 6,291 Δ');
   assertEquals(row(a, 'NKE').line, 'Keeps making more past ↑14.8%');
   assertEquals(row(a, 'NFLX').right, 'Long 3,274 Δ');
-  assertEquals(b.stats.map((s) => s.v), ['$16K', '$219', '$17K']);
+  assertEquals(b.stats.map((s) => s.v), ['$16.5K', '$219', '$16.5K']);
   assertEquals(row(b, 'NKE').right, 'Long 1,742 Δ');
 });
 

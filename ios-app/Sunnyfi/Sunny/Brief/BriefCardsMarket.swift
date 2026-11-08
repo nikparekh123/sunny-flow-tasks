@@ -87,8 +87,9 @@ struct BMarketsCard: View {
                     }
                     Spacer(minLength: 0)
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(r["value"].string ?? "").bLine(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(S.ink)
-                        BMove(text: r["move"].string, color: r["moveColor"].string, type: SType(size: 13, weight: 700, line: 16, tracking: 0))
+                        // Price and change 600 (Nov 8, was 700).
+                        Text(r["value"].string ?? "").bLine(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(S.ink)
+                        BMove(text: r["move"].string, color: r["moveColor"].string, type: SType(size: 13, weight: 600, line: 16, tracking: 0))
                     }
                 }
                 .padding(.vertical, 9)
@@ -338,6 +339,8 @@ private struct BMapCard: View {
     let page: JSONValue
     /// Spoken with the title: the sector's share of the S&P 500 (not shown, as in the design).
     var weight: String? = nil
+    /// A sector map rings the names the book holds; Your names and the watchlist do not.
+    var ring = false
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             BMapHead(page: page)
@@ -347,7 +350,7 @@ private struct BMapCard: View {
                                                BSay.move(page["move"].string, color: page["moveColor"].string),
                                                page["period"].string]))
                 .accessibilityAddTraits(.isHeader)
-            BHeatMap(page: page)
+            BHeatMap(page: page, ring: ring)
                 .padding(.horizontal, -2)
                 .padding(.bottom, -2)
                 .padding(.top, 12)
@@ -417,7 +420,7 @@ struct BSectorsRow: View {
             .padding(.top, -2)
             .briefCard()
             ForEach(Array(maps.enumerated()), id: \.offset) { _, m in
-                BMapCard(page: m, weight: m["weightOfSP500"].string)
+                BMapCard(page: m, weight: m["weightOfSP500"].string, ring: true)
             }
         }
     }

@@ -27,7 +27,8 @@ import { buildDoc, type NameDay } from './doc.ts';
 import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
-const BUILD = '2026-11-08.4';
+import { fK } from '../_shared/book-engine.ts';
+const BUILD = '2026-11-08.5';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -2376,7 +2377,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         if (Number(h.add) > 0) v2.push({ key: 'hedge', kind: 'thin', tag: 'Watch',
           lead: dg?.thin25 != null ? `Your hedge is thin past +${f1(dg.thin25)}%` : 'Your hedge is thin',
           body: `You stay long through ${dg?.m1 != null ? `a normal week's move, +${f1(dg.m1)}%` : 'a normal week'}.${dg?.sh != null ? ` Past +${f1(dg.sh)}% each rise costs you.` : ''}`
-            + ` Buying ${h.add} ${mdy(String(h.exp))} calls, about ${usd0(Number(h.cost))}, keeps you safe through ${thr}. It is in To do.` });
+            + ` Buying ${h.add} ${mdy(String(h.exp))} calls, about ${fK(Number(h.cost))}, keeps you safe through ${thr}. It is in To do.` });
         else v2.push({ key: 'hedge', kind: 'covered', tag: 'Helps', lead: 'The hedge covers a big week',
           body: `With the ${h.held} ${mdy(String(h.exp))} calls held, delta stays positive through ${thr}.` }); }
       { const ws = (p?.walls ?? []) as Row[], c1 = ws.find((w) => w.side === 'call' && w.rank === 1);

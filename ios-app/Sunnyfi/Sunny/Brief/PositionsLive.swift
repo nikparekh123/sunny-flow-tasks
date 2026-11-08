@@ -4,7 +4,7 @@
 //
 //  Positions on the real book (handoff 6 Nov 2026, Pass 2). When the tab opens a name, the phone asks
 //  sunny-positions for it with the signed-in user's token (RLS: members of the book only) and gets every leg's
-//  P&L, delta, theta and vega on a price-by-date grid, the OTM call a fix would buy, the walls by chain, the
+//  P&L, delta, theta and vega on a price-by-date grid (±12%, and out to ±50% for the chart's zoom), the OTM call a fix would buy, the walls by chain, the
 //  Technicals lines and, on the weekend, the legs that ended Friday. PositionsSource decodes each reply once,
 //  off the main thread, and keeps one model per name and build (never built in a view's body).
 //
@@ -78,7 +78,9 @@ final class PositionsSource {
         r.setValue(Secrets.supabasePublishableKey, forHTTPHeaderField: "apikey")
         let token = try await SupabaseService.client.auth.session.accessToken
         r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        r.httpBody = try JSONSerialization.data(withJSONObject: ["book": book, "t": t])
+        // `wide` (Nov 8, the chart's pinch zoom): prices out to ±50% as well; a server without it sends ±12%, and the
+        // chart then zooms no wider than its grid (PositionsModel.widestZoom).
+        r.httpBody = try JSONSerialization.data(withJSONObject: ["book": book, "t": t, "wide": true] as [String: Any])
         let (d, resp) = try await URLSession.shared.data(for: r)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         data = d

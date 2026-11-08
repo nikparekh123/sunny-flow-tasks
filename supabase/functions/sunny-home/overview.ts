@@ -9,7 +9,7 @@
 // Words (Nik, 7 Nov): never "turns short"; a name past its best at its priced move.
 // No em dashes; money lost is red with no minus sign.
 
-import { type Leg, NameBook } from '../_shared/book-engine.ts';
+import { fK, type Leg, NameBook } from '../_shared/book-engine.ts';
 
 type Row = Record<string, any>;
 type Span = { t: string; b?: boolean; c?: string };
@@ -27,9 +27,9 @@ const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const ymd = (d: string) => { const [y, m, dd] = d.split('-').map(Number); return { y, m, d: dd, wd: new Date(Date.UTC(y, m - 1, dd)).getUTCDay() }; };
 const md = (d: string) => `${MON[ymd(d).m - 1]} ${ymd(d).d}`;
 const dmd = (d: string) => `${DOW[ymd(d).wd]} ${md(d)}`;
-const $0 = (x: number) => `$${Math.round(Math.abs(x)).toLocaleString('en-US')}`;
 const n0 = (x: number) => Math.round(x).toLocaleString('en-US');
 const pc = (x: number) => `${Math.round(Math.abs(x))}%`;
+/** Pace is a weekly yield: two decimals, as the design writes it (0.60%, a usual week 0.50%). Money is in K and M (fK). */
 const p2 = (x: number) => `${Math.abs(x).toFixed(2)}%`;
 const sp = (t: string, ink = false): Span => ({ t, b: true, c: ink ? 'ink' : 'secondary' });
 const list = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
@@ -82,7 +82,7 @@ export function buildOverview(books: BookSide[], today: string, mins: number, co
   // Downside
   const down = sum((p) => p.downside), hold = sum((p) => p.hold), downPct = hold > 0 ? (-down / hold) * 100 : 0;
   const coverAll = sum((p) => p.shares) > 0 ? (sum((p) => p.covered) / sum((p) => p.shares)) * 100 : 0;
-  const downside = check('Downside', downPct > 5, down < 0 ? $0(down) : '$0',
+  const downside = check('Downside', downPct > 5, down < 0 ? fK(down) : fK(0),
     down < 0 ? `Lost by Friday if every name falls its priced move, ${downPct.toFixed(1)}% of what ${held.length > 1 ? 'both books hold' : 'the book holds'}.`
       : 'Nothing lost by Friday if every name falls its priced move.',
     [`Puts cover ${pc(coverAll)} of the shares`, ...per.filter((p) => p.shares > 0).map((p) => `${nm(p.b)} ${pc(p.covered / p.shares * 100)}`)], down < 0 ? 'red' : 'ink');
@@ -191,7 +191,7 @@ export function comingIn(books: BookSide[], divs: Row[], company: (t: string) =>
   }
   const all = [...amt.values()].reduce((s, v) => s + v, 0);
   if (!(all > 0)) return null;
-  return { title: 'Coming in', amount: $0(all), amountColor: 'green',
-    line: `Dividends by ${md(last)} from ${list([...names].map(company))}${books.filter((b) => (amt.get(b.id) ?? 0) > 0).length > 1 ? books.filter((b) => (amt.get(b.id) ?? 0) > 0).map((b) => ` · ${b.name} ${$0(amt.get(b.id)!)}`).join('') : ''} · kept apart from pace`,
+  return { title: 'Coming in', amount: fK(all), amountColor: 'green',
+    line: `Dividends by ${md(last)} from ${list([...names].map(company))}${books.filter((b) => (amt.get(b.id) ?? 0) > 0).length > 1 ? books.filter((b) => (amt.get(b.id) ?? 0) > 0).map((b) => ` · ${b.name} ${fK(amt.get(b.id)!)}`).join('') : ''} · kept apart from pace`,
     raw: books.map((b) => ({ id: b.id, amount: Math.round(amt.get(b.id) ?? 0) })) };
 }

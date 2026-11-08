@@ -156,7 +156,7 @@ struct SXBig: View {
         VStack(alignment: .leading, spacing: 4) {
             if let label { Text(label).sx(.headline).foregroundStyle(SX.ink) }
             Group {
-                if count, let n { SXCount(value: shown, fmt: fmt) } else { Text(value) }
+                if count, let n { SXCount(value: shown, target: n, final: value, fmt: fmt) } else { Text(value) }
             }
             .sx(type)
             .foregroundStyle(SX.tone(tone, SX.ink))
@@ -176,13 +176,15 @@ struct SXBig: View {
 }
 
 /// The count-up, frame by frame, in the big number's own format.
+/// Money counts up in K and M, as the design's money() does (8 Nov 2026), and lands on the server's own words.
 private struct SXCount: View, Animatable {
     var value: Double
+    let target: Double, final: String
     let fmt: String
     var animatableData: Double { get { value } set { value = newValue } }
     var body: some View {
-        let v = Int(value.rounded()).formatted(.number.grouping(.automatic))
-        Text(fmt == "$" ? "$" + v : v)
+        if value == target { Text(final) }
+        else { Text(fmt == "$" ? SampleEngine.fK(value) : Int(value.rounded()).formatted(.number.grouping(.automatic))) }
     }
 }
 

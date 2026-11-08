@@ -160,7 +160,12 @@ export class NameBook {
 }
 
 // ── Words and money (README 11.5) ───────────────────────────────────────────
-export const fK = (x: number) => { const a = Math.abs(x); return a >= 1e4 ? '$' + Math.round(a / 1000) + 'K' : a >= 1000 ? '$' + (a / 1000).toFixed(1) + 'K' : '$' + Math.round(a); };
+// Money in K and M, the design's money() (8 Nov 2026, README 11.5): $624, $5.9K, $13.7K, $379K, $1.2M, no trailing .0.
+// Stock prices, strikes, index levels, dividends a share and the account value stay exact (f$ / their own formats).
+export const fK = (x: number) => {
+  const a = Math.abs(+x || 0), s1 = (v: number, u: string) => '$' + v.toFixed(1).replace(/\.0$/, '') + u;
+  return a >= 999500 ? s1(a / 1e6, 'M') : a >= 99950 ? '$' + Math.round(a / 1e3) + 'K' : a >= 999.5 ? s1(a / 1e3, 'K') : '$' + Math.round(a);
+};
 export const f$ = (x: number) => '$' + Math.round(Math.abs(x)).toLocaleString('en-US');
 export const fn = (x: number) => Math.round(Math.abs(x)).toLocaleString('en-US');
 export const f1 = (x: number) => (Math.round(x * 10) / 10).toFixed(1);
@@ -278,10 +283,18 @@ const r0 = (x: number) => Math.round(x);
 const r1 = (x: number) => Math.round(x * 10) / 10;
 
 /** Every leg's P&L, delta, theta and vega on the chart's price grid (today's price ±12%) at every stop.
- *  The phone adds the legs that are on; gamma is the slope of the summed delta between grid points. */
-export function positionsGrid(nb: NameBook, stops: Stop[], otm: { K: number; ex: string; days: number; label: string } | null, nPts = 101): PositionsGrid {
+ *  The phone adds the legs that are on; gamma is the slope of the summed delta between grid points.
+ *  `wide` (Nov 8, the chart's pinch zoom, ±5% to ±50%): the same 101 prices inside ±12%, then every 0.5% out to
+ *  ±25% and every 1% out to ±50%, and the turns-short price searched to the widest range. X0 and X1 stay ±12%, the
+ *  range the chart opens on; a phone that does not ask for `wide` gets exactly the grid it always did. */
+export function positionsGrid(nb: NameBook, stops: Stop[], otm: { K: number; ex: string; days: number; label: string } | null, nPts = 101, wide = false): PositionsGrid {
   const X0 = nb.S0 * 0.88, X1 = nb.S0 * 1.12, S: number[] = [];
   for (let i = 0; i < nPts; i++) S.push(+(X0 + (X1 - X0) * i / (nPts - 1)).toFixed(4));
+  if (wide) {
+    const out: number[] = []; for (let p = 12.5; p <= 25 + 1e-9; p += 0.5) out.push(p); for (let p = 26; p <= 50 + 1e-9; p += 1) out.push(p);
+    S.unshift(...out.slice().reverse().map((p) => +(nb.S0 * (1 - p / 100)).toFixed(4)));
+    S.push(...out.map((p) => +(nb.S0 * (1 + p / 100)).toFixed(4)));
+  }
   const grid = (l: Leg, f: (l: Leg, s: number, tt: number) => number, rd: (x: number) => number) => stops.map((st) => S.map((s) => rd(f(l, s, st.tt))));
   const legs: GridLeg[] = nb.legs.map((l) => ({
     k: l.k, kind: l.kind, ty: l.ty, K: l.K, q: l.q, ex: l.ex, days: +l.days.toFixed(3), label: l.label,
@@ -299,7 +312,7 @@ export function positionsGrid(nb: NameBook, stops: Stop[], otm: { K: number; ex:
   }
   return {
     t: nb.t, S0: nb.S0, P0: nb.P0, iv: nb.iv, sd: nb.S0 * nb.iv * Math.sqrt(5 / 252), X0, X1, S, stops, legs, fix,
-    turnsShort: stops.map((st) => nb.turnsShort(st.tt, X1 * 1.05)?.price ?? null),
+    turnsShort: stops.map((st) => nb.turnsShort(st.tt, (wide ? nb.S0 * 1.5 : X1) * 1.05)?.price ?? null),
   };
 }
 

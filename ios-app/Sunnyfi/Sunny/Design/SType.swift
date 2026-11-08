@@ -70,15 +70,22 @@ struct SType {
     nonisolated(unsafe) private static var cache: [String: UIFont] = [:]
     private static let lock = NSLock()
 
-    /// ⚠ SF PRO EVERYWHERE (handoff 6 Nov 2026, Nik's answer 10): the system font, with tabular figures on
-    /// every number. Inter was the web prototype's stand-in. The `wght` value maps to the nearest system
-    /// weight (500 Medium, 600 Semibold, 700 Bold, 800 Heavy); SF picks its Text or Display cut by size.
+    /// ⚠ INTER EVERYWHERE (Nov 8 2026, Nik and the design review): the design is drawn in Inter, the web uses Inter,
+    /// so the app does too; SF Pro read about one weight heavier at the same number. One variable font: the weight is
+    /// the `wght` axis (400 Regular ... 800 ExtraBold, 1:1 with the CSS), `opsz` stays at 14 (the design's Google
+    /// Fonts Inter is the text cut at every size). Native controls (segmented Pickers, tab bar labels, menus, the
+    /// keyboard) keep the system font on their own.
     private func make(tabular: Bool) -> UIFont {
-        let base = UIFont.systemFont(ofSize: size, weight: Self.systemWeight(weight))
-        guard tabular else { return base }
-        let attrs: [UIFontDescriptor.AttributeName: Any] = [
-            .featureSettings: [[UIFontDescriptor.FeatureKey.type: kNumberSpacingType,
-                                UIFontDescriptor.FeatureKey.selector: kMonospacedNumbersSelector]]]
+        guard let base = UIFont(name: "Inter", size: size) else {
+            return .systemFont(ofSize: size, weight: Self.systemWeight(weight))
+        }
+        var attrs: [UIFontDescriptor.AttributeName: Any] = [
+            UIFontDescriptor.AttributeName(rawValue: "NSCTFontVariationAttribute"): [0x77676874: weight, 0x6F70737A: 14],
+        ]
+        if tabular {
+            attrs[.featureSettings] = [[UIFontDescriptor.FeatureKey.type: kNumberSpacingType,
+                                         UIFontDescriptor.FeatureKey.selector: kMonospacedNumbersSelector]]
+        }
         return UIFont(descriptor: base.fontDescriptor.addingAttributes(attrs), size: size)
     }
 
@@ -156,8 +163,29 @@ private struct SFontModifier: ViewModifier {
     @Environment(\.dynamicTypeSize) private var dts
     @Environment(\.sTypeScales) private var scales
     func body(content: Content) -> some View {
-        let f = Font.system(size: scales ? SDynamic.scaled(size, dts) : size, weight: weight)
-        content.font(mono ? f.monospacedDigit() : f)
+        // Inter, like every other text (Nov 8); the weight names map 1:1 to the CSS numbers.
+        content.font(.inter(scales ? SDynamic.scaled(size, dts) : size, Font.wght(weight), tabular: mono))
+    }
+}
+
+extension Font {
+    /// Inter at a size and CSS weight (400 Regular ... 800 ExtraBold), tabular figures on request.
+    static func inter(_ size: CGFloat, _ weight: CGFloat, tabular: Bool = false) -> Font {
+        Font(SType(size: size, weight: weight, line: size, tracking: 0).uiFont(tabular: tabular))
+    }
+    /// A SwiftUI weight as the CSS number.
+    static func wght(_ w: Font.Weight) -> CGFloat {
+        switch w {
+        case .ultraLight: 200
+        case .thin: 250
+        case .light: 300
+        case .medium: 500
+        case .semibold: 600
+        case .bold: 700
+        case .heavy: 800
+        case .black: 900
+        default: 400
+        }
     }
 }
 

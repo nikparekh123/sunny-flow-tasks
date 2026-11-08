@@ -65,6 +65,7 @@ struct YourPositionCard: View {
                 }
             }
             .padding(.top, 6)
+            .environment(\.sTypeScales, false)   // chart labels keep their size: the axis is drawn to it (they collided at large text)
             .accessibilityHidden(true)   // the payoff's spoken summary covers the axis
             HStack(spacing: 12) {
                 HStack(spacing: 5) {
@@ -145,7 +146,8 @@ struct YourPositionCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 0) {
-                Text(r.right).sType(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(BK.color(r.rightColor)).lineLimit(1)
+                // 15/20 600 (Nov 8, was 700).
+                Text(r.right).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(BK.color(r.rightColor)).lineLimit(1)
                 if !r.at.isEmpty {   // empty for a name with no option prices (no priced move)
                     Text(r.at).sType(SType(size: 12, weight: 500, line: 15, tracking: 0)).foregroundStyle(S.secondary).lineLimit(1)
                 }
@@ -229,6 +231,7 @@ struct PayoffChart: View {
                         .foregroundStyle(S.act).lineLimit(1).padding(.horizontal, 4)
                 }
                 .offset(y: -2)
+                .environment(\.sTypeScales, false)   // a chart label, drawn to the chart
                 .accessibilityHidden(true)
             }
         }

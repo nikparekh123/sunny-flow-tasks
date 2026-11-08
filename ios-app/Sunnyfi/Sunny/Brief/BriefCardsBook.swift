@@ -50,22 +50,237 @@ private struct BHead: View {
     }
 }
 
-/// Week or month labels under a bar row: 11/14 medium secondary, the last one 800 ink.
+/// Week or month labels on their own row under a bar grid (the design's `margin-top:-4px` row): 11/14 500 secondary,
+/// the marked one (`strong`, else the last) 800 ink, one per column, `spacing` apart. Each label sits centred on its
+/// column at its own width and never shrinks, so "This week" stays one line even where it is a hair wider than the
+/// bar above it: it may reach 3 into each gap, so two neighbours always keep 4 between them. Only at a larger text
+/// size, and only a label wider than that, wraps (centred).
 private struct BBarLabels: View {
     let labels: [String]
+    var strong: Int? = nil
     var spacing: CGFloat = 10
     @Environment(\.dynamicTypeSize) private var dts
+    @Environment(\.sTypeScales) private var scales
     var body: some View {
-        HStack(spacing: spacing) {
+        let big = scales && dts > .large
+        BLabelRow(spacing: spacing, spill: max(0, (spacing - 4) / 2)) {
             ForEach(Array(labels.enumerated()), id: \.offset) { i, l in
-                let last = i == labels.count - 1
-                Text(l).sType(SType(size: 11, weight: last ? 800 : 500, line: 14, tracking: 0), tabular: false)
-                    .foregroundStyle(last ? S.ink : S.secondary)
-                    .lineLimit(dts > .large ? nil : 1).minimumScaleFactor(dts > .large ? 1 : 0.8)   // wraps only at large text (Audit 6)
-                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: dts > .large)
-                    .frame(maxWidth: .infinity)
+                let on = i == (strong ?? labels.count - 1)
+                Text(l).sType(SType(size: 11, weight: on ? 800 : 500, line: 14, tracking: 0), tabular: false)
+                    .foregroundStyle(on ? S.ink : S.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(big ? nil : 1)
+                    .fixedSize(horizontal: !big, vertical: true)
             }
         }
+    }
+}
+
+/// Equal columns `spacing` apart; each child centred on its column, offered the column plus `spill` on each side.
+private struct BLabelRow: Layout {
+    var spacing: CGFloat
+    var spill: CGFloat
+    private func col(_ w: CGFloat, _ n: Int) -> CGFloat { (w - spacing * CGFloat(max(n - 1, 0))) / CGFloat(max(n, 1)) }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let w = proposal.width ?? 0, c = col(w, subviews.count)
+        let h = subviews.map { $0.sizeThatFits(ProposedViewSize(width: c + 2 * spill, height: nil)).height }.max() ?? 0
+        return CGSize(width: w, height: h)
+    }
+    func placeSubviews(in b: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let c = col(b.width, subviews.count)
+        for (i, v) in subviews.enumerated() {
+            let s = v.sizeThatFits(ProposedViewSize(width: c + 2 * spill, height: nil))
+            v.place(at: CGPoint(x: b.minX + CGFloat(i) * (c + spacing) + c / 2, y: b.minY), anchor: .top, proposal: ProposedViewSize(s))
+        }
+    }
+}
+
+/// One bar per week or month on one baseline, the design's grid (SunnyBriefs Yield and Payback): `count` columns 10
+/// apart, bottom aligned in a grid `grid` tall; each column its value (11/13, 700 in the value's colour, the marked
+/// one 800 in the bar's tint) 4 over a bar of radius 6, the tallest `tallest` and the rest to scale (2 at least),
+/// green, or red for a week or month that lost, at 35% (the marked one full). The value row is reserved over the
+/// tallest bar: the grid grows if the value's line would not fit, so a value is never cut. Every value is one size.
+private struct BColumnBars: View {
+    let bars: [JSONValue]
+    var grid: CGFloat = 84
+    var tallest: CGFloat = 56
+    var privacy = false
+    var title: String? = nil
+    @Environment(\.dynamicTypeSize) private var dts
+    @Environment(\.sTypeScales) private var scales
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    @State private var width: CGFloat = 0
+
+    /// The values' type at the phone's text size, made smaller all together (never one bar alone) only when the
+    /// widest value would reach past its column and 3 into each gap: at the largest text sizes five values such as
+    /// "4.34%" would otherwise run into each other and push the card wider than the screen.
+    private func valueType() -> SType {
+        let base = SType(size: 11, weight: 700, line: 13, tracking: 0)
+        let t = scales ? base.scaled(dts) : base
+        guard width > 0, !bars.isEmpty else { return t }
+        let n = CGFloat(bars.count), room = (width - 10 * (n - 1)) / n + 6
+        let f = t.weighted(800).uiFont(tabular: true)
+        let widest = bars.map { (BriefWords.plain($0["value"].string, privacy: privacy) as NSString).size(withAttributes: [.font: f]).width }.max() ?? 0
+        guard widest > room, widest > 0 else { return t }
+        let k = max(11 / t.size, room / widest)   // never under the design's own 11
+        return SType(size: (t.size * k * 2).rounded(.down) / 2, weight: 700, line: (t.line * k).rounded(), tracking: 0)
+    }
+
+    /// The signed number when the server sends one (`n` money, `signed` a yield), else the label's own number.
+    private var vals: [Double] { bars.map { $0["n"].double ?? $0["signed"].double ?? $0["value"].double ?? 0 } }
+
+    /// One spoken line for the whole chart: each bar's label and value, a loss as "down", money "hidden" under privacy.
+    private func summary(_ vals: [Double]) -> String {
+        let items = bars.enumerated().map { i, b -> String in
+            let v = BSay.words(b["value"].string, privacy: privacy)
+            return BSay.join([b["label"].string, v.isEmpty ? (b["empty"].bool ? "none yet" : nil) : (vals[i] < 0 ? "down " + v : v)], " ")
+        }
+        return BSay.join([title, items.joined(separator: ", ")], ": ")
+    }
+
+    var body: some View {
+        let vals = vals
+        let mx = max(vals.map(abs).max() ?? 1, 0.0001)
+        let marked = bars.firstIndex { $0["highlight"].bool } ?? bars.count - 1
+        let value = valueType()   // already at the phone's text size
+        let line = value.line
+        VStack(spacing: 4) {
+            HStack(alignment: .bottom, spacing: 10) {
+                ForEach(Array(bars.enumerated()), id: \.offset) { i, b in
+                    let hl = i == marked, tint = vals[i] < 0 ? S.red : S.green
+                    VStack(spacing: 4) {
+                        // The value's row is reserved at its line; the value is centred on the column at its own
+                        // width and never sets the column's width (the columns share the card evenly).
+                        Color.clear.frame(height: line).overlay {
+                            BriefWords.line(b["value"].string, privacy: privacy)
+                                .sType(value.weighted(hl ? 800 : 700))
+                                .environment(\.sTypeScales, false)
+                                .foregroundStyle(hl ? tint : BK.color(b["valueColor"].string))
+                                .lineLimit(1).fixedSize()
+                        }
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(b["empty"].bool ? S.chip : hl ? tint : tint.opacity(0.35))
+                            .frame(height: max(2, tallest * CGFloat(abs(vals[i]) / mx)))
+                            // Bar fills on the page curve (never the segmented spring), instant under Reduce Motion.
+                            .animation(S.moving(S.page, reduce), value: vals[i])
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(height: max(grid, line + 4 + tallest), alignment: .bottom)
+            BBarLabels(labels: bars.map { $0["label"].string ?? "" }, strong: marked)
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(summary(vals))
+    }
+}
+
+/// The month's weeks in Results (SunnyBriefs p31.res.isM): the legend (12/15 700, 10 pt swatches of radius 3, 14
+/// apart), then each week a pair of bars around one zero line: Sold, kept (green, 8% in, 38% wide) and Long (grey at
+/// 45%, 54% in, 38% wide), radius 5, the longest 63 and the rest to scale, up for a gain and down for a loss, each
+/// value (11/13 700, unsigned, in its colour) 2 beyond its bar's end and centred over it. The zero line sits 70 down
+/// a 150 box (lower, and the box taller, only when a bar and its value need it). A month shows at least four week
+/// columns, filled from the left; the weeks' dates on their own row 6 under the box, the current week 800 ink.
+private struct BPairedWeeks: View {
+    let chart: JSONValue
+    let privacy: Bool
+    @Environment(\.dynamicTypeSize) private var dts
+    @Environment(\.sTypeScales) private var scales
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    @State private var width: CGFloat = 0
+
+    struct Value { let n: Double; let text: String; let color: String? }
+    struct Week { let label: String; let hl: Bool; let sold: Value; let long: Value }
+
+    /// The signed dollars (`n`, sunny-home v132), else the label read back ("$15.8K", negative when red).
+    private static func value(_ v: JSONValue) -> Value {
+        let t = v["value"].string ?? ""
+        if let n = v["n"].double { return Value(n: n, text: t, color: v["valueColor"].string) }
+        var s = t.filter { "0123456789.KM".contains($0) }, m = 1.0
+        if s.hasSuffix("K") { m = 1e3; s.removeLast() } else if s.hasSuffix("M") { m = 1e6; s.removeLast() }
+        return Value(n: (Double(s) ?? 0) * m * (v["valueColor"].string == "red" ? -1 : 1), text: t, color: v["valueColor"].string)
+    }
+
+    private var weeks: [Week] {
+        chart["groups"].array.map { g in
+            let vs = g["values"].array
+            let sold = vs.first { $0["series"].string == "Sold, kept" } ?? vs.first ?? .null
+            let long = vs.first { $0["series"].string == "Long" } ?? (vs.count > 1 ? vs[1] : .null)
+            return Week(label: g["label"].string ?? "", hl: g["highlight"].bool, sold: Self.value(sold), long: Self.value(long))
+        }
+    }
+
+    /// The values' type at the phone's text size, smaller all together only if the widest would not fit its half of
+    /// a column (54%, plus 2 each side).
+    private func valueType(_ ws: [Week], cols: Int) -> SType {
+        let base = SType(size: 11, weight: 700, line: 13, tracking: 0)
+        let t = scales ? base.scaled(dts) : base
+        guard width > 0 else { return t }
+        let col = (width - 10 * CGFloat(cols - 1)) / CGFloat(cols), room = col * 0.54 + 4
+        let f = t.uiFont(tabular: true)
+        let widest = ws.flatMap { [$0.sold.text, $0.long.text] }
+            .map { (BriefWords.plain($0, privacy: privacy) as NSString).size(withAttributes: [.font: f]).width }.max() ?? 0
+        guard widest > room, widest > 0 else { return t }
+        let k = max(11 / t.size, room / widest)
+        return SType(size: (t.size * k * 2).rounded(.down) / 2, weight: 700, line: (t.line * k).rounded(), tracking: 0)
+    }
+
+    var body: some View {
+        let ws = weeks, cols = max(4, ws.count)
+        let mx = max(ws.flatMap { [abs($0.sold.n), abs($0.long.n)] }.max() ?? 1, 1)
+        let k = 63 / mx
+        let up = CGFloat(ws.flatMap { [$0.sold.n, $0.long.n] }.map { max(0, $0) }.max() ?? 0) * k
+        let down = CGFloat(ws.flatMap { [$0.sold.n, $0.long.n] }.map { max(0, -$0) }.max() ?? 0) * k
+        let vt = valueType(ws, cols: cols), lh = vt.line
+        let zero = max(70, up + 2 + lh), box = max(150, zero + down + 2 + lh)
+        let legend = chart["legend"].array.compactMap(\.string)
+        let grey = Color(.sRGB, red: 118 / 255, green: 118 / 255, blue: 128 / 255, opacity: 0.45)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 14) {
+                ForEach(Array(legend.enumerated()), id: \.offset) { i, l in
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 3).fill(i == 0 ? S.green : grey).frame(width: 10, height: 10)
+                        Text(l).sType(BB.legend, tabular: false).foregroundStyle(S.ink)
+                    }
+                }
+            }
+            .accessibilityHidden(true)
+            VStack(spacing: 6) {
+                GeometryReader { g in
+                    let col = (g.size.width - 10 * CGFloat(cols - 1)) / CGFloat(cols)
+                    ZStack(alignment: .topLeading) {
+                        Rectangle().fill(S.hairline).frame(width: g.size.width, height: 1).offset(y: zero)
+                        ForEach(Array(ws.enumerated()), id: \.offset) { i, w in
+                            let x0 = CGFloat(i) * (col + 10)
+                            ForEach(0..<2, id: \.self) { j in
+                                let v = j == 0 ? w.sold : w.long
+                                let h = CGFloat(abs(v.n)) * k, pos = v.n >= 0
+                                RoundedRectangle(cornerRadius: 5, style: .continuous).fill(j == 0 ? S.green : grey)
+                                    .frame(width: col * 0.38, height: max(1, h))
+                                    .offset(x: x0 + col * (j == 0 ? 0.08 : 0.54), y: pos ? zero - h : zero)
+                                    .animation(S.moving(S.page, reduce), value: v.n)
+                                BriefWords.line(v.text, privacy: privacy).sType(vt).environment(\.sTypeScales, false)
+                                    .foregroundStyle(BK.color(v.color)).lineLimit(1).fixedSize()
+                                    .frame(width: col * 0.54, height: lh)
+                                    .offset(x: x0 + col * (j == 0 ? 0 : 0.46), y: pos ? zero - h - 2 - lh : zero + h + 2)
+                            }
+                        }
+                    }
+                }
+                .frame(height: box)
+                BBarLabels(labels: ws.map(\.label) + Array(repeating: "", count: cols - ws.count),
+                           strong: ws.firstIndex { $0.hl } ?? max(0, ws.count - 1))
+            }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        // One stop: "Sold, kept and Long, week by week: Nov 2, sold, kept down $16.4K, long up $15.8K".
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(BSay.join([legend.joined(separator: " and ") + ", week by week",
+                                       ws.map { w in BSay.join([w.label,
+                                                                "sold, kept " + (w.sold.n < 0 ? "down " : "") + BSay.words(w.sold.text, privacy: privacy),
+                                                                "long " + (w.long.n < 0 ? "down " : "up ") + BSay.words(w.long.text, privacy: privacy)]) }
+                                           .joined(separator: "; ")], ": "))
     }
 }
 
@@ -327,7 +542,7 @@ struct BWhatIfChart: View {
                     ctx.fill(dot, with: .color(S.ink))
                     ctx.stroke(dot, with: .color(S.paper), lineWidth: 2)
                     // SVG text: 11 bold, centred on Today, baseline at 9.
-                    ctx.draw(Text("Today").font(.system(size: 11, weight: .bold)).foregroundStyle(S.ink), at: CGPoint(x: m.today.x, y: 9), anchor: UnitPoint(x: 0.5, y: 0.78))
+                    ctx.draw(Text("Today").font(.inter(11, 700)).foregroundStyle(S.ink), at: CGPoint(x: m.today.x, y: 9), anchor: UnitPoint(x: 0.5, y: 0.78))
                 }
                 ForEach(Array((m.strikeLabels + m.wallLabels).enumerated()), id: \.offset) { _, k in
                     Text(k.l).sType(SType(size: 12, weight: 700, line: 13, tracking: 0)).foregroundStyle(k.c).lineLimit(1).fixedSize()
@@ -490,29 +705,44 @@ struct BResults: View {
     let card: JSONValue
     let privacy: Bool
     @State private var seg: String = ""
+    @Environment(\.accessibilityReduceMotion) private var reduce
     var body: some View {
         let segs = card["segments"].array.compactMap(\.string)
         let pick = seg.isEmpty ? (card["selected"].string ?? segs.first ?? "") : seg
         let s = card["bySegment"][pick]
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center, spacing: 8) {
-                BTitle(t: card["title"].string)
-                Spacer(minLength: 0)
-                if segs.count > 1 {
-                    BSegmented(items: segs, selected: Binding(get: { pick }, set: { seg = $0 })).frame(width: 184)   // two 1fr cells of "This week" + 28, track 2
+            // The title and the range switch on one row; at a large text size the switch drops under the title.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 8) {
+                    BTitle(t: card["title"].string)
+                    Spacer(minLength: 0)
+                    rangePicker(segs, pick)
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    BTitle(t: card["title"].string)
+                    rangePicker(segs, pick)
                 }
             }
             // The range's blocks, 12 apart; the dividends and each chart under a rule, 12 below it.
             VStack(alignment: .leading, spacing: 12) {
+                // The month (SunnyBriefs p31.res.isM): the pace line sits under the big number's sub (14/19 700 ink),
+                // then the legend and the weeks' paired bars, then the stats.
+                let paired = s["charts"].array.first { !$0["groups"].array.isEmpty }
                 if let b = s["big"].string {
                     VStack(alignment: .leading, spacing: 2) {
                         BriefWords.line(b, privacy: privacy).sType(BB.big).foregroundStyle(BK.color(s["bigColor"].string))
                         BriefWords.line(s["bigSub"].string, privacy: privacy).sType(BB.bigSub, tabular: false).foregroundStyle(S.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                        if let t = paired?["title"].string {
+                            BriefWords.line(t, privacy: privacy).sType(SType(size: 14, weight: 700, line: 19, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
+                if let p = paired { BPairedWeeks(chart: p, privacy: privacy) }
                 BStats(stats: s["stats"].array, privacy: privacy)
-                BBody(v: s["body"], privacy: privacy, type: BB.body)
+                // An empty paragraph ("body": "") takes no row and no gap.
+                if !BriefSpan.list(s["body"]).map(\.t).joined().isEmpty { BBody(v: s["body"], privacy: privacy, type: BB.body) }
                 let dv = s["dividends"]
                 if !dv.isNull {
                     VStack(alignment: .leading, spacing: 0) {
@@ -523,33 +753,38 @@ struct BResults: View {
                                 BBody(v: dv["line"], privacy: privacy, type: BB.note)
                             }
                             Spacer(minLength: 0)
-                            BriefWords.line(dv["right"].string, privacy: privacy).sType(SType(size: 17, weight: 800, line: 22, tracking: 0))
-                                .foregroundStyle(BK.color(dv["rightColor"].string)).lineLimit(1).fixedSize()
+                            // "None this week" is 15/20 regular in ink (Nov 8); an amount stays 17/22 heavy in its colour.
+                            let none = (dv["right"].string ?? "").hasPrefix("None")
+                            BriefWords.line(dv["right"].string, privacy: privacy)
+                                .sType(none ? SType(size: 15, weight: 400, line: 20, tracking: 0) : SType(size: 17, weight: 800, line: 22, tracking: 0))
+                                .foregroundStyle(none ? S.ink : BK.color(dv["rightColor"].string)).lineLimit(1).fixedSize()
                         }
                         .padding(.top, 12)
                     }
                 }
-                ForEach(Array(s["charts"].array.enumerated()), id: \.offset) { _, c in
+                // The week's charts under a rule (the month's paired weeks are drawn above, under the big number).
+                ForEach(Array(s["charts"].array.filter { $0["groups"].array.isEmpty }.enumerated()), id: \.offset) { _, c in
                     VStack(alignment: .leading, spacing: 0) {
                         BHairline()
                         VStack(alignment: .leading, spacing: 8) {
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Text(c["title"].string ?? "").sType(SType(size: 14, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                                Spacer(minLength: 0)
-                                if let sub = c["sub"].string { BriefWords.line(sub, privacy: privacy).sType(BB.note, tabular: false).foregroundStyle(S.secondary) }
-                            }
-                            // The bars' grid is 84 tall, the labels 4 under it (11/14).
-                            Group {
-                                if !c["bars"].array.isEmpty {
-                                    BBars(bars: c["bars"].array, height: 56, privacy: privacy, title: c["title"].string)
-                                } else if !c["groups"].array.isEmpty {
-                                    BBars(bars: c["groups"].array.map { g in
-                                        JSONValue.object(["label": g["label"], "highlight": g["highlight"],
-                                                          "value": g["values"][0]["value"], "valueColor": g["values"][0]["valueColor"]])
-                                    }, height: 56, privacy: privacy, title: c["title"].string)
+                            // The caption sits in the header row, right, on the title's baseline; at a large text
+                            // size it drops under the title rather than running into it.
+                            ViewThatFits(in: .horizontal) {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    chartTitle(c)
+                                    Spacer(minLength: 0)
+                                    chartSub(c)
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    chartTitle(c)
+                                    chartSub(c)
                                 }
                             }
-                            .frame(height: 102, alignment: .bottom)
+                            // The grid 84 tall (the tallest bar 56, its value row reserved above it), the dates on
+                            // their own row 4 under the baseline.
+                            if !c["bars"].array.isEmpty {
+                                BColumnBars(bars: c["bars"].array, grid: 84, tallest: 56, privacy: privacy, title: c["title"].string)
+                            }
                             if let n = c["note"].string { Text(n).sType(BB.body, tabular: false).foregroundStyle(S.ink).fixedSize(horizontal: false, vertical: true) }
                         }
                         .padding(.top, 12)
@@ -559,6 +794,31 @@ struct BResults: View {
         }
         .briefCard()
         .padding(.horizontal, S.margin)
+    }
+
+    /// The range switch: the native segmented control (Liquid Glass, the system font), Nik's call for the two
+    /// Results cards only (build review 4). The card under it reflows on the page curve.
+    @ViewBuilder private func rangePicker(_ segs: [String], _ pick: String) -> some View {
+        if segs.count > 1 {
+            Picker(card["title"].string ?? "Range", selection: Binding(get: { pick }, set: { v in withAnimation(S.moving(S.page, reduce)) { seg = v } })) {
+                ForEach(segs, id: \.self) { Text($0).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .sensoryFeedback(.selection, trigger: pick)
+        }
+    }
+
+    private func chartTitle(_ c: JSONValue) -> some View {
+        Text(c["title"].string ?? "").sType(SType(size: 14, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder private func chartSub(_ c: JSONValue) -> some View {
+        if let sub = c["sub"].string {
+            BriefWords.line(sub, privacy: privacy).sType(BB.note, tabular: false).foregroundStyle(S.secondary).lineLimit(1).fixedSize()
+        }
     }
 }
 
@@ -733,6 +993,8 @@ struct BOrders: View {
 struct BThetaMonth: View {
     let card: JSONValue
     let privacy: Bool
+    @Environment(\.dynamicTypeSize) private var dts
+    @Environment(\.sTypeScales) private var scales
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             BHead(card: card)
@@ -748,6 +1010,8 @@ struct BThetaMonth: View {
             // The weeks: a 108 tall grid of bar pairs (the tallest 84), the labels 12 under it.
             let weeks = card["weeks"].array
             let mx = weeks.compactMap { Double(($0["ratio"].string ?? "").replacingOccurrences(of: "×", with: "")) }.max() ?? 1
+            let ratio = SType(size: 12, weight: 800, line: 14, tracking: 0)
+            let ratioLine = scales ? ratio.scaled(dts).line : ratio.line
             VStack(spacing: 12) {
                 HStack(alignment: .bottom, spacing: 10) {
                     ForEach(Array(weeks.enumerated()), id: \.offset) { i, w in
@@ -755,8 +1019,11 @@ struct BThetaMonth: View {
                         let now = i == weeks.count - 1, op = now ? 1 : 0.38
                         let bar = UnevenRoundedRectangle(topLeadingRadius: 4, bottomLeadingRadius: 1, bottomTrailingRadius: 1, topTrailingRadius: 4)
                         VStack(spacing: 5) {
-                            Text(w["ratio"].string ?? "").sType(SType(size: 12, weight: 800, line: 14, tracking: 0)).foregroundStyle(now ? S.ink : S.secondary)
-                                .lineLimit(1).fixedSize()
+                            // Centred at its own width; it never widens its column.
+                            Color.clear.frame(height: ratioLine).overlay {
+                                Text(w["ratio"].string ?? "").sType(ratio).foregroundStyle(now ? S.ink : S.secondary)
+                                    .lineLimit(1).fixedSize()
+                            }
                             HStack(alignment: .bottom, spacing: 3) {
                                 bar.fill(S.green.opacity(op)).frame(height: 84 * CGFloat(r / mx))
                                 bar.fill(S.red.opacity(op)).frame(height: 84 / CGFloat(mx))
@@ -765,7 +1032,8 @@ struct BThetaMonth: View {
                         .frame(maxWidth: .infinity)
                     }
                 }
-                .frame(height: 108, alignment: .bottom)
+                // 108 tall (the tallest bar 84); the ratio row stays reserved over it at a larger text size.
+                .frame(height: max(108, ratioLine + 5 + 84), alignment: .bottom)
                 BBarLabels(labels: weeks.map { $0["label"].string ?? "" })
             }
             // The weeks as one stop: "Collected against paid in decay, week by week: Sep 28 3.9 times, ...".
@@ -799,11 +1067,11 @@ struct BPayback: View {
             }
             let ch = card["chart"]
             if !ch.isNull {
-                // The title 8 over a 90 tall grid (the tallest bar 70), the months 4 under it.
+                // The title 8 over a 90 tall grid (the tallest bar 70, every bar to scale on one baseline, every value
+                // one size), the months on their own row 4 under it.
                 VStack(alignment: .leading, spacing: 8) {
                     Text(ch["title"].string ?? "").sType(SType(size: 14, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                    BBars(bars: ch["bars"].array, height: 70, privacy: privacy, title: ch["title"].string)
-                        .frame(height: 108, alignment: .bottom)
+                    BColumnBars(bars: ch["bars"].array, grid: 90, tallest: 70, privacy: privacy, title: ch["title"].string)
                 }
             }
             VStack(spacing: 0) {

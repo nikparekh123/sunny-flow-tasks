@@ -166,14 +166,16 @@ enum S {
     /// The economy's older readings (SunnyEconomy --bar): solid on a sheet, see-through on glass; the latest is ink.
     static let econBar      = dyn(0xD1D1D6, 0x48484A)
     static let econBarGlass = dynA(0x1D1D1F, 0.16, 0xFFFFFF, 0.24)
-    /// Heat-map tiles (Your names, Sectors; SunnyEconomy tc(), Nik 4 Nov): the app's green and red, pale to full,
-    /// four steps by the size of the move (under 0.5%, 1.5%, 3%, then more). Ink text on them in light, white in dark.
-    static let heatTileUp   = [dyn(0xE2F2E0, 0x1D3521), dyn(0xC2E4BE, 0x22492A), dyn(0x8FCF89, 0x2A6232), dyn(0x4FA554, 0x347D3A)]
-    static let heatTileDown = [dyn(0xFBE3E2, 0x3D2322), dyn(0xF6C4C2, 0x572927), dyn(0xEE9B97, 0x77302D), dyn(0xE26F6A, 0xA53A35)]
-    static func heatTile(_ move: Double) -> Color {
-        let a = abs(move), i = a < 0.5 ? 0 : a < 1.5 ? 1 : a < 3 ? 2 : 3
-        return (move >= 0 ? heatTileUp : heatTileDown)[i]
-    }
+    /// Heat-map tiles (Your names, Sectors; SunnyEconomy tc(), Nik 4 Nov, 8 Nov): the app's green and red, pale to full,
+    /// four steps by the size of the move (under 0.5%, 1.5%, 3%, then more). The text is the tile's own colour (README
+    /// 11.2, Nov 8): darker on pale tiles, lighter on deep ones, every pair 4.5:1. The deepest fills went a shade darker.
+    static let heatTileUp   = [dyn(0xE2F2E0, 0x1D3521), dyn(0xC2E4BE, 0x22492A), dyn(0x8FCF89, 0x2A6232), dyn(0x2B7330, 0x2E7034)]
+    static let heatTileDown = [dyn(0xFBE3E2, 0x3D2322), dyn(0xF6C4C2, 0x572927), dyn(0xEE9B97, 0x77302D), dyn(0xB8322D, 0xA53A35)]
+    static let heatInkUp    = [dyn(0x1F5A23, 0xA8DCA3), dyn(0x1A5220, 0xB5E3B0), dyn(0x123F16, 0xC8EDC4), dyn(0xE4F4E1, 0xE3F5E0)]
+    static let heatInkDown  = [dyn(0x8E2420, 0xF2A9A5), dyn(0x7D1F1B, 0xF5B8B4), dyn(0x5E1411, 0xF9CFCC), dyn(0xFDE7E5, 0xFDE5E3)]
+    static func heatStep(_ move: Double) -> Int { let a = abs(move); return a < 0.5 ? 0 : a < 1.5 ? 1 : a < 3 ? 2 : 3 }
+    static func heatTile(_ move: Double) -> Color { (move >= 0 ? heatTileUp : heatTileDown)[heatStep(move)] }
+    static func heatInk(_ move: Double) -> Color { (move >= 0 ? heatInkUp : heatInkDown)[heatStep(move)] }
 
     /// A figure on the chart and its stats: red when below zero, else ink.
     static func lossInk(_ v: Double) -> Color { v < 0 ? red : ink }

@@ -44,7 +44,26 @@ struct PositionsModel {
     let v: Double
     let legs: [Leg]
     let earned: [String: Double]          // sold leg id → premium already earned (q × 100 × (at − now))
-    let X0: Double, X1: Double
+    /// The chart's prices: today's ±12% as it opens, or the zoom's range (`zoomed`).
+    private(set) var X0: Double, X1: Double
+    /// The pinch zoom's steps (SunnyPositions.dc.html Z45, Nov 8): the price range either side of today. It opens on
+    /// ±12% (index 2) every time.
+    static let zooms: [Double] = [0.05, 0.08, 0.12, 0.18, 0.25, 0.35, 0.5]
+    static let fitZoom = 2
+    /// This model with the chart on today's price ± r (the design's m45(t, zi)): the P&L scale, the grid it draws,
+    /// the strikes, walls and turns-short price all follow X0 and X1.
+    func zoomed(_ r: Double) -> PositionsModel {
+        var c = self
+        c.X0 = S0 * (1 - r); c.X1 = S0 * (1 + r)
+        return c
+    }
+    /// The widest zoom step the prices cover: every step on the sample book (priced on the phone); live, as far as
+    /// the server's grid reaches (±50% when it sent the wide grid, else ±12%).
+    var widestZoom: Int {
+        guard let g, let lo = g.S.first, let hi = g.S.last else { return Self.zooms.count - 1 }
+        let r = min(S0 - lo, hi - S0) / S0 + 1e-4
+        return Self.zooms.lastIndex { $0 <= r } ?? Self.fitZoom
+    }
     /// One stop per trading day to the last sold expiry. On the weekend the week that ended folds away and the
     /// slider runs Monday to Friday of next week (answer 3).
     let stops: [Stop]
@@ -184,13 +203,16 @@ struct PositionsModel {
 
         /// The stop a date is (the slider only ever asks for its own stops, or now).
         func row(_ tt: Double) -> Int? { tts.firstIndex { abs($0 - tt) < 1e-4 } }
-        /// A value between two grid prices, read on the straight line between them (held at the ends).
+        /// A value between two grid prices, read on the straight line between them (held at the ends). The wide grid
+        /// is not evenly spaced (0.24% steps inside ±12%, then 0.5% and 1%), so the two prices are found by halving.
         func at(_ a: [Double], _ x: Double) -> Double {
             guard a.count == S.count, S.count > 1, let lo = S.first, let hi = S.last, hi > lo else { return a.first ?? 0 }
-            let f = (x - lo) / (hi - lo) * Double(S.count - 1)
-            let i = max(0, min(S.count - 2, Int(f.rounded(.down))))
-            let w = max(0, min(1, f - Double(i)))
-            return a[i] + (a[i + 1] - a[i]) * w
+            if x <= lo { return a[0] }
+            if x >= hi { return a[S.count - 1] }
+            var i = 0, j = S.count - 1
+            while j - i > 1 { let k = (i + j) / 2; if S[k] <= x { i = k } else { j = k } }
+            let w = S[j] > S[i] ? (x - S[i]) / (S[j] - S[i]) : 0
+            return a[i] + (a[j] - a[i]) * w
         }
         /// A leg's row on a grid: its own, a sold leg's (a fix buying it back), or the fix's OTM call.
         func rows(_ key: String, _ m: KeyPath<Grid, [String: [[Double]]]>, otm o: KeyPath<Otm, [[Double]]>?) -> [[Double]]? {
@@ -236,7 +258,8 @@ struct PositionsModel {
     }
     /// Where the name makes the most on that date: the first price above today where delta drops below zero
     /// (today's price when it already has). Live with every leg on, the server's price to the cent, the one Home
-    /// says; with a leg off, read off the grid.
+    /// says; with a leg off, read off the grid. Searched to 5% past the chart's right edge (m45's flip), so it
+    /// follows the zoom: none when the chart's range ends well before it.
     func flip(_ tt: Double, off: Set<String> = []) -> Double? {
         guard let g else {
             var pos = false
@@ -246,10 +269,10 @@ struct PositionsModel {
             }
             return nil
         }
-        if off.isEmpty, let r = g.row(tt), r < g.turnsShort.count { return g.turnsShort[r] }
+        if off.isEmpty, let r = g.row(tt), r < g.turnsShort.count { return g.turnsShort[r].flatMap { $0 <= X1 * 1.05 ? $0 : nil } }
         var px = S0, pd = delta(S0, tt, off: off)
         if pd < 0 { return S0 }
-        for x in g.S where x > S0 {
+        for x in g.S where x > S0 && x <= X1 * 1.05 {
             let d = delta(x, tt, off: off)
             if d < 0 { return ((px + (x - px) * pd / (pd - d)) * 100).rounded(.up) / 100 }
             px = x; pd = d
@@ -273,8 +296,13 @@ struct PositionsModel {
         }
         return (d, gm, th, vg)
     }
-    /// The price grid and the P&L scale across every stop, as the chart draws it.
-    var grid: [Double] { g?.S ?? (0...140).map { X0 + (X1 - X0) * Double($0) / 140 } }
+    /// The price grid and the P&L scale across every stop, as the chart draws it: the server's prices inside the
+    /// chart's range with both ends read between them (live), or 141 across it (the design's GR).
+    var grid: [Double] {
+        guard let g else { return (0...140).map { X0 + (X1 - X0) * Double($0) / 140 } }
+        let e = (X1 - X0) * 1e-4
+        return [X0] + g.S.filter { $0 > X0 + e && $0 < X1 - e } + [X1]
+    }
     func scale(off: Set<String>) -> (mn: Double, mx: Double) {
         var mn = 0.0, mx = 0.0
         let xs = grid

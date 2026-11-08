@@ -231,7 +231,8 @@ struct BriefSectionView: View {
     @State private var width: CGFloat = 0
 
     var body: some View {
-        let headline = privacy ? (section.headlinePrivacy ?? section.headline) : section.headline
+        // Thick and thin (Nov 8): the first sentence in the headline weight, the rest Regular.
+        let headline = HeadlineWeight.split(privacy ? (section.headlinePrivacy ?? section.headline) : section.headline)
         VStack(alignment: .leading, spacing: 0) {
             // Kicker and headline are one heading (block 29): "Your book, Down $13,740, most of it Lululemon."
             // The section number is left out of speech.
@@ -243,7 +244,7 @@ struct BriefSectionView: View {
                 // text-wrap: balance (block 29).
                 BriefSentence(SentenceWrap.apply(headline, scales ? Self.headline.scaled(dts) : Self.headline,
                                                  width: width - 2 * S.margin, .balance, privacy: privacy),
-                              base: Self.headline, privacy: privacy)
+                              base: Self.headline, boldWeight: Self.thick, privacy: privacy)
                     .modifier(SentenceBox(t: Self.headline))
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, S.margin)
@@ -262,7 +263,66 @@ struct BriefSectionView: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
     }
 
-    static let headline = SType(size: 24, weight: 700, line: 30, tracking: -0.015)
+    /// 24/30, -.015em (New Home iPhone Preview h2): the first sentence 700 (`thick`, the runs marked bold), the rest 400.
+    static let headline = SType(size: 24, weight: 400, line: 30, tracking: -0.015)
+    static let thick: CGFloat = 700
+}
+
+/// Section headlines thick and thin (CHANGES Nov 8, README 11.1): the first sentence keeps the headline weight, the
+/// rest is Regular, same size and colour; a one-sentence headline stays all thick. The server sends the headline as
+/// runs (all bold); the split is made here, at the end of the first sentence as the design splits it: a full stop,
+/// question or exclamation mark followed by a space and more words ("Nike turns short above $36.23 by Friday. Roll
+/// the 36 calls..."; "$36.23." and "26.0%." end a sentence, "U.S." "a.m." "vs." and "Mr." do not). Each run keeps its colour.
+enum HeadlineWeight {
+    static func split(_ spans: [BriefSpan]) -> [BriefSpan] {
+        let chars = Array(spans.map(\.t).joined())
+        let cut = firstSentenceEnd(chars) ?? chars.count
+        var out: [BriefSpan] = [], at = 0
+        for r in spans {
+            let n = r.t.count, end = at + n
+            if end <= cut { out.append(BriefSpan(r.t, b: true, c: r.c)) }
+            else if at >= cut { out.append(BriefSpan(r.t, b: false, c: r.c)) }
+            else {
+                let k = cut - at, cs = Array(r.t)
+                out.append(BriefSpan(String(cs[..<k]), b: true, c: r.c))
+                out.append(BriefSpan(String(cs[k...]), b: false, c: r.c))
+            }
+            at = end
+        }
+        return out
+    }
+
+    /// Words that end in a full stop without ending the sentence.
+    private static let abbreviations: Set<String> = ["mr", "mrs", "ms", "dr", "st", "jr", "sr", "inc", "corp", "co", "ltd",
+                                                     "vs", "approx", "no", "jan", "feb", "mar", "apr", "jun", "jul", "aug",
+                                                     "sep", "sept", "oct", "nov", "dec", "mon", "tue", "tues", "wed", "thu",
+                                                     "thur", "thurs", "fri", "sat", "sun"]
+
+    /// The index just past the space after the first sentence, or nil when the headline is one sentence.
+    static func firstSentenceEnd(_ c: [Character]) -> Int? {
+        var i = 0
+        while i < c.count - 1 {
+            defer { i += 1 }
+            guard ".!?".contains(c[i]) else { continue }
+            // A closing quote or bracket may follow the mark; then a space and more words.
+            var j = i + 1
+            while j < c.count, "\u{201D}\u{2019}\")'".contains(c[j]) { j += 1 }
+            guard j < c.count, c[j] == " ", c[(j + 1)...].contains(where: { !$0.isWhitespace }) else { continue }
+            if c[i] == "." {
+                var k = i
+                while k > 0, !c[k - 1].isWhitespace { k -= 1 }
+                let word = String(c[k..<i])
+                let letters = word.trimmingCharacters(in: CharacterSet(charactersIn: "(\u{201C}\""))
+                if abbreviations.contains(letters.lowercased()) { continue }
+                // Initials and dotted short forms: "U.S.", "a.m.", "e.g.", a single capital ("J. Powell").
+                if letters.range(of: #"^([A-Za-z]\.)+[A-Za-z]$"#, options: .regularExpression) != nil { continue }
+                if letters.count == 1, letters.first?.isUppercase == true { continue }
+                if i > 0, c[i - 1] == "." { continue }   // an ellipsis
+            }
+            return j + 1
+        }
+        return nil
+    }
 }
 
 /// CSS text-wrap for a sentence of runs, which SwiftUI does not have (SWrap does it for one font). The breaks are
@@ -286,6 +346,16 @@ enum SentenceWrap {
             if space, start >= 0 { words.append(NSRange(location: start, length: i - start)); start = -1 }
             else if !space, start < 0 { start = i }
         }
+        // A time stays on one line: "8:30 AM" never breaks before its AM or PM.
+        var glued: [NSRange] = []
+        for r in words {
+            let w = str.substring(with: r)
+            if let last = glued.last, w.range(of: #"^(AM|PM)[,.;:]?$"#, options: .regularExpression) != nil,
+               str.substring(with: last).last?.isNumber == true {
+                glued[glued.count - 1] = NSRange(location: last.location, length: NSMaxRange(r) - last.location)
+            } else { glued.append(r) }
+        }
+        words = glued
         guard words.count > 1 else { return shown }
         func span(_ a: Int, _ b: Int) -> CGFloat {
             ceil(full.attributedSubstring(from: NSRange(location: words[a].location,
@@ -333,69 +403,18 @@ enum SentenceWrap {
     }
 }
 
-// MARK: - The glass every Home card sits on (block 34)
+// MARK: - The glass every Home card sits on
 
-/// Live Liquid Glass, as the design draws it. If scrolling stutters on the phone, `still` switches every
-/// card to a material that looks the same, and live glass stays on the tab bar, Search, the strip and the
-/// deck (answer 11).
-enum BriefGlass {
-    static var still = false
-}
-
+/// Every Home card: the padding and width, on SunnyGlass (Design/SunnyGlass.swift, Nik's spec, 8 Nov 2026).
+/// ⚠ Don't swap in .glassEffect(), a tint, or a drawn backdrop: all three were tried and rejected on 8 Nov.
 struct BriefCardChrome: ViewModifier {
     var radius: CGFloat = 20
     var padding: CGFloat = 20
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                // Block 34's fill inside the glass: linear 160°, white .62 → .22 → .14 → .40 (dark .10 → .03 → .02 → .07).
-                // Inset shadows paint under the content, as in CSS, so the edges sit here too.
-                ZStack {
-                    if BriefGlass.still { shape.fill(.ultraThinMaterial) }
-                    shape.fill(Self.fill)
-                    Self.edges(shape)
-                }
-            }
-            .modifier(LiveGlass(shape: shape))
-            .shadow(color: S.dynA(0x000000, 0.10, 0x000000, 0.40), radius: 12, y: 10)   // 0 10 24 -6, .1 light, .4 dark
-    }
-
-    /// The design's backdrop filter (brightness 1.06, contrast 1.05) clips the light page to white under each card, and
-    /// its dark card reads near black; plain glass reads grey (245 light, 20 to 30 dark) and takes the blobs' colour.
-    static let tint = S.dynA(0xFFFFFF, 0.85, 0x000000, 0.85)
-
-    /// The CSS gradient line at 160° on a card about 362 × 300 runs from (0.3, -0.12) to (0.7, 1.12).
-    private static let fill = LinearGradient(stops: [
-        .init(color: S.dynA(0xFFFFFF, 0.62, 0xFFFFFF, 0.10), location: 0),
-        .init(color: S.dynA(0xFFFFFF, 0.22, 0xFFFFFF, 0.03), location: 0.38),
-        .init(color: S.dynA(0xFFFFFF, 0.14, 0xFFFFFF, 0.02), location: 0.62),
-        .init(color: S.dynA(0xFFFFFF, 0.40, 0xFFFFFF, 0.07), location: 1),
-    ], startPoint: UnitPoint(x: 0.3, y: -0.12), endPoint: UnitPoint(x: 0.7, y: 1.12))
-
-    /// The inner edges (--csh): a 1 pt white ring (.7 / .16), a 1.5 pt top-left highlight (1 / .28), a fainter
-    /// bottom-right one (.55 / .08) and a soft glow under the top edge (.9 / .12), plus the .5 pt outer ring in light.
-    @ViewBuilder private static func edges(_ shape: RoundedRectangle) -> some View {
-        ZStack {
-            shape.fill(LinearGradient(colors: [S.dynA(0xFFFFFF, 0.9, 0xFFFFFF, 0.12), .clear],
-                                      startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.12)))
-                .opacity(0.35)
-            shape.strokeBorder(S.dynA(0xFFFFFF, 0.7, 0xFFFFFF, 0.16), lineWidth: 1)
-            shape.strokeBorder(LinearGradient(colors: [S.dynA(0xFFFFFF, 1, 0xFFFFFF, 0.28), .clear],
-                                              startPoint: .topLeading, endPoint: .center), lineWidth: 1.5)
-            shape.strokeBorder(LinearGradient(colors: [.clear, S.dynA(0xFFFFFF, 0.55, 0xFFFFFF, 0.08)],
-                                              startPoint: .center, endPoint: .bottomTrailing), lineWidth: 1)
-            shape.stroke(S.dynA(0x1D1D1F, 0.06, 0x000000, 0), lineWidth: 0.5)
-        }
-    }
-
-    private struct LiveGlass: ViewModifier {
-        let shape: RoundedRectangle
-        func body(content: Content) -> some View {
-            if BriefGlass.still { content } else { content.glassEffect(.regular.tint(BriefCardChrome.tint), in: shape) }
-        }
+            .sunnyGlass(radius: radius)
     }
 }
 

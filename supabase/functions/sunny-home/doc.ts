@@ -13,6 +13,7 @@
 // Words: no em dashes; money lost is red with no minus sign; dividends never go into kept, Made or Payback.
 
 import { company, type Moment } from './brief.ts';
+import { fK } from '../_shared/book-engine.ts';
 
 type Row = Record<string, any>;
 type Span = { t: string; b?: boolean; c?: string };
@@ -54,10 +55,13 @@ const nyClock = (iso: string) => {
 const dayDiff = (a: string, b: string) => Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / 864e5);
 const md = (d: string) => `${MON[ymd(d).m - 1]} ${ymd(d).d}`;
 const dmd = (d: string) => `${DOW[ymd(d).wd]} ${md(d)}`;
-const $0 = (x: number) => `$${Math.round(Math.abs(x)).toLocaleString('en-US')}`;
-const $K = (x: number) => { const a = Math.abs(x); return a >= 1e6 ? `$${(a / 1e6).toFixed(1)}M` : a >= 1e4 ? `$${Math.round(a / 1e3)}K` : a >= 1e3 ? `$${(a / 1e3).toFixed(1)}K` : `$${Math.round(a)}`; };
-const p2 = (x: number) => `${Math.abs(x).toFixed(2)}%`;
-const p1 = (x: number) => `${Math.abs(x).toFixed(1)}%`;
+/* Words and numbers (README 11.5, Nik, 8 Nov 2026). Book money in K and M through the engine's fK, the design's
+   money(): $624, $5.9K, $13.7K, $379K, $1.2M. Prices, strikes, index levels and dividends a share stay exact.
+   A move in %: one decimal, two only under 0.1% (the design's pct). A yield keeps two decimals, as the design
+   writes it (a 0.59% week, the 10y at 4.08%). */
+/* Two decimals only while the move rounds under 0.1% (0.04%); 0.0996 reads 0.1%, never 0.10%. */
+const p1 = (x: number) => { const q = Math.abs(x); return `${Math.round(q * 100) < 10 ? q.toFixed(2) : q.toFixed(1)}%`; };
+const py = (x: number) => `${Math.abs(x).toFixed(2)}%`;
 const col = (x: number) => (x < 0 ? 'red' : 'green');
 const upDown = (x: number) => (x < 0 ? 'down' : 'up');
 const hm = (m: number) => { const h = Math.floor(m / 60), mm = m % 60; const hh = h % 12 || 12; return `${hh}:${String(mm).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
@@ -70,11 +74,12 @@ const word = (n: number) => (n <= 10 ? NUM[n] : String(n));
 const leadOf = (spans: Span[]) => (spans.filter((s) => s.b).map((s) => s.t).join('') || spans.map((s) => s.t).join('')).trim();
 const lc = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
-/** Heat-map tile colours by move (the design's eight steps). */
+/** Heat-map tile colours by move (the design's eight steps, light; the deepest a shade darker since 8 Nov 2026).
+ *  The phone picks the step from the move in both themes; this is only its fallback. */
 const tileBg = (m: number) => {
   const a = Math.abs(m);
-  if (m >= 0) return a < 0.5 ? '#E2F2E0' : a < 1.5 ? '#C2E4BE' : a < 3 ? '#8FCF89' : '#4FA554';
-  return a < 0.5 ? '#FBE3E2' : a < 1.5 ? '#F6C4C2' : a < 3 ? '#EE9B97' : '#E26F6A';
+  if (m >= 0) return a < 0.5 ? '#E2F2E0' : a < 1.5 ? '#C2E4BE' : a < 3 ? '#8FCF89' : '#2B7330';
+  return a < 0.5 ? '#FBE3E2' : a < 1.5 ? '#F6C4C2' : a < 3 ? '#EE9B97' : '#B8322D';
 };
 /** Squarified tiles in a W x H box, biggest first; each rect inset 2 pt so tiles sit 4 apart. */
 function squarify(vals: number[], W: number, H: number): number[][] {
@@ -102,11 +107,11 @@ function heatMap(title: string, items: { ticker: string; name: string; move: num
   const tot = its.reduce((a, x) => a + x.weight, 0);
   const move = tot ? its.reduce((a, x) => a + x.move * x.weight, 0) / tot : 0;
   return {
-    title, ...(period ? { period } : {}), move: p2(move), moveColor: col(move), moveSigned: +move.toFixed(2), ...extra,
-    aria: `${title}${extra.weightOfSP500 ? `, ${extra.weightOfSP500} of the S&P 500` : ''}, ${upDown(move)} ${p2(move)}${period ? ' this week' : ''}. ` + its.map((x) => `${x.name} ${upDown(x.move)} ${p2(x.move)}`).join(', '),
+    title, ...(period ? { period } : {}), move: p1(move), moveColor: col(move), moveSigned: +move.toFixed(2), ...extra,
+    aria: `${title}${extra.weightOfSP500 ? `, ${extra.weightOfSP500} of the S&P 500` : ''}, ${upDown(move)} ${p1(move)}${period ? ' this week' : ''}. ` + its.map((x) => `${x.name} ${upDown(x.move)} ${p1(x.move)}`).join(', '),
     mapSize: [305, 196],
     tiles: its.map((x, k) => ({ name: x.name, move: +x.move.toFixed(2), bg: tileBg(x.move), rect: rects[k], ticker: x.ticker,
-      moveText: p2(x.move), showsMove: rects[k][2] >= 34 && rects[k][3] >= 30, weight: +x.weight.toFixed(1) })),
+      moveText: p1(x.move), showsMove: rects[k][2] >= 34 && rects[k][3] >= 30, weight: +x.weight.toFixed(1) })),
   };
 }
 
@@ -128,6 +133,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   const weekOpen = wk && weekFri > today, closedDay = !isTrading(today) && ymd(today).wd >= 1 && ymd(today).wd <= 5;
   const salesDay = DAY[ymd(nextTrading(today)).wd];
   const mk = (s: string) => x.market.find((m) => m.symbol === s);
+  const weekPct = (m: Row | undefined) => (m && num(m.week_base) && num(m.price) ? (Number(m.price) / Number(m.week_base) - 1) * 100 : null);
   const owner: { key: string; spans?: Span[] }[] = [];   // what the open copy leaves out
 
   // ── Per name: the move that matters at this moment ──
@@ -135,8 +141,14 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   const bn = new Map<string, Row>((B.names ?? []).map((n: Row) => [n.t, n]));
   const names: NM[] = x.names.map((n) => {
     const b = bn.get(n.t) ?? {};
-    const day = n.P0 > 0 ? (n.S0 / n.P0 - 1) * 100 : 0;
-    const move = wk ? (n.weekBase ? (n.S0 / n.weekBase - 1) * 100 : day) : moment === 'pre' || moment === 'futures' ? (n.ext ?? 0) : day;
+    /* Build review item 11 (8 Nov 2026): a name's move reads the same quote as the rest of Home and the ticker chart a
+       tile opens: market_live (Yahoo), as the index cards, sectors and Watchlist do. The day is against the last close
+       (at the close after 4:00 PM); before the bell the pre-market or after-hours move; on the weekend the week, Friday's
+       close against the Friday before, and the map says "Week". The book's own quotes stand in only for a name with no
+       Yahoo row. Your names, What's moving and the Your book headline all read this one move. */
+    const y = x.market.find((m) => m.symbol === n.t && m.kind === 'name') ?? mk(n.t);
+    const day = num(y?.regular_change_pct) ?? (n.P0 > 0 ? (n.S0 / n.P0 - 1) * 100 : 0);
+    const move = wk ? (weekPct(y) ?? (n.weekBase ? (n.S0 / n.weekBase - 1) * 100 : day)) : moment === 'pre' || moment === 'futures' ? (n.ext ?? 0) : day;
     const t = n.today, dayPL = t.sh + t.lp + t.oc + t.ip + t.sc + t.sp;
     return { ...n, name: company(n.t), move, dayPL, st: Number(b.st ?? 0), fp: b.fp ?? null, sd: Number(b.sd ?? 0),
       pricedDay: (Number(b.iv ?? 0) / Math.sqrt(252)) * 100 };
@@ -166,7 +178,6 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   // ── Market pieces ──
   const spy = mk('SPY'), iwm = mk('IWM');
   const spyDay = num(spy?.regular_change_pct) ?? 0, iwmDay = num(iwm?.regular_change_pct) ?? 0;
-  const weekPct = (m: Row | undefined) => (m && num(m.week_base) && num(m.price) ? (Number(m.price) / Number(m.week_base) - 1) * 100 : null);
   const fut = (card: string) => x.futures.find((f) => f.card === card);
   const futPct = (card: string) => { const f = fut(card); return f && num(f.price) && num(f.base) ? (Number(f.price) / Number(f.base) - 1) * 100 : null; };
   const esPct = futPct('SPY');
@@ -182,7 +193,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   // ════ Cards ════
   const idxCard = (sym: string, label: string, price: number | null, move: number | null, extra: Row = {}, suffix = '') =>
     price == null || move == null ? null : { symbol: label, ...extra, price: label === 'VIX' ? price.toFixed(2) : `$${price.toFixed(2)}`,
-      move: p2(move), moveColor: col(move), moveSigned: +move.toFixed(2), aria: `${label} ${upDown(move)} ${p2(move)}${suffix}` };
+      move: p1(move), moveColor: col(move), moveSigned: +move.toFixed(2), aria: `${label} ${upDown(move)} ${p1(move)}${suffix}` };
   const indexCards = () => {
     const pre = moment === 'pre';
     const cards = [['SPY', 'SPY'], ['QQQ', 'QQQ'], ['IWM', 'IWM'], ['^VIX', 'VIX']].map(([s, l]) => {
@@ -235,7 +246,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     } else {
       move = wkMode ? weekPct(m) : num(m.regular_change_pct);
       if (move == null) return null;
-      moveText = p2(move);
+      moveText = p1(move);
     }
     const value = yieldRow ? `${p.toFixed(2)}%` : ['CL=F', 'GC=F', 'BTC-USD'].includes(s) ? `$${p >= 1000 ? Math.round(p).toLocaleString('en-US') : p.toFixed(2)}`
       : p >= 1000 ? Math.round(p).toLocaleString('en-US') : p.toFixed(2);
@@ -285,7 +296,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
       /* The sector's share of the S&P 500 (SPY's holdings by sector, market-tape daily); left out when there is none. */
       const spw = num(x.sectors.find((r) => r.etf && r.sector === s.sector)?.sp_weight);
       const m = heatMap(s.sector, its, spw != null ? { weightOfSP500: `${Math.round(spw)}%` } : {}, wkMode ? 'Week' : '');
-      return { ...m, move: p2(s.move), moveColor: col(s.move), moveSigned: +s.move.toFixed(2) };
+      return { ...m, move: p1(s.move), moveColor: col(s.move), moveSigned: +s.move.toFixed(2) };
     };
     const why = (s: { sector: string; move: number }) => x.sectors.filter((r) => !r.etf && r.sector === s.sector && num(r.market_cap))
       .map((r) => ({ name: String(r.name), c: Number(r.market_cap) * (wkMode ? (num(r.week_base) ? Number(r.price) / Number(r.week_base) - 1 : 0) : (num(r.day_pct) ?? 0) / 100) }))
@@ -301,7 +312,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
         : [`${lead.sector} leads${on(lead)}.`, `${trail.sector} trails${on(trail)}.`],
       leadsTrails: [[wkMode ? 'Led the week' : past ? 'Led' : 'Leads', lead], [wkMode ? 'Lagged' : past ? 'Trailed' : 'Trails', trail]].map(([l, s]) => {
         const v = s as { sector: string; move: number };
-        return { label: l, sector: v.sector, move: p2(v.move), moveColor: col(v.move), aria: `${l}: ${v.sector}, ${upDown(v.move)} ${p2(v.move)}. Show its map` };
+        return { label: l, sector: v.sector, move: p1(v.move), moveColor: col(v.move), aria: `${l}: ${v.sector}, ${upDown(v.move)} ${p1(v.move)}. Show its map` };
       }),
       mapOrder: order.map((s) => s.sector), maps: order.map(mapOf),
       source: wkMode ? `Sector funds · week of ${md(monday)}` : 'Sector funds · Yahoo',
@@ -330,8 +341,8 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const past = lead.pricedDay > 0 && Math.abs(lead.move) > lead.pricedDay;
     const sold = lead.soldCalls.filter((c) => c.ex <= F).reduce((a, c) => a + c.n, 0);
     const parts: string[] = [];
-    if (lead.today.sh) parts.push(`Your ${lead.shares.toLocaleString('en-US')} shares are ${upDown(lead.today.sh)} ${$0(lead.today.sh)}`);
-    if (lead.today.lp) parts.push(`the LEAPS ${upDown(lead.today.lp)} ${$0(lead.today.lp)}`);
+    if (lead.today.sh) parts.push(`Your ${lead.shares.toLocaleString('en-US')} shares are ${upDown(lead.today.sh)} ${fK(lead.today.sh)}`);
+    if (lead.today.lp) parts.push(`the LEAPS ${upDown(lead.today.lp)} ${fK(lead.today.lp)}`);
     const body = `${lead.move < 0 ? 'Down' : 'Up'} ${p1(lead.move)} so far, priced for ${p1(lead.pricedDay)} today. `
       + (sold ? `${sold} calls sold on it this week.` : 'No calls sold on it this week.') + (parts.length ? ` ${parts.join(', ')} so far.` : '');
     return { type: 'whatsMoving', title: 'What’s moving', subtitle: past ? `${lead.name} is past the move priced for today` : 'Every name is inside the move priced for today',
@@ -351,7 +362,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
       return { type: 'toDecide', title: 'To decide · needs a look',
         subtitle: itm ? `${company(look.t)}’s ${look.K} calls are in the money with ${dleft(look.ex)} days left` : `${company(look.t)} is ${look.cap}% kept with ${dleft(look.ex)} days left`,
         body: itm ? 'Roll them or let them go?' : 'Close early and sell next week’s calls now?',
-        footer: [sp(`${$0(look.left)} left to earn on ${look.q} calls, ${$0(look.kept)} kept.`, true)] };
+        footer: [sp(`${fK(look.left)} left to earn on ${look.q} calls, ${fK(look.kept)} kept.`, true)] };
     }
     const n = shorts[0];
     return { type: 'toDecide', title: 'To decide · near its best', subtitle: `${n.name} makes the most at $${n.fp!.toFixed(2)} by Friday`,
@@ -371,7 +382,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     for (const e of x.earnings) { const d = String(e.date); if (d >= from && d <= to) out.push({ d, logo: e.ticker, text: [sp(`${company(e.ticker)} reports${e.estimated ? ', date not confirmed' : ''}`, true)] }); }
     for (const v of x.divs) {
       const d = String(v.ex_date), t = String(v.ticker).toUpperCase(), n = names.find((y) => y.t === t);
-      if (d >= from && d <= to && n && n.shares > 0) out.push({ d, logo: t, text: [sp(`${n.name} goes ex-dividend `, true), sp(`· $${Number(v.cash_amount).toFixed(2)} a share, ${$0(n.shares * Number(v.cash_amount))}`, false, 'secondary')] });
+      if (d >= from && d <= to && n && n.shares > 0) out.push({ d, logo: t, text: [sp(`${n.name} goes ex-dividend `, true), sp(`· $${Number(v.cash_amount).toFixed(2)} a share, ${fK(n.shares * Number(v.cash_amount))}`, false, 'secondary')] });
     }
     return out.sort((a, b) => a.d.localeCompare(b.d));
   };
@@ -413,7 +424,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     if (stopped.has('dividends')) return null;      // no dividends feed: no line, never "None ahead"
     const v = x.divs.map((d) => ({ d, n: names.find((y) => y.t === String(d.ticker).toUpperCase()) })).filter((r) => r.n && r.n.shares > 0)
       .sort((a, b) => String(a.d.ex_date).localeCompare(String(b.d.ex_date)))[0];
-    return v ? [sp(`Next: ${v.n!.name}, ex ${dmd(String(v.d.ex_date))}, ${$0(v.n!.shares * Number(v.d.cash_amount))} · kept out of Made`, false, 'secondary')]
+    return v ? [sp(`Next: ${v.n!.name}, ex ${dmd(String(v.d.ex_date))}, ${fK(v.n!.shares * Number(v.d.cash_amount))} · kept out of Made`, false, 'secondary')]
       : [sp('None ahead in the next 45 days · kept out of Made', false, 'secondary')];
   };
   const paidIn = (from: string, to: string) => ((x.chart?.dividends?.paid ?? []) as [string, number][]).filter(([d]) => d >= from && d <= to).reduce((a, [, v]) => a + Number(v), 0);
@@ -421,9 +432,9 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const fris: string[] = []; let f = weekFri;
     for (let k = 0; k < n; k++) { fris.unshift(f); f = lastTrading(addDays(mondayOf(f), -3)); }
     return fris.map((fr) => { const w = yw(fr), base = x.baseAt(fr), v = base > 0 ? (keptOf(w) / base) * 100 : 0, me = fr === weekFri;
-      return { label: me ? 'This week' : md(mondayOf(fr)), value: p2(v), signed: +v.toFixed(2), highlight: me, valueColor: v < 0 ? 'red' : me ? 'green' : 'ink' }; });
+      return { label: me ? 'This week' : md(mondayOf(fr)), value: py(v), signed: +v.toFixed(2), highlight: me, valueColor: v < 0 ? 'red' : me ? 'green' : 'ink' }; });
   };
-  const stat = (label: string, v: number, sub: string) => ({ label, value: $0(v), valueColor: col(v), sub });
+  const stat = (label: string, v: number, sub: string) => ({ label, value: fK(v), valueColor: col(v), sub });
   const resultsWeek = () => {
     const w = yw(weekFri), kept = keptOf(w), sold = soldOf(w), base = x.baseAt(weekFri), long = bookWeek?.long ?? 0;
     return { kept, sold, base, long, made: kept + long, yieldPct: base > 0 ? (kept / base) * 100 : 0 };
@@ -437,7 +448,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     if (asg) bits.push(`${word(asg).toLowerCase()} assigned`);
     if (early.length) bits.push(`${early.join(', ')} closed early`);
     const g = bookWeek;
-    const legs = g ? `Shares ${upDown(g.sh)} ${$0(g.sh)}, calls bought ${upDown(g.cb)} ${$0(g.cb)}, insurance ${upDown(g.pb)} ${$0(g.pb)}.` : '';
+    const legs = g ? `Shares ${upDown(g.sh)} ${fK(g.sh)}, calls bought ${upDown(g.cb)} ${fK(g.cb)}, insurance ${upDown(g.pb)} ${fK(g.pb)}.` : '';
     return `${bits.length ? `Calls: ${bits.join(', ')}. ` : ''}${legs}`.trim();
   };
   const results = () => {
@@ -447,20 +458,21 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const mSplit = split(idxOn(addDays(mStart, -1)), last), mLong = mSplit?.long ?? 0;
     const groups = fris.map((w) => {
       const s = split(idxOn(addDays(String(w.week), -1)), idxOn(String(w.fri)));
-      return { label: md(String(w.week)), highlight: w.fri === weekFri, values: [{ series: 'Sold, kept', value: $K(keptOf(w)), valueColor: 'ink' },
-        { series: 'Long', value: $K(s?.long ?? 0), valueColor: col(s?.long ?? 0) }] };
+      // `n`: the signed dollars behind each label, so the app draws the bar above or below the zero line (the label stays unsigned).
+      return { label: md(String(w.week)), highlight: w.fri === weekFri, values: [{ series: 'Sold, kept', value: fK(keptOf(w)), valueColor: 'ink', n: Math.round(keptOf(w)) },
+        { series: 'Long', value: fK(s?.long ?? 0), valueColor: col(s?.long ?? 0), n: Math.round(s?.long ?? 0) }] };
     });
     const last4 = yieldBars(4).map((b) => b.signed), pace = last4.reduce((a, b) => a + b, 0) / Math.max(1, last4.length);
     return { type: 'results', title: 'Results', segments: ['This week', mName], selected: 'This week', bySegment: {
-      'This week': { big: $0(r.kept), bigColor: col(r.kept), bigSub: r.kept >= 0 ? `kept of ${$0(r.sold)} sold · ${p2(r.yieldPct)} yield on ${$K(r.base)} bought`
-          : `bought back more than the ${$0(r.sold)} sold · ${p2(r.yieldPct)} given back on ${$K(r.base)} bought`,
+      'This week': { big: fK(r.kept), bigColor: col(r.kept), bigSub: r.kept >= 0 ? `kept of ${fK(r.sold)} sold · ${py(r.yieldPct)} yield on ${fK(r.base)} bought`
+          : `bought back more than the ${fK(r.sold)} sold · ${py(r.yieldPct)} given back on ${fK(r.base)} bought`,
         stats: [stat('Sold · kept', r.kept, 'realized'), stat('Long', r.long, 'unrealized'), stat('Made', r.made, 'the week')],
-        body: weekFacts(), dividends: { title: 'Dividends', line: divNext(), right: paidIn(monday, today) ? $0(paidIn(monday, today)) : 'None this week', rightColor: paidIn(monday, today) ? 'green' : 'secondary' },
-        charts: [{ title: 'Yield, week by week', sub: `on ${$K(r.base)} bought`, bars: yieldBars() }] },
-      [mName]: { big: p1(mBase > 0 ? (mKept / mBase) * 100 : 0), bigColor: col(mKept), bigSub: `${mKept >= 0 ? 'yield' : 'given back'} in ${mName} on ${$K(mBase)} bought`,
+        body: weekFacts(), dividends: { title: 'Dividends', line: divNext(), right: paidIn(monday, today) ? fK(paidIn(monday, today)) : 'None this week', rightColor: paidIn(monday, today) ? 'green' : 'secondary' },
+        charts: [{ title: 'Yield, week by week', sub: `on ${fK(r.base)} bought`, bars: yieldBars() }] },
+      [mName]: { big: p1(mBase > 0 ? (mKept / mBase) * 100 : 0), bigColor: col(mKept), bigSub: `${mKept >= 0 ? 'yield' : 'given back'} in ${mName} on ${fK(mBase)} bought`,
         charts: [{ title: pace >= 0 ? `${Math.round(pace * 52)}% a year at the 4-week pace` : `Giving back ${Math.round(-pace * 52)}% a year at the 4-week pace`, legend: ['Sold, kept', 'Long'], groups }],
         stats: [stat('Sold · kept', mKept, 'realized'), stat('Long', mLong, 'unrealized'), stat('Made', mKept + mLong, mName)],
-        dividends: { title: 'Dividends', line: divNext(), right: paidIn(mStart, today) ? $0(paidIn(mStart, today)) : 'None', rightColor: paidIn(mStart, today) ? 'green' : 'secondary' } },
+        dividends: { title: 'Dividends', line: divNext(), right: paidIn(mStart, today) ? fK(paidIn(mStart, today)) : 'None', rightColor: paidIn(mStart, today) ? 'green' : 'secondary' } },
     } };
   };
   const yourResults = () => {
@@ -470,10 +482,10 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const body = lead ? `${lead.name}’s ${kind} ${t.made < 0 ? 'did most of the damage' : 'did most of the work'}.${t.sold > 0 ? ' Your sales kept working.' : ''}` : '';
     return { type: 'yourResults', title: 'Your results', segments: ['Today', 'This week'], selected: 'Today', bySegment: {
       Today: { stats: [stat('Sold · kept', t.sold, 'today'), stat('Long', t.long, 'unrealized'), stat('Made', t.made, 'today')], body,
-        dividends: { title: 'Dividends', line: divNext(), right: paidIn(today, today) ? $0(paidIn(today, today)) : 'None today', rightColor: paidIn(today, today) ? 'green' : 'secondary' } },
-      'This week': { stats: [stat('Sold · kept', r.kept, `of ${$0(r.sold)}`), stat('Long', r.long, 'unrealized'), stat('Made', r.made, 'so far')],
-        dividends: { title: 'Dividends', line: divNext(), right: paidIn(monday, today) ? $0(paidIn(monday, today)) : 'None this week', rightColor: paidIn(monday, today) ? 'green' : 'secondary' },
-        charts: [{ title: 'Yield, week by week', sub: `on ${$K(r.base)} bought`, bars: yieldBars() }] },
+        dividends: { title: 'Dividends', line: divNext(), right: paidIn(today, today) ? fK(paidIn(today, today)) : 'None today', rightColor: paidIn(today, today) ? 'green' : 'secondary' } },
+      'This week': { stats: [stat('Sold · kept', r.kept, `of ${fK(r.sold)}`), stat('Long', r.long, 'unrealized'), stat('Made', r.made, 'so far')],
+        dividends: { title: 'Dividends', line: divNext(), right: paidIn(monday, today) ? fK(paidIn(monday, today)) : 'None this week', rightColor: paidIn(monday, today) ? 'green' : 'secondary' },
+        charts: [{ title: 'Yield, week by week', sub: `on ${fK(r.base)} bought`, bars: yieldBars() }] },
     } };
   };
   const closedRolled = () => {
@@ -486,7 +498,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
         + Number(new Date(String(c.executed_at)).toLocaleString('en-US', { timeZone: 'America/New_York', minute: 'numeric' }))) : '';
       return { logo: t, title: `${company(t)} ${Number(c.strike)} ${kind}, ${opened ? 'rolled' : c.direction === 'short' ? 'bought back' : 'sold'}`,
         sub: `${c.contracts} ${md(String(c.expiry))}${opened ? ` for ${md(String(opened.expiry))} ${Number(opened.strike)}s` : ''}${at ? ` · ${at}` : ''}`,
-        value: $0(pl), valueColor: col(pl), valueLabel: pl < 0 ? 'lost' : 'made' };
+        value: fK(pl), valueColor: col(pl), valueLabel: pl < 0 ? 'lost' : 'made' };
     });
     const rolls = rows.filter((r) => r.title.endsWith('rolled')).length;
     return { type: 'closedRolled', title: 'Closed and rolled today',
@@ -497,8 +509,8 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     if (!x.orders.length) return null;
     const cin = x.orders.filter((o) => o.credit).reduce((a, o) => a + Number(o.cost ?? 0), 0), cout = x.orders.filter((o) => !o.credit).reduce((a, o) => a + Number(o.cost ?? 0), 0);
     return { type: 'tomorrowOrders', title: 'Tomorrow’s orders', count: `${x.orders.length} ${x.orders.length === 1 ? 'order' : 'orders'}`,
-      subtitle: `Place at the open · ${$0(cin)} in, ${$0(cout)} out`, footer: 'Each one clears once IBKR shows the fill.',
-      rows: x.orders.map((o) => ({ logo: o.t, order: String(o.action ?? o.act), why: String(o.why ?? ''), amount: $0(Number(o.cost ?? 0)), amountLabel: o.credit ? 'credit' : 'cost' })) };
+      subtitle: `Place at the open · ${fK(cin)} in, ${fK(cout)} out`, footer: 'Each one clears once IBKR shows the fill.',
+      rows: x.orders.map((o) => ({ logo: o.t, order: String(o.action ?? o.act), why: String(o.why ?? ''), amount: fK(Number(o.cost ?? 0)), amountLabel: o.credit ? 'credit' : 'cost' })) };
   };
   const thetaMonth = () => {
     const H = x.history?.theta, hd: string[] = x.history?.days ?? [];
@@ -511,7 +523,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     return { type: 'thetaMonth', title: `Theta · ${MONTH[ymd(today).m - 1]}`, subtitle: `Collected ${r(a).toFixed(1)}× what you paid, ${trend}`,
       legend: ['Collected', 'Paid in decay'],
       weeks: ws.map((w) => ({ label: w.m === monday ? 'This week' : md(w.m), ratio: `${r(w).toFixed(1)}×`, highlight: w.m === monday })),
-      body: `Paying went from ${$0(ws[0].p)} to ${$0(a.p)} a week and collecting ${a.c >= ws[0].c ? 'kept up' : 'fell behind'}.` };
+      body: `Paying went from ${fK(ws[0].p)} to ${fK(a.p)} a week and collecting ${a.c >= ws[0].c ? 'kept up' : 'fell behind'}.` };
   };
   const payback = () => {
     const P = x.payback; if (!P || !(x.baseNow > 0)) return null;
@@ -522,14 +534,14 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     for (const [d, , v] of (P.series2 ?? []) as [string, number, number][]) { const m = d.slice(0, 7); const e = months.find((y) => y.m === m); if (e) e.v = v; else months.push({ m, v }); }
     const bars = months.slice(-5).map((e, i, a) => { const prev = i ? a[i - 1].v : (months[months.length - a.length - 1]?.v ?? 0), v = e.v - prev, me = e.m === today.slice(0, 7);
       /* n: the signed amount, so a month that lost draws its bar red (the label stays without a minus sign). */
-      return { label: MON[Number(e.m.slice(5)) - 1], value: $K(v), n: Math.round(v), highlight: me, valueColor: me ? col(v) : v < 0 ? 'red' : 'ink', empty: false }; });
+      return { label: MON[Number(e.m.slice(5)) - 1], value: fK(v), n: Math.round(v), highlight: me, valueColor: me ? col(v) : v < 0 ? 'red' : 'ink', empty: false }; });
     const whenA = when(pr), whenB = when(ps);
     return { type: 'payback', title: 'Payback · month end'.replace('month end', today.slice(8) >= '25' ? 'month end' : 'so far'),
       subtitle: pr && pr > 0 && ps && ps > 0 ? `Paid back between ${[whenA, whenB].sort((u, v) => Date.parse('1 ' + u) - Date.parse('1 ' + v)).join(' and ')}` : 'Not paid back at the recent pace',
-      big: p1(pct), bigColor: col(pct), bigSub: `of ${$K(base)} in shares, LEAPS and calls made back, after closing costs and insurance`,
+      big: p1(pct), bigColor: col(pct), bigSub: `of ${fK(base)} in shares, LEAPS and calls made back, after closing costs and insurance`,
       chart: { title: 'Made each month', bars },
-      rows: [{ label: pr != null ? `At the 4-week pace, ${pr < 0 ? 'losing ' : ''}${$K(pr)} a week` : 'At the 4-week pace', value: whenA, valueColor: pr && pr > 0 ? 'ink' : 'red' },
-        { label: ps != null ? `Since you started, ${ps < 0 ? 'losing ' : ''}${$K(ps)} a week` : 'Since you started', value: whenB, valueColor: ps && ps > 0 ? 'ink' : 'red' }],
+      rows: [{ label: pr != null ? `At the 4-week pace, ${pr < 0 ? 'losing ' : ''}${fK(pr)} a week` : 'At the 4-week pace', value: whenA, valueColor: pr && pr > 0 ? 'ink' : 'red' },
+        { label: ps != null ? `Since you started, ${ps < 0 ? 'losing ' : ''}${fK(ps)} a week` : 'Since you started', value: whenB, valueColor: ps && ps > 0 ? 'ink' : 'red' }],
       footer: 'Payback isn’t profit until what you bought holds its value. Dividends stay out of it.' };
   };
   const remember = () => {
@@ -594,7 +606,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   const ordersLine = orders ? `${word(orders)} ${orders === 1 ? 'order' : 'orders'} to place at the open.` : 'Nothing to place at the open.';
   const decisions = shorts.length;
   const decLine = decisions ? `${word(decisions)} ${decisions === 1 ? 'call' : 'calls'} to make before Friday.` : 'Nothing to decide before Friday.';
-  const money = (v: number, privacy: boolean) => (privacy ? p1(pctOfBase(v)) : $0(v));
+  const money = (v: number, privacy: boolean) => (privacy ? p1(pctOfBase(v)) : fK(v));
   let lede: Span[] = [], ledeP: Span[] = [];
   const both = (f: (p: boolean) => Span[]) => { lede = f(false); ledeP = f(true); };
   if (moment === 'pre') {
@@ -630,8 +642,8 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const mkt = `Stocks ${spw >= 0 ? 'rose' : 'fell'}${on && Math.sign(on.move) === Math.sign(spw) ? ` on ${short(on.sector)}` : ''}`;
     both((p) => [
       ...(held && r.sold > 0 ? (r.kept >= 0
-        ? [sp(`${weekOpen ? 'So far, a' : 'A'} ${p2(r.yieldPct)} week: you kept `), sp(p ? `${Math.round((r.kept / r.sold) * 100)}%` : $0(r.kept), true, 'green'), sp(p ? ' of what you sold. ' : ` of ${$0(r.sold)} sold. `)]
-        : [sp(`${weekOpen ? 'So far, a' : 'A'} losing week: buying back cost `), ...(p ? [sp('more than you sold. ')] : [sp($0(-r.kept), true, 'red'), sp(` more than the ${$0(r.sold)} sold. `)])])
+        ? [sp(`${weekOpen ? 'So far, a' : 'A'} ${py(r.yieldPct)} week: you kept `), sp(p ? `${Math.round((r.kept / r.sold) * 100)}%` : fK(r.kept), true, 'green'), sp(p ? ' of what you sold. ' : ` of ${fK(r.sold)} sold. `)]
+        : [sp(`${weekOpen ? 'So far, a' : 'A'} losing week: buying back cost `), ...(p ? [sp('more than you sold. ')] : [sp(fK(-r.kept), true, 'red'), sp(` more than the ${fK(r.sold)} sold. `)])])
         : []),
       sp(mkt), ...(held && sells ? [sp(`, and ${word(sells).toLowerCase()} ${sells === 1 ? 'sale comes' : 'sales come'} ${salesDay}.`)] : [sp('.')])]);
     if (held && sells) owner.push({ key: 'lede' });
@@ -659,11 +671,13 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   const namesHead = (): Span[] => {
     if (!held) return [sp('Nothing held yet.', true)];
     const big = [...names].sort((u, v) => Math.abs(v.move) - Math.abs(u.move))[0];
-    if (wk) { const fell = names.filter((n) => n.move < 0).length; return [sp(`${big.name} ${big.move >= 0 ? 'rose' : 'fell'} ${p1(big.move)}. ${word(fell)} of your ${word(names.length).toLowerCase()} names fell.`, true)]; }
+    /* The figure in the name's colour (New Home iPhone Preview h2, Nov 8): "Netflix rose 12.7%." with 12.7% green. Every
+       run stays bold, so a build before the thick-and-thin headline reads as it did; the app sets the weights. */
+    if (wk) { const fell = names.filter((n) => n.move < 0).length; return [sp(`${big.name} ${big.move >= 0 ? 'rose' : 'fell'} `, true), sp(p1(big.move), true, col(big.move)), sp(`. ${word(fell)} of your ${word(names.length).toLowerCase()} names fell.`, true)]; }
     if (moment === 'pre' || moment === 'futures') {
       if (names.every((n) => !n.ext)) return [sp('Your names trade again at 4:00 AM.', true)];
       const fu = esPct ?? 0, nUp = names.filter((n) => n.move > 0).length, follow = fu >= 0 ? nUp >= names.length / 2 : nUp <= names.length / 2;
-      return [sp(`Your names ${follow ? 'are' : 'aren’t'} following. ${big.name} is ${upDown(big.move)} ${p1(big.move)}.`, true)];
+      return [sp(`Your names ${follow ? 'are' : 'aren’t'} following. ${big.name} is ${upDown(big.move)} `, true), sp(p1(big.move), true, col(big.move)), sp('.', true)];
     }
     const bt = bookToday; if (!bt) return [sp('Your book.', true)];
     if (moment === 'post') {
@@ -705,7 +719,9 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), held ? results() : null, yourPosition()] });
     const pb = payback(), tm2 = thetaMonth(), mName = MONTH[ymd(today).m - 1], done = ymd(addDays(today, 7)).m !== ymd(today).m && dayDiff(today, `${today.slice(0, 7)}-28`) <= 0;
     const pbPct = x.payback && x.baseNow > 0 ? (Number(x.payback.made ?? 0) / x.baseNow) * 100 : 0;
-    if (held && (pb || tm2)) S.push({ kicker: mName, headline: [sp(`${mName} ${done ? 'is done' : 'so far'}: ${pbPct >= 0 ? `${p1(pbPct)} of what you bought is paid back` : `${p1(pbPct)} of what you bought is given back`}.`, true)], cards: [tm2, pb] });
+    /* "October is done: 6.2% of what you bought is paid back." with the figure green (red when given back), as the design. */
+    if (held && (pb || tm2)) S.push({ kicker: mName, headline: [sp(`${mName} ${done ? 'is done' : 'so far'}: `, true), sp(p1(pbPct), true, col(pbPct)),
+      sp(` of what you bought is ${pbPct >= 0 ? 'paid back' : 'given back'}.`, true)], cards: [tm2, pb] });
     const rem = remember(), sells = x.orders.filter((o) => o.kind === 'sell' || o.kind === 'put').length, ne = earningsAhead(7);
     const first = rem?.rows.find((r: Row) => !r.owner);
     S.push({ kicker: weekOpen ? 'Coming up' : 'Next week', headline: [sp(sells ? `${word(sells)} ${sells === 1 ? 'sale' : 'sales'} ${salesDay}.` : first ? `${leadOf(first.text)}, ${first.date}.` : 'A quiet week ahead.', true)],

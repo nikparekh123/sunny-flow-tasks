@@ -154,8 +154,9 @@ export function checkInvariants(x: CheckIn): Check[] {
     if (Array.isArray(v)) { v.forEach(walk); return; }
     if (!v || typeof v !== 'object') return;
     const o = v as Row;
-    if (o.title === 'Dividends' && o.line) { const m = text(o.line).match(/^Next: (.+?), ex \w+ (\w+ \d+), (\$[\d,]+)/); if (m) note(`${m[1]} ${m[2]}`, m[3], 'Dividends line'); }
-    if (Array.isArray(o.text) && o.date) { const m = text(o.text).match(/^(.+?) goes ex-dividend · \$[\d.]+ a share, (\$[\d,]+)/); if (m) note(`${m[1]} ${String(o.date).replace(/^\w+ /, '')}`, m[2], 'Coming up'); }
+    // The amount in K and M since 8 Nov 2026 ($2.5K); a dividend a share keeps its cents ($0.41).
+    if (o.title === 'Dividends' && o.line) { const m = text(o.line).match(/^Next: (.+?), ex \w+ (\w+ \d+), (\$[\d,.]*\d[KM]?)/); if (m) note(`${m[1]} ${m[2]}`, m[3], 'Dividends line'); }
+    if (Array.isArray(o.text) && o.date) { const m = text(o.text).match(/^(.+?) goes ex-dividend · \$[\d.]+ a share, (\$[\d,.]*\d[KM]?)/); if (m) note(`${m[1]} ${String(o.date).replace(/^\w+ /, '')}`, m[2], 'Coming up'); }
     for (const k of Object.keys(o)) walk(o[k]);
   };
   walk(x.full?.sections);

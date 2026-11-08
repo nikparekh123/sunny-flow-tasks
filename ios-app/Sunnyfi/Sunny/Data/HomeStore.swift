@@ -57,6 +57,8 @@ final class HomeStore {
     private var book: (user: UUID, id: String)?
     /// Every book this login is a member of, owned first (the account strip: Sunny = S, Nicolay = N).
     private(set) var books: [String] = []
+    /// When `books` was last read from book_members.
+    private var booksReadAt = Date.distantPast
     /// The book the strip picked; nil = the login's default (S when it holds S, else its first owned book).
     private var picked: String?
     /// The book on screen ("S", "N"), once looked up; Positions asks sunny-positions for it.
@@ -185,12 +187,16 @@ final class HomeStore {
         if a.contains("-fixture") { books = a.contains("-fixtureN") ? ["S", "N"] : [bookIDNow ?? "S"]; return bookIDNow ?? "S" }
         #endif
         let user = try await SupabaseService.client.auth.session.user.id
-        if let b = book, b.user == user { return b.id }
+        // Memberships are read again every few minutes, so a book added to this login (Nik joining his cousin's
+        // book, 8 Nov 2026) reaches the strip without quitting the app; the book on screen stays as it is.
+        if let b = book, b.user == user, Date().timeIntervalSince(booksReadAt) < 180 { return b.id }
         struct Member: Decodable { let book_id: String; let role: String }
         let ms: [Member] = try await SupabaseService.client.from("book_members").select("book_id,role").execute().value
         let sorted = ms.sorted(by: { ($0.role == "owner" ? 0 : 1, $0.book_id) < ($1.role == "owner" ? 0 : 1, $1.book_id) }).map(\.book_id)
         guard let first = sorted.first else { throw URLError(.userAuthenticationRequired) }
         books = sorted
+        booksReadAt = Date()
+        if let b = book, b.user == user, sorted.contains(b.id) { return b.id }
         let id = picked.flatMap { sorted.contains($0) ? $0 : nil } ?? (sorted.contains("S") ? "S" : first)
         book = (user, id)
         return id

@@ -44,7 +44,7 @@ struct AccountStrip: View {
                     let on = a == selected
                     Button { choose(a) } label: {
                         Text(a.name)
-                            .sFont(14, on ? .semibold : .medium)
+                            .sType(SType(size: 14, weight: on ? 600 : 500, line: 18, tracking: -0.005), tabular: false)
                             .foregroundStyle(on ? S.ink : S.secondaryOnPage)
                             .padding(.horizontal, 12)
                             .frame(height: 30)

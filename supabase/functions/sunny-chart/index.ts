@@ -10,8 +10,12 @@
  * for checks). The book's legs are read AS THE CALLER (RLS: members of the book only); a cron-key call reads
  * them with the service key. verify_jwt is off so the cron key can pass; the check below stands in for it.
  * No em dashes in any words written here (Nik).
+ *
+ * 8 Nov 2026 (type pass, SunnyTickerChart.dc.html): the walls also send the accelerator; the reply adds the move
+ * priced by Friday (sd, the brief's one weekly SD: iv × √(5/252) × 100, in %) for the Walls band, and the sub line's
+ * pieces: the name as the brief writes it (short), its strategy word, and whether it is on the watchlist.
  */
-const BUILD = '2026-11-07.2';
+const BUILD = '2026-11-08.1';
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -91,11 +95,20 @@ Deno.serve(async (req) => {
 
     // The book's legs and walls in this name, read as the caller.
     let positions: Row[] = [], walls: Row[] = [];
+    let sd: number | null = null, short: string | null = null, strategy: string | null = null, watch = false;
     if (/^[A-Z]$/.test(book)) {
-      const r = await fetch(`${URL_}/rest/v1/home_snapshot?book_id=eq.${book}&select=inputs:payload->brief_inputs`, { headers: { apikey: who.key, Authorization: who.auth } });
+      const r = await fetch(`${URL_}/rest/v1/home_snapshot?book_id=eq.${book}&select=inputs:payload->brief_inputs,names:payload->brief->names,`
+        + `strategies:payload->strategies,watchlist:payload->watchlist`, { headers: { apikey: who.key, Authorization: who.auth } });
       const rows = r.ok ? await r.json() as Row[] : [];
-      const n = (rows[0]?.inputs?.names ?? []).find((x: Row) => x.t === t);
+      const row = rows[0] ?? {};
+      const bn = ((row.names ?? []) as Row[]).find((x) => x?.t === t);
+      if (bn?.name) short = String(bn.name);
+      const st = (row.strategies ?? {})[t] ?? bn?.strategy;
+      if (st) strategy = String(st);
+      watch = ((row.watchlist ?? []) as Row[]).some((w) => w?.ticker === t);
+      const n = (row.inputs?.names ?? []).find((x: Row) => x.t === t);
       if (n) {
+        if (!n.noIv && Number(n.iv) > 0) sd = +(Number(n.iv) * Math.sqrt(5 / 252) * 100).toFixed(3);
         const legs = n.legs as Row[];
         for (const l of legs.filter((x) => x.kind === 'leaps' || x.kind === 'otm')) positions.push({ k: l.K, label: `${l.kind === 'leaps' ? 'LEAPS' : 'Hedge'} ${fk(l.K)} ×${l.q}`, solid: false });
         for (const l of legs.filter((x) => x.kind === 'sc' || x.kind === 'sp')) positions.push({ k: l.K, label: `Sold ${l.kind === 'sc' ? 'call' : 'put'} ${fk(l.K)} ×${-l.q}, ${md(String(l.ex))}`, solid: true });
@@ -106,6 +119,7 @@ Deno.serve(async (req) => {
         if (w) {
           if (w.c) walls.push({ k: w.c.k, label: `Ceiling · ${w.label}` });
           if (w.f) walls.push({ k: w.f.k, label: `Floor · ${w.label}` });
+          if (w.a) walls.push({ k: w.a.k, label: `Accelerator · ${w.label}` });
           if (w.flip != null) walls.push({ k: w.flip, label: `Flip · ${w.label}` });
         }
       }
@@ -115,7 +129,7 @@ Deno.serve(async (req) => {
       positions = [...byK.values()];
     }
     return json(200, { v: 1, build: BUILD, t, name: String(meta.shortName ?? meta.longName ?? t), price: +price.toFixed(4), prev: +prev.toFixed(4),
-      last_bar: lastD ?? null, dates: pts.map((p) => p.d), closes, positions, walls, tech });
+      last_bar: lastD ?? null, dates: pts.map((p) => p.d), closes, positions, walls, tech, sd, short, strategy, watch });
   } catch (e) {
     return json(502, { error: String((e as Error)?.message ?? e) });
   }

@@ -21,7 +21,7 @@ enum BK {
     static let caption = SType(size: 11, weight: 500, line: 13, tracking: 0)
     static let label = SType(size: 12, weight: 500, line: 15, tracking: 0)
     static let stat = SType(size: 17, weight: 800, line: 22, tracking: 0)
-    static let big = SType(size: 40, weight: 800, line: 46, tracking: -0.03)
+    static let big = SType(size: 40, weight: 800, line: 44, tracking: -0.03)
 
     static func color(_ c: String?) -> Color {
         switch c {
@@ -213,7 +213,7 @@ struct BLogo: View {
             if let t = ticker, let img = UIImage(named: "logo-\(t)") {
                 Image(uiImage: img).resizable().scaledToFit().frame(width: size * 0.74, height: size * 0.74)   // design: center/74%
             } else if let t = ticker {
-                Text(String(t.prefix(4))).font(.system(size: size * 0.26, weight: .bold)).foregroundStyle(Color(hex: 0x1D1D1F))
+                Text(String(t.prefix(4))).font(.inter(size * 0.26, 700)).foregroundStyle(Color(hex: 0x1D1D1F))
             }
         }
         .frame(width: size, height: size)
@@ -350,41 +350,161 @@ struct BBars: View {
 /// A heat map drawn from the content's own tiles (rects on a 305 × 196 grid, colours by move).
 struct BHeatMap: View {
     let page: JSONValue
+    /// Sector maps ring the names the book holds (SunnyEconomy mapCard: a 2 pt ink ring inside the tile's edge, then
+    /// 1.5 pt of the card's paper); Your names and the watchlist do not (the design's noRing).
+    var ring = false
     @Environment(BriefState.self) private var brief
 
-    /// The design's type steps for a tile (SunnyEconomy mapCard): ticker and move 15/14, 13/12 or 12/11 when both fit,
-    /// else the ticker alone, else nothing. `w`, `h` are the tile's own size. The design's alone step is 10, but its
-    /// layout never leaves a tile that small (it grows the floor first); the server's can, so 11, the README's least.
-    static func tier(_ ticker: String, _ w: CGFloat, _ h: CGFloat) -> (tf: CGFloat, pf: CGFloat) {
+    /// The names the book holds: the brief's names (the snapshot's strategies and legs), the sample book's in sample mode.
+    private var held: Set<String> {
+        guard ring else { return [] }
+        if BriefDebug.sample { return Set(SampleBook.names) }
+        return Set(brief.live?.names.compactMap { $0["t"].string } ?? [])
+    }
+
+    /// The design's type steps for a tile (SunnyEconomy mapCard, Nov 8: one size smaller): ticker and move 13/12 when
+    /// both fit and the tile is 44 tall, 12/11 at 36, 11/10 at 30, else the ticker alone at 10, else nothing. A tile drops
+    /// a size before it drops the move (BUILD-REVIEW 10). The widths are the design's estimates (ticker .66 em a letter,
+    /// the move five figures at .6 em, its triangle and gap, 8 to spare), checked against the real words measured in
+    /// Inter (2 a side for the ticker, 1 for the move), so a longer move than the design's ("26.04%") never runs past its tile.
+    static func tier(_ ticker: String, _ move: String?, _ w: CGFloat, _ h: CGFloat) -> (tf: CGFloat, pf: CGFloat) {
         let n = CGFloat(ticker.count)
-        func tw(_ f: CGFloat) -> CGFloat { n * f * 0.66 + 8 }
-        func pw(_ f: CGFloat) -> CGFloat { 5 * f * 0.6 + 8 + f * 0.6 + 3 }
-        if w >= tw(15), w >= pw(14), h >= 52 { return (15, 14) }
-        if w >= tw(13), w >= pw(12), h >= 40 { return (13, 12) }
-        if w >= tw(12), w >= pw(11), h >= 34 { return (12, 11) }
-        if w >= tw(11), h >= 16 { return (11, 0) }
+        func tw(_ f: CGFloat) -> CGFloat { max(n * f * 0.66 + 8, measure(ticker, f, 700, false) + 4) }
+        func pw(_ f: CGFloat) -> CGFloat {
+            max(5 * f * 0.6 + 8 + f * 0.6 + 3, measure(move ?? "", f, 500, true) + (f * 0.6).rounded() + (f >= 13 ? 3 : 2) + 2)
+        }
+        let shows = !(move ?? "").isEmpty
+        if shows, w >= tw(13), w >= pw(12), h >= 44 { return (13, 12) }
+        if shows, w >= tw(12), w >= pw(11), h >= 36 { return (12, 11) }
+        if shows, w >= tw(11), w >= pw(10), h >= 30 { return (11, 10) }
+        if w >= tw(10), h >= 16 { return (10, 0) }
         return (0, 0)
+    }
+
+    /// The tiles and where they sit (x, y, w, h on the map's grid, the 2 pt gap already taken off each side). SunnyEconomy
+    /// mapCard: the biggest names by weight, up to 12; each name's area its weight with a floor that steps up from 5% to
+    /// 10% of the total until every tile has room for its ticker (12) and move (11) and is 34 tall; else the top 10 at a
+    /// 10% floor. Squarified (`squarify`). Falls back to the server's rects when a tile carries no weight.
+    static func layout(_ tiles: [JSONValue], _ W: Double, _ H: Double) -> [(tile: JSONValue, rect: [Double])] {
+        let server = tiles.map { (tile: $0, rect: $0["rect"].array.compactMap(\.double)) }
+        let weight = { (t: JSONValue) -> Double in t["weight"].double ?? 0 }
+        guard !tiles.isEmpty, tiles.allSatisfy({ weight($0) > 0 }) else { return server }
+        let items: [JSONValue] = tiles.enumerated().sorted { (a, b) -> Bool in
+            let wa = weight(a.element), wb = weight(b.element)
+            return wa != wb ? wa > wb : a.offset < b.offset
+        }.map(\.element)
+        let ticker = { (t: JSONValue) -> String in t["ticker"].string ?? t["name"].string ?? "" }
+        // The design's room for a ticker at 12 and a five-figure move at 11, and 34 tall.
+        let moveRoom: CGFloat = 5 * 11 * 0.6 + 8 + 11 * 0.6 + 3
+        func fit(_ r: CGRect, _ t: String) -> Bool {
+            let tickerRoom = CGFloat(t.count) * 12 * 0.66 + 8
+            return r.width - 4 >= max(tickerRoom, moveRoom) && r.height - 4 >= 34
+        }
+        func lay(_ tt: [JSONValue], _ f: Double) -> [CGRect] {
+            let caps: [Double] = tt.map(weight)
+            let tc: Double = caps.reduce(0, +)
+            let wv: [Double] = caps.map { max($0, tc * f) }
+            let wt: Double = wv.reduce(0, +)
+            return squarify(wv.map { $0 / wt * W * H }, W, H)
+        }
+        func out(_ tt: [JSONValue], _ rr: [CGRect]) -> [(tile: JSONValue, rect: [Double])] {
+            zip(tt, rr).map { (t: JSONValue, r: CGRect) -> (tile: JSONValue, rect: [Double]) in
+                let x = Double(r.minX) + 2, y = Double(r.minY) + 2, w = Double(r.width) - 4, h = Double(r.height) - 4
+                return (tile: t, rect: [x, y, w, h])
+            }
+        }
+        for n in [12, 10] {
+            let tt = Array(items.prefix(n))
+            var f = 0.05
+            while f <= 0.1001 {
+                let rr = lay(tt, f)
+                if zip(rr, tt).allSatisfy({ fit($0, ticker($1)) }) { return out(tt, rr) }
+                f += 0.005
+            }
+        }
+        let top = Array(items.prefix(10))
+        return out(top, lay(top, 0.1))
+    }
+
+    /// SunnyEconomy sq(): squarified rows; a last name left alone in a thin strip joins the row before it, laid out
+    /// whichever way keeps the tiles squarest.
+    static func squarify(_ vals: [Double], _ W: Double, _ H: Double) -> [CGRect] {
+        var out: [CGRect] = []
+        var rows: [(x: Double, y: Double, w: Double, h: Double, n: Int, at: Int)] = []
+        var x = 0.0, y = 0.0, w = W, h = H, i = 0
+        while i < vals.count {
+            let s = min(w, h)
+            func worst(_ r: [Double]) -> Double {
+                let sum = r.reduce(0, +), mx = r.max() ?? 0, mn = r.min() ?? 1
+                return max(s * s * mx / (sum * sum), sum * sum / (s * s * mn))
+            }
+            var row = [vals[i]], j = i + 1
+            while j < vals.count, worst(row + [vals[j]]) <= worst(row) { row.append(vals[j]); j += 1 }
+            let sum = row.reduce(0, +)
+            rows.append((x, y, w, h, row.count, out.count))
+            if w >= h {
+                let cw = sum / h; var yy = y
+                for v in row { out.append(CGRect(x: x, y: yy, width: cw, height: v / cw)); yy += v / cw }
+                x += cw; w -= cw
+            } else {
+                let rh = sum / w; var xx = x
+                for v in row { out.append(CGRect(x: xx, y: y, width: v / rh, height: rh)); xx += v / rh }
+                y += rh; h -= rh
+            }
+            i = j
+        }
+        if rows.count >= 2, let last = rows.last, last.n == 1 {
+            let p = rows[rows.count - 2]
+            let vs = Array(vals.suffix(p.n + 1)), tail = Array(out[p.at...])
+            func lay(_ across: Bool) -> [CGRect] {
+                var x = p.x, y = p.y
+                return vs.map { v in
+                    if across { let cw = v / p.h, r = CGRect(x: x, y: y, width: cw, height: p.h); x += cw; return r }
+                    let rh = v / p.w, r = CGRect(x: x, y: y, width: p.w, height: rh); y += rh; return r
+                }
+            }
+            func ar(_ rs: [CGRect]) -> Double { rs.map { Double(max($0.width / $0.height, $0.height / $0.width)) }.max() ?? 0 }
+            let best = [tail, lay(true), lay(false)].min { ar($0) < ar($1) } ?? tail
+            out.removeSubrange(p.at...)
+            out += best
+        }
+        return out
+    }
+
+    private static func measure(_ s: String, _ f: CGFloat, _ weight: CGFloat, _ tabular: Bool) -> CGFloat {
+        let font = SType(size: f, weight: weight, line: f, tracking: 0).uiFont(tabular: tabular)
+        return ceil(NSAttributedString(string: s, attributes: [.font: font]).size().width)
     }
 
     var body: some View {
         let size = page["mapSize"].array.compactMap(\.double)
         let mw = size.first ?? 305, mh = size.count > 1 ? size[1] : 196
+        // The design's own layout from the tiles' weights (every tile room for its ticker and move); the server's
+        // rects only when a tile has no weight.
+        let laid = Self.layout(page["tiles"].array, mw, mh)
+        let held = self.held
         GeometryReader { g in
             let sx = g.size.width / mw, sy = g.size.height / mh
             ZStack(alignment: .topLeading) {
-                ForEach(Array(page["tiles"].array.enumerated()), id: \.offset) { _, t in
-                    let r = t["rect"].array.compactMap(\.double)
+                ForEach(Array(laid.enumerated()), id: \.offset) { _, x in
+                    let t = x.tile, r = x.rect
                     if r.count == 4 {
                         let w = r[2] * sx, h = r[3] * sy
                         let tk = t["ticker"].string ?? t["name"].string ?? ""
-                        let f = Self.tier(tk, w, h)
+                        let mv = t["moveText"].string
+                        let f = Self.tier(tk, mv, w, h)
                         ZStack {
                             RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Self.fill(t))
+                            if let tk = t["ticker"].string, held.contains(tk) {
+                                // inset 0 0 0 2px var(--ink), inset 0 0 0 3.5px var(--card): the ink over the paper.
+                                RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(S.paper, lineWidth: 3.5)
+                                RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(S.ink, lineWidth: 2)
+                            }
                             if f.tf > 0 {
                                 // Centred column, 3 apart, each line 1.1 of its size; the move's triangle as the design draws it.
                                 VStack(spacing: 3) {
                                     Text(tk).sType(SType(size: f.tf, weight: 700, line: f.tf * 1.1, tracking: 0), tabular: false)
-                                    if f.pf > 0, t["showsMove"].bool, let m = t["moveText"].string {
+                                    if f.pf > 0, let m = mv {
                                         let tw = (f.pf * 0.6).rounded() / 2, th = (f.pf * 0.9).rounded() / 2
                                         HStack(spacing: f.pf >= 13 ? 3 : 2) {
                                             BTriangle(up: (t["move"].double ?? 0) >= 0).frame(width: tw * 2, height: th)
@@ -392,13 +512,14 @@ struct BHeatMap: View {
                                         }
                                     }
                                 }
-                                .foregroundStyle(S.ink)
-                                .lineLimit(1)   // never wrap the % onto its own line (FIS ▼26.04%): shrink a little first
-                                .minimumScaleFactor(0.8)
-                                .padding(2)
+                                // The text is the tile's own colour (Nov 8, README 11.2).
+                                .foregroundStyle(Self.ink(t))
+                                .lineLimit(1)
+                                .fixedSize()
                             }
                         }
                         .frame(width: w, height: h)
+                        .clipped()
                         .contentShape(Rectangle())
                         // The ticker chart is the sample's until its real series lands (Pass 2); real tiles do not open it yet.
                         .onTapGesture { if let t = t["ticker"].string, Self.opens(t) { brief.ticker = t } }
@@ -413,8 +534,9 @@ struct BHeatMap: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(BSay.words(page["aria"].string))
         .accessibilityActions {
-            ForEach(Array(page["tiles"].array.enumerated()), id: \.offset) { _, t in
-                if let tk = t["ticker"].string, Self.opens(tk) {
+            ForEach(Array(laid.enumerated()), id: \.offset) { _, x in
+                if let tk = x.tile["ticker"].string, Self.opens(tk) {
+                    let t = x.tile
                     Button("Open \(t["name"].string ?? tk) chart") { brief.ticker = tk }
                 }
             }
@@ -429,6 +551,8 @@ struct BHeatMap: View {
         if let hex = t["bg"].string?.replacingOccurrences(of: "#", with: ""), let v = UInt32(hex, radix: 16) { return Color(hex: v) }
         return S.chip
     }
+    /// The tile's text: its own step's ink (darker on pale tiles, lighter on deep ones); ink when there is no move.
+    static func ink(_ t: JSONValue) -> Color { t["move"].double.map(S.heatInk) ?? S.ink }
 }
 
 /// Cards in a sideways row: the first full width less a peek of the next (block 29 rows).
@@ -437,6 +561,7 @@ struct BRow<Content: View>: View {
     /// 12 between cards; the index cards sit 8 apart.
     var spacing: CGFloat = 12
     @ViewBuilder let content: () -> Content
+    @State private var pos = ScrollPosition()
     var body: some View {
         ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: spacing) { content() }
@@ -446,5 +571,16 @@ struct BRow<Content: View>: View {
         .scrollIndicators(.hidden)
         .scrollTargetBehavior(.viewAligned)
         .scrollClipDisabled()
+        .scrollPosition($pos)
+        .task {
+            // DEBUG audits (simulator only): `-hscroll 688` opens every sideways row that far in, to shoot a later card.
+            #if DEBUG && targetEnvironment(simulator)
+            let a = ProcessInfo.processInfo.arguments
+            if let i = a.firstIndex(of: "-hscroll"), i + 1 < a.count, let x = Double(a[i + 1]) {
+                try? await Task.sleep(for: .milliseconds(700))
+                pos.scrollTo(x: x)
+            }
+            #endif
+        }
     }
 }

@@ -348,7 +348,7 @@ struct AccountChart: View {
                 } else {
                     let first = m.nav(s), d = bigValue - first - m.deposited(s, i)
                     let p = first != 0 ? d / abs(first) * 100 : 0
-                    Text("\(F.money(d)) · \(F.pct(p, places: 1))")
+                    Text("\(SampleEngine.fK(d)) · \(F.pct(p, places: 1))")
                         .sType(Self.changeValue)
                         .foregroundStyle(S.signed(d.rounded()))
                         .contentTransition(reduce ? .identity : .numericText(value: d))
@@ -388,7 +388,7 @@ struct AccountChart: View {
     /// "up 571 dollars, 0.6 percent"; privacy "hidden, up 0.6 percent" (the percentage stays).
     private func change(_ d: Double, pct p: Double) -> String {
         if d.rounded() == 0 { return hidden ? "hidden, no change" : "no change" }
-        return hidden ? "hidden, \(Self.way(d)) \(Self.percent(p))" : "\(Self.way(d)) \(Self.dollars(d)), \(Self.percent(p))"
+        return hidden ? "hidden, \(Self.way(d)) \(Self.percent(p))" : "\(Self.way(d)) \(Self.kDollars(d)), \(Self.percent(p))"
     }
 
     // Spoken money: words, never a minus sign.
@@ -399,6 +399,9 @@ struct AccountChart: View {
     }
     /// "down 500 dollars" for a loss, "1,200 dollars" for a gain.
     private static func signedDollars(_ v: Double) -> String { (v.rounded() < 0 ? "down " : "") + dollars(v) }
+    /// Money as it shows under the value, in K and M: "1.6 thousand dollars" for $1.6K.
+    private static func kDollars(_ v: Double) -> String { BriefWords.speech(SampleEngine.fK(v)) }
+    private static func signedK(_ v: Double) -> String { (v.rounded() < 0 ? "down " : "") + kDollars(v) }
     private static func percent(_ p: Double) -> String { String(format: "%.1f percent", abs(p)) }
 
     /// Money paid in or out in the range, on its own line (never in the change above it).
@@ -406,19 +409,24 @@ struct AccountChart: View {
         if let m = model, !fresh, !pnl, single == nil, !compare {
             let (s, _) = bounds, dep = m.deposited(s, at)
             if abs(dep) >= 1 {
-                Text("\(F.money(abs(dep))) \(dep > 0 ? "deposited" : "withdrawn") \(scrubbing ? "by then" : range.words)")
+                Text("\(SampleEngine.fK(dep)) \(dep > 0 ? "deposited" : "withdrawn") \(scrubbing ? "by then" : range.words)")
                     .sType(Self.changeWords, tabular: false).foregroundStyle(S.mutedOnPage)
                     .blur(radius: hidden ? 9 : 0)
                     .lineLimit(1)
-                    .accessibilityLabel("\(hidden ? "hidden" : Self.dollars(dep)) \(dep > 0 ? "deposited" : "withdrawn") \(scrubbing ? "by then" : range.words)")
+                    .accessibilityLabel("\(hidden ? "hidden" : Self.kDollars(dep)) \(dep > 0 ? "deposited" : "withdrawn") \(scrubbing ? "by then" : range.words)")
             }
         }
     }
 
     private var eyeButton: some View {
         Button { withAnimation(S.fade) { hidden.toggle() } } label: {
-            Image(systemName: hidden ? "eye.slash" : "eye")
-                .sFont(15, .medium)
+            // The design's eye: an 18 pt line icon (24 grid, stroke 2), the slash drawn in while hidden; 55% at rest.
+            ZStack {
+                SEyeIcon().stroke(style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                SEyeIcon(slash: true).trim(from: 0, to: hidden ? 1 : 0)
+                    .stroke(style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+            }
+                .frame(width: 18, height: 18)
                 .foregroundStyle(S.muted)
                 .opacity(hidden ? 1 : 0.55)
                 .frame(width: 28, height: 28)
@@ -758,12 +766,9 @@ struct AccountChart: View {
                 if let t = st.text {
                     Text(t)
                 } else {
-                    // Full dollars; $K above $100,000 only when the column would wrap.
-                    ViewThatFits(in: .horizontal) {
-                        SNumber(value: st.value, format: { F.money($0) }, countUp: false)
-                        SNumber(value: st.value, format: { F.moneyK($0) }, countUp: false)
-                    }
-                    .transaction(still)
+                    // Money in K and M under the chart (Nov 8, the design's fmt): $4.9K, $176K; only the account value is exact.
+                    SNumber(value: st.value, format: { SampleEngine.fK($0) }, countUp: false)
+                        .transaction(still)
                 }
             }
             .sType(SType(size: 20, weight: 700, line: 24, tracking: -0.01))
@@ -773,8 +778,18 @@ struct AccountChart: View {
             // The read rolls in over "Time value" for a few seconds, then back.
             let word = readOn ? st.read : nil
             ZStack(alignment: .leading) {
-                Text(word?.word ?? (st.label == "Time value" && timeValueTap != nil ? "Time value ›" : st.label))
-                    .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
+                // "Time value" and the design's chevron (10 pt, a 24 grid's M9 6l6 6-6 6 at stroke 3), 3 apart.
+                HStack(spacing: 3) {
+                    Text(word?.word ?? st.label)
+                        .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
+                    if word == nil, st.label == "Time value", timeValueTap != nil {
+                        Path { p in
+                            p.move(to: CGPoint(x: 3.75, y: 2.5)); p.addLine(to: CGPoint(x: 6.25, y: 5)); p.addLine(to: CGPoint(x: 3.75, y: 7.5))
+                        }
+                        .stroke(style: StrokeStyle(lineWidth: 1.25, lineCap: .round, lineJoin: .round))
+                        .frame(width: 10, height: 10)
+                    }
+                }
                     .foregroundStyle(word?.color ?? S.mutedOnPage)
                     .lineLimit(1)
                     .id(word?.word ?? st.label)
@@ -790,7 +805,7 @@ struct AccountChart: View {
         // The stat's own label and its value, never the rolled read word ("LULU up" is a few seconds of colour).
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(st.label)
-        .accessibilityValue(hidden ? "hidden" : st.text.map { $0 == "-" ? "none" : $0 } ?? Self.signedDollars(st.value))
+        .accessibilityValue(hidden ? "hidden" : st.text.map { $0 == "-" ? "none" : $0 } ?? Self.signedK(st.value))
         .accessibilityAddTraits(st.label == "Time value" && timeValueTap != nil ? .isButton : [])
     }
 
@@ -800,7 +815,7 @@ struct AccountChart: View {
         guard let m = model, m.n > 0 else { return [] }
         let (s, e) = bounds, i = at
         if fresh {
-            return [Minor(label: "Margin", text: F.money(home.account.margin ?? m.c.margin[e] ?? 0)),
+            return [Minor(label: "Margin", text: SampleEngine.fK(home.account.margin ?? m.c.margin[e] ?? 0)),
                     Minor(label: "Interest", text: "$0"), Minor(label: "Fees", text: "$0")]
         }
         switch single {
@@ -808,9 +823,9 @@ struct AccountChart: View {
             let margin = i == e && m.c.liveLast ? (home.account.margin ?? m.c.margin[i] ?? 0) : (m.c.margin[i] ?? 0)
             let interest = (m.c.interestCum[i] ?? 0) - (m.c.interestCum[s] ?? 0)
             let fees = (m.c.commissionCum[i] ?? 0) - (m.c.commissionCum[s] ?? 0)
-            return [Minor(label: "Margin", text: F.money(margin)),
-                    Minor(label: "Interest", text: F.money(interest)),
-                    Minor(label: "Fees", text: F.money(fees), color: fees.rounded() < 0 ? S.red : S.ink)]
+            return [Minor(label: "Margin", text: SampleEngine.fK(margin)),
+                    Minor(label: "Interest", text: SampleEngine.fK(interest)),
+                    Minor(label: "Fees", text: SampleEngine.fK(fees), color: fees.rounded() < 0 ? S.red : S.ink)]
         case .shares?:
             return [Minor(label: "Tickers", text: "\(m.c.sharesTickers[safe: i] ?? 0)")]
         case .dividends?:
@@ -832,7 +847,7 @@ struct AccountChart: View {
         }
         .fixedSize()
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(mn.label) \(hidden ? "hidden" : mn.text)")
+        .accessibilityLabel("\(mn.label) \(hidden ? "hidden" : BriefWords.speech(mn.text))")
     }
 
     private var halfToggle: some View {
@@ -872,7 +887,7 @@ struct AccountChart: View {
                                 .foregroundStyle(S.ink)
                         }
                         Spacer(minLength: 0)
-                        Text(F.money(v)).sType(SType(size: 13, weight: 700, line: 18, tracking: 0))
+                        Text(SampleEngine.fK(v)).sType(SType(size: 13, weight: 700, line: 18, tracking: 0))
                             .foregroundStyle(S.lossInk(v))
                             .contentTransition(reduce ? .identity : .numericText(value: v))
                             .blur(radius: hidden ? 9 : 0)
@@ -882,7 +897,7 @@ struct AccountChart: View {
                 }
                 .buttonStyle(SPressStyle())
                 .accessibilityLabel(g.rawValue)
-                .accessibilityValue(hidden ? "hidden" : Self.signedDollars(v))
+                .accessibilityValue(hidden ? "hidden" : Self.signedK(v))
                 .accessibilityHint("Shows \(g.rawValue) on its own")
             }
         }
@@ -950,6 +965,26 @@ struct SVLine: Shape {
     let x: CGFloat, from: CGFloat, to: CGFloat
     func path(in rect: CGRect) -> Path {
         Path { $0.move(to: CGPoint(x: x, y: from)); $0.addLine(to: CGPoint(x: x, y: to)) }
+    }
+}
+
+/// The eye from the design file (24 pt grid): the outline and the pupil, or the slash across them.
+struct SEyeIcon: Shape {
+    var slash = false
+    func path(in rect: CGRect) -> Path {
+        let k = rect.width / 24
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * k, y: y * k) }
+        var path = Path()
+        if slash { path.move(to: p(3, 3)); path.addLine(to: p(21, 21)); return path }
+        // M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z
+        path.move(to: p(2, 12))
+        path.addCurve(to: p(12, 5), control1: p(2, 12), control2: p(5.5, 5))
+        path.addCurve(to: p(22, 12), control1: p(18.5, 5), control2: p(22, 12))
+        path.addCurve(to: p(12, 19), control1: p(22, 12), control2: p(18.5, 19))
+        path.addCurve(to: p(2, 12), control1: p(5.5, 19), control2: p(2, 12))
+        path.closeSubpath()
+        path.addEllipse(in: CGRect(x: 9 * k, y: 9 * k, width: 6 * k, height: 6 * k))
+        return path
     }
 }
 

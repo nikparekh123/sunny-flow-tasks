@@ -7,20 +7,24 @@
  */
 type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 
-/** Formats, after the bar: $ dollars, $2 to the cent, $k short ($3.8K, $46.3B), % one decimal, %0 whole, %2 two,
-    # whole number, #1 and #2 decimals, d a delta (.62), x a multiple (18.0x), k a strike (104, 37.5). */
+/** Money in K and M, the design's money() (8 Nov 2026, README 11.5): $624, $5.9K, $13.7K, $379K, $1.2M, no trailing
+    .0 and no sign; past a billion (a market cap) $46.3B and $1.2T. Prices and strikes are not money: $2 and k. */
+export function money(v: number): string {
+  const a = Math.abs(+v || 0), s1 = (x: number, u: string) => '$' + x.toFixed(1).replace(/\.0$/, '') + u;
+  const big = (x: number, u: string) => '$' + (x >= 100 ? Math.round(x).toLocaleString('en-US') : x.toFixed(1).replace(/\.0$/, '')) + u;
+  return a >= 999.5e9 ? big(a / 1e12, 'T') : a >= 999.5e6 ? big(a / 1e9, 'B') : a >= 999500 ? s1(a / 1e6, 'M')
+    : a >= 99950 ? '$' + Math.round(a / 1e3) + 'K' : a >= 999.5 ? s1(a / 1e3, 'K') : '$' + Math.round(a);
+}
+
+/** Formats, after the bar: $ money in K and M ($0 and $k the same), $2 to the cent (a price), % one decimal (two
+    under 0.1%), %0 whole, %2 two (a yield or a ratio), # whole number, #1 and #2 decimals, d a delta (.62),
+    x a multiple (18.0x), k a strike (104, 37.5). */
 export function fmt(v: number, f: string): string {
   const a = Math.abs(v), us = (x: number, d = 0) => x.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
-  const short = (x: number) => {
-    const [u, s] = x >= 1e12 ? [1e12, 'T'] : x >= 1e9 ? [1e9, 'B'] : x >= 1e6 ? [1e6, 'M'] : x >= 1e3 ? [1e3, 'K'] : [1, ''];
-    const y = x / u;
-    return s ? (y >= 100 ? us(y) : y.toFixed(1).replace(/\.0$/, '')) + s : us(x);
-  };
   switch (f.trim()) {
-    case '$': return '$' + us(Math.round(a));
+    case '$': case '$0': case '$k': return money(a);
     case '$2': return '$' + us(a, 2);
-    case '$k': return '$' + short(a);
-    case '%': return a.toFixed(1) + '%';
+    case '%': return (Math.round(a * 100) < 10 ? a.toFixed(2) : a.toFixed(1)) + '%';
     case '%0': return Math.round(a) + '%';
     case '%2': return a.toFixed(2) + '%';
     case '#': return us(Math.round(a));
@@ -34,7 +38,8 @@ export function fmt(v: number, f: string): string {
   throw new Error(`format ${f}`);
 }
 
-/** Formats that count up on screen (the big number): whole dollars and whole numbers. */
+/** Formats that count up on screen (the big number): money and whole numbers. The design counts money up in its
+    own K and M steps (SunnySearch Count), so the phone writes each frame with money() too. */
 export const COUNTS = new Set(['$', '#']);
 
 /** Literal numbers a slot may use besides its names: small counts and 100 (for a percent). */

@@ -3,6 +3,8 @@
  * on its own as { type, tag, source: { kind, at }, data }. Reads what Sunny already works out (home_snapshot,
  * gamma_view_day) and, for walls on any ticker, asks gex-walls live. Never writes, never trades.
  */
+import { money } from './slots.ts';
+
 export const SB_URL = Deno.env.get('SUPABASE_URL')!;
 export const SB_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 export type Row = Record<string, any>;
@@ -74,7 +76,10 @@ const spotOf = (c: Ctx, t: string) =>
   num(c.p.portfolio?.find((x: Row) => x.ticker === t)?.spot) ?? num(c.p.legs?.find((l: Row) => l.ticker === t)?.underlying) ?? NaN;
 const nameRow = (c: Ctx, t: string): Row | undefined => c.p.writes?.names?.find((n: Row) => n.ticker === t);
 /** The book's names: the plan's for an owner, each open name's strategy for a viewer (the same names). */
-export const bookNames = (c: Ctx) => Object.keys(c.p.plan ?? c.p.strategies ?? {}).sort();
+/* Every name the book holds. `plan` lists only names with a write planned (NFLX and UBER on 8 Nov), so reading it first
+   told the name page and the price chart that NKE, FIS, LULU and BABA were "not in the book" (fixed 8 Nov 2026). */
+export const bookNames = (c: Ctx) => [...new Set([...Object.keys(c.p.strategies ?? {}), ...Object.keys(c.p.plan ?? {}),
+  ...((c.p.legs ?? []) as Row[]).map((l) => String(l.ticker))])].filter(Boolean).sort();
 function need(t: string | undefined, what: string): string {
   if (!t) throw new Error(`${what} needs a ticker`);
   return t;
@@ -171,10 +176,8 @@ function bsDelta(S: number, K: number, years: number, v: number, cp: 'c' | 'p'):
   const d1 = (Math.log(S / K) + (RATE + v * v / 2) * years) / (v * Math.sqrt(years));
   return cp === 'c' ? ncdf(d1) : ncdf(d1) - 1;
 }
-const usdK = (v: number) => {
-  const a = Math.abs(v), k = a / 1000;
-  return a >= 1000 ? '$' + (k >= 10 || Math.abs(k - Math.round(k)) < 0.05 ? String(Math.round(k)) : k.toFixed(1)) + 'K' : '$' + tens(a);
-};
+/* Money in K and M (README 11.5, 8 Nov 2026): the design's money(), shared with the slots. */
+const usdK = money;
 const stateOf = (d: number, long: number) => (d < 0 ? 'Short' : d < 0.25 * long ? 'Thin' : 'On target');
 
 function whatIf(c: Ctx, t: string, g: Row | undefined, ask: number | null) {
@@ -795,7 +798,7 @@ async function dbAll(path: string): Promise<Row[]> {
   }
 }
 const yShort = (iso: string) => `${monShort(iso)} ’${iso.slice(2, 4)}`;
-const usd0 = (v: number) => '$' + Math.round(Math.abs(v)).toLocaleString('en-US');
+const usd0 = money;
 
 async function yourName(c: Ctx, t: string, ch: Row) {
   const from = BOOK_FROM[c.book] ?? BOOK_FROM.S, today = c.today, spot = spotOf(c, t), fri = fridayFrom(today);

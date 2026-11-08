@@ -3,8 +3,9 @@
 //  Sunny
 //
 //  The ticker chart on real data (block 33, handoff 6 Nov 2026, Pass 2): sunny-chart sends five years of daily
-//  closes from Yahoo, the price and the previous close, and the three layers (the book's legs in this name, the
-//  nearest weekly's walls, the technical lines). The phone only draws it. Decoded off the main thread.
+//  closes from Yahoo, the price and the previous close, the book's legs in this name, the nearest weekly's walls
+//  (ceiling, floor, accelerator, flip) and the move priced by Friday, and the sub line's name, strategy and watchlist
+//  flag (8 Nov 2026). The phone draws it, the moving averages and RSI from the closes. Decoded off the main thread.
 //
 
 import Foundation
@@ -22,12 +23,17 @@ nonisolated struct TickerWire: Decodable, Sendable {
     let positions: [Line]
     let walls: [Line]
     let tech: Tech
+    /// The move priced by Friday in % (one weekly SD, the brief's sd), for the Walls band. Nil when not held or no IV
+    /// (and from a server older than build 2026-11-08.1).
+    let sd: Double?
+    /// The sub line's pieces: the name as the brief writes it ("Nike"), its strategy word ("rebound"), on the watchlist.
+    let short: String?
+    let strategy: String?
+    let watch: Bool?
 
-    /// The Technicals layer as lines: the 20- and 50-day averages, the year's high and low.
-    var techLines: [(k: Double, label: String, solid: Bool)] {
-        [(tech.sma20, "20-day"), (tech.sma50, "50-day"), (tech.hi52, "Year high"), (tech.lo52, "Year low")]
-            .compactMap { v, l in v.map { ($0, l, false) } }
-    }
+    // The Technicals layer is drawn on the phone from the closes (TickerChart.swift TKCalc: the 20, 50 and 200-day
+    // averages over time and RSI 14), as the design does; `tech` stays in the reply for older builds.
+
     /// Closes since the first session of the latest year (YTD).
     var ytdCount: Int {
         guard let y = dates.last?.prefix(4) else { return closes.count }

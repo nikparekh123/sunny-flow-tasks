@@ -81,10 +81,17 @@ enum SampleEngine {
 
     // MARK: Money as the prototype writes it
 
+    /// Money in K and M, the design's `money()` (8 Nov 2026, README 11.5): $624, $5.9K, $13.7K, $379K, $1.2M,
+    /// no trailing .0 ($2K). Stock prices, strikes, index levels, dividends a share and the account value stay exact.
     static func fK(_ x: Double) -> String {
         let a = abs(x)
-        if a >= 1e4 { return "$\(Int((a / 1000).rounded()))K" }
-        if a >= 1000 { return "$" + String(format: "%.1f", a / 1000) + "K" }
+        func s1(_ v: Double, _ u: String) -> String {
+            var t = String(format: "%.1f", v); if t.hasSuffix(".0") { t.removeLast(2) }
+            return "$" + t + u
+        }
+        if a >= 999_500 { return s1(a / 1e6, "M") }
+        if a >= 99_950 { return "$\(Int((a / 1000).rounded()))K" }
+        if a >= 999.5 { return s1(a / 1000, "K") }
         return "$\(Int(a.rounded()))"
     }
     static func fn(_ x: Double) -> String {

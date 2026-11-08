@@ -6,7 +6,8 @@
  * at 101 prices (today's price ±12%) for each date-slider stop, plus the OTM call a fix would buy. Turning a
  * leg off, dragging the price and the fixes' previews are then sums of these numbers on the phone.
  *
- * POST { book: 'S' | 'N', t: 'NKE' } with the signed-in user's JWT (verify_jwt = true).
+ * POST { book: 'S' | 'N', t: 'NKE' } with the signed-in user's JWT (verify_jwt = true). `wide: true` (Nov 8, the
+ * chart's pinch zoom) adds prices out to ±50% around the same 101 (book-engine positionsGrid); older phones omit it.
  * ⚠ READ AS THE CALLER: the book's home_snapshot is fetched with the caller's own token, so RLS decides who
  * sees what (members of the book only). Nothing here uses the service key.
  *
@@ -49,7 +50,7 @@ Deno.serve(async (req) => {
   const stops = n.stops.map((s) => ({ ...s, tt: s.tt === 0 ? 0 : Math.max(0, s.tt - gone) }));
   const otm = n.otm ? { ...n.otm, days: n.otm.days - gone } : null;
   const nb = new NameBook({ t, S0: n.S0, P0: n.P0, iv: n.iv, legs, divs, r: inp.r, noIv: !!n.noIv });
-  const g = positionsGrid(nb, stops, otm);
+  const g = positionsGrid(nb, stops, otm, 101, body.wide === true);
   /* Walls by chain, the 20-day line and the month's range, and on the weekend the legs that ended Friday:
      sunny-home's reads (positions.ts), passed through as they are. */
   return json(200, { v: 1, book, ...g, fridayStop: n.fridayStop, walls: n.walls ?? [], tech: n.tech ?? null,

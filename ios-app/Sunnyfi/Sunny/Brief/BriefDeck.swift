@@ -182,7 +182,7 @@ private struct AlertCard: View {
                 // The watermark draws over the card's shape only, so it can never size the card.
                 .overlay(alignment: .bottomTrailing) {
                     if let mark = alert["mark"].string {
-                        Text(mark).font(.system(size: 200, weight: .heavy)).foregroundStyle((dark ? Color.white : S.ink).opacity(0.06))
+                        Text(mark).font(.inter(200, 800)).foregroundStyle((dark ? Color.white : S.ink).opacity(0.06))
                             .lineLimit(1).fixedSize()
                             .offset(x: 24, y: 56)
                             .accessibilityHidden(true)
@@ -311,7 +311,7 @@ struct DayCard: View {
                         .shadow(color: .white.opacity(0.7), radius: 6)
                         .position(sun)
                     Text(Self.clock(u))
-                        .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                        .font(.inter(11, 600, tabular: true))
                         .foregroundStyle(.white)
                         .fixedSize()
                         .shadow(color: Self.labelShade, radius: 2, y: 0.5)   // 4.5:1 on any hour's sky (Audit 4)

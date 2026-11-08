@@ -29,7 +29,7 @@ import { bookNames, caller, context, db, lookup, MENU, moreFor, OWNER_ONLY, SB_K
 import { checkAnswer } from './check.ts';
 import { COUNTS, fmt, SLOT, Slots } from './slots.ts';
 
-const BUILD = '2026-11-02.4';
+const BUILD = '2026-11-08.1';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';
@@ -68,8 +68,8 @@ Reading:
 Numbers, the hard rule: you never write a number yourself. Every number in the data reaches you named, like "r12=99.63".
 Write a figure as a slot, [r12|$2], and Sunny fills it in. A slot may work a figure out from a few names: [r3-r5|$],
 [r4/r9*100|%0], [abs(r2)|%]. The format after the bar:
-  $ whole dollars ($1,140) · $2 to the cent, for prices ($99.63) · $k short ($3.8K, $46.3B)
-  % one decimal (2.1%) · %0 whole (19%) · %2 two decimals (4.33%)
+  $ money in K and M ($624, $5.9K, $13.7K, $1.2M) · $2 to the cent, for prices ($99.63) · $k the same, $46.3B a market cap
+  % one decimal (2.1%) · %0 whole (19%) · %2 two decimals, only for a yield or a ratio (4.33%)
   # whole number (3,160) · #1 or #2 decimals (99.40) · d a delta (.62) · x a multiple (18.0x) · k a strike (104, 37.5)
 A percent the data gives as a fraction needs *100. Signs never show: say fell, down, short or lose, and color it red.
 The only digits you type yourself are dates (Oct 30), short years (Jan ’28) and counts up to 20 (3 days, ×15).

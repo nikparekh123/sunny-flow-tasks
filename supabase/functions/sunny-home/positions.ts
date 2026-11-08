@@ -9,12 +9,14 @@
 //
 // No em dashes in any words written here (Nik).
 
+import { fK } from '../_shared/book-engine.ts';
+
 type Row = Record<string, any>;
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const md = (d: string) => { const [, m, dd] = d.split('-').map(Number); return `${MON[m - 1]} ${dd}`; };
 const fk = (k: number) => (k % 1 ? String(+k.toFixed(2)) : String(k));
-const usd = (v: number) => '$' + Math.round(Math.abs(v)).toLocaleString('en-US');
+/* Money made or lost in K and M (fK, README 11.5); a premium or strike a share stays to the cent. */
 const usd2 = (v: number) => '$' + Math.abs(v).toFixed(2);
 
 export interface Wall { k: number; gex: number }
@@ -96,7 +98,7 @@ export function endedFor(t: string, day: string | null, x: PositionsCtx): EndedL
     if (e) parts.push(e === n ? 'All of them expired worthless.' : `${e} expired worthless.`);
     if (asg) parts.push(`${asg} assigned: ${(asg * 100).toLocaleString('en-US')} shares ${put ? 'bought' : 'sold'} at ${usd2(K)}.`);
     if (b + e + asg < n) parts.push(`${n - b - e - asg} still to settle.`);
-    parts.push(pl >= 0 ? `Made ${usd(pl)}.` : `Lost ${usd(pl)}.`);
+    parts.push(pl >= 0 ? `Made ${fK(pl)}.` : `Lost ${fK(pl)}.`);
     out.push({ k: `ended-${type}-${fk(K)}-${exp}`, label: `${put ? 'Puts' : 'Calls'} ${fk(K)} ×${n}, ${md(exp)}`, K, put, q: n, note: parts.join(' '), pl });
   }
   return out.sort((p, q) => p.K - q.K);

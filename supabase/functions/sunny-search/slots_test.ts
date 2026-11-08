@@ -17,7 +17,7 @@ Deno.test('slots are written out in the design formats, signs dropped', () => {
   s.tag({ a: 99.63, b: -2.1, c: 5550, d: 2731, e: 0.62, f: 46300000000, g: 18.04, h: 104, i: 0.19 });
   const bad: string[] = [];
   assertEquals(s.fill('BABA fell {r:[r2|%]} to {b:[r1|$2]}.', bad), 'BABA fell {r:2.1%} to {b:$99.63}.');
-  assertEquals(s.fill('kept [r3-r4|$] of [r3|$]', bad), 'kept $2,819 of $5,550');
+  assertEquals(s.fill('kept [r3-r4|$] of [r3|$]', bad), 'kept $2.8K of $5.5K');
   assertEquals(s.fill('Δ [r5|d] · [r6|$k] · [r7|x] · [r8|k] calls · [r9*100|%0]', bad), 'Δ .62 · $46.3B · 18.0x · 104 calls · 19%');
   assertEquals(bad, []);
 });
@@ -37,4 +37,8 @@ Deno.test('short money', () => {
   assertEquals(fmt(104, 'k'), '104');
   assertEquals(fmt(226010, '$k'), '$226K');
   assertEquals(fmt(56900000, '$k'), '$56.9M');
+  assertEquals(fmt(46.3e9, '$k'), '$46.3B');
+  assertEquals([624, 5920, 13740, 379000, 1.2e6, 1960].map((v) => fmt(v, '$')), ['$624', '$5.9K', '$13.7K', '$379K', '$1.2M', '$2K']);
+  assertEquals(fmt(-2731, '$0'), '$2.7K');
+  assertEquals([fmt(4.87, '%'), fmt(0.04, '%'), fmt(4.33, '%2')], ['4.9%', '0.04%', '4.33%']);
 });

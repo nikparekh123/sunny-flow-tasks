@@ -30,18 +30,19 @@ struct SBackground: View {
         .accessibilityHidden(true)
     }
 
+    /// The design's exact blobs (Nik's glass spec, 8 Nov 2026): green at (70, 270) to radius 200, blue at
+    /// (width − 70, 630) to 227, yellow at (220, height − 40) to 240, each a RadialGradient from its colour to clear.
     @ViewBuilder private func glows3(w: CGFloat, h: CGFloat) -> some View {
-        glow(S.auroraGreen, size: 300, center: CGPoint(x: -80 + 150, y: 120 + 150))
-        glow(S.auroraBlue, size: 340, center: CGPoint(x: w + 100 - 170, y: 460 + 170))
-        glow(S.auroraYellow, size: 360, center: CGPoint(x: 40 + 180, y: h + 140 - 180))
+        glow(S.auroraGreen, radius: 200, center: CGPoint(x: 70, y: 270))
+        glow(S.auroraBlue, radius: 227, center: CGPoint(x: w - 70, y: 630))
+        glow(S.auroraYellow, radius: 240, center: CGPoint(x: 220, y: h - 40))
     }
 
-    private func glow(_ a: (color: Color, light: Double, dark: Double), size: CGFloat, center: CGPoint) -> some View {
-        let d = size * 1.35
-        return Circle()
+    private func glow(_ a: (color: Color, light: Double, dark: Double), radius: CGFloat, center: CGPoint) -> some View {
+        Circle()
             .fill(RadialGradient(colors: [a.color.opacity(scheme == .dark ? a.dark : a.light), a.color.opacity(0)],
-                                 center: .center, startRadius: 0, endRadius: d / 2 * 0.7))
-            .frame(width: d, height: d)
+                                 center: .center, startRadius: 0, endRadius: radius))
+            .frame(width: radius * 2, height: radius * 2)
             .position(center)
     }
 }
