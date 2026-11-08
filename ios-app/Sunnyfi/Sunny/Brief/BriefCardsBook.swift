@@ -139,12 +139,61 @@ private struct BColumnBars: View {
     }
 
     var body: some View {
+        if vals.contains(where: { $0 < 0 }) { diverging } else { upward }
+    }
+
+    /// A week or month that lost hangs below a zero line, its value under it; one that made stands on the line
+    /// with its value over it (Nik, 8 Nov 2026: "negative weeks should be below so it's easier to read").
+    /// Both sides share one scale; the dates sit on their own row under the lowest value.
+    private var diverging: some View {
+        let vals = vals
+        let mx = max(vals.map(abs).max() ?? 1, 0.0001)
+        let pos = vals.filter { $0 > 0 }.max() ?? 0, neg = -(vals.filter { $0 < 0 }.min() ?? 0)
+        let marked = bars.firstIndex { $0["highlight"].bool } ?? bars.count - 1
+        let value = valueType(), line = value.line
+        let upH = pos > 0 ? tallest * CGFloat(pos / mx) : 0, downH = tallest * CGFloat(neg / mx)
+        let upZone = pos > 0 ? line + 4 + upH : 0, downZone = downH + 4 + line
+        return VStack(spacing: 6) {
+            HStack(alignment: .top, spacing: 10) {
+                ForEach(Array(bars.enumerated()), id: \.offset) { i, b in
+                    let hl = i == marked, v = vals[i], tint = v < 0 ? S.red : S.green
+                    let h = max(2, tallest * CGFloat(abs(v) / mx))
+                    let label = BriefWords.line(b["value"].string, privacy: privacy)
+                        .sType(value.weighted(hl ? 800 : 700))
+                        .environment(\.sTypeScales, false)
+                        .foregroundStyle(hl ? tint : BK.color(b["valueColor"].string))
+                        .lineLimit(1).fixedSize()
+                        .frame(height: line)
+                    let bar = RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(b["empty"].bool ? S.chip : hl ? tint : tint.opacity(0.35))
+                        .frame(height: h)
+                        .animation(S.moving(S.page, reduce), value: v)
+                    VStack(spacing: 0) {
+                        VStack(spacing: 4) { if v >= 0 { label; bar } }
+                            .frame(height: upZone, alignment: .bottom)
+                        VStack(spacing: 4) { if v < 0 { bar; label } }
+                            .frame(height: downZone, alignment: .top)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .overlay(alignment: .top) {
+                Rectangle().fill(S.hairline).frame(height: 1).offset(y: upZone - 0.5)
+            }
+            BBarLabels(labels: bars.map { $0["label"].string ?? "" }, strong: marked)
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(summary(vals))
+    }
+
+    private var upward: some View {
         let vals = vals
         let mx = max(vals.map(abs).max() ?? 1, 0.0001)
         let marked = bars.firstIndex { $0["highlight"].bool } ?? bars.count - 1
         let value = valueType()   // already at the phone's text size
         let line = value.line
-        VStack(spacing: 4) {
+        return VStack(spacing: 4) {
             HStack(alignment: .bottom, spacing: 10) {
                 ForEach(Array(bars.enumerated()), id: \.offset) { i, b in
                     let hl = i == marked, tint = vals[i] < 0 ? S.red : S.green
@@ -741,8 +790,9 @@ struct BResults: View {
                 }
                 if let p = paired { BPairedWeeks(chart: p, privacy: privacy) }
                 BStats(stats: s["stats"].array, privacy: privacy)
-                // An empty paragraph ("body": "") takes no row and no gap.
-                if !BriefSpan.list(s["body"]).map(\.t).joined().isEmpty { BBody(v: s["body"], privacy: privacy, type: BB.body) }
+                // An empty paragraph ("body": "") takes no row and no gap. Results shows none at all (Nik, 8 Nov 2026:
+                // "Calls: one expired, … insurance down $2.9K." removed); Your results keeps its line.
+                if card["type"].string != "results", !BriefSpan.list(s["body"]).map(\.t).joined().isEmpty { BBody(v: s["body"], privacy: privacy, type: BB.body) }
                 let dv = s["dividends"]
                 if !dv.isNull {
                     VStack(alignment: .leading, spacing: 0) {

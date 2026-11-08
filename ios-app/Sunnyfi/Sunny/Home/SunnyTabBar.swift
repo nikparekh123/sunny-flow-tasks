@@ -24,13 +24,17 @@ struct SunnyTabBar: View {
     var body: some View {
         // Handoff 6 Nov (README 11.3): two tabs (148 pt with the padding) centred at 50% − 36 pt, the 62 pt
         // Search circle from 50% + 48 pt, both 28 pt from the bottom.
+        // Tabs 80 wide (Nik, 8 Nov 2026: at 70 "Positions" touched the thumb's edge); the pair stays centred as one
+        // group, Search 10 to the right of the bar as before.
         GeometryReader { g in
             let mid = g.size.width / 2, y = g.size.height - 28 - 31
             bar.position(x: mid - 36, y: y)
-            searchButton.position(x: mid + 48 + 31, y: y)
+            searchButton.position(x: mid - 36 + (2 * Self.tabW + 8) / 2 + 10 + 31, y: y)
         }
         .ignoresSafeArea()
     }
+
+    static let tabW: CGFloat = 80
 
     private var index: Int { HomeRouter.Tab.bar.firstIndex(of: tab) ?? 0 }
 
@@ -43,7 +47,7 @@ struct SunnyTabBar: View {
                         Text(t.title).font(.system(size: 11, weight: .semibold))
                     }
                     .foregroundStyle(t == tab ? S.ink : S.secondary)
-                    .frame(width: 70, height: 54)
+                    .frame(width: Self.tabW, height: 54)
                     .contentShape(.capsule)
                 }
                 .buttonStyle(SunnyTabPress())
@@ -55,8 +59,8 @@ struct SunnyTabBar: View {
         .background(alignment: .leading) {
             Capsule().fill(Self.thumb)
                 .overlay(Capsule().strokeBorder(Self.thumbEdge, lineWidth: 0.5))
-                .frame(width: 70, height: 54)
-                .offset(x: CGFloat(index) * 70)
+                .frame(width: Self.tabW, height: 54)
+                .offset(x: CGFloat(index) * Self.tabW)
                 .animation(S.moving(S.spring, reduce), value: index)   // README 11.4: the thumb spring, (.3,1.4,.5,1) 0.45 s
         }
         .animation(S.fade, value: tab)

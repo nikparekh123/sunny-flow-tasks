@@ -139,11 +139,19 @@ struct BIndicatorCard: View {
             .frame(minHeight: 24)
             Text(c["value"].string ?? "").sType(BMk.big).foregroundStyle(S.ink)
                 .padding(.top, 10)
+            // Good or bad in plain words (sunny-home v134, Nik 8 Nov 2026): the read in its tone, then the trend
+            // coloured by whether its move is good (green) or bad (red) for markets.
+            if let read = c["read"].string {
+                Text(read).sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false)
+                    .foregroundStyle(BK.color(c["readTone"].string))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
+            }
             HStack(alignment: .top, spacing: 6) {
                 Text(c["arrow"].string ?? "").fixedSize().frame(width: 14).accessibilityHidden(true)
                 Text(c["trend"].string ?? "").fixedSize(horizontal: false, vertical: true)
             }
-            .sType(BMk.label, tabular: false).foregroundStyle(S.ink)
+            .sType(BMk.label, tabular: false).foregroundStyle(c["trendTone"].isNull ? S.ink : BK.color(c["trendTone"].string))
             .padding(.top, 4)
             let pts = c["chart"]["points"].array
             if !pts.isEmpty {
@@ -243,7 +251,8 @@ struct BEconomyRow: View {
                         .padding(.top, 4)
                     BHairline().padding(.top, 12)
                     let watching = Set(card["indicators"].array.filter { $0["tagStyle"].string == "yellow" }.compactMap { $0["name"].string })
-                    VStack(alignment: .leading, spacing: 8) {
+                    // 16 between indicators (Nik, 8 Nov 2026: 8 ran each trend line into the next name).
+                    VStack(alignment: .leading, spacing: 16) {
                         ForEach(Array(card["rows"].array.enumerated()), id: \.offset) { i, r in
                             let on = watching.contains(r["name"].string ?? "") || (watching.isEmpty && i < 3)
                             // Dot, name and value on one line; the trend under the name, running under the value too.
@@ -254,8 +263,15 @@ struct BEconomyRow: View {
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                     Text(r["value"].string ?? "").bLine(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(S.ink)
                                 }
+                                // The read in its tone (green good, red bad, orange mixed), then the trend coloured
+                                // by whether its move is good or bad (Nik, 8 Nov 2026).
+                                if let read = r["read"].string {
+                                    Text(read).bLine(SType(size: 13, weight: 700, line: 17, tracking: 0), tabular: false)
+                                        .foregroundStyle(BK.color(r["readTone"].string))
+                                        .padding(.leading, 18)
+                                }
                                 Text(r["trend"].string ?? "").bLine(SType(size: 13, weight: 500, line: 17, tracking: 0), tabular: false)
-                                    .foregroundStyle(S.secondary)
+                                    .foregroundStyle(r["trendTone"].isNull ? S.secondary : BK.color(r["trendTone"].string))
                                     .padding(.leading, 18)
                             }
                             // The yellow dot in words: one stop per row, "watching" on the ones worth watching.
@@ -387,7 +403,7 @@ struct BSectorsRow: View {
                 }
                 .frame(minHeight: 24)
                 Text(card["writeUp"].array.compactMap(\.string).joined(separator: " "))
-                    .sType(SType(size: 17, weight: 400, line: 25, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                    .sType(SType(size: 17, weight: 500, line: 25, tracking: 0), tabular: false).foregroundStyle(S.ink)   // 500, a touch thicker than the design's 400 (Nik, 8 Nov 2026)
                     .lineLimit(dts > .large ? nil : 3).fixedSize(horizontal: false, vertical: true)   // all of it at large text (Audit 6)
                     .padding(.top, 12)
                 Spacer(minLength: 0)

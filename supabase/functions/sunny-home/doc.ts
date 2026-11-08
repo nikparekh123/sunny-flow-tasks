@@ -115,6 +115,44 @@ function heatMap(title: string, items: { ticker: string; name: string; move: num
   };
 }
 
+/* ── The economy in plain words: good or bad (Nik, 8 Nov 2026: "I don't know what to read, good or bad") ──
+   Each reading's level against bands set for it (ours, not FRED's: change them here), and which way is better.
+   `read` says both ("Calm, but getting worse"), `readTone` colours it (green good, red bad, orange mixed, secondary
+   plain), `trendTone` colours the trend line by whether its move is good (green) or bad (red). */
+type Tone = 'good' | 'okay' | 'bad';
+const ECON_READ: Record<string, { better: 'up' | 'down'; bands: [number, string, Tone][] }> = {
+  hy_spread:          { better: 'down', bands: [[3.5, 'Calm', 'good'], [5, 'Normal', 'okay'], [7, 'Stressed', 'bad'], [Infinity, 'Panic', 'bad']] },
+  consumer_sentiment: { better: 'up',   bands: [[55, 'Very gloomy', 'bad'], [70, 'Gloomy', 'bad'], [85, 'Normal', 'okay'], [Infinity, 'Upbeat', 'good']] },
+  auto_delinquency:   { better: 'down', bands: [[2, 'Few behind', 'good'], [2.8, 'Normal', 'okay'], [Infinity, 'Many behind', 'bad']] },
+  curve_10y3m:        { better: 'up',   bands: [[0, 'Inverted, a recession warning', 'bad'], [0.5, 'Flat', 'okay'], [Infinity, 'Healthy', 'good']] },
+  stress_index:       { better: 'down', bands: [[-0.25, 'Calm', 'good'], [0.5, 'Normal', 'okay'], [1.5, 'Stressed', 'bad'], [Infinity, 'High stress', 'bad']] },
+  jobless_claims:     { better: 'down', bands: [[250e3, 'Strong jobs', 'good'], [300e3, 'Softening', 'okay'], [Infinity, 'Weak jobs', 'bad']] },
+  bank_credit:        { better: 'up',   bands: [[0, 'Shrinking', 'bad'], [3, 'Slow', 'okay'], [Infinity, 'Healthy', 'good']] },
+  sahm:               { better: 'down', bands: [[0.3, 'No recession signal', 'good'], [0.5, 'Near a recession signal', 'okay'], [Infinity, 'Recession signal', 'bad']] },
+  lending_standards:  { better: 'down', bands: [[0, 'Easing', 'good'], [10, 'Steady', 'okay'], [Infinity, 'Tightening', 'bad']] },
+  chargeoff_rate:     { better: 'down', bands: [[0.5, 'Low losses', 'good'], [1, 'Normal', 'okay'], [Infinity, 'High losses', 'bad']] },
+  card_delinquency:   { better: 'down', bands: [[2.5, 'Few behind', 'good'], [3.5, 'Normal', 'okay'], [Infinity, 'Many behind', 'bad']] },
+  debt_service:       { better: 'down', bands: [[10.5, 'Light', 'good'], [12, 'Normal', 'okay'], [Infinity, 'Heavy', 'bad']] },
+};
+export function econRead(id: string, card: Row): { read?: string; readTone?: string; trendTone?: string } {
+  const rule = ECON_READ[id];
+  const raw = String(card.chart?.points?.at?.(-1)?.value ?? card.value ?? '').trim();
+  const m = raw.match(/^([+-]?[0-9.]+)\s*([KM%]?)/i);
+  if (!rule || !m) return {};
+  const v = Number(m[1]) * (m[2].toUpperCase() === 'K' ? 1e3 : m[2].toUpperCase() === 'M' ? 1e6 : 1);
+  if (!Number.isFinite(v)) return {};
+  const [, word, level] = rule.bands.find(([hi]) => v < hi) ?? rule.bands[rule.bands.length - 1];
+  const dir = card.arrow === '↗' ? 'up' : card.arrow === '↘' ? 'down' : null;
+  const better = dir == null ? null : dir === rule.better;
+  const read = better == null ? word
+    : better ? `${word}, ${level === 'bad' ? 'but' : 'and'} getting better`
+    : `${word}, ${level === 'bad' ? 'and' : 'but'} getting worse`;
+  const tone = better == null ? (level === 'good' ? 'green' : level === 'bad' ? 'red' : 'secondary')
+    : better ? (level === 'bad' ? 'orange' : 'green')
+    : (level === 'bad' ? 'red' : 'orange');
+  return { read, readTone: tone, trendTone: better == null ? 'secondary' : better ? 'green' : 'red' };
+}
+
 export function buildDoc(x: DocIn): { full: Row; open: Row } {
   const stopped = new Set(x.feeds?.stopped ?? []);
   x = { ...x, earnings: stopped.has('earnings') ? [] : x.earnings, macro: stopped.has('macro') ? [] : x.macro,
@@ -269,7 +307,8 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   const econ = [...(x.econ ?? [])].sort((a, b) => Number(a.ord) - Number(b.ord));
   const landed = (r: Row) => (r.landed_at ? nyDay(String(r.landed_at)) : '');
   const isNew = (r: Row) => landed(r) >= addDays(today, -1);
-  const tagged = (r: Row): Row => ({ ...r.card, ...(r.watch ? { tag: 'Worth watching', tagStyle: 'yellow' } : isNew(r) ? { tag: 'New since yesterday', tagStyle: 'plain' } : {}) });
+  const tagged = (r: Row): Row => ({ ...r.card, ...econRead(String(r.id), r.card ?? {}),
+    ...(r.watch ? { tag: 'Worth watching', tagStyle: 'yellow' } : isNew(r) ? { tag: 'New since yesterday', tagStyle: 'plain' } : {}) });
   const econAll = [...econ.filter((r) => r.watch), ...econ.filter((r) => !r.watch && isNew(r)), ...econ.filter((r) => !r.watch && !isNew(r))].map(tagged);
   const economyCard = () => {
     if (!econ.length) return null;
@@ -277,11 +316,11 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const feat = econAll.slice(0, Math.max(3, Math.min(5, nW + nN)));
     return { type: 'economy', label: 'The economy', headline: nW ? `${nW} to watch` : 'Nothing to watch',
       sub: `${nN ? `${nN} new since yesterday · ` : ''}${steady} steady`,
-      rows: feat.map((c) => ({ name: c.name, value: c.value, trend: c.trend })), indicators: feat,
+      rows: feat.map((c) => ({ name: c.name, value: c.value, trend: c.trend, read: c.read, readTone: c.readTone, trendTone: c.trendTone })), indicators: feat,
       button: econ.length > feat.length ? `See the other ${econ.length - feat.length}` : null };
   };
   const outToday = () => {
-    const rows = econ.filter((r) => landed(r) === today).map((r) => ({ ...r.card, tag: 'Out today', tagStyle: 'plain' }));
+    const rows = econ.filter((r) => landed(r) === today).map((r) => ({ ...r.card, ...econRead(String(r.id), r.card ?? {}), tag: 'Out today', tagStyle: 'plain' }));
     return rows.length ? { type: 'outToday', indicators: rows } : null;
   };
 

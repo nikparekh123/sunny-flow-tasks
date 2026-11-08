@@ -319,8 +319,15 @@ private struct BookTotalsRow: View {
         let shown: [(name: String, v: Double)] = longItems.filter { $0.1 != 0 || $0.2 != 0 }.map { it in
             (it.0, mode == 0 ? it.1 : mode == 1 ? (it.3 != 0 ? it.2 / it.3 * 100 : 0) : it.2)
         }
-        let sold: [(String, Double, Bool)] = [("Calls", sc, false), ("Puts", sp, false)].filter { $0.1 != 0 }
-        Button { withAnimation(S.fade) { mode = (mode + 1) % 3 } } label: {
+        // Sold cycles with Long (the design's totG: "Calls · time value", then % today, then $ today; Nik, 8 Nov 2026).
+        let scT = hs.reduce(0) { $0 + $1.sc.today }, spT = hs.reduce(0) { $0 + $1.sp.today }
+        let sold: [(String, Double, Bool)] = [("Calls", sc, scT), ("Puts", sp, spT)].filter { $0.1 != 0 }.map { it in
+            (it.0, mode == 0 ? it.1 : mode == 1 ? (it.1 != 0 ? it.2 / it.1 * 100 : 0) : it.2, false)
+        }
+        // ⚠ A tap on the strip cycles the view. Not a Button around the ScrollView: inside a sideways ScrollView the
+        // button never fired on the phone (Nik, 8 Nov 2026: "it was supposed to be tappable"); the tap sits on the row.
+        let cycle = { withAnimation(S.fade) { mode = (mode + 1) % 3 } }
+        Group {
             ScrollView(.horizontal) {
                 // The design's totGrid: groups and items 16 apart with a 1 pt rule on the left of each after the
                 // first; padding 2 top, 6 bottom, 40 right, and the last 36 pt fade out.
@@ -331,13 +338,15 @@ private struct BookTotalsRow: View {
                         return (lbl, it.v, mode == 1, mode != 0 || it.name == "Shares")
                     })
                     if !sold.isEmpty {
-                        group("Sold · left to earn", sold.map { ($0.0, $0.1, $0.2, false) })
+                        group("Sold", sold.map { ("\($0.0) · \(views[mode])", $0.1, mode == 1, mode != 0) })
                             .padding(.leading, 16)
                             .overlay(alignment: .leading) { Rectangle().fill(Self.rule).frame(width: 1) }
                     }
                 }
                 .padding(.leading, S.margin).padding(.trailing, 40)
                 .padding(.top, 2).padding(.bottom, 6)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: cycle)
             }
             .scrollIndicators(.hidden)
             .mask {
@@ -347,8 +356,11 @@ private struct BookTotalsRow: View {
                 }
             }
         }
-        .buttonStyle(.plain)
+        .sensoryFeedback(.selection, trigger: mode)
         // VoiceOver: the view on screen, then every figure with its sign as a word (money "hidden" with privacy on).
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(.default, cycle)
         .accessibilityLabel("Book totals, \(said[mode])")
         .accessibilityValue(spoken(shown, sold))
         .accessibilityHint("Shows \(said[(mode + 1) % 3]) next")
@@ -362,10 +374,14 @@ private struct BookTotalsRow: View {
                 : (it.v < 0 && !privacy ? "down " : "") + PosSay.moneyK(it.v, privacy)
             return "\(what), \(amount)"
         }
-        let s = sold.map { "\($0.0), \(PosSay.moneyK($0.1, privacy))" }
+        let s = sold.map { it -> String in
+            let amount = mode == 1 ? "\(it.1 < 0 ? "down" : "up") \(String(format: "%.1f", abs(it.1))) percent"
+                : mode == 2 ? PosSay.signed(it.1, privacy, k: true) : PosSay.moneyK(it.1, privacy)
+            return "\(it.0) \(mode == 0 ? "time value" : ""), \(amount)"
+        }
         var parts: [String] = []
         if !l.isEmpty { parts.append("Long. " + l.joined(separator: "; ")) }
-        if !s.isEmpty { parts.append("Sold, left to earn. " + s.joined(separator: "; ")) }
+        if !s.isEmpty { parts.append("Sold. " + s.joined(separator: "; ")) }
         return parts.joined(separator: ". ")
     }
 
@@ -524,14 +540,30 @@ private struct PositionsDetail: View {
                         .lineLimit(1).fixedSize()
                         .accessibilityLabel(privacy ? "\(pl < 0 ? "Down" : "Up"), hidden" : "\(pl < 0 ? "Down" : "Up") \(PosSay.moneyK(pl, false))")
                     Spacer(minLength: 0)
-                    VStack(alignment: .trailing, spacing: 0) {
-                        Text(pl < 0 ? (short ? "Losing, and rises cost you" : "Losing") : short ? "Making, past its best" : "Long and making")
-                            .sType(SType(size: 13, weight: 700, line: 17, tracking: 0), tabular: false)
-                            .foregroundStyle(pl < 0 ? S.red : short ? S.act : S.green)
-                            .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)   // wraps, never cut (Audit 6)
-                        Text("\(m.t) at $\(String(format: "%.2f", px)) · \(st.long)").sType(SType(size: 12, weight: 600, line: 16, tracking: 0))
-                            .foregroundStyle(PosC.mu).multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
-                            .accessibilityLabel("\(m.company) at \(PosSay.price(px)), \(PosSay.words(st.long))")
+                    // ⚠ ONE HEIGHT WHILE SCRUBBING (Nik, 8 Nov 2026): "LULU at $110.74 · Tue Nov 10" went from one line to
+                    // two as the big number changed width, and the chart under it jumped. The price and the date now sit
+                    // on two lines of their own, and the block keeps the room of its longest state ("Losing, and rises
+                    // cost you" on two lines), bottom aligned, so nothing below it moves.
+                    ZStack(alignment: .bottomTrailing) {
+                        VStack(alignment: .trailing, spacing: 0) {
+                            Text("Losing, and rises\ncost you").sType(SType(size: 13, weight: 700, line: 17, tracking: 0), tabular: false)
+                            Text("X").sType(SType(size: 12, weight: 600, line: 16, tracking: 0))
+                            Text("X").sType(SType(size: 12, weight: 600, line: 16, tracking: 0))
+                        }
+                        .hidden().accessibilityHidden(true)
+                        VStack(alignment: .trailing, spacing: 0) {
+                            Text(pl < 0 ? (short ? "Losing, and rises cost you" : "Losing") : short ? "Making, past its best" : "Long and making")
+                                .sType(SType(size: 13, weight: 700, line: 17, tracking: 0), tabular: false)
+                                .foregroundStyle(pl < 0 ? S.red : short ? S.act : S.green)
+                                .multilineTextAlignment(.trailing).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                            Group {
+                                Text("\(m.t) at $\(String(format: "%.2f", px))")
+                                Text(st.long)
+                            }
+                            .sType(SType(size: 12, weight: 600, line: 16, tracking: 0))
+                            .foregroundStyle(PosC.mu).lineLimit(1)
+                        }
+                        .accessibilityElement(children: .combine)
                     }
                 }
                 HStack(alignment: .top, spacing: 8) {
