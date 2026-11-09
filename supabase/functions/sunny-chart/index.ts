@@ -14,8 +14,13 @@
  * 8 Nov 2026 (type pass, SunnyTickerChart.dc.html): the walls also send the accelerator; the reply adds the move
  * priced by Friday (sd, the brief's one weekly SD: iv × √(5/252) × 100, in %) for the Walls band, and the sub line's
  * pieces: the name as the brief writes it (short), its strategy word, and whether it is on the watchlist.
+ *
+ * 9 Nov 2026 (Nik: "add the analyst targets to the ticker chart"): the reply adds `targets`, the analysts' 12-month
+ * low, average and high from ticker_fundamentals (filled each morning by ticker-technicals for the book's names),
+ * with how many analysts and the day it was read. Null when the name has no row from the last 30 days. Market data,
+ * not the book's, so it is read with the service key.
  */
-const BUILD = '2026-11-08.1';
+const BUILD = '2026-11-09.1';
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -68,6 +73,21 @@ const md = (d: string) => `${MON[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8,
 const fk = (k: number) => (k % 1 ? String(+k.toFixed(2)) : String(k));
 const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
+/** The analysts' latest 12-month targets for a name, or null when none are fresh (30 days). */
+async function targets(t: string): Promise<Row | null> {
+  const since = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+  const r = await fetch(`${URL_}/rest/v1/ticker_fundamentals?ticker=eq.${encodeURIComponent(t)}&day=gte.${since}`
+    + `&analyst_target=not.is.null&select=day,analyst_low,analyst_target,analyst_high,n_buy,n_hold,n_sell&order=day.desc&limit=1`,
+    { headers: { apikey: SK, Authorization: `Bearer ${SK}` } });
+  if (!r.ok) { await r.body?.cancel(); return null; }
+  const x = ((await r.json()) as Row[])[0];
+  if (!x) return null;
+  const n = (v: unknown) => (v == null ? null : +Number(v).toFixed(2));
+  const low = n(x.analyst_low), mid = n(x.analyst_target), high = n(x.analyst_high);
+  if (low == null || mid == null || high == null) return null;
+  return { low, avg: mid, high, analysts: (x.n_buy ?? 0) + (x.n_hold ?? 0) + (x.n_sell ?? 0), day: x.day };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   const who = await caller(req);
@@ -77,7 +97,7 @@ Deno.serve(async (req) => {
   if (!/^[A-Z.^=-]{1,12}$/.test(t)) return json(400, { error: 'send t' });
 
   try {
-    const res = await chart(t);
+    const [res, tgt] = await Promise.all([chart(t), targets(t).catch(() => null)]);
     const meta = res.meta ?? {}, ts: number[] = res.timestamp ?? [], cl: (number | null)[] = res.indicators?.quote?.[0]?.close ?? [];
     const pts = ts.map((s, i) => ({ d: new Date(s * 1000).toISOString().slice(0, 10), c: cl[i] })).filter((p) => p.c != null) as { d: string; c: number }[];
     const price = Number(meta.regularMarketPrice ?? pts.at(-1)?.c ?? 0);
@@ -129,7 +149,7 @@ Deno.serve(async (req) => {
       positions = [...byK.values()];
     }
     return json(200, { v: 1, build: BUILD, t, name: String(meta.shortName ?? meta.longName ?? t), price: +price.toFixed(4), prev: +prev.toFixed(4),
-      last_bar: lastD ?? null, dates: pts.map((p) => p.d), closes, positions, walls, tech, sd, short, strategy, watch });
+      last_bar: lastD ?? null, dates: pts.map((p) => p.d), closes, positions, walls, tech, sd, short, strategy, watch, targets: tgt });
   } catch (e) {
     return json(502, { error: String((e as Error)?.message ?? e) });
   }
