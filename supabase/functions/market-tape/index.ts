@@ -28,15 +28,23 @@
  * once the regular session has closed, that day's close into `daily_closes`
  * for the symbols nothing else captures, so the range filters can look back.
  *
+ * THE WORLD'S DAILY CLOSES (Nik, 9 Nov 2026: "save them and load the history", for trend lines on the
+ * Overnight markets). Every 'global' symbol (Nikkei, Hang Seng, Shanghai, Nifty, DAX, 10y yield, Dollar,
+ * Oil, Gold, Bitcoin) keeps one close a day in `daily_closes`, taken from Yahoo's daily bars and dated in
+ * the market's own time zone (Tokyo's Monday is Monday). Read at 16:10 and 20:10 New York, the last ten
+ * days each time, so a bar still trading at 16:10 (oil, gold, the dollar, Bitcoin) is put right later
+ * and a missed day fills itself in.
+ *
  * Body: { force?: true } runs outside the window; { backfill?: true } loads
- * three months of daily closes for every symbol here.
+ * three months of daily closes for VIX and the watchlist; { backfill: 'world' } loads two years for
+ * every 'global' symbol.
  *
  * ⚠ DEPLOY WITH verify_jwt = false, like every cron-called function here.
  * pg_cron's cron_invoke_function sends the vault's sb_secret key, which is
  * not a JWT, so a verify_jwt function answers 401 to every scheduled call
  * (12 Oct 2026: the first deploys did exactly that).
  */
-const BUILD = '2026-11-07.3';
+const BUILD = '2026-11-09.1';
 const UA = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 '
     + '(KHTML, like Gecko) Version/17.0 Safari/605.1.15',
@@ -71,6 +79,7 @@ const SYMBOLS: { s: string; label: string; kind: 'index' | 'vix' | 'global' | 'w
   { s: 'RTY=F', label: 'RTY', kind: 'future' },
 ];
 const FUTURES = SYMBOLS.filter((x) => x.kind === 'future').map((x) => x.s);
+const WORLD = SYMBOLS.filter((x) => x.kind === 'global').map((x) => x.s);
 
 /* Sectors (handoff 6 Nov 2026, block 29): each SPDR's move is the sector's, and its 12 biggest names make
    the heat map (tile area = Yahoo's market cap, colour = the move). The lists are the funds' top holdings as
@@ -170,6 +179,30 @@ async function spark(symbols: string[]): Promise<Map<string, { d: string; c: num
   }
   return out;
 }
+/* One symbol's daily closes from Yahoo's chart, each bar dated in its exchange's own time zone: a bar is
+   stamped at its session's start in local time, so Tokyo's Monday (9:00 JST) is Sunday evening in New York. */
+async function dailyBars(symbol: string, range: string): Promise<{ ticker: string; date: string; close_price: number }[]> {
+  const r = await fetch(`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=1d`,
+    { headers: UA, signal: AbortSignal.timeout(15_000) });
+  if (!r.ok) { await r.body?.cancel(); throw new Error(`yahoo chart ${symbol} ${r.status}`); }
+  const res = (await r.json())?.chart?.result?.[0];
+  const tz = String(res?.meta?.exchangeTimezoneName ?? 'America/New_York');
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+  const t: number[] = res?.timestamp ?? [];
+  const c: (number | null)[] = res?.indicators?.quote?.[0]?.close ?? [];
+  const byDay = new Map<string, number>();
+  t.forEach((x, i) => { if (c[i] != null && isFinite(Number(c[i]))) byDay.set(day.format(new Date(x * 1000)), Number(c[i])); });
+  /* ⚠ Yahoo leaves a market's latest daily bar empty until its overnight update (9 Nov 2026: Tokyo, Hong Kong
+     and Shanghai had closed Monday's session hours before and still had no Monday bar), so the latest day is
+     the quote's own price at its own time. */
+  const mt = n(res?.meta?.regularMarketTime), mp = n(res?.meta?.regularMarketPrice);
+  if (mt && mp) {
+    const d = day.format(new Date(mt * 1000)), last = [...byDay.keys()].sort().at(-1) ?? '';
+    if (d >= last) byDay.set(d, mp);
+  }
+  return [...byDay].map(([date, close_price]) => ({ ticker: symbol, date, close_price }));
+}
+
 /* Monday of the week a New York date falls in (Mon to Sun). */
 function mondayOf(date: string): string {
   const d = new Date(`${date}T12:00:00Z`), wd = (d.getUTCDay() + 6) % 7;
@@ -220,10 +253,22 @@ Deno.serve(async (req) => {
     });
     if (!r.ok) throw new Error(`${table} ${r.status} ${(await r.text()).slice(0, 200)}`);
   };
-  let body: { force?: boolean; backfill?: boolean } = {};
+  let body: { force?: boolean; backfill?: boolean | 'world' } = {};
   try { if (req.method === 'POST') body = await req.json(); } catch { /* no body is fine */ }
 
   try {
+    if (body.backfill === 'world') {
+      const out: Record<string, number | string> = {};
+      for (const s of WORLD) {
+        try {
+          const rows = await dailyBars(s, '2y');
+          for (let i = 0; i < rows.length; i += 500) await upsert('daily_closes', 'ticker,date', rows.slice(i, i + 500));
+          out[s] = rows.length;
+        } catch (e) { out[s] = String(e); }
+      }
+      return new Response(JSON.stringify({ ok: true, build: BUILD, backfill: out }),
+        { headers: { 'Content-Type': 'application/json' } });
+    }
     if (body.backfill) {
       const out: Record<string, number> = {};
       for (const s of CLOSES_HERE) {
@@ -398,9 +443,17 @@ Deno.serve(async (req) => {
       bases = rows.length;
     }
 
+    /* The world's daily closes: the last ten days at 16:10 and 20:10 (header). */
+    let world = 0;
+    if ((ny.mins >= 16 * 60 + 10 && ny.mins < 16 * 60 + 12) || (ny.mins >= 20 * 60 + 10 && ny.mins < 20 * 60 + 12)) {
+      for (const s of WORLD) {
+        try { const rows = await dailyBars(s, '10d'); await upsert('daily_closes', 'ticker,date', rows); world += rows.length; } catch { /* next read */ }
+      }
+    }
+
     await upsert('sync_heartbeat', 'feed', [{
       feed: 'market-tape', ran_at: new Date().toISOString(), rows_written: Number(passes.at(-1)?.symbols ?? 0),
-      detail: `yahoo · ${passes.map((p) => p.symbols).join('/')} symbols · ${passes.map((p) => p.sectors).join('/')} sector rows${sparked ? ` · ${sparked} week bases` : ''}${bases ? ` · ${bases} futures bases` : ''}`,
+      detail: `yahoo · ${passes.map((p) => p.symbols).join('/')} symbols · ${passes.map((p) => p.sectors).join('/')} sector rows${sparked ? ` · ${sparked} week bases` : ''}${bases ? ` · ${bases} futures bases` : ''}${world ? ` · ${world} world closes` : ''}`,
     }]);
     return new Response(JSON.stringify({ ok: true, build: BUILD, passes }),
       { headers: { 'Content-Type': 'application/json' } });
