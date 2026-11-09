@@ -11,7 +11,8 @@
 //
 // DEV ONLY: `?fx` reads saved replies from /__fx/ (vite.config.ts serves SUNNY_FX_DIR there in dev, never in a
 // build), so pages can be checked on real numbers without signing in, as the phone's -fixture does.
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { liveHours, regularHours } from './clock';
 
@@ -155,16 +156,52 @@ async function callFn(name: string, body: Record<string, unknown>): Promise<J> {
   return r.json();
 }
 
-/** One name's Positions grid: P&L and delta by price and date (wide: out to ±50% for the zoom). `built` re-asks
-    when Home rebuilds, as PositionsLive does. */
+/** One name's Positions grid: P&L and delta by price and date (wide: out to ±50% for the zoom). */
+const positionsKey = (book: BookId | null | undefined, t: string | null | undefined) => ['sw', 'positions', book, t];
+const fetchPositions = (book: BookId, t: string) => (FX ? fx(`grids/${book}-${t}.json`) : callFn('sunny-positions', { book, t, wide: true }));
+
+/** The name on screen. Its grid is asked again when Home rebuilds (`built`), as PositionsLive does; a name already
+    read (or read ahead, below) shows at once from what is kept and refreshes behind it. */
 export function usePositions(book: BookId | null | undefined, t: string | null | undefined, built?: string) {
-  return useQuery({
-    queryKey: ['sw', 'positions', book, t, built ?? ''],
+  const q = useQuery({
+    queryKey: positionsKey(book, t),
     enabled: !!book && !!t,
-    staleTime: 60_000,
-    placeholderData: (prev) => prev,
-    queryFn: () => (FX ? fx(`grids/${book}-${t}.json`) : callFn('sunny-positions', { book, t, wide: true })),
+    staleTime: 15_000,
+    gcTime: 30 * 60_000,
+    queryFn: () => fetchPositions(book!, t!),
   });
+  const seen = useRef<string | undefined>(built);
+  useEffect(() => {
+    if (!built || seen.current === built) return;
+    seen.current = built;
+    if (book && t) void q.refetch();
+  }, [built]); // eslint-disable-line react-hooks/exhaustive-deps
+  return q;
+}
+
+/** Reads every other name's grid ahead, one at a time once the page is idle (Nik, 9 Nov 2026: switching names
+    must be smooth, "do a lazy load"), so a click on the strip shows the next name at once. A name already kept
+    is skipped; nothing is read ahead while the tab is hidden. */
+export function usePrefetchPositions(book: BookId | null | undefined, names: string[], start: boolean) {
+  const qc = useQueryClient();
+  const list = names.join(',');
+  useEffect(() => {
+    if (!book || !start || !names.length) return;
+    let live = true;
+    const idle = (f: () => void) => {
+      const w = window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
+      if (w.requestIdleCallback) w.requestIdleCallback(f, { timeout: 1500 }); else setTimeout(f, 300);
+    };
+    const next = (i: number) => {
+      if (!live || i >= names.length) return;
+      const t = names[i];
+      if (document.hidden || qc.getQueryData(positionsKey(book, t))) { idle(() => next(i + 1)); return; }
+      qc.prefetchQuery({ queryKey: positionsKey(book, t), queryFn: () => fetchPositions(book, t), staleTime: 15_000, gcTime: 30 * 60_000 })
+        .finally(() => idle(() => next(i + 1)));
+    };
+    const id = setTimeout(() => idle(() => next(0)), 600);
+    return () => { live = false; clearTimeout(id); };
+  }, [book, start, list]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 /** One name's price history with its layers (positions, walls, technicals, targets). */

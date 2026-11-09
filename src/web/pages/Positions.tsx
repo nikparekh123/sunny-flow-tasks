@@ -11,7 +11,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { BOOK_NAME } from '../components/AccountMenu';
 import { CountUp } from '../components/CountUp';
 import { clock12, ny, shortDate } from '../lib/clock';
-import { useHome, usePositions, useTicker, type J } from '../lib/data';
+import { useHome, usePositions, usePrefetchPositions, useTicker, type J } from '../lib/data';
 import { arrow, count, level, money, pct, price } from '../lib/format';
 import { useWeb } from '../lib/state';
 import { PayoffChart, ZS, FIT, type Line } from '../positions/PayoffChart';
@@ -52,6 +52,9 @@ export default function Positions() {
     if (names.length && !t && order[0]) nav(`/positions/${order[0]}${loc.search}`, { replace: true });
   }, [names.length, t, order, nav, loc.search]);
 
+  // Read the other names ahead once the page is up (smooth switching); the rail order, from the name on screen on.
+  const ahead = useMemo(() => { const i = Math.max(0, order.indexOf(t ?? '')); return [...order.slice(i + 1), ...order.slice(0, i)]; }, [order, t]);
+  usePrefetchPositions(book, ahead, !!t);
   const subtitle = book ? `${BOOK_NAME[book]}’s book${payload ? ' · ' + asOf(payload.fresh?.marks) : ''}` : '';
   // The totals (handoff 2026-11-08-web 2): every name from its own legs, the book their sum, so they always add up.
   // The view opens on Time value, as the app's does (README state; D5 left open).
@@ -108,6 +111,12 @@ function Name({ book, t, name, payload }: { book: 'S' | 'N'; t: string; name: J;
   const q = usePositions(book, t, payload?.built_at);
   const grid = q.data as GridW | undefined;
   const ready = !!grid && grid.t === t && grid.stops?.length > 0 && grid.S?.length > 1;
+  // ⚠ SMOOTH SWITCHING (Nik, 9 Nov 2026: "every time I click on one ticker to the next the page shifts and almost
+  // reloads"): while the next name's grid is on its way the last name stays on screen, dimmed, so the page never
+  // collapses; Detail is not remounted per name, so the numbers count on from the last value (the design's CountUp).
+  const last = useRef<{ t: string; grid: GridW } | null>(null);
+  if (ready) last.current = { t, grid: grid! };
+  const shown = ready ? { t, grid: grid! } : last.current;
   const S0 = ready ? grid!.S0 : +name?.S0 || 0, P0 = ready ? grid!.P0 : +name?.P0 || S0, mv = P0 ? (S0 / P0 - 1) * 100 : 0;
   const strat = String(name?.strategy ?? '');
   const company = String(name?.name ?? t);
@@ -121,8 +130,14 @@ function Name({ book, t, name, payload }: { book: 'S' | 'N'; t: string; name: J;
         </span>
         <span style={{ fontSize: 15, color: MU }}>{company}{strat ? ' · ' + strat.charAt(0).toUpperCase() + strat.slice(1) : ''}</span>
       </div>
-      {ready ? <Detail key={t} book={book} t={t} company={company} grid={grid!} inputs={payload?.brief_inputs ?? null} fridayIso={payload?.brief?.friday ?? ''} mask={mask} privacy={privacy} />
-        : q.isError ? <span style={{ fontSize: 13, color: MU }}>Could not load {t}.</span>
+      {shown ? (
+        <div aria-busy={!ready} style={{ display: 'flex', flexDirection: 'column', gap: 24, opacity: ready ? 1 : 0.55, transition: 'opacity .2s',
+          pointerEvents: ready ? 'auto' : 'none' }}>
+          {!ready && q.isError && <span style={{ fontSize: 13, color: MU }}>Could not load {t}.</span>}
+          <Detail book={book} t={shown.t} company={shown.t === t ? company : String(shown.t)} grid={shown.grid} inputs={payload?.brief_inputs ?? null}
+            fridayIso={payload?.brief?.friday ?? ''} mask={mask} privacy={privacy} />
+        </div>
+      ) : q.isError ? <span style={{ fontSize: 13, color: MU }}>Could not load {t}.</span>
         : <div style={{ minHeight: 600 }} />}
     </>
   );
