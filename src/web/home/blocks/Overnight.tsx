@@ -1,9 +1,12 @@
 // Overnight (Web Dark v2, `b.isOvn`): four columns, Asia · Europe · Rates and the dollar · Commodities and crypto,
-// each row the name and its value, under them the region and the move. Also draws The world this week.
+// each row the name and its value, under them the region and the move, and between them the month's line (Nik,
+// 9 Nov 2026: trend lines, one month; the server sends `trend`: the closes, ending on today's price, its colour and
+// words). Also draws The world this week.
 // The doc's rows carry no group, so a row is placed by its name; with any name not known the rows run in four
 // even columns with no group labels rather than guess.
+import { Fragment } from 'react';
 import type { J } from '../../lib/data';
-import { C, clean } from '../../lib/format';
+import { C, clean, named } from '../../lib/format';
 import { move } from './util';
 
 const GROUPS: { k: string; l: string; status: boolean; re: RegExp }[] = [
@@ -13,11 +16,28 @@ const GROUPS: { k: string; l: string; status: boolean; re: RegExp }[] = [
   { k: 'cmd', l: 'Commodities and crypto', status: false, re: /^(oil|brent|wti|gold|silver|copper|natural gas|gas|bitcoin|ether|ethereum|crypto)/i },
 ];
 
-interface ORow { name: string; sub: string; value: string; m: { t: string; c: string }; status: string }
+interface Trend { pts: number[]; color: string; text: string }
+interface ORow { name: string; sub: string; value: string; m: { t: string; c: string }; status: string; trend: Trend | null }
+
+/** The month's line: the closes stretched to the box, 1.5 px, in the month's colour; the words on hover. */
+function MonthLine({ t }: { t: Trend }) {
+  const lo = Math.min(...t.pts), hi = Math.max(...t.pts), span = hi - lo || 1, n = t.pts.length;
+  const d = t.pts.map((v, i) => `${i ? 'L' : 'M'}${((i / (n - 1)) * 100).toFixed(2)} ${(2 + (1 - (v - lo) / span) * 24).toFixed(2)}`).join(' ');
+  return (
+    <svg viewBox="0 0 100 28" preserveAspectRatio="none" role="img" aria-label={t.text} style={{ width: '100%', height: 28, display: 'block', overflow: 'visible' }}>
+      <title>{t.text}</title>
+      <path d={d} fill="none" stroke={named(t.color, C.ink2)} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+const trendOf = (x: J): Trend | null => {
+  const pts = Array.isArray(x?.pts) ? (x.pts as unknown[]).map(Number).filter((v) => Number.isFinite(v)) : [];
+  return pts.length >= 2 ? { pts, color: String(x.color ?? ''), text: clean(x.text) } : null;
+};
 
 export default function Overnight({ card }: { card: J }) {
   const rows: ORow[] = (card.rows ?? []).map((r: J) => ({
-    name: clean(r.name), sub: clean(r.sub), value: clean(r.value), m: move(r.move, r.moveColor, r.moveSigned), status: clean(r.status),
+    name: clean(r.name), sub: clean(r.sub), value: clean(r.value), m: move(r.move, r.moveColor, r.moveSigned), status: clean(r.status), trend: trendOf(r.trend),
   }));
   const week = card.type === 'worldThisWeek';
   const placed = rows.map((r) => GROUPS.findIndex((g) => g.re.test(r.name)));
@@ -45,18 +65,26 @@ export default function Overnight({ card }: { card: J }) {
         {cols.map((g) => (
           <div key={g.k} style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             {g.l ? <span className="kicker" style={{ paddingBottom: 6 }}>{g.l}</span> : null}
-            {g.rows.map((r) => (
-              <div key={r.name} style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '9px 0', borderTop: '1px solid rgba(255,255,255,.08)' }}>
-                <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                  <span style={{ fontSize: 15 }}>{r.name}</span>
-                  <span style={{ fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap' }}>{r.value}</span>
-                </span>
-                <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                  <span style={{ fontSize: 12, color: C.ink2 }}>{r.sub}</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: r.m.c, whiteSpace: 'nowrap' }}>{r.m.t}</span>
-                </span>
-              </div>
-            ))}
+            {/* One grid a column: name and region, the month's line, value and move. The names and values take
+                what they need and the lines fill the rest, so a column's lines stand one above the other. */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0,1fr) max-content', alignItems: 'stretch' }}>
+              {g.rows.map((r) => {
+                const cell = { padding: '9px 0', borderTop: '1px solid rgba(255,255,255,.08)', display: 'flex', flexDirection: 'column' as const, gap: 1, justifyContent: 'center', minWidth: 0 };
+                return (
+                  <Fragment key={r.name}>
+                    <span style={cell}>
+                      <span style={{ fontSize: 15, whiteSpace: 'nowrap' }}>{r.name}</span>
+                      <span style={{ fontSize: 12, color: C.ink2, whiteSpace: 'nowrap' }}>{r.sub}</span>
+                    </span>
+                    <span style={{ ...cell, padding: '9px 14px' }}>{r.trend ? <MonthLine t={r.trend} /> : null}</span>
+                    <span style={{ ...cell, alignItems: 'flex-end' }}>
+                      <span style={{ fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap' }}>{r.value}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: r.m.c, whiteSpace: 'nowrap' }}>{r.m.t}</span>
+                    </span>
+                  </Fragment>
+                );
+              })}
+            </div>
           </div>
         ))}
       </div>

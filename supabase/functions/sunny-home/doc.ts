@@ -33,6 +33,7 @@ export interface DocIn {
   chart: Row | null; yieldWeeks: Row[]; payback: Row | null; history: Row | null;
   earnings: Row[]; macro: Row[]; divs: Row[]; trades: Row[]; orders: Row[]; aftershock: Row | null;
   econ?: Row[];                    // econ_cards (econ-sync, FRED): the twelve indicators
+  closes?: Row[];                  // daily_closes (ticker, date, close_price), oldest first: the world markets' month lines
   baseNow: number; baseAt: (d: string) => number;
   /* README 9.4 (Audit 7): feeds that have stopped (no run for 50 h, health-monitor's "stopped") hide what they feed
      rather than show an old claim ("None ahead", "3 names still to report"); marketAt = the tape's last capture. */
@@ -272,6 +273,22 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     ['^GDAXI', 'DAX', 'Germany'], ['^TNX', '10y yield', 'US Treasury'], ['DX-Y.NYB', 'Dollar', 'Dollar index'], ['CL=F', 'Oil', 'WTI crude'],
     ['GC=F', 'Gold', 'Futures'], ['BTC-USD', 'Bitcoin', 'Trades 24/7']];
   const closedState = (s: string) => /CLOSED|POSTPOST|PREPRE/.test(s ?? '');
+  /* Each world market's month line (Nik, 9 Nov 2026: trend lines on Overnight, one month): its daily closes over
+     the last 31 days (market-tape keeps them, each dated in the market's own time zone), ending on the quote's own
+     price, so today's move is the line's last step. A close for the quote's own session is left out (the quote is
+     that day). Colour by the month's direction, as the move's. */
+  const TZ: Record<string, string> = { '^N225': 'Asia/Tokyo', '^HSI': 'Asia/Hong_Kong', '000001.SS': 'Asia/Shanghai', '^GDAXI': 'Europe/Berlin', 'BTC-USD': 'UTC' };
+  const dayIn = (tz: string, iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+  const monthLine = (s: string, p: number, m: Row) => {
+    const from = x.addDays(x.today, -31);
+    const live = m.regular_time ? dayIn(TZ[s] ?? 'America/New_York', String(m.regular_time)) : x.today;
+    const pts = (x.closes ?? []).filter((c) => c.ticker === s && String(c.date) >= from && String(c.date) < live)
+      .map((c) => Number(c.close_price)).filter((v) => v > 0);
+    pts.push(p);
+    if (pts.length < 5) return null;
+    const bp = s === '^TNX', chg = bp ? (p - pts[0]) * 100 : (p / pts[0] - 1) * 100;
+    return { pts: pts.map((v) => Number(v.toPrecision(6))), color: col(chg), text: `${upDown(chg)} ${bp ? `${Math.abs(Math.round(chg))} bp` : p1(chg)} in a month` };
+  };
   const worldRows = (wkMode: boolean) => WORLD.map(([s, name, sub]) => {
     const m = mk(s); if (!m || num(m.price) == null) return null;
     const p = Number(m.price);
@@ -289,7 +306,9 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const value = yieldRow ? `${p.toFixed(2)}%` : ['CL=F', 'GC=F', 'BTC-USD'].includes(s) ? `$${p >= 1000 ? Math.round(p).toLocaleString('en-US') : p.toFixed(2)}`
       : p >= 1000 ? Math.round(p).toLocaleString('en-US') : p.toFixed(2);
     const status = s === 'BTC-USD' || !closedState(String(m.market_state)) ? 'still trading' : 'closed';
-    return { name, sub, value, move: moveText, moveColor: col(move), status, aria: `${name} ${value}, ${upDown(move)} ${moveText}, ${status}` };
+    const trend = monthLine(s, p, m);
+    return { name, sub, value, move: moveText, moveColor: col(move), status, ...(trend ? { trend } : {}),
+      aria: `${name} ${value}, ${upDown(move)} ${moveText}, ${status}${trend ? `, ${trend.text}` : ''}` };
   }).filter(Boolean) as Row[];
   const overnight = () => {
     const rows = worldRows(false); if (!rows.length) return null;
