@@ -5,13 +5,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 import { RequireAuth } from './web/components/RequireAuth';
+import { page } from './web/pages/load';
 
 const Login = lazy(() => import('./web/pages/Login'));
 const WebLayout = lazy(() => import('./web/WebLayout'));
-const Home = lazy(() => import('./web/pages/Home'));
-const Positions = lazy(() => import('./web/pages/Positions'));
-const Overview = lazy(() => import('./web/pages/Overview'));
-const Ticker = lazy(() => import('./web/pages/Ticker'));
+const Home = lazy(page.Home);
+const Positions = lazy(page.Positions);
+const Overview = lazy(page.Overview);
+const Ticker = lazy(page.Ticker);
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false, retry: 1 } },
@@ -22,7 +23,9 @@ const Blank = () => <div style={{ minHeight: '100vh', background: '#000000' }} /
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      {/* Every move between pages is a transition: the page on screen stays until the next one can draw, never the
+          blank screen (smooth switching, 9 Nov 2026). */}
+      <BrowserRouter future={{ v7_startTransition: true }}>
         <Suspense fallback={<Blank />}>
           <Routes>
             <Route path="/" element={<Login />} />

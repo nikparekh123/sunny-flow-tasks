@@ -4,7 +4,7 @@
 // on that name. The view is remembered per computer (railView; Nik approved, default Rails).
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { BookId, J } from '../lib/data';
+import { usePrefetchFromHome, type BookId, type J } from '../lib/data';
 import { money } from '../lib/format';
 import { useWeb } from '../lib/state';
 import { inSessionOrder, railNames, tvLegs } from './rail/model';
@@ -20,6 +20,13 @@ export default function Rail({ payload, book, narrow }: { payload: J; book: Book
     const legs = tvLegs(payload);
     return { calls: Number(payload?.brief?.totals?.tv?.sc ?? 0), ready: legs.filter((l) => l.ready).length };
   }, [payload]);
+  // Once Home is up, read ahead what a click here opens: each name on Positions, then its ticker page, in the
+  // rail's order (the names Positions holds).
+  const ahead = useMemo(() => {
+    const held = new Set(((payload?.brief?.names ?? []) as J[]).map((n) => String(n.t)));
+    return names.map((n) => n.t).filter((t) => held.has(t));
+  }, [names, payload]);
+  usePrefetchFromHome(book, ahead, ahead.length > 0);
   const [tip, setTip] = useState<TipAt | null>(null);
   // A hover readout never outlives a scroll or a change of view.
   useEffect(() => {

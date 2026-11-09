@@ -6,7 +6,8 @@
 // each with its tiles: ticker, name, move, weight). Leads and Trails are the best and worst movers among those tiles.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { J } from '../../lib/data';
+import { usePrefetchTicker, type J } from '../../lib/data';
+import { useWeb } from '../../lib/state';
 import { C, clean, pct } from '../../lib/format';
 import { NARROW_QUERY } from '../../WebLayout';
 import { pmove, tileColors } from './util';
@@ -105,6 +106,7 @@ const MW0 = 280, MH = 176;
 /** The heat maps, biggest move first. */
 export function SectorMaps({ secs, held, linked }: { secs: Sec[]; held: Set<string>; linked: Set<string> }) {
   const navigate = useNavigate();
+  const pre = usePrefetchTicker(useWeb().book);
   const narrow = useNarrow();
   const cols = narrow ? 2 : 3;
   const ref = useRef<HTMLDivElement>(null);
@@ -144,6 +146,7 @@ export function SectorMaps({ secs, held, linked }: { secs: Sec[]; held: Set<stri
                 return (
                   <button key={q.t} type="button" className="bare swb-heat" aria-label={aria} title={aria}
                     onClick={ok ? () => navigate('/t/' + q.t, { state: { from: 'home' } }) : undefined}
+                    onPointerEnter={ok ? () => pre(q.t) : undefined} onFocus={ok ? () => pre(q.t) : undefined}
                     style={{ position: 'absolute', left: (q.x / MW0 * 100).toFixed(2) + '%', top: (q.y / MH * 100).toFixed(2) + '%', width: (q.w / MW0 * 100).toFixed(2) + '%', height: (q.h / MH * 100).toFixed(2) + '%', padding: 1.5, cursor: ok ? 'pointer' : 'default' }}>
                     <span style={{ boxSizing: 'border-box', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1,
                       border: held.has(q.t) ? '1.5px solid rgba(245,245,247,.6)' : '1px solid rgba(0,0,0,.28)', borderRadius: 5, background: bg, color: fg, overflow: 'hidden' }}>

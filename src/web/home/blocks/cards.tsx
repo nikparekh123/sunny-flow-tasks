@@ -3,7 +3,8 @@
 // privacy (mask); market numbers stay.
 import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { J } from '../../lib/data';
+import { usePrefetchTicker, type J } from '../../lib/data';
+import { useWeb } from '../../lib/state';
 import { C, clean, named, pct } from '../../lib/format';
 import { Bars, Big, Caption, Card, Line, MapTiles, Rows, Stats, Text, Words, type Bar, type MapTile, type Row, type Stat } from './Card';
 import { move, plain, pmove, spans, tidy, type Mo } from './util';
@@ -43,12 +44,13 @@ export function gridCards(card: J, cx: Ctx, key: string): ReactNode[] {
 /* ── Your names and the watchlist: flex tiles sized by weight; a tile opens its ticker page ── */
 function NamesMap({ page, cx }: { page: J; cx: Ctx }) {
   const navigate = useNavigate();
+  const pre = usePrefetchTicker(useWeb().book);
   const watch = page.kind === 'watchlist';
   const mv = move(page.move, page.moveColor, page.moveSigned);
   const when = cx.mo === 'pre' ? 'Before the bell' : cx.mo === 'weekend' ? 'The week' : 'Today';
   const tiles: MapTile[] = (page.tiles ?? []).map((x: J) => {
     const t = clean(x.ticker), p = +x.move || 0, m = pmove(p);
-    return { k: t, t, m, p, g: Math.max(1, +x.weight || 1), aria: `${clean(x.name) || t} ${m}`, go: () => navigate('/t/' + t, { state: { from: 'home' } }) };
+    return { k: t, t, m, p, g: Math.max(1, +x.weight || 1), aria: `${clean(x.name) || t} ${m}`, go: () => navigate('/t/' + t, { state: { from: 'home' } }), pre: () => pre(t) };
   });
   return (
     <Card title={clean(page.title)} sub={watch ? 'by market cap' : `${when} ${mv.t}`}>

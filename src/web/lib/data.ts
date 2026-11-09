@@ -179,37 +179,71 @@ export function usePositions(book: BookId | null | undefined, t: string | null |
   return q;
 }
 
-/** Reads every other name's grid ahead, one at a time once the page is idle (Nik, 9 Nov 2026: switching names
-    must be smooth, "do a lazy load"), so a click on the strip shows the next name at once. A name already kept
-    is skipped; nothing is read ahead while the tab is hidden. */
-export function usePrefetchPositions(book: BookId | null | undefined, names: string[], start: boolean) {
+/* ── Reading ahead (Nik, 9 Nov 2026: switching must be smooth, "do a lazy load") ── */
+interface Ahead { key: unknown[]; fn: () => Promise<J>; stale: number }
+const idle = (f: () => void) => {
+  const w = window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
+  if (w.requestIdleCallback) w.requestIdleCallback(f, { timeout: 1500 }); else setTimeout(f, 300);
+};
+
+/** Reads `jobs` ahead one at a time, each when the page is idle, starting `delay` ms after the page is up, so a click
+    shows the next page at once from what is kept. Anything already kept is skipped; nothing is read while the tab is
+    hidden. `id` names the list, so a new list starts again and the old one stops. */
+function useReadAhead(id: string, jobs: Ahead[], start: boolean, delay: number) {
   const qc = useQueryClient();
-  const list = names.join(',');
+  const list = useRef(jobs);
+  list.current = jobs;
   useEffect(() => {
-    if (!book || !start || !names.length) return;
+    if (!start || !id) return;
     let live = true;
-    const idle = (f: () => void) => {
-      const w = window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number };
-      if (w.requestIdleCallback) w.requestIdleCallback(f, { timeout: 1500 }); else setTimeout(f, 300);
-    };
     const next = (i: number) => {
-      if (!live || i >= names.length) return;
-      const t = names[i];
-      if (document.hidden || qc.getQueryData(positionsKey(book, t))) { idle(() => next(i + 1)); return; }
-      qc.prefetchQuery({ queryKey: positionsKey(book, t), queryFn: () => fetchPositions(book, t), staleTime: 15_000, gcTime: 30 * 60_000 })
-        .finally(() => idle(() => next(i + 1)));
+      const js = list.current;
+      if (!live || i >= js.length) return;
+      const j = js[i];
+      if (document.hidden || qc.getQueryData(j.key)) { idle(() => next(i + 1)); return; }
+      qc.prefetchQuery({ queryKey: j.key, queryFn: j.fn, staleTime: j.stale, gcTime: 30 * 60_000 }).finally(() => idle(() => next(i + 1)));
     };
-    const id = setTimeout(() => idle(() => next(0)), 600);
-    return () => { live = false; clearTimeout(id); };
-  }, [book, start, list]); // eslint-disable-line react-hooks/exhaustive-deps
+    const tm = setTimeout(() => idle(() => next(0)), delay);
+    return () => { live = false; clearTimeout(tm); };
+  }, [id, start, delay]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+const gridJob = (book: BookId, t: string): Ahead => ({ key: positionsKey(book, t), fn: () => fetchPositions(book, t), stale: 15_000 });
+
+/** Positions: every other name's grid, nearest in the strip first, so a click on the strip shows the next name at once. */
+export function usePrefetchPositions(book: BookId | null | undefined, names: string[], start: boolean) {
+  const jobs = book ? names.map((t) => gridJob(book, t)) : [];
+  useReadAhead(book ? book + ':' + names.join(',') : '', jobs, start, 600);
+}
+
+/** Home: what its clicks open, read once Home has drawn. The rail's names on Positions (the grid of each, in the
+    rail's order), then the ticker page of each name held. */
+export function usePrefetchFromHome(book: BookId | null | undefined, names: string[], start: boolean) {
+  const jobs = book ? [...names.map((t) => gridJob(book, t)), ...names.map((t) => tickerJob(t, book))] : [];
+  useReadAhead(book ? book + ':' + names.join(',') : '', jobs, start, 1500);
+}
+
+/** One ticker page read ahead on a hover or a keyboard focus (the watchlist and sector maps, too many to read all). */
+export function usePrefetchTicker(book: BookId | null | undefined) {
+  const qc = useQueryClient();
+  return (t: string) => {
+    if (!t || !book) return;
+    const j = tickerJob(t, book);
+    if (!qc.getQueryData(j.key)) void qc.prefetchQuery({ queryKey: j.key, queryFn: j.fn, staleTime: j.stale });
+  };
 }
 
 /** One name's price history with its layers (positions, walls, technicals, targets). */
+const tickerKey = (t: string | null | undefined, book?: BookId | null) => ['sw', 'ticker', t, book ?? ''];
+const fetchTicker = (t: string, book?: BookId | null) => (FX ? fx(`charts/${book ?? 'S'}-${t}.json`) : callFn('sunny-chart', book ? { t, book } : { t }));
+const tickerJob = (t: string, book: BookId): Ahead => ({ key: tickerKey(t, book), fn: () => fetchTicker(t, book), stale: 60_000 });
+
 export function useTicker(t: string | null | undefined, book?: BookId | null) {
   return useQuery({
-    queryKey: ['sw', 'ticker', t, book ?? ''],
+    queryKey: tickerKey(t, book),
     enabled: !!t,
     staleTime: 60_000,
-    queryFn: () => (FX ? fx(`charts/${book ?? 'S'}-${t}.json`) : callFn('sunny-chart', book ? { t, book } : { t })),
+    gcTime: 30 * 60_000,
+    queryFn: () => fetchTicker(t!, book),
   });
 }

@@ -75,7 +75,7 @@ export function Caption({ children }: { children: ReactNode }) {
   return <span style={{ fontSize: 12, lineHeight: '17px', color: C.ink2 }}>{children}</span>;
 }
 
-export interface MapTile { k: string; t: string; m: string; p: number; g: number; aria: string; go?: () => void }
+export interface MapTile { k: string; t: string; m: string; p: number; g: number; aria: string; go?: () => void; pre?: () => void }
 /** Map: flex tiles sized by weight, radius 6, the ticker 13/600 over the move 12, the text in the tile's colour. */
 export function MapTiles({ tiles, h = 160 }: { tiles: MapTile[]; h?: number }) {
   return (
@@ -83,7 +83,7 @@ export function MapTiles({ tiles, h = 160 }: { tiles: MapTile[]; h?: number }) {
       {tiles.map((x) => {
         const { bg, fg } = tileColors(x.p);
         return (
-          <button key={x.k} type="button" className="bare swb-tile" onClick={x.go} aria-label={x.aria} title={x.aria}
+          <button key={x.k} type="button" className="bare swb-tile" onClick={x.go} onPointerEnter={x.pre} onFocus={x.pre} aria-label={x.aria} title={x.aria}
             style={{ cursor: x.go ? 'pointer' : 'default', flex: `${x.g} 1 0`, minWidth: 58, borderRadius: 6, background: bg, color: fg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>{x.t}</span>
             <span style={{ fontSize: 12 }}>{x.m}</span>
