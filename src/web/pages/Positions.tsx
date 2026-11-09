@@ -19,6 +19,8 @@ import { Compare, EveryLeg, Lists, PriceDateGrid, type CmpRow, type LegRow } fro
 import { WhatIfPanel } from '../positions/WhatIfPanel';
 import { PosModel, Pricer, fk, updn, type GridW, type Inputs, type PLeg, type Seg } from '../positions/model';
 import { useWhatIf, type Draft } from '../positions/whatif';
+import { bookTotals, nameTotals } from '../positions/totals';
+import { TotalsSwitch, TotalsTable, type TView } from '../positions/TotalsTable';
 import { DateSeg, Chip, G, HAIR, HAIR_S, K, MU, O, R, PosStyles, cl, kicker } from '../positions/ui';
 
 /** "Fri Nov 6 close" for marks taken at or after the close (or on an earlier day), else "Mon Nov 9 · 11:42 AM ET". */
@@ -51,12 +53,18 @@ export default function Positions() {
   }, [names.length, t, order, nav, loc.search]);
 
   const subtitle = book ? `${BOOK_NAME[book]}’s book${payload ? ' · ' + asOf(payload.fresh?.marks) : ''}` : '';
+  // The totals (handoff 2026-11-08-web 2): every name from its own legs, the book their sum, so they always add up.
+  // The view opens on Time value, as the app's does (README state; D5 left open).
+  const [tview, setTview] = useState<TView>('tv');
+  const nt = useMemo(() => nameTotals(payload), [payload]);
+  const bt = useMemo(() => bookTotals(nt), [nt]);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PosStyles />
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 14 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '12px 14px' }}>
         <h1 style={{ margin: 0, fontSize: 42, lineHeight: '48px', fontWeight: 700, letterSpacing: '-.03em' }}>Positions</h1>
         <span style={{ fontSize: 15, color: MU }}>{subtitle}</span>
+        {names.length > 0 && <TotalsSwitch view={tview} set={setTview} />}
       </div>
       {payload && !names.length && (
         // An empty book (the agreed lines, as on the phone).
@@ -65,55 +73,9 @@ export default function Positions() {
           <span style={{ fontSize: 13, color: MU }}>Each name you hold shows here once IBKR reports it.</span>
         </div>
       )}
-      {names.length > 0 && <Totals brief={brief} names={names} mask={mask} />}
+      {names.length > 0 && <TotalsTable view={tview} setView={setTview} book={bt} name={t ? nt.get(t) ?? null : null} t={t} mask={mask} />}
       {names.length > 0 && <Strip names={names} t={t} go={(x) => nav(`/positions/${x}${loc.search}`)} />}
       {t && book && <Name key={book} book={book} t={t} name={names.find((n) => n.t === t)} payload={payload} />}
-    </div>
-  );
-}
-
-/* ── Book totals: always the whole book ──────────────────────────────────── */
-function Totals({ brief, names, mask }: { brief: J; names: J[]; mask: (s: string) => string }) {
-  const tot = brief?.totals ?? {};
-  const gain = names.reduce((a, n) => a + (+n.gain || 0), 0);
-  const groups: { l: string; items: { l: string; v: number; c: string }[] }[] = [
-    { l: 'Long', items: [
-      { l: 'Shares · gain', v: gain, c: gain < 0 ? R : gain > 0 ? G : K },
-      { l: 'LEAPS · time value', v: +tot.tv?.lp || 0, c: K },
-      { l: 'OTM calls · time value', v: +tot.tv?.oc || 0, c: K },
-      { l: 'Insurance · value', v: +tot.ip?.[0] || 0, c: K },
-    ] },
-    { l: 'Sold', items: [
-      { l: 'Calls · left to earn', v: +tot.sc?.[0] || 0, c: G },
-      { l: 'Puts · left to earn', v: +tot.sp?.[0] || 0, c: G },
-    ] },
-  ];
-  // Narrow: when the second group wraps under the first it loses its divider and its 40 of left padding.
-  const g0 = useRef<HTMLDivElement>(null), g1 = useRef<HTMLDivElement>(null);
-  const [wrapped, setWrapped] = useState(false);
-  useLayoutEffect(() => {
-    const f = () => { if (g0.current && g1.current) setWrapped(g1.current.offsetTop > g0.current.offsetTop + 4); };
-    f();
-    const ro = new ResizeObserver(f);
-    if (g0.current?.parentElement) ro.observe(g0.current.parentElement);
-    return () => ro.disconnect();
-  }, []);
-  return (
-    <div className="tnum" style={{ display: 'flex', flexWrap: 'wrap', gap: '18px 0', padding: '18px 0', borderTop: HAIR_S, borderBottom: HAIR }}>
-      {groups.map((g, gi) => (
-        <div key={g.l} ref={gi ? g1 : g0}
-          style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: `0 40px 0 ${gi && !wrapped ? 40 : 0}px`, borderLeft: gi && !wrapped ? HAIR : 'none' }}>
-          <span style={kicker}>{g.l}</span>
-          <div style={{ display: 'flex', gap: 28 }}>
-            {g.items.map((x) => (
-              <div key={x.l} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span style={{ fontSize: 22, lineHeight: '28px', fontWeight: 600, color: x.c }}>{mask(money(x.v))}</span>
-                <span style={{ fontSize: 12, color: MU, whiteSpace: 'nowrap' }}>{x.l}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
