@@ -1,0 +1,180 @@
+/* Sunny web (handoff 2026-11-08-web, README "Design tokens"). Dark only (D4).
+   Every value here is the design's exact one; do not round to a grid.
+   Scoped to .sw so the hidden /payoff and /ask pages keep their own styles. */
+
+.sw {
+  --bg: linear-gradient(180deg, #0A0F0C 0%, #000000 38%, #0C0A08 100%);
+  --ink: #F5F5F7;
+  --ink-2: #98989D;
+  --ink-3: #AEAEB2;
+  --green: #65C466;
+  --red: #FF6961;
+  --orange: #FF9F0A;
+  --blue: #86A8F0;
+  --blue-hover: #B3C8F6;
+  --teal: #4CC9D0;
+  --violet: #B9A3F0;
+  --hair-strong: rgba(255, 255, 255, .14);
+  --hair: rgba(255, 255, 255, .08);
+  --track: rgba(118, 118, 128, .24);
+  --tile: #1D1D1F;
+  --tile-hover: #2C2C2E;
+  --small-btn: #2C2C2E;
+
+  color-scheme: dark;
+  box-sizing: border-box;
+  position: relative;
+  min-height: 100vh;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+html:has(.sw), body:has(.sw) { background: #000000; color-scheme: dark; }
+.sw *, .sw *::before, .sw *::after { box-sizing: border-box; }
+.sw a { color: var(--blue); text-decoration: none; }
+.sw a:hover { color: var(--blue-hover); }
+.sw ::selection { background: rgba(134, 168, 240, .35); }
+.sw select, .sw input, .sw button { font-family: inherit; }
+.sw button:focus-visible, .sw select:focus-visible, .sw input:focus-visible {
+  outline: 2px solid #86A8F0; outline-offset: 2px; border-radius: 6px;
+}
+.sw option { background: #1C1C1E; color: #F5F5F7; }
+@media (prefers-reduced-motion: reduce) {
+  .sw *, .sw *::before, .sw *::after { transition: none !important; animation: none !important; }
+}
+
+/* A bare button: no chrome, inherits type. */
+.sw .bare {
+  all: unset; box-sizing: border-box; cursor: pointer;
+}
+.sw .bare:focus-visible { outline: 2px solid #86A8F0; outline-offset: 2px; border-radius: 6px; }
+.sw .tnum { font-variant-numeric: tabular-nums; }
+
+/* Fixed glow behind the page. */
+.sw-ambient {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(60vw 52vw at 4% -10%, rgba(101, 196, 102, .22), transparent 62%),
+    radial-gradient(52vw 52vw at 104% 30%, rgba(115, 182, 249, .18), transparent 60%),
+    radial-gradient(62vw 50vw at 30% 116%, rgba(247, 206, 70, .13), transparent 62%);
+}
+
+/* Page frame: max 1440, padding 104 48 112 (the top clears the 64 px header). */
+.sw-page {
+  position: relative; z-index: 1;
+  max-width: 1440px; margin: 0 auto; padding: 104px 48px 112px;
+}
+
+/* ── Surfaces ───────────────────────────────────────────────────────────── */
+/* G1: the alert card, the What if panel, the zoom capsule, the sign-in form. */
+.sw .g1 {
+  background: linear-gradient(160deg, rgba(255, 255, 255, .10) 0%, rgba(255, 255, 255, .03) 38%, rgba(255, 255, 255, .02) 62%, rgba(255, 255, 255, .07) 100%);
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  backdrop-filter: blur(14px) saturate(180%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .16), inset 1.5px 1.5px 0 -.5px rgba(255, 255, 255, .28),
+    inset -1px -1px 0 -.5px rgba(255, 255, 255, .08), inset 0 18px 36px -24px rgba(255, 255, 255, .12),
+    0 1px 3px rgba(0, 0, 0, .2), 0 10px 24px -6px rgba(0, 0, 0, .4);
+}
+/* G2: menus and tooltips. */
+.sw .g2 {
+  background: rgba(36, 36, 40, .82);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  box-shadow: inset 0 0 0 .5px rgba(255, 255, 255, .18), inset 0 1px 0 rgba(255, 255, 255, .12), 0 18px 48px rgba(0, 0, 0, .55);
+}
+.sw .glass-header {
+  background: rgba(8, 10, 9, .6);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .08);
+}
+.sw .glass-sheet {
+  background: rgba(28, 28, 30, .86);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, .12), -20px 0 60px rgba(0, 0, 0, .5);
+}
+.sw .scrim {
+  background: rgba(0, 0, 0, .5);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+/* Soft tile: the Positions rail cards. */
+.sw .soft-rail {
+  background: linear-gradient(160deg, rgba(255, 255, 255, .07) 0%, rgba(255, 255, 255, .025) 55%, rgba(255, 255, 255, .05) 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08), inset 1px 1px 0 -.5px rgba(255, 255, 255, .16);
+  border-radius: 20px;
+  transition: background .2s;
+}
+.sw .soft-rail:hover {
+  background: linear-gradient(160deg, rgba(255, 255, 255, .11) 0%, rgba(255, 255, 255, .04) 55%, rgba(255, 255, 255, .08) 100%);
+}
+/* Soft tile: the economy readings. */
+.sw .soft-econ {
+  background: linear-gradient(160deg, rgba(255, 255, 255, .06), rgba(255, 255, 255, .025) 55%, rgba(255, 255, 255, .045));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07);
+  border-radius: 18px;
+  padding: 18px 18px 20px;
+}
+
+/* ── Type ───────────────────────────────────────────────────────────────── */
+.sw .kicker {
+  font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-2);
+}
+.sw .h2 {
+  font-size: 28px; line-height: 36px; font-weight: 600; letter-spacing: -.02em;
+  text-wrap: balance; max-width: 900px; margin: 0;
+}
+.sw .h2 .thin { font-weight: 400; color: rgba(245, 245, 247, .72); }
+.sw .lede { font-size: 20px; line-height: 30px; font-weight: 400; max-width: 860px; text-wrap: pretty; color: rgba(245, 245, 247, .9); }
+.sw .cap { font-size: 12px; line-height: 18px; color: var(--ink-2); }
+
+/* ── Controls (iOS 26 Liquid Glass) ─────────────────────────────────────── */
+/* Segmented: a capsule track with a glass selected segment. */
+.sw .seg { display: inline-flex; background: var(--track); border-radius: 999px; padding: 2px; gap: 0; }
+.sw .seg > button {
+  all: unset; box-sizing: border-box; cursor: pointer; border-radius: 999px;
+  font-size: 13px; line-height: 16px; font-weight: 500; color: var(--ink); padding: 6px 12px;
+  transition: background .2s, box-shadow .2s;
+}
+.sw .seg > button[aria-checked="true"], .sw .seg > button[aria-selected="true"], .sw .seg > button.on {
+  background: rgba(255, 255, 255, .20); color: #FFFFFF; font-weight: 600;
+  box-shadow: inset 0 0 0 .5px rgba(255, 255, 255, .22), inset 0 1px 0 rgba(255, 255, 255, .3), 0 2px 8px rgba(0, 0, 0, .35);
+}
+.sw .seg > button:focus-visible { outline: 2px solid #86A8F0; outline-offset: 2px; }
+/* The glass thumb on its own (for sliding segmented controls). */
+.sw .seg-thumb {
+  background: rgba(255, 255, 255, .20);
+  box-shadow: inset 0 0 0 .5px rgba(255, 255, 255, .22), inset 0 1px 0 rgba(255, 255, 255, .3), 0 2px 8px rgba(0, 0, 0, .35);
+}
+/* Switch 40×24, knob 20. */
+.sw .switch {
+  all: unset; box-sizing: border-box; cursor: pointer; position: relative; flex: 0 0 auto;
+  width: 40px; height: 24px; border-radius: 12px; background: rgba(120, 120, 128, .32); transition: background .2s;
+}
+.sw .switch[aria-checked="true"] { background: #65C466; }
+.sw .switch > span {
+  position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #FFFFFF;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .35); transition: left .2s cubic-bezier(.22, 1, .36, 1);
+}
+.sw .switch[aria-checked="true"] > span { left: 18px; }
+.sw .switch:focus-visible { outline: 2px solid #86A8F0; outline-offset: 2px; }
+/* Round ✕ buttons on sheets and trades. */
+.sw .xbtn {
+  all: unset; box-sizing: border-box; cursor: pointer; border-radius: 50%; background: var(--small-btn);
+  display: inline-flex; align-items: center; justify-content: center; color: var(--ink-3);
+}
+/* Outlined capsule chip (layers). */
+.sw .chip {
+  all: unset; box-sizing: border-box; cursor: pointer; border-radius: 999px; padding: 6px 12px;
+  font-size: 13px; line-height: 16px; font-weight: 500; color: var(--ink-2);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18);
+}
+.sw .chip[aria-pressed="true"] { color: var(--ink); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .55); font-weight: 600; }
+.sw .chip:focus-visible { outline: 2px solid #86A8F0; outline-offset: 2px; }
+
+/* Hide a scrollbar but keep the scroll. */
+.sw .noscroll { scrollbar-width: none; }
+.sw .noscroll::-webkit-scrollbar { display: none; }

@@ -28,7 +28,7 @@ import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-08.5';
+const BUILD = '2026-11-09.1';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -3230,6 +3230,20 @@ async function hasViewer(book: string): Promise<boolean> {
   return ((await r.json()) as Row[]).length > 0;
 }
 
+/* The web's four tabs over the eight moments: before the bell, the session, after the close, the weekend. */
+const TAB_OF: Record<string, string> = { futures: 'pre', pre: 'pre', bell: 'open', open: 'open', last20: 'open', last5: 'open', post: 'post', weekend: 'weekend' };
+async function logBrief(book: string, p: Row): Promise<void> {
+  const doc = p.brief?.doc as Row | undefined, tab = doc ? TAB_OF[String(doc.moment)] : undefined;
+  if (!doc || !tab || !doc.built_for) return;
+  const row = (audience: string, d: unknown) => ({ book_id: book, tab, audience, moment: doc.moment, built_for: doc.built_for,
+    doc: d, built_at: p.built_at, build: BUILD });
+  const r = await fetch(`${URL_}/rest/v1/home_brief_log?on_conflict=book_id,tab,audience`, {
+    method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify([row('all', p.brief_doc_open ?? null), row('owners', doc)]),
+  });
+  if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 160)}`);
+}
+
 /* ── THE DEBUG MENU'S PAGE (Pass 3, README 2: "a debug menu that pins the clock, the account and the holiday") ──
    POST { mode: 'doc', book, moment, holiday? } from the app with the user's token: New Home built as if it were that
    moment (today if it trades, else the last session; the weekend = this week's Saturday), written nowhere. A member
@@ -3314,6 +3328,11 @@ Deno.serve(async (req) => {
         body: JSON.stringify([{ id: BOOKS[book].id, book_id: book, payload: strip ? open : (({ brief_doc_open: _o, ...whole }) => whole)(payload as Row), built_at: payload.built_at, build: BUILD, ms }]),
       });
       if (!w.ok) throw new Error(`home_snapshot ${w.status} ${(await w.text()).slice(0, 160)}`);
+      /* ⚠ THE WEB'S MOMENT TABS (Nik, 9 Nov 2026: "save each brief"): each tab keeps the last brief of its moment
+         in home_brief_log, the copy without orders for every member and the whole one for owners (RLS, as
+         home_snapshot and home_todo). Every 5 minutes in the session, every build otherwise, so a tab's brief is
+         at most 5 minutes older than the moment's last; a failed write never fails the build. */
+      if (i === 0 && (n.mins % 5 === 0 || !live)) await logBrief(book, payload as Row).catch((e) => console.error('home_brief_log', e));
       out.push({ ms, steps, legs: (payload.legs as unknown[]).length, value: (payload.account as Row).value ?? null });
     }
     if (out.length) {

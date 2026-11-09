@@ -1,0 +1,6 @@
+/* Hover states of Home's section blocks (the design's style-hover values). Scoped under .sw. */
+.sw .swb-row:hover { background: rgba(255, 255, 255, .03); }
+.sw .swb-tile:hover { filter: brightness(1.18); }
+.sw .swb-heat:hover { filter: brightness(1.2); }
+.sw .swb-chip { transition: background .25s cubic-bezier(.22, 1, .36, 1); }
+.sw .swb-seg:hover { color: #F5F5F7; }

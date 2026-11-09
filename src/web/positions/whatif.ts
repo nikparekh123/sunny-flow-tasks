@@ -1,0 +1,40 @@
+// The What if, per book and name (README State: "What if per name: legs switched off, trades added"). It survives
+// switching names, and leaving the page, for the session (sessionStorage when the browser allows it). Nothing here
+// is ever sent anywhere.
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import type { Trade } from './model';
+
+/** The Try a trade form, per name (the design keeps it per name too). Unset fields take the name's defaults. */
+export interface Draft { side?: 's' | 'b'; ty?: 'c' | 'p'; K?: number; ex?: string; n?: number }
+export interface NameWhatIf { off: string[]; trades: Trade[]; draft: Draft }
+
+const KEY = 'sw-whatif';
+const EMPTY: NameWhatIf = { off: [], trades: [], draft: {} };
+const store = new Map<string, NameWhatIf>();
+const subs = new Set<() => void>();
+
+try {
+  const raw = sessionStorage.getItem(KEY);
+  if (raw) for (const [k, v] of Object.entries(JSON.parse(raw) as Record<string, NameWhatIf>)) store.set(k, { ...EMPTY, ...v });
+} catch { /* a private window: this session only */ }
+
+const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify(Object.fromEntries(store))); } catch { /* ignore */ } };
+const set = (k: string, f: (w: NameWhatIf) => NameWhatIf) => {
+  store.set(k, f(store.get(k) ?? EMPTY));
+  save();
+  subs.forEach((s) => s());
+};
+const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
+
+export function useWhatIf(book: string | null | undefined, t: string | null | undefined) {
+  const k = `${book ?? ''}|${t ?? ''}`;
+  const w = useSyncExternalStore(subscribe, () => store.get(k) ?? EMPTY);
+  const toggleLeg = useCallback((leg: string) => set(k, (x) => ({ ...x, off: x.off.includes(leg) ? x.off.filter((y) => y !== leg) : [...x.off, leg] })), [k]);
+  const add = useCallback((u: Omit<Trade, 'id' | 'on'>) => set(k, (x) => ({ ...x, trades: [...x.trades, { ...u, id: Date.now(), on: true }] })), [k]);
+  const toggleTrade = useCallback((id: number) => set(k, (x) => ({ ...x, trades: x.trades.map((u) => (u.id === id ? { ...u, on: !u.on } : u)) })), [k]);
+  const remove = useCallback((id: number) => set(k, (x) => ({ ...x, trades: x.trades.filter((u) => u.id !== id) })), [k]);
+  const setDraft = useCallback((d: Draft) => set(k, (x) => ({ ...x, draft: { ...x.draft, ...d } })), [k]);
+  /** Back to the book: every leg on, every trade gone (the design's reset keeps the form). */
+  const reset = useCallback(() => set(k, (x) => ({ ...x, off: [], trades: [] })), [k]);
+  return useMemo(() => ({ ...w, toggleLeg, add, toggleTrade, remove, setDraft, reset }), [w, toggleLeg, add, toggleTrade, remove, setDraft, reset]);
+}
