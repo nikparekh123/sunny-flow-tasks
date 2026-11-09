@@ -1,16 +1,23 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Session, User } from "@supabase/supabase-js";
 
-const REDIRECT_URL =
-  typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : "";
-
 /**
  * Shared team account. Anyone with the 10-digit code signs in as this user.
  * To rotate access, change this user's password in Supabase Auth.
  */
 export const SHARED_LOGIN_EMAIL = "nik@sunnyfi.co";
 
-/** Sign in with the shared 10-digit code (used as the password for SHARED_LOGIN_EMAIL). */
+/**
+ * Book N's login (the cousin's own 10-digit code, on the same screen), as in the
+ * phone app's AuthStore. A code that is not book S's is tried here next; the
+ * database refuses the same code for both.
+ */
+export const BOOK_N_LOGIN_EMAIL = "book-n@sunnyfi.co";
+
+/**
+ * Sign in with a 10-digit code (the password for one of the two logins).
+ * Code only: there is no email-link sign-in on the web.
+ */
 export async function signInWithCode(code: string): Promise<
   | { ok: true }
   | { ok: false; reason: "invalid_code" | "wrong_code" | "network" | "unknown"; message?: string }
@@ -19,49 +26,20 @@ export async function signInWithCode(code: string): Promise<
   if (!/^\d{10}$/.test(trimmed)) {
     return { ok: false, reason: "invalid_code" };
   }
-  try {
-    const { error } = await supabase.auth.signInWithPassword({
-      email: SHARED_LOGIN_EMAIL,
-      password: trimmed,
-    });
-    if (error) {
+  let last: { reason: "wrong_code" | "unknown"; message?: string } | null = null;
+  for (const email of [SHARED_LOGIN_EMAIL, BOOK_N_LOGIN_EMAIL]) {
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password: trimmed });
+      if (!error) return { ok: true };
       const status = (error as { status?: number }).status;
-      if (status === 400) return { ok: false, reason: "wrong_code", message: error.message };
-      return { ok: false, reason: "unknown", message: error.message };
+      // Only a wrong code moves on to the next login; anything else stops here.
+      if (status !== 400) return { ok: false, reason: "unknown", message: error.message };
+      last = { reason: "wrong_code", message: error.message };
+    } catch (e) {
+      return { ok: false, reason: "network", message: e instanceof Error ? e.message : undefined };
     }
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, reason: "network", message: e instanceof Error ? e.message : undefined };
   }
-}
-
-export async function sendMagicLink(email: string): Promise<
-  | { ok: true }
-  | { ok: false; reason: "invalid_email" | "rate_limited" | "network" | "unknown"; message?: string }
-> {
-  const trimmed = email.trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-    return { ok: false, reason: "invalid_email" };
-  }
-  try {
-    const { error } = await supabase.auth.signInWithOtp({
-      email: trimmed,
-      options: {
-        emailRedirectTo: REDIRECT_URL,
-        // Don't auto-create accounts for non-allowlisted users — but Supabase
-        // doesn't enforce the allowlist; our client check after callback does.
-        shouldCreateUser: true,
-      },
-    });
-    if (error) {
-      const status = (error as { status?: number }).status;
-      if (status === 429) return { ok: false, reason: "rate_limited", message: error.message };
-      return { ok: false, reason: "unknown", message: error.message };
-    }
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, reason: "network", message: e instanceof Error ? e.message : undefined };
-  }
+  return { ok: false, ...(last ?? { reason: "wrong_code" as const }) };
 }
 
 /** Pre-login check: is this email in the allowlist? Safe to call anon. */
@@ -78,8 +56,18 @@ export async function checkMemberEmail(email: string): Promise<boolean> {
   return !!data;
 }
 
-/** Check that the signed-in user's email is in the `members` allowlist. */
+/**
+ * Is the signed-in user let in? Yes when they belong to a book (book_members,
+ * which RLS lets a user read only for their own rows), as in the phone app.
+ * The older `members` list (nik@ only) still counts, so nothing that worked stops.
+ */
 export async function isAllowed(user: User): Promise<boolean> {
+  const { data: books, error: booksError } = await supabase
+    .from("book_members" as never)
+    .select("book_id")
+    .eq("user_id", user.id)
+    .limit(1);
+  if (!booksError && Array.isArray(books) && books.length > 0) return true;
   if (!user.email) return false;
   const { data, error } = await supabase
     .from("members")

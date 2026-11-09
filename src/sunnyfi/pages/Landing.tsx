@@ -55,7 +55,7 @@ export default function Landing() {
     }
     setStage("error");
     if (res.reason === "invalid_code") setMsg("That should be a 10-digit number.");
-    else if (res.reason === "wrong_code") setMsg("Wrong code — try again.");
+    else if (res.reason === "wrong_code") setMsg("Wrong code. Try again.");
     else if (res.reason === "network") setMsg("Couldn't reach the server.");
     else setMsg(res.message || "Something went wrong.");
   };
