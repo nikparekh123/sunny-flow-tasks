@@ -35,6 +35,8 @@ export function gridCards(card: J, cx: Ctx, key: string): ReactNode[] {
     case 'tomorrowOrders': return [<Orders key={key} card={card} cx={cx} />];
     case 'thetaMonth': return [<Theta key={key} card={card} cx={cx} />];
     case 'payback': return [<Payback key={key} card={card} cx={cx} />];
+    // Performance (10 Nov 2026): this month's realized, a bar per month, this month's names; the payback card's shape.
+    case 'performance': return [<Payback key={key} card={card} cx={cx} />];
     case 'earningsAhead': return [<EarningsAhead key={key} card={card} cx={cx} />];
     case 'closedRolled': return [<ClosedRolled key={key} card={card} cx={cx} />];
     default: return [<Generic key={key} card={card} cx={cx} />];

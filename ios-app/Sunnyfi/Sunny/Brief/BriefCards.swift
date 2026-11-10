@@ -32,6 +32,7 @@ struct BriefCardView: View {
         case "tomorrowOrders": BOrders(card: card, privacy: privacy)
         case "thetaMonth": BThetaMonth(card: card, privacy: privacy)
         case "payback": BPayback(card: card, privacy: privacy)
+        case "performance": BPerformance(card: card, privacy: privacy)
         case "thesisCheck": BThesisCheck(card: card, privacy: privacy)
         default: GenericBriefCard(card: card, privacy: privacy).padding(.horizontal, S.margin)
         }
@@ -101,6 +102,24 @@ struct GenericBriefCard: View {
             }
         } else {
             BriefWords.line(r.string ?? "", privacy: privacy).sType(SType(size: 15, weight: 500, line: 20, tracking: 0)).foregroundStyle(S.ink)
+        }
+    }
+}
+
+/// Performance (Nik 10 Nov 2026, of the old Home's card: "Add this to weekend and post market and search"): the old
+/// card itself, its filters, months and a bar per name, drawn from the Home payload in the new Home's glass. In
+/// privacy (its money has no hiding), or before the payload is in, the server's words in the Payback card's shape:
+/// this month's realized, a bar per month and this month's names, money hidden.
+struct BPerformance: View {
+    let card: JSONValue
+    let privacy: Bool
+    @Environment(\.homeWords) private var words
+
+    var body: some View {
+        if let w = words, !privacy, !(w.performance.realized.isEmpty && w.performance.unrealized.isEmpty) {
+            SunnyPerformance(words: w, surface: .glass).padding(.horizontal, S.margin)
+        } else {
+            BPayback(card: card, privacy: privacy)
         }
     }
 }

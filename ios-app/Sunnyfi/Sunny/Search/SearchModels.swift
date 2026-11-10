@@ -104,11 +104,13 @@ enum SXPart: Decodable, Equatable {
     case tech(SXTech)
     /// A name's page (block 31): pushed over Search; in the chat its paragraph and a button that opens it again.
     case page(SXPage)
+    /// Performance (10 Nov 2026): the old Home's card, drawn from the phone's own Home data, opened on the month asked.
+    case performance(month: String?)
     case none(why: String?, didYouMean: String?)
 
     private enum K: String, CodingKey {
         case type, text, label, value, n, count, fmt, sub, tone, items, head, rows, title, say, trio, table, note, source
-        case summary, sources, line, why, lead, didYouMean = "did_you_mean"
+        case summary, sources, line, why, lead, month, didYouMean = "did_you_mean"
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
@@ -142,6 +144,7 @@ enum SXPart: Decodable, Equatable {
         case "page":
             // A page that will not read keeps its paragraph.
             self = (try? SXPage(from: d)).map { .page($0) } ?? .say(s(.lead) ?? "")
+        case "performance": self = .performance(month: s(.month))
         default: self = .none(why: s(.why), didYouMean: s(.didYouMean))
         }
     }
@@ -155,7 +158,7 @@ enum SXPart: Decodable, Equatable {
         case .rows: return ""
         case .panel(let title, let say, _, _, _, _, _): return say.map { "\(title ?? ""). \(p($0))" } ?? ""
         case .web(let summary, _, _): return "From the web: " + summary
-        case .payoff, .chart, .book, .whatif, .tech: return ""
+        case .payoff, .chart, .book, .whatif, .tech, .performance: return ""
         case .page(let x): return p(x.lead)
         case .none(let why, _): return "I can't answer that from your data. " + (why ?? "")
         }

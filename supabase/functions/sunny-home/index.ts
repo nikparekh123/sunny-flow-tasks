@@ -28,7 +28,7 @@ import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-09.3';
+const BUILD = '2026-11-10.1';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -3090,7 +3090,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const docs = buildDoc({ moment: brief.moment, today, mins: now.mins, isTrading, addDays, cal, brief, names: nameDays,
         market, sectors: sectorRows, futures, watch: watchlist as Row[], chart, yieldWeeks: yieldOut, payback, history,
         earnings, macro, divs, trades, orders: docOrders, aftershock, baseNow: baseAt(today), baseAt, econ: econRows, closes,
-        feeds: { stopped: stoppedFeeds, marketAt } });
+        perf: performance, perfFrom: CHART_START, feeds: { stopped: stoppedFeeds, marketAt } });
       /* README 12: the same number reads the same everywhere. Checked on every build; failures kept with the
          brief (and logged) so a mismatch shows the day it happens, not when Nik spots it. */
       const failed = checkInvariants({ brief, full: docs.full, open: docs.open, inputs: briefInputs, orders: docOrders });

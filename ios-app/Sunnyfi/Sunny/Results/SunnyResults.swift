@@ -204,8 +204,35 @@ struct SunnySoldBought: View {
 
 // MARK: - Performance
 
+/// Where the Performance card sits: the old Home (the busiest card stays paper), the new Home (its glass) or a Search
+/// answer (Search's paper, as the book and chart cards).
+enum PerfSurface { case paper, glass, search }
+
+private struct PerfChrome: ViewModifier {
+    let surface: PerfSurface
+    let glow: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        switch surface {
+        case .paper: content.padding(20).frame(maxWidth: .infinity, alignment: .leading).sCardSurface(glow: glow, glass: false)
+        case .glass: content.briefCard()
+        case .search: content.padding(EdgeInsets(top: 18, leading: 20, bottom: 14, trailing: 20))   // 20 a side: the chip rows bleed 20.frame(maxWidth: .infinity, alignment: .leading)
+            .modifier(SXPaper(radius: 22))
+        }
+    }
+}
+
+extension EnvironmentValues {
+    /// The Home payload the old cards are drawn from (store.words, else store.home), for a card the new Home or Search
+    /// draws from it (Performance, 10 Nov 2026). Nil before the first read.
+    @Entry var homeWords: HomePayload? = nil
+}
+
 struct SunnyPerformance: View {
     let words: HomePayload
+    /// Paper on the old Home; the new Home's glass there (10 Nov 2026), and Search's paper in a Search answer.
+    var surface: PerfSurface = .paper
+    /// The month to open on (yyyy-MM, Search: "How did I do in October?"); else this month.
+    var month: String? = nil
     @State private var realized = DebugPreset.string("perf.r") != "0"
     @State private var unrealized = DebugPreset.bool("perf.u")
     @State private var period: Int?          // nil = YTD, else a month index
@@ -339,14 +366,12 @@ struct SunnyPerformance: View {
             legend(list: list, pv: pv, label: (focus ?? "All companies") + " · " + (per.map(monthName) ?? "YTD"))
         }
         .foregroundStyle(S.ink)
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .sCardSurface(glow: unrealized, glass: false)   // the busiest card stays paper
+        .modifier(PerfChrome(surface: surface, glow: unrealized))
         .onAppear {
             guard !started else { return }
             started = true
             let p = DebugPreset.string("perf.period")
-            period = p == "ytd" ? nil : p.flatMap(Int.init) ?? months.count - 1
+            period = p == "ytd" ? nil : p.flatMap(Int.init) ?? month.flatMap { months.firstIndex(of: $0) } ?? months.count - 1
         }
     }
 
@@ -420,7 +445,9 @@ struct SunnyPerformance: View {
         let typeTotals = Self.types.filter { on($0.key) }.map { t -> (String, Double) in
             (t.name, focus.map { pv($0, t.key) } ?? list.reduce(0) { $0 + pv($1.t, t.key) })
         }
-        let topT = typeTotals.max { $0.1 < $1.1 }
+        // The type that moved the money most, either way: the largest by size, never one at $0 (Nik's screenshot,
+        // 10 Nov 2026: "Mostly puts sold, $0" in a month every type lost).
+        let topT = typeTotals.filter { abs($0.1) >= 1 }.max { abs($0.1) < abs($1.1) }
         let money = { (v: Double) -> Text in Text(F.moneyK(v)).fontWeight(.semibold).foregroundColor(v < 0 ? S.red : S.sumHead) }
         var sentence = Text("")
         if none {
@@ -429,11 +456,11 @@ struct SunnyPerformance: View {
             let v = r.up - r.dn
             let best = ms.indices.max { net(f, ms[$0]) < net(f, ms[$1]) }.map { Periods.monthNames[(Int(ms[$0].suffix(2)) ?? 1) - 1] } ?? ""
             sentence = Text(f).fontWeight(.semibold) + Text(v < 0 ? " lost " : " made ") + money(v)
-                + Text(" \(perLabel), mostly \(topT?.0.lowercased() ?? "") (") + money(topT?.1 ?? 0) + Text("). Best month \(best).")
+                + Text(" \(perLabel)") + (topT.map { Text(", mostly \($0.0.lowercased()) (") + money($0.1) + Text(")") } ?? Text("")) + Text(". Best month \(best).")
         } else if let top = list.first, let bot = list.last {
             sentence = Text(top.t).fontWeight(.semibold) + Text(" led \(perLabel) with ") + money(top.up - top.dn) + Text(", ")
                 + Text(bot.t).fontWeight(.semibold) + Text(bot.up - bot.dn < 0 ? " lost " : " trailed at ") + money(bot.up - bot.dn)
-                + Text(". Mostly \(topT?.0.lowercased() ?? ""), ") + money(topT?.1 ?? 0) + Text(".")
+                + Text(".") + (topT.map { Text(" Mostly \($0.0.lowercased()), ") + money($0.1) + Text(".") } ?? Text(""))
         } else {
             sentence = Text("Nothing closed \(perLabel) yet.")
         }

@@ -1107,6 +1107,8 @@ export const MENU: Row[] = [
       period: { type: 'string', enum: ['week', 'month'] },
       at: { type: 'string', description: 'A date in the week, or a month like 2026-10; default now' } } },
   { name: 'payback', shows: 'Payback: what the book has made against what the LEAPS cost, and the pace', args: {} },
+  { name: 'performance', shows: "Performance: realized P&L (closed trades only) by month since the book's start, by name and by kind (calls sold, puts sold, calls bought, puts bought, shares) for one month, the year so far and the best and worst months; and open P&L by name. Read this for how he did in a month or this year, his best month, or which names made or lost the most", args: {
+      month: { type: 'string', description: "'YYYY-MM' when he names a month (October is 2026-10); none for this month" } } },
   { name: 'events', shows: 'Earnings and market holidays coming up; one name or all', args: { ...TICKER,
       days: { type: 'number', description: 'How many days ahead, default 14' } } },
   { name: 'who_is_trading', shows: 'Flow profile for one name: Institution-heavy or Retail-heavy, with the five inputs', args: TICKER, required: ['ticker'] },
@@ -1301,6 +1303,28 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
       const x = c.p.payback ?? {};
       return card('payback', 'Payback', sunny(c), { leaps_base: x.base, made: x.made, settled: x.settled, open: x.open, closing: x.closing,
         hedges: x.hedges, pace_since_start_per_week: x.pace_start, pace_last_4_weeks_per_week: x.pace_recent, leaps_value: x.leaps_value });
+    }
+    case 'performance': {
+      /* The Performance card's figures (sunny-home block 20, payload.performance: [month, ticker, kind, $] rows). A month
+         before the book's first counts in its first, as on the card (the LEAPS bought on 31 Aug count in September). */
+      const P = c.p.performance ?? {}, from = String(c.p.history?.from ?? BOOK_FROM[c.book] ?? c.today).slice(0, 7);
+      const mo = c.today.slice(0, 7), asked = /^\d{4}-\d{2}$/.test(String(a.month ?? '')) ? String(a.month) : mo;
+      const byM = new Map<string, number>(), byT = new Map<string, number>(), byK = new Map<string, number>(), open = new Map<string, number>();
+      for (const r of (P.realized ?? []) as unknown[][]) {
+        const m = [String(r[0]), from].sort().at(-1)!, v = Number(r[3]) || 0;
+        byM.set(m, (byM.get(m) ?? 0) + v);
+        if (m === asked) { byT.set(String(r[1]), (byT.get(String(r[1])) ?? 0) + v); byK.set(String(r[2]), (byK.get(String(r[2])) ?? 0) + v); }
+      }
+      for (const r of (P.unrealized ?? []) as unknown[][]) open.set(String(r[1]), (open.get(String(r[1])) ?? 0) + (Number(r[3]) || 0));
+      const months = [...byM].filter(([m]) => m <= mo).sort((x, y) => x[0].localeCompare(y[0])).map(([month, made]) => ({ month, made: Math.round(made) }));
+      const ranked = [...months].sort((x, y) => y.made - x.made);
+      return card('performance', 'Performance', sunny(c), { realized_means: 'closed trades only', month: asked, this_month: mo,
+        month_realized: Math.round(byM.get(asked) ?? 0),
+        year_so_far: Math.round(months.filter((x) => x.month.slice(0, 4) === mo.slice(0, 4)).reduce((t, x) => t + x.made, 0)),
+        best_month: ranked[0] ?? null, worst_month: ranked.at(-1) ?? null, by_month: months,
+        by_name: [...byT].map(([ticker, made]) => ({ ticker, made: Math.round(made) })).filter((x) => x.made !== 0).sort((x, y) => y.made - x.made),
+        by_kind: [...byK].map(([kind, made]) => ({ kind, made: Math.round(made) })).filter((x) => x.made !== 0).sort((x, y) => Math.abs(y.made) - Math.abs(x.made)),
+        open_by_name: [...open].map(([ticker, open_pl]) => ({ ticker, open_pl: Math.round(open_pl) })).sort((x, y) => y.open_pl - x.open_pl) });
     }
     case 'events': {
       const days = num(a.days) ?? 14, end = addDays(c.today, days);

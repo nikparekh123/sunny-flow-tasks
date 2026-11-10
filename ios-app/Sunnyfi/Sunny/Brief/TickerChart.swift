@@ -12,6 +12,10 @@
 //    name is held, and its chip only shows then. Walls leave room after today for the chain ahead.
 //  · The price column on the right (56 wide) is a drag: up zooms in, down zooms out, around the price under the
 //    finger (span × e^(dy/160), from a sixth to four times the auto span). A double tap or Auto goes back.
+//  · The dates under the chart are the same drag sideways (Nik 10 Nov 2026: "one is up and down to get the prices
+//    closer and one is left and right to spread out the chart"): right spreads the days out around the day under
+//    the finger, left squeezes them back, from one week to the whole range; the auto price scale fits the days on
+//    screen. A double tap on the dates, Auto, or a new range goes back.
 //  · A tag per leg ("Sold call 40 ×50"), 19 apart so none overlaps; off the scale it pins to the edge with an arrow.
 //  · ⚠ THE PAGE IS EXACTLY THE SCREEN. The layer chips sat at their own width in a plain HStack: one text size up
 //    they summed wider than the phone, the page grew past the screen and, centred, lost both edges (the price
@@ -574,18 +578,27 @@ private struct TKSeriesLine: Shape {
     var lo: Double
     var hi: Double
     var xw: CGFloat
+    /// The closes on screen in index units: x0 at the left edge, x1 at xw (0 and n - 1 until the dates are dragged).
+    var x0: Double
+    var x1: Double
     var padTop: CGFloat
     var padBottom: CGFloat
-    var animatableData: AnimatablePair<AnimatablePair<Double, Double>, CGFloat> {
-        get { AnimatablePair(AnimatablePair(lo, hi), xw) }
-        set { lo = newValue.first.first; hi = newValue.first.second; xw = newValue.second }
+    var animatableData: AnimatablePair<AnimatablePair<Double, Double>, AnimatablePair<CGFloat, AnimatablePair<Double, Double>>> {
+        get { AnimatablePair(AnimatablePair(lo, hi), AnimatablePair(xw, AnimatablePair(x0, x1))) }
+        set {
+            lo = newValue.first.first; hi = newValue.first.second
+            xw = newValue.second.first; x0 = newValue.second.second.first; x1 = newValue.second.second.second
+        }
     }
     func path(in r: CGRect) -> Path {
         var p = Path(), pen = false
-        let n = vals.count, span = max(1e-9, hi - lo)
-        for (i, v) in vals.enumerated() {
-            guard let v else { pen = false; continue }
-            let pt = CGPoint(x: n > 1 ? CGFloat(i) / CGFloat(n - 1) * xw : 0, y: padTop + CGFloat((hi - v) / span) * (r.height - padTop - padBottom))
+        let n = vals.count, span = max(1e-9, hi - lo), dx = max(1e-9, x1 - x0)
+        // Only the closes on screen and one either side: the rest are clipped anyway.
+        let from = max(0, Int(floor(x0)) - 1), to = min(n - 1, Int(ceil(x1)) + 1)
+        guard from <= to else { return p }
+        for i in from...to {
+            guard let v = vals[i] else { pen = false; continue }
+            let pt = CGPoint(x: n > 1 ? CGFloat((Double(i) - x0) / dx) * xw : 0, y: padTop + CGFloat((hi - v) / span) * (r.height - padTop - padBottom))
             if pen { p.addLine(to: pt) } else { p.move(to: pt); pen = true }
         }
         return p
@@ -596,14 +609,21 @@ private struct TKSeriesLine: Shape {
 private struct TKRSILine: Shape {
     var vals: [Double]
     var xw: CGFloat
-    var animatableData: CGFloat { get { xw } set { xw = newValue } }
+    var x0: Double
+    var x1: Double
+    var animatableData: AnimatablePair<CGFloat, AnimatablePair<Double, Double>> {
+        get { AnimatablePair(xw, AnimatablePair(x0, x1)) }
+        set { xw = newValue.first; x0 = newValue.second.first; x1 = newValue.second.second }
+    }
     static func y(_ v: Double) -> CGFloat { 3 + CGFloat((100 - v) / 100 * 52) }
     func path(in r: CGRect) -> Path {
         var p = Path()
-        let n = vals.count
-        for (i, v) in vals.enumerated() {
-            let pt = CGPoint(x: n > 1 ? CGFloat(i) / CGFloat(n - 1) * xw : 0, y: Self.y(v))
-            i == 0 ? p.move(to: pt) : p.addLine(to: pt)
+        let n = vals.count, dx = max(1e-9, x1 - x0)
+        let from = max(0, Int(floor(x0)) - 1), to = min(n - 1, Int(ceil(x1)) + 1)
+        guard from <= to else { return p }
+        for i in from...to {
+            let pt = CGPoint(x: n > 1 ? CGFloat((Double(i) - x0) / dx) * xw : 0, y: Self.y(vals[i]))
+            i == from ? p.move(to: pt) : p.addLine(to: pt)
         }
         return p
     }
@@ -614,6 +634,10 @@ private struct TickerLine: View {
     /// A tag placed on the plot.
     struct Tag: Identifiable { let id: String; let text: String; let color: Color; var y: CGFloat; let right: Bool; let w: CGFloat }
     private struct Drag { let y0: CGFloat; let lo0: Double; let hi0: Double; let a: Double; var moved: Bool }
+    /// The closes on screen, in index units (a at the left edge, b at today's place).
+    struct Win: Equatable { var a: Double; var b: Double }
+    /// A drag on the dates: where it started, the window then, the close under the finger and its place across.
+    private struct TDrag { let x0: CGFloat; let a0: Double; let b0: Double; let at: Double; let fa: Double; var moved: Bool }
 
     let pts: [Double]
     let dates: [String]
@@ -639,6 +663,10 @@ private struct TickerLine: View {
     @State private var vr: Scale?
     @State private var drag: Drag?
     @State private var lastTap = Date.distantPast
+    /// The spread-out window; nil = the whole range. Reset by a double tap on the dates, Auto, or a new range.
+    @State private var win: Win?
+    @State private var tdrag: TDrag?
+    @State private var lastDateTap = Date.distantPast
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     /// 14 clear over the plot, 12 under it (PT, PB).
@@ -698,7 +726,13 @@ private struct TickerLine: View {
             let PT = Self.PT, PB = Self.PB
             let rsiH: CGFloat = rsi == nil ? 0 : 86                     // RSI: 10 under the chart, 76 tall
             let H = max(PT + PB + 20, g.size.height - 24 - rsiH)       // the plot; the dates 8 under, 16 tall
-            let a = Self.auto(pts, ext), s = vr ?? a
+            // The closes on screen: the whole range, or the window the dates were dragged to. While spread out the
+            // auto scale fits the closes on screen, so the stretch gets the height too.
+            let N = pts.count, full = Double(max(1, N - 1))
+            let w = win.flatMap { N > 1 && $0.a >= -1e-9 && $0.b <= full + 1e-9 && $0.b - $0.a < full - 1e-9 ? $0 : nil } ?? Win(a: 0, b: full)
+            let zoomed = w.b - w.a < full - 1e-9
+            let vis = zoomed ? Array(pts[max(0, Int(floor(w.a)))...min(N - 1, Int(ceil(w.b)))]) : pts
+            let a = Self.auto(vis, ext), s = vr ?? a
             let lo = s.lo, hi = s.hi
             let Y = { (v: Double) -> CGFloat in PT + CGFloat((hi - v) / max(1e-9, hi - lo)) * (H - PT - PB) }
             let px = pts.last ?? lo
@@ -717,12 +751,11 @@ private struct TickerLine: View {
             let colW = max(56, (axis.map { TK.width(fmt($0), 12, 500) + 12 }.max() ?? 0), TK.width(pill, 12, 700) + 12 + 4)
             let W = max(1, g.size.width - colW)
             let XW = room ? W * 0.86 : W
-            let N = pts.count
-            let Xr = { (i: Int) -> CGFloat in N > 1 ? CGFloat(i) / CGFloat(N - 1) * XW : 0 }
+            let Xr = { (i: Int) -> CGFloat in N > 1 ? CGFloat((Double(i) - w.a) / max(1e-9, w.b - w.a)) * XW : 0 }
             let tags = Self.layout(marks, lo: lo, hi: hi, Y: Y, H: H, W: W)
             let at = si.flatMap { $0 < N ? $0 : nil }
             ZStack(alignment: .topLeading) {
-                plot(W: W, XW: XW, H: H, lo: lo, hi: hi, grid: grid, Y: Y)
+                plot(W: W, XW: XW, H: H, lo: lo, hi: hi, grid: grid, Y: Y, w: w)
                 // The scrub: a finger on the plot reads the close under it (the readout above follows); lifting it
                 // goes back to the range's move.
                 Color.clear
@@ -731,7 +764,8 @@ private struct TickerLine: View {
                     .gesture(DragGesture(minimumDistance: 0)
                         .onChanged { v in
                             guard N > 0 else { return }
-                            let i = Int((max(0, min(1, v.location.x / max(1, XW))) * CGFloat(N - 1)).rounded())
+                            let f = Double(max(0, min(1, v.location.x / max(1, XW))))
+                            let i = min(Int(floor(w.b + 1e-9)), max(Int(ceil(w.a - 1e-9)), Int((w.a + f * (w.b - w.a)).rounded())))
                             if i != si { var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { si = i } }
                         }
                         .onEnded { _ in var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { si = nil } })
@@ -741,8 +775,8 @@ private struct TickerLine: View {
                 if let last = pts.last {
                     Circle().fill(up ? S.green : S.red).frame(width: 9, height: 9)
                         .background(Circle().fill(TK.ring).padding(-2))
-                        .position(x: XW, y: Y(last))
-                        .opacity(last >= lo && last <= hi ? 1 : 0)
+                        .position(x: Xr(N - 1), y: Y(last))
+                        .opacity(last >= lo && last <= hi && Xr(N - 1) <= XW + 1 ? 1 : 0)
                         .accessibilityHidden(true)
                 }
                 // The tags: 11/14 700, padding 1 6, radius 7, on the chart chip.
@@ -783,11 +817,28 @@ private struct TickerLine: View {
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                 if let r = rsi {
-                    rsiPanel(r, at: at, full: g.size.width, W: W, XW: XW, colW: colW, Xr: Xr)
+                    rsiPanel(r, at: at, full: g.size.width, W: W, XW: XW, colW: colW, Xr: Xr, w: w)
                         .position(x: g.size.width / 2, y: H + 10 + 38)
                         .transition(.opacity)
                 }
-                dateRow(XW: XW, W: W, top: H + rsiH)
+                dateRow(XW: XW, W: W, top: H + rsiH, w: w, zoomed: zoomed, Xr: Xr)
+                // The time scale: the dates under the chart are the handle, the price column's twin sideways. Right
+                // spreads the chart out around the day under the finger, left squeezes it back to the whole range.
+                Color.clear
+                    .frame(width: W, height: 24)
+                    .contentShape(Rectangle())
+                    .gesture(stretch(w: w, XW: XW, N: N))
+                    .accessibilityElement()
+                    .accessibilityLabel("Time scale")
+                    .accessibilityValue(zoomed ? "\(Int((w.b - w.a).rounded()) + 1) days on screen" : "Whole range")
+                    .accessibilityHint("Swipe up to spread the chart out, down to squeeze it back")
+                    .accessibilityAdjustableAction { d in
+                        let minSpan = min(full, 5), span = min(full, max(minSpan, (w.b - w.a) * (d == .increment ? 0.8 : 1.25)))
+                        let st = min(max(0, w.b - span), full - span)
+                        win = span >= full - 1e-9 ? nil : Win(a: st, b: st + span)
+                    }
+                    .accessibilityAction(named: "Auto") { reset(price: false) }
+                    .position(x: W / 2, y: H + rsiH + 12)
                 // The price scale: the whole price column is the handle.
                 Color.clear
                     .frame(width: colW, height: H)
@@ -801,29 +852,31 @@ private struct TickerLine: View {
                         let c = (lo + hi) / 2, sp = min((a.hi - a.lo) * 4, max((a.hi - a.lo) / 6, (hi - lo) * (d == .increment ? 0.8 : 1.25)))
                         vr = Scale(lo: c - sp / 2, hi: c + sp / 2)
                     }
-                    .accessibilityAction(named: "Auto") { reset() }
+                    .accessibilityAction(named: "Auto") { reset(time: false) }
                     .position(x: W + colW / 2, y: H / 2)
-                // Auto while zoomed: 12/12 700 on ink, 26 tall, 10 a side, in a 44 target 12 over the chart's top.
-                if vr != nil {
-                    Button(action: reset) {
+                // Auto while zoomed either way: 12/12 700 on ink, 26 tall, 10 a side, in a 44 target 12 over the
+                // chart's top. It puts both scales back.
+                if vr != nil || zoomed {
+                    Button { reset() } label: {
                         Text("Auto").sType(SType(size: 12, weight: 700, line: 12, tracking: 0), tabular: false).foregroundStyle(TK.onink)
                             .padding(.horizontal, 10).frame(height: 26).background(Capsule().fill(TK.ink))
                             .padding(.horizontal, 4).frame(height: 44).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Reset the price scale to auto")
+                    .accessibilityLabel("Reset the chart to auto")
                     .frame(width: g.size.width, alignment: .trailing)
                     .position(x: g.size.width / 2, y: -12 + 22)
                     .transition(.opacity)
                 }
             }
         }
-        .onChange(of: range) { _, _ in vr = nil }
+        .onChange(of: range) { _, _ in vr = nil; win = nil }
     }
 
     /// The grid, the band, the range's first close dotted, the layers' lines, the averages and the price, clipped to
-    /// the plot. One spoken stop.
-    private func plot(W: CGFloat, XW: CGFloat, H: CGFloat, lo: Double, hi: Double, grid: [Double], Y: @escaping (Double) -> CGFloat) -> some View {
+    /// the plot. One spoken stop. The closes and averages stop at today's place (XW), so spread out over an earlier
+    /// stretch the room after today stays empty.
+    private func plot(W: CGFloat, XW: CGFloat, H: CGFloat, lo: Double, hi: Double, grid: [Double], Y: @escaping (Double) -> CGFloat, w: Win) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(grid, id: \.self) { v in
                 Rectangle().fill(TK.line).frame(width: W, height: 1).position(x: W / 2, y: Y(v))
@@ -847,19 +900,21 @@ private struct TickerLine: View {
             }
             // Technicals: the 20-day solid, the 50-day dashed (6 4), the 200-day dotted (1 4), teal 1.5.
             ForEach(ma) { m in
-                TKSeriesLine(vals: m.vals, lo: lo, hi: hi, xw: XW, padTop: Self.PT, padBottom: Self.PB)
+                TKSeriesLine(vals: m.vals, lo: lo, hi: hi, xw: XW, x0: w.a, x1: w.b, padTop: Self.PT, padBottom: Self.PB)
                     .stroke(TK.tc, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: m.dash))
                     .frame(width: W, height: H)
+                    .frame(width: XW + 1.5, height: H, alignment: .topLeading).clipped()
                     .id("\(range)|\(m.id)")
                     .transition(.opacity)
             }
             ZStack {
-                TKSeriesLine(vals: pts.map { Optional($0) }, lo: lo, hi: hi, xw: XW, padTop: Self.PT, padBottom: Self.PB)
+                TKSeriesLine(vals: pts.map { Optional($0) }, lo: lo, hi: hi, xw: XW, x0: w.a, x1: w.b, padTop: Self.PT, padBottom: Self.PB)
                     .stroke(up ? S.green : S.red, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                     .id(range)
                     .transition(.opacity)
             }
             .frame(width: W, height: H)
+            .frame(width: XW + 1.5, height: H, alignment: .topLeading).clipped()
         }
         .frame(width: W, height: H, alignment: .topLeading)
         .clipped()
@@ -870,7 +925,7 @@ private struct TickerLine: View {
     /// RSI 14 (the design's strip, 76 tall): "RSI (14)" 12/15 600 muted 16 in with its value 700 ink and Overbought or
     /// Oversold 700 orange, 6 apart; under it the 58 pt strip with 70 to 30 shaded teal to today and the line teal 1.5;
     /// 70 and 30 at the right (12/14 500 muted). Under the finger: its value then, and the same line.
-    private func rsiPanel(_ r: [Double], at: Int?, full: CGFloat, W: CGFloat, XW: CGFloat, colW: CGFloat, Xr: @escaping (Int) -> CGFloat) -> some View {
+    private func rsiPanel(_ r: [Double], at: Int?, full: CGFloat, W: CGFloat, XW: CGFloat, colW: CGFloat, Xr: @escaping (Int) -> CGFloat, w: Win) -> some View {
         let i = at.flatMap { $0 < r.count ? $0 : nil } ?? (r.count - 1)
         let rv = r.indices.contains(i) ? r[i] : 50
         let y70 = TKRSILine.y(70), y30 = TKRSILine.y(30)
@@ -884,8 +939,8 @@ private struct TickerLine: View {
             .frame(height: 15)
             .offset(x: 16)
             Rectangle().fill(TK.tcTint).frame(width: XW, height: y30 - y70).offset(y: 18 + y70)
-            TKRSILine(vals: r, xw: XW).stroke(TK.tc, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
-                .frame(width: W, height: 58).clipped().offset(y: 18)
+            TKRSILine(vals: r, xw: XW, x0: w.a, x1: w.b).stroke(TK.tc, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
+                .frame(width: XW + 1.5, height: 58).clipped().offset(y: 18)
                 .id("rsi|\(range)").transition(.opacity)
             if let s = at {
                 Rectangle().fill(TK.mu).opacity(0.6).frame(width: 1, height: 58).offset(x: Xr(s) - 0.5, y: 18)
@@ -905,18 +960,22 @@ private struct TickerLine: View {
     /// The dates 8 under the chart (12/16 500 muted) at 8, 36, 64 and 92% of the closes; on 1W each weekday in the
     /// middle of its day, as the design's week. The chain's date over the room after today while Walls is on. A date
     /// never runs off the chart's edge.
-    private func dateRow(XW: CGFloat, W: CGFloat, top: CGFloat) -> some View {
+    private func dateRow(XW: CGFloat, W: CGFloat, top: CGFloat, w: Win, zoomed: Bool, Xr: @escaping (Int) -> CGFloat) -> some View {
         let N = pts.count
-        let at: [(x: CGFloat, i: Int)] = range == "1W" && N > 1
+        // Spread out, the dates read for the days on screen: "Aug 3" up to about three months, "Aug" (or "Aug ’25"
+        // on All) up to about a year.
+        let sp = w.b - w.a
+        let fmt = !zoomed ? range : sp <= 70 ? "3M" : sp <= 300 ? (range == "All" ? "All" : "1Y") : range
+        let at: [(x: CGFloat, i: Int)] = range == "1W" && N > 1 && !zoomed
             ? (1..<N).map { s in ((CGFloat(s) - 0.5) / CGFloat(N - 1) * XW, s) }
             : [0.08, 0.36, 0.64, 0.92].map { f in
-                let i = Int((f * Double(max(0, N - 1))).rounded())
-                return (N > 1 ? CGFloat(i) / CGFloat(N - 1) * XW : 0, i)
+                let i = Int((w.a + f * sp).rounded())
+                return (Xr(i), i)
             }
         return ZStack(alignment: .topLeading) {
             ForEach(Array(at.enumerated()), id: \.offset) { _, p in
                 if dates.indices.contains(p.i) {
-                    let s = TickerChartPage.dateLabel(dates[p.i], range), half = TK.width(s, 12, 500) / 2
+                    let s = TickerChartPage.dateLabel(dates[p.i], fmt), half = TK.width(s, 12, 500) / 2
                     Text(s).font(.inter(12, 500)).foregroundStyle(TK.mu).fixedSize()
                         .position(x: min(max(p.x, half), W - half), y: top + 16)
                 }
@@ -954,13 +1013,48 @@ private struct TickerLine: View {
                 drag = nil
                 guard !moved else { return }
                 let now = Date()
-                if now.timeIntervalSince(lastTap) < 0.32 { lastTap = .distantPast; reset() } else { lastTap = now }
+                if now.timeIntervalSince(lastTap) < 0.32 { lastTap = .distantPast; reset(time: false) } else { lastTap = now }
             }
     }
 
-    /// Back to auto: a 520 ms ease-out glide (the design's anim), none under Reduce Motion.
-    private func reset() {
-        guard vr != nil else { return }
-        withAnimation(S.moving(.timingCurve(0.33, 1, 0.68, 1, duration: 0.52), reduce)) { vr = nil }
+    /// The drag on the dates (Nik 10 Nov: "one is up and down to get the prices closer and one is left and right to
+    /// spread out the chart"): the day under the finger stays put and the days on screen scale by e^(-dx/120), so
+    /// right spreads the chart out and left squeezes it back, from one week (6 closes) to the whole range. A tap that
+    /// doesn't move, twice within 320 ms, goes back to the whole range.
+    private func stretch(w: Win, XW: CGFloat, N: Int) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { v in
+                let full = Double(max(1, N - 1)), minSpan = min(full, 5)
+                guard full > minSpan else { return }
+                if tdrag == nil {
+                    let fa = Double(max(0, min(1, v.startLocation.x / max(1, XW))))
+                    tdrag = TDrag(x0: v.startLocation.x, a0: w.a, b0: w.b, at: w.a + fa * (w.b - w.a), fa: fa, moved: false)
+                }
+                guard var z = tdrag else { return }
+                let dx = v.location.x - z.x0
+                if !z.moved && abs(dx) > 3 { z.moved = true; tdrag = z }
+                guard z.moved else { return }
+                let span = min(full, max(minSpan, (z.b0 - z.a0) * exp(-Double(dx) / 120)))
+                let st = min(max(0, z.at - z.fa * span), full - span)
+                var tx = Transaction(); tx.disablesAnimations = true
+                withTransaction(tx) { win = span >= full - 1e-9 ? nil : Win(a: st, b: st + span); si = nil }
+            }
+            .onEnded { _ in
+                let moved = tdrag?.moved ?? false
+                tdrag = nil
+                guard !moved else { return }
+                let now = Date()
+                if now.timeIntervalSince(lastDateTap) < 0.32 { lastDateTap = .distantPast; reset(price: false) } else { lastDateTap = now }
+            }
+    }
+
+    /// Back to auto: a 520 ms ease-out glide (the design's anim), none under Reduce Motion. Auto puts both scales
+    /// back; a double tap on the price column or on the dates puts back its own.
+    private func reset(price: Bool = true, time: Bool = true) {
+        guard (price && vr != nil) || (time && win != nil) else { return }
+        withAnimation(S.moving(.timingCurve(0.33, 1, 0.68, 1, duration: 0.52), reduce)) {
+            if price { vr = nil }
+            if time { win = nil }
+        }
     }
 }

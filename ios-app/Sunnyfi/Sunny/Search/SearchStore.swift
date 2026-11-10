@@ -232,7 +232,7 @@ enum SXClient {
     static func ask(_ q: String, thread: [[String: String]], deep: Bool, spoken: Bool = false, rid: String = UUID().uuidString, aid: String? = nil,
                     step: @escaping @MainActor (String, Bool) -> Void) async throws -> SXAnswer {
         // draws: the newer cards this build can draw; more is the payoff's names and Also helps (block 30).
-        var body: [String: Any] = ["ask": q, "thread": thread, "deep": deep, "voice": spoken, "rid": rid, "stream": true, "draws": ["whatif", "tech", "more", "page"]]
+        var body: [String: Any] = ["ask": q, "thread": thread, "deep": deep, "voice": spoken, "rid": rid, "stream": true, "draws": ["whatif", "tech", "more", "page", "performance"]]
         if let aid, !deep { body["id"] = aid }
         let (bytes, _) = try await URLSession.shared.bytes(for: try await request(body))
         for try await line in bytes.lines {

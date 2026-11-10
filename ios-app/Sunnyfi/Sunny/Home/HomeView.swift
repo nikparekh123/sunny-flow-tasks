@@ -73,6 +73,7 @@ struct HomeView: View {
             // Block 27: Search, a page of its own over the tab you came from.
             if store.home != nil, router.searchOpen {
                 SunnySearchPage(search: search, voice: voice, from: router.searchFrom, leave: closeSearch, listenTick: router.listenTick)
+                    .environment(\.homeWords, store.words ?? store.home)
                     .zIndex(9)
             }
             if let home = store.home, let r = router.receipt {
@@ -157,6 +158,8 @@ struct HomeView: View {
         }
         // Text on New Home, Positions, Overview and the ticker chart follows the phone's text size (Pass 5).
         .environment(\.sTypeScales, true)
+        // The payload the old cards draw from, for Performance on the new Home (10 Nov 2026).
+        .environment(\.homeWords, store.words ?? home)
         .animation(reduce ? S.fade : S.page, value: brief.onOverview)
         .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.45), value: brief.ticker)
         .sheet(item: Binding(get: { brief.sheet }, set: { brief.sheet = $0 })) { k in

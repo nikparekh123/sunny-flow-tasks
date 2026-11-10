@@ -29,7 +29,7 @@ import { bookNames, caller, context, db, lookup, MENU, moreFor, OWNER_ONLY, SB_K
 import { checkAnswer } from './check.ts';
 import { COUNTS, fmt, SLOT, Slots } from './slots.ts';
 
-const BUILD = '2026-11-08.1';
+const BUILD = '2026-11-10.1';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';
@@ -146,6 +146,13 @@ The shape: pick what fits, never more than the question needs.
   under its 74 calls, then LULU {o:1.0%} under the Ceiling." For the 50-day: how many are under it and the furthest.
   This is not "all my sold positions" or "what I bought": those stay rows. follow_ups such as "Show them as small
   charts", "Which names are under their 50-day?".
+- Performance, when he asks how his trades did over a month or the year, or which names made or lost the most (Show me
+  my performance. How did I do in October? What have I made this year? Which names lost money this month? What was my
+  best month?): read performance (month when he names one). Then one "say" of ONE sentence and {"performance": true}:
+  Sunny draws the card (every month, a bar per name, the filters). Nothing else. The sentence: the month's realized and
+  the name that moved it most, with the period named: "November has {r:lost [r3|$]} so far, most of it Alibaba." or
+  "October made {g:[r3|$]}, led by Netflix." For the year: the year so far and the best month. Realized is closed
+  trades only. follow_ups such as "How did I do in October?", "What have I made this year?".
 - What if, when he asks what a move does to a name's delta, or whether its delta is safe (Is my BABA delta safe if it
   moves 10%? What does a 10% drop do to my Nike delta?): read delta_gamma with the ticker and move_pct (the move named,
   negative for a drop, 10 when none). Then one "say" of two short sentences and {"whatif": true}: Sunny draws the card
@@ -407,6 +414,10 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
       // Your book (block 29): a row per name, drawn on the phone; its source line is its own.
       const card = ran.filter((x) => x.ok && x.name === 'book').at(-1)?.card;
       if (card?.chart) parts.push({ type: 'book', ...card.chart, at: marketOpen() ? clock(new Date()) : `${lastClose()} close` });
+    } else if (p.performance) {
+      // Performance (10 Nov 2026): the phone draws the old Home's card from its own payload, opened on the month asked.
+      const card = ran.filter((x) => x.ok && x.name === 'performance').at(-1)?.card;
+      if (card && c.draws?.includes('performance')) parts.push({ type: 'performance', month: card.data?.month ?? null });
     } else if (p.whatif) {
       // What if · Delta and Gamma (block 29): the slider's every step, drawn on the phone; its source line is its own.
       const card = ran.filter((x) => x.ok && x.name === 'delta_gamma' && x.card?.chart).at(-1)?.card;
@@ -446,7 +457,7 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
   const recap = f.recap ? plain(S(f.recap) ?? '') : null;
   // The source line ends every answer, unless its last part is a panel with a source of its own.
   const last = parts.at(-1);
-  const source = ['panel', 'none', 'payoff', 'chart', 'book', 'whatif', 'tech', 'page'].includes(last?.type) ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
+  const source = ['panel', 'none', 'payoff', 'chart', 'book', 'whatif', 'tech', 'page', 'performance'].includes(last?.type) ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
   return { parts, source, follow_ups, recap, can_answer: f.can_answer !== false && !parts.some((x) => x.type === 'none'),
     bad, literal: lit.join(' \n '), webLiteral: webLit.join(' \n ') };
 }
@@ -473,6 +484,7 @@ function stepOf(name: string, a: Row): { step: string; work: boolean } {
     case 'walls_live': return s(`Reading ${t}'s live chain`, true);
     case 'yield': return s('Reading your yield');
     case 'payback': return s('Reading payback');
+    case 'performance': return s('Reading your performance');
     case 'events': return s('Checking earnings and holidays');
     case 'fundamentals': case 'analyst_targets': case 'earnings_history': case 'research_notes':
       return s(`Reading saved research on ${t}`, true);
@@ -503,7 +515,7 @@ function routeOf(id: string): string {
 
 /** The line a folded answer shows above its first sentence: the card it drew, or what it read. */
 function labelOf(parts: Row[], ran: Ran[]): string | null {
-  const p = parts.find((x) => ['payoff', 'chart', 'book', 'whatif', 'tech', 'page'].includes(x.type));
+  const p = parts.find((x) => ['payoff', 'chart', 'book', 'whatif', 'tech', 'page', 'performance'].includes(x.type));
   if (p?.type === 'page') return `${p.t} · ${p.co} page`;
   if (p?.type === 'payoff') {
     const t = p.names?.[0]?.t;
@@ -513,6 +525,7 @@ function labelOf(parts: Row[], ran: Ran[]): string | null {
   if (p?.type === 'book') return `Your book · ${p.view === 'grid' ? 'small charts' : 'list'}`;
   if (p?.type === 'whatif') return `${p.t} · What if · Delta and Gamma`;
   if (p?.type === 'tech') return `${p.t} · Technicals`;
+  if (p?.type === 'performance') return 'Performance';
   const r = ran.find((x) => x.ok && x.card);
   if (!r) return null;
   const t = r.args.ticker ? String(r.args.ticker).toUpperCase() : '';

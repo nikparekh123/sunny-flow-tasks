@@ -42,6 +42,7 @@ struct SXAnswerView: View {
         case .whatif(let w): SXWhatIfCard(p: w)
         case .tech(let t): SXTechCard(p: t)
         case .page(let pg): SXPageEntry(p: pg)
+        case .performance(let m): SXPerformance(month: m)
         case .none(let why, let dym): SXNone(why: why, didYouMean: dym, ask: ask)
         }
     }
@@ -409,5 +410,17 @@ struct SXSourceLine: View {
         }
         .foregroundStyle(kind == "web" ? SX.web : SX.muted)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Performance in a Search answer (10 Nov 2026): the old Home's card from the phone's own Home data, on the month
+/// asked; nothing before that data is in (the sentence above it still answers).
+struct SXPerformance: View {
+    let month: String?
+    @Environment(\.homeWords) private var words
+    var body: some View {
+        if let w = words, !(w.performance.realized.isEmpty && w.performance.unrealized.isEmpty) {
+            SunnyPerformance(words: w, surface: .search, month: month)
+        }
     }
 }

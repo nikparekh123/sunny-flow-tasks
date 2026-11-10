@@ -35,6 +35,8 @@ export interface DocIn {
   econ?: Row[];                    // econ_cards (econ-sync, FRED): the twelve indicators
   closes?: Row[];                  // daily_closes (ticker, date, close_price), oldest first: the world markets' month lines
   baseNow: number; baseAt: (d: string) => number;
+  /** payload.performance (block 20): realized and open as [month, ticker, kind, $] rows; perfFrom = the book's chart start. */
+  perf?: { realized: unknown[][]; unrealized: unknown[][] }; perfFrom?: string;
   /* README 9.4 (Audit 7): feeds that have stopped (no run for 50 h, health-monitor's "stopped") hide what they feed
      rather than show an old claim ("None ahead", "3 names still to report"); marketAt = the tape's last capture. */
   feeds?: { stopped?: string[]; marketAt?: string | null };
@@ -740,8 +742,36 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     if (held && sells) owner.push({ key: 'lede' });
   }
 
+  /* Performance (Nik 10 Nov 2026, of the old Home's card: "Add this to weekend and post market and search"). The phone
+     draws the whole card (filters, months, a bar per name) from payload.performance, realized by month, name and kind;
+     these words are what the web, a phone in privacy and an older build draw: this month's realized, a bar per month
+     since the book's first, and this month's names. A month before the book's first counts in its first (the LEAPS
+     bought on 31 Aug count in September), as on the phone. */
+  const performanceCard = () => {
+    const rows = (x.perf?.realized ?? []) as unknown[][]; if (!rows.length) return null;
+    const from = String(x.perfFrom ?? today).slice(0, 7), mo = today.slice(0, 7), mName = MONTH[ymd(today).m - 1];
+    const byM = new Map<string, number>(), byT = new Map<string, number>();
+    for (const r of rows) {
+      const m = [String(r[0]), from].sort().at(-1)!, v = Number(r[3]) || 0;
+      byM.set(m, (byM.get(m) ?? 0) + v);
+      if (m === mo) byT.set(String(r[1]), (byT.get(String(r[1])) ?? 0) + v);
+    }
+    const months = [...byM].filter(([m]) => m <= mo).sort((a, b) => a[0].localeCompare(b[0]));
+    const month = byM.get(mo) ?? 0, ytd = months.filter(([m]) => m.slice(0, 4) === mo.slice(0, 4)).reduce((a, [, v]) => a + v, 0);
+    const best = [...months].sort((a, b) => b[1] - a[1])[0];
+    const bestName = best ? MONTH[Number(best[0].slice(5, 7)) - 1] : null;
+    const bars = months.slice(-5).map(([m, v]) => ({ label: MON[Number(m.slice(5, 7)) - 1], value: fK(v), n: Math.round(v), highlight: m === mo,
+      valueColor: m === mo ? col(v) : v < 0 ? 'red' : 'ink', empty: false }));
+    const named = [...byT].filter(([, v]) => Math.abs(v) >= 1).sort((a, b) => b[1] - a[1]);
+    return { type: 'performance', title: 'Performance', subtitle: `Realized in ${mName}, closed trades only`,
+      big: fK(month), bigColor: col(month),
+      bigSub: `${month < 0 ? 'lost' : 'made'} in ${mName} · ${fK(ytd)} ${ytd < 0 ? 'lost' : 'made'} this year${bestName && best[1] > 0 ? ` · ${bestName} the best month` : ''}`,
+      chart: bars.length > 1 ? { title: 'Realized by month', bars } : null,
+      rows: named.map(([t, v]) => ({ label: company(t), value: fK(v), valueSub: v < 0 ? 'lost' : 'made', valueColor: col(v) })) };
+  };
+
   // ════ Sections ════
-  type Sec = { kicker: string; headline: Span[]; privacy?: Span[]; cards: (Row | null)[]; ownerCards?: string[]; openHeadline?: Span[] };
+  type Sec ={ kicker: string; headline: Span[]; privacy?: Span[]; cards: (Row | null)[]; ownerCards?: string[]; openHeadline?: Span[] };
   const S: Sec[] = [];
   const marketHead = (): Span[] => {
     const ss = sec(wk).sort((u, v) => v.move - u.move), lead = ss[0], trail = ss[ss.length - 1];
@@ -801,13 +831,13 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     S.push({ kicker: 'Coming up', headline: [sp(`Post-market takes over at ${hm(closeMin)}.`, true)], cards: [cl] });
   } else if (moment === 'post') {
     S.push({ kicker: 'The market', headline: marketHead(), cards: [indexCards(), sectorsCard(false)] });
-    S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), yourResults(), closedRolled(), yourPosition()] });
+    S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), yourResults(), closedRolled(), held ? performanceCard() : null, yourPosition()] });
     const tom = tomorrowOrders(), cl = comingLine();
     S.push({ kicker: 'Tomorrow', headline: [sp(orders ? `${word(orders)} ${orders === 1 ? 'order' : 'orders'} to place at the open.` : 'Nothing to place at the open.', true)],
       openHeadline: [sp(cl ? cl.line[0].t : 'Tomorrow.', true)], cards: [tom, cl], ownerCards: ['tomorrowOrders'] });
   } else {
     S.push({ kicker: 'The week', headline: marketHead(), cards: [weekIndexes(), worldThisWeek(), economyCard(), sectorsCard(true)] });
-    S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), held ? results() : null, yourPosition()] });
+    S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), held ? results() : null, held ? performanceCard() : null, yourPosition()] });
     const pb = payback(), tm2 = thetaMonth(), mName = MONTH[ymd(today).m - 1], done = ymd(addDays(today, 7)).m !== ymd(today).m && dayDiff(today, `${today.slice(0, 7)}-28`) <= 0;
     const pbPct = x.payback && x.baseNow > 0 ? (Number(x.payback.made ?? 0) / x.baseNow) * 100 : 0;
     /* "October is done: 6.2% of what you bought is paid back." with the figure green (red when given back), as the design. */
