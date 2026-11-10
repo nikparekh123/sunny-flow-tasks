@@ -54,7 +54,7 @@ struct BriefPositionsScreen: View {
     @State private var fix: String?
     @State private var totalsMode = 0
     @State private var wallsKind = "All"
-    /// The payoff chart's price range, an index into PositionsModel.zooms (Nov 8): ±12% each time the tab opens,
+    /// The payoff chart's price range, an index into PositionsModel.zooms (Nov 8): ±25% each time the tab opens,
     /// kept across names while it stays open, as the design's z45.
     @State private var zoom = Self.debugZoom ?? PositionsModel.fitZoom
     /// Screens checked in the simulator: `-pzoom 4` opens the chart at ±25%.
@@ -195,7 +195,7 @@ struct BriefPositionsScreen: View {
                 .accessibilityHidden(!shown)
         }
         .onAppear {
-            // The chart opens at ±12% every time (design change 8); a price dragged outside that goes back to today.
+            // The chart opens at ±25% every time (design change 8; ±25% since 10 Nov 2026); a price dragged outside that goes back to today.
             if zoom != PositionsModel.fitZoom && Self.debugZoom == nil {
                 if let p = price, let m = model, abs(p / m.S0 - 1) > PositionsModel.zooms[PositionsModel.fitZoom] { price = nil }
                 zoom = PositionsModel.fitZoom
@@ -856,7 +856,7 @@ private struct PositionsChart: View {
                 }
                 .onEnded { _ in if pinch == nil { scrubOff = false } })
             // Design change 8 (Nov 8): a pinch steps the range one step per 1.3× of the fingers' distance across,
-            // narrower as they spread (pm: z0 - round(log(d / d0) / log(1.3))); a double tap goes back to ±12%.
+            // narrower as they spread (pm: z0 - round(log(d / d0) / log(1.3))); a double tap goes back to ±25%.
             .gesture(PinchAcross { d in
                 guard let d else { pinch = nil; return }
                 guard let p = pinch else { pinch = (max(8, d), zoom); scrubOff = true; return }
@@ -878,7 +878,7 @@ private struct PositionsChart: View {
         // The pinch for VoiceOver (the design's - and + keys on the web).
         .accessibilityAction(named: "Wider price range") { zoomTo(zoom + 1) }
         .accessibilityAction(named: "Narrower price range") { zoomTo(zoom - 1) }
-        // While zoomed: the glass capsule top right of the plot, "±25% · Fit"; a tap goes back to ±12%.
+        // While zoomed: the glass capsule top right of the plot, "±12% · Fit"; a tap goes back to ±25%.
         .overlay(alignment: .topTrailing) {
             if zoom != PositionsModel.fitZoom { ZoomFit(r: PositionsModel.zooms[zoom]) { zoomTo(PositionsModel.fitZoom) } }
         }
@@ -922,7 +922,7 @@ private struct ZoomPress: ButtonStyle {
     }
 }
 
-/// The design's onDoubleClick (pay.zd): two taps on the chart go back to ±12%. UIKit's double tap, alongside the
+/// The design's onDoubleClick (pay.zd): two taps on the chart go back to ±25%. UIKit's double tap, alongside the
 /// one-finger scrub (each tap still sets the price, as each click does in the design).
 private struct DoubleTap: UIGestureRecognizerRepresentable {
     let action: () -> Void

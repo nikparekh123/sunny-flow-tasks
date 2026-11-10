@@ -268,7 +268,7 @@ function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy }:
           </div>
           <PayoffChart xs={ch.xs} vW={ch.vW} vB={ch.vB} chg={chg} S0={S0} v0={v0} zi={zi} widest={widest} setZoom={setZoom}
             band={band} short={short} lines={lines} privacy={privacy} />
-          <span style={{ fontSize: 12, lineHeight: '18px', color: MU, paddingTop: 6 }}>{legend} Pinch, − and + zoom from ±5% to ±50%; double-click or Fit goes back to ±12%.</span>
+          <span style={{ fontSize: 12, lineHeight: '18px', color: MU, paddingTop: 6 }}>{legend} Pinch, − and + zoom from ±5% to ±50%; double-click or the reset arrow goes back to ±25%.</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
               <span style={{ fontSize: 15, fontWeight: 600 }}>By {dL}</span>

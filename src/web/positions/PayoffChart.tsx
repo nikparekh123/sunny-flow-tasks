@@ -6,7 +6,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { money, price } from '../lib/format';
 
 export const ZS = [5, 8, 12, 18, 25, 35, 50];
-export const FIT = 2;
+/** The zoom it opens on and goes back to: ±25% (Nik, 10 Nov 2026: "Default zoom should be 25%"; was ±12%). */
+export const FIT = 4;
 
 export interface Line { k: string; x: number; label: string; kind: 'wall' | 'tech' }
 interface Props {
@@ -143,7 +144,8 @@ export function PayoffChart(p: Props) {
   const xpc = (s: number) => ((s - X0) / (X1 - X0) * 100).toFixed(2) + '%';
   const svg = { position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible' } as const;
   const ns = { vectorEffect: 'non-scaling-stroke' } as const;
-  const zOn = zi !== FIT;
+  // Away from where it opens (±25%, or the widest a narrow grid allows): only then the reset arrow shows.
+  const zOn = zi !== Math.min(FIT, widest);
   return (
     <>
       <div ref={box} onPointerMove={onMove} onPointerDown={onDown} onPointerUp={onUp} onPointerLeave={onLeave} onPointerCancel={onLeave}
@@ -199,18 +201,29 @@ export function PayoffChart(p: Props) {
         </span>
         <span ref={dot} style={{ position: 'absolute', left: 0, top: 0, width: 10, height: 10, margin: '-5px 0 0 -5px', borderRadius: '50%', background: '#FFFFFF',
           boxShadow: '0 0 0 3px rgba(0,0,0,.55)', pointerEvents: 'none', opacity: 0 }} />
-        {/* A quick − − or + + must not read as the chart's double-click (which goes back to ±12%). */}
-        <div className="g1" onDoubleClick={(e) => e.stopPropagation()}
-          style={{ position: 'absolute', right: 0, top: 0, display: 'flex', alignItems: 'center', borderRadius: 999, cursor: 'default' }}>
-          <button type="button" className="bare" aria-label="Zoom out" onClick={() => step(1)}
-            style={{ padding: '0 12px', fontSize: 18, lineHeight: '30px', fontWeight: 500 }}>−</button>
-          <span style={{ fontSize: 13, fontWeight: 600, padding: '0 2px', whiteSpace: 'nowrap' }}>±{ZS[zi]}%</span>
-          <button type="button" className="bare" aria-label="Zoom in" onClick={() => step(-1)}
-            style={{ padding: '0 12px', fontSize: 18, lineHeight: '30px', fontWeight: 500 }}>+</button>
+        {/* A quick − − or + + must not read as the chart's double-click (which goes back to ±25%). The zoom capsule
+            keeps one shape; once zoomed, a grey reset arrow (back to ±25%) sits just to its left (Nik, 10 Nov 2026: "I
+            don't like how the button changes shape... just remove Fit and add a reset button next to the button"). */}
+        <div onDoubleClick={(e) => e.stopPropagation()}
+          style={{ position: 'absolute', right: 0, top: 0, display: 'flex', alignItems: 'center', gap: 8, cursor: 'default' }}>
           {zOn && (
-            <button type="button" className="bare" onClick={() => setZoom(FIT)}
-              style={{ padding: '0 12px', borderLeft: '1px solid rgba(255,255,255,.16)', fontSize: 13, lineHeight: '30px', fontWeight: 600 }}>Fit</button>
+            <button type="button" className="bare" onClick={() => setZoom(FIT)} aria-label={`Reset the zoom to ±${ZS[FIT]}%`} title={`Reset to ±${ZS[FIT]}%`}
+              style={{ width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#98989D' }}>
+              {/* A plain grey reset arrow, no glass (Nik: "just a simple grey icon"). */}
+              <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"
+                style={{ fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }}>
+                <path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1" />
+                <path d="M3.5 3.5v5h5" />
+              </svg>
+            </button>
           )}
+          <div className="g1" style={{ display: 'flex', alignItems: 'center', borderRadius: 999 }}>
+            <button type="button" className="bare" aria-label="Zoom out" onClick={() => step(1)}
+              style={{ padding: '0 12px', fontSize: 18, lineHeight: '30px', fontWeight: 500 }}>−</button>
+            <span style={{ fontSize: 13, fontWeight: 600, padding: '0 2px', whiteSpace: 'nowrap' }}>±{ZS[zi]}%</span>
+            <button type="button" className="bare" aria-label="Zoom in" onClick={() => step(-1)}
+              style={{ padding: '0 12px', fontSize: 18, lineHeight: '30px', fontWeight: 500 }}>+</button>
+          </div>
         </div>
       </div>
       <div style={{ position: 'relative', height: 16, marginTop: -6, borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 6 }}>

@@ -48,12 +48,12 @@ struct PositionsModel {
     let v: Double
     let legs: [Leg]
     let earned: [String: Double]          // sold leg id → premium already earned (q × 100 × (at − now))
-    /// The chart's prices: today's ±12% as it opens, or the zoom's range (`zoomed`).
+    /// The chart's prices: today's ±25% as it opens, or the zoom's range (`zoomed`).
     private(set) var X0: Double, X1: Double
     /// The pinch zoom's steps (SunnyPositions.dc.html Z45, Nov 8): the price range either side of today. It opens on
-    /// ±12% (index 2) every time.
+    /// ±25% (index 4) every time (Nik, 10 Nov 2026: "Default zoom should be 25%"; was ±12%), or the widest the grid has.
     static let zooms: [Double] = [0.05, 0.08, 0.12, 0.18, 0.25, 0.35, 0.5]
-    static let fitZoom = 2
+    static let fitZoom = 4
     /// This model with the chart on today's price ± r (the design's m45(t, zi)): the P&L scale, the grid it draws,
     /// the strikes, walls and turns-short price all follow X0 and X1.
     func zoomed(_ r: Double) -> PositionsModel {
