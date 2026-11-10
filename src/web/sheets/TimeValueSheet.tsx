@@ -56,7 +56,7 @@ export default function TimeValueSheet() {
   }, [p]);
 
   const why = (l: TvLeg) => (l.itm ? { w: l.intr.toFixed(2) + ' ITM', c: C.red }
-    : { w: (l.cap >= 90 ? l.cap + '% captured' : price(l.tvPer) + ' a share left') + ' · roll to next week', c: C.orange });
+    : { w: (l.cap >= 90 ? l.cap + '% captured' : price(l.tvPer) + ' a share left'), c: C.orange });
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 30, display: 'flex', justifyContent: 'flex-end' }}>

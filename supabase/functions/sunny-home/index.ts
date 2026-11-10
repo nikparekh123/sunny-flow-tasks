@@ -28,7 +28,7 @@ import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-09.2';
+const BUILD = '2026-11-09.3';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -1044,19 +1044,25 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     return Math.max(0, prem - intr) * Number(t.contracts) * 100;
   };
   const yieldWeeks = new Map<string, { cs: number; cb: number; ps: number; pb: number; cst: number; cbt: number;
-    pst: number; pbt: number; month: string }>();
+    pst: number; pbt: number; co: number; po: number; month: string }>();
   for (const [, rows] of groups) {
     const f = rows[0];
     if (f.direction !== 'short') continue;
     const firstOpen = rows.filter((r) => r.action === 'open').map((r) => String(r.trade_date)).sort()[0];
     if (!firstOpen || firstOpen < BOOK_START) continue;
     const exp = String(f.expiry), w = weekStartOf(exp);
-    const e = yieldWeeks.get(w) ?? { cs: 0, cb: 0, ps: 0, pb: 0, cst: 0, cbt: 0, pst: 0, pbt: 0, month: exp.slice(0, 7) };
+    const e = yieldWeeks.get(w) ?? { cs: 0, cb: 0, ps: 0, pb: 0, cst: 0, cbt: 0, pst: 0, pbt: 0, co: 0, po: 0, month: exp.slice(0, 7) };
+    let nOpen = 0, nClose = 0, cOpen = 0;
     for (const t of rows) {
       const c = Number(t.contracts) * Number(t.premium) * 100, call = f.option_type === 'call', tv = tvOf(t, call);
+      if (t.action === 'open') { nOpen += Number(t.contracts); cOpen += c; } else nClose += Number(t.contracts);
       if (call) { if (t.action === 'open') { e.cs += c; e.cst += tv; } else { e.cb += c; e.cbt += tv; } }
       else { if (t.action === 'open') { e.ps += c; e.pst += tv; } else { e.pb += c; e.pbt += tv; } }
     }
+    /* Nik 9 Nov: the credit on contracts still open (not yet expired or bought back), at their average sale price,
+       so Home's "Sold · kept" can count closed contracts only. */
+    const still = exp >= today ? Math.max(0, nOpen - nClose) : 0;
+    if (still > 0 && nOpen > 0) { if (f.option_type === 'call') e.co += cOpen * still / nOpen; else e.po += cOpen * still / nOpen; }
     yieldWeeks.set(w, e);
   }
   /* The divisor is what is invested in the long legs still held, as at the
@@ -1079,7 +1085,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
              /* Handoff 32 (17): the LEAPs base at that week's end (today for this week) and the week's hedge charge. */
              leaps: Math.round(addDays(w, 6) >= today ? baseNow : leapsCostAsOf(addDays(w, 6))), hedge: Math.round(hedgeIn(w, addDays(w, 7))),
              calls_sold_tv: Math.round(e.cst), calls_back_tv: Math.round(e.cbt),
-             puts_sold_tv: Math.round(e.pst), puts_back_tv: Math.round(e.pbt) };
+             puts_sold_tv: Math.round(e.pst), puts_back_tv: Math.round(e.pbt),
+             calls_open: Math.round(e.co), puts_open: Math.round(e.po) };
   });
 
   // ── Inventory (block 14): the shelf, now and per week covered ──

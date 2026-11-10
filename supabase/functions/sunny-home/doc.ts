@@ -476,8 +476,11 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
 
   // Results: kept (by expiry week, the yield rule), Long and Made from the account chart's lines.
   const yw = (fri: string) => x.yieldWeeks.find((w) => w.fri === fri || w.week === mondayOf(fri));
-  const keptOf = (w: Row | undefined) => (w ? w.calls_sold - w.calls_back + w.puts_sold - w.puts_back : 0);
-  const soldOf = (w: Row | undefined) => (w ? w.calls_sold + w.puts_sold : 0);
+  /* Nik 9 Nov: kept counts CLOSED contracts only (expired, assigned or bought back); the credit on ones still open
+     is shown apart as "still open" and joins kept as they close. Past weeks have nothing open, so they are unchanged. */
+  const openOf = (w: Row | undefined) => (w ? Number(w.calls_open ?? 0) + Number(w.puts_open ?? 0) : 0);
+  const keptOf = (w: Row | undefined) => (w ? w.calls_sold - w.calls_back + w.puts_sold - w.puts_back - openOf(w) : 0);
+  const soldOf = (w: Row | undefined) => (w ? w.calls_sold + w.puts_sold - openOf(w) : 0);
   const divNext = () => {
     if (stopped.has('dividends')) return null;      // no dividends feed: no line, never "None ahead"
     const v = x.divs.map((d) => ({ d, n: names.find((y) => y.t === String(d.ticker).toUpperCase()) })).filter((r) => r.n && r.n.shares > 0)
@@ -494,8 +497,8 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   };
   const stat = (label: string, v: number, sub: string) => ({ label, value: fK(v), valueColor: col(v), sub });
   const resultsWeek = () => {
-    const w = yw(weekFri), kept = keptOf(w), sold = soldOf(w), base = x.baseAt(weekFri), long = bookWeek?.long ?? 0;
-    return { kept, sold, base, long, made: kept + long, yieldPct: base > 0 ? (kept / base) * 100 : 0 };
+    const w = yw(weekFri), kept = keptOf(w), sold = soldOf(w), open = openOf(w), base = x.baseAt(weekFri), long = bookWeek?.long ?? 0;
+    return { kept, sold, open, base, long, made: kept + long, yieldPct: base > 0 ? (kept / base) * 100 : 0 };
   };
   const weekFacts = () => {
     const tr = x.trades.filter((t) => String(t.trade_date) >= monday && String(t.trade_date) <= today && t.option_type === 'call' && t.direction === 'short' && t.action === 'close');
@@ -522,7 +525,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     });
     const last4 = yieldBars(4).map((b) => b.signed), pace = last4.reduce((a, b) => a + b, 0) / Math.max(1, last4.length);
     return { type: 'results', title: 'Results', segments: ['This week', mName], selected: 'This week', bySegment: {
-      'This week': { big: fK(r.kept), bigColor: col(r.kept), bigSub: r.kept >= 0 ? `kept of ${fK(r.sold)} sold · ${py(r.yieldPct)} yield on ${fK(r.base)} bought`
+      'This week': { big: fK(r.kept), bigColor: col(r.kept), bigSub: r.kept >= 0 ? `kept of ${fK(r.sold)} ${r.open ? `closed · ${fK(r.open)} still open` : 'sold'} · ${py(r.yieldPct)} yield on ${fK(r.base)} bought`
           : `bought back more than the ${fK(r.sold)} sold · ${py(r.yieldPct)} given back on ${fK(r.base)} bought`,
         stats: [stat('Sold · kept', r.kept, 'realized'), stat('Long', r.long, 'unrealized'), stat('Made', r.made, 'the week')],
         body: weekFacts(), dividends: { title: 'Dividends', line: divNext(), right: paidIn(monday, today) ? fK(paidIn(monday, today)) : 'None this week', rightColor: paidIn(monday, today) ? 'green' : 'secondary' },
@@ -541,7 +544,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     return { type: 'yourResults', title: 'Your results', segments: ['Today', 'This week'], selected: 'Today', bySegment: {
       Today: { stats: [stat('Sold · kept', t.sold, 'today'), stat('Long', t.long, 'unrealized'), stat('Made', t.made, 'today')], body,
         dividends: { title: 'Dividends', line: divNext(), right: paidIn(today, today) ? fK(paidIn(today, today)) : 'None today', rightColor: paidIn(today, today) ? 'green' : 'secondary' } },
-      'This week': { stats: [stat('Sold · kept', r.kept, `of ${fK(r.sold)}`), stat('Long', r.long, 'unrealized'), stat('Made', r.made, 'so far')],
+      'This week': { stats: [stat('Sold · kept', r.kept, r.open ? `${fK(r.open)} still open` : `of ${fK(r.sold)}`), stat('Long', r.long, 'unrealized'), stat('Made', r.made, 'so far')],
         dividends: { title: 'Dividends', line: divNext(), right: paidIn(monday, today) ? fK(paidIn(monday, today)) : 'None this week', rightColor: paidIn(monday, today) ? 'green' : 'secondary' },
         charts: [{ title: 'Yield, week by week', sub: `on ${fK(r.base)} bought`, bars: yieldBars() }] },
     } };
@@ -549,13 +552,43 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   const closedRolled = () => {
     const tr = x.trades.filter((t) => String(t.trade_date) === today && !/lifecycle/.test(String(t.note ?? '')));
     const closes = tr.filter((t) => t.action === 'close'); if (!closes.length) return null;
-    const rows = closes.map((c) => {
-      const t = String(c.ticker).toUpperCase(), opened = tr.find((o) => o.action === 'open' && String(o.ticker).toUpperCase() === t && o.option_type === c.option_type && o.direction === c.direction);
+    const T = (t: Row) => String(t.ticker).toUpperCase(), at = (t: Row) => String(t.executed_at ?? t.trade_date ?? '');
+    const legKey = (t: Row) => `${T(t)}|${t.option_type}|${t.direction}|${Number(t.strike)}|${t.expiry}`;
+    /* Cash in or out of one fill, fees included (IBKR's net_cash): + for a sale, - for a buy. */
+    const cash = (t: Row) => num(t.net_cash)
+      ?? (((t.action === 'open') === (t.direction === 'short') ? 1 : -1) * Number(t.contracts) * Number(t.premium) * 100 + (num(t.commission) ?? 0));
+    /* What each close made: IBKR's realized_pl once its next-morning report has it; until then the same sum IBKR
+       makes, the matched opens' cash (FIFO) plus the close's own cash (equal to the cent on 6 Nov's closes). */
+    const made = new Map<Row, number>(), legs = new Map<string, Row[]>();
+    for (const t of x.trades) { if (t.voided_at) continue; const k = legKey(t); (legs.get(k) ?? legs.set(k, []).get(k)!).push(t); }
+    for (const k of new Set(closes.map(legKey))) {
+      const all = (legs.get(k) ?? []).slice().sort((u, v) => at(u).localeCompare(at(v)));
+      const pool = all.filter((t) => t.action === 'open').map((o) => ({ o, n: Number(o.contracts) }));
+      for (const c of all.filter((t) => t.action === 'close')) {
+        let need = Number(c.contracts), from = 0;
+        for (const s of pool) {
+          if (need <= 0) break;
+          const take = Math.min(need, s.n);
+          if (take > 0) { from += (cash(s.o) * take) / Number(s.o.contracts); s.n -= take; need -= take; }
+        }
+        made.set(c, num(c.realized_pl) ?? from + cash(c));
+      }
+    }
+    /* Nik 9 Nov: one line per strike, however many pieces IBKR filled it in; "$31 calls" so the strike never
+       reads as a count. */
+    const byLeg = new Map<string, Row[]>();
+    for (const c of closes.slice().sort((u, v) => at(u).localeCompare(at(v)))) { const k = legKey(c); (byLeg.get(k) ?? byLeg.set(k, []).get(k)!).push(c); }
+    const usd = (k: number) => `$${Number.isInteger(k) ? k : k.toFixed(2)}`;
+    const rows = [...byLeg.values()].map((g) => {
+      const c = g[0], t = T(c), n = g.reduce((a, r) => a + Number(r.contracts), 0);
+      const opened = tr.find((o) => o.action === 'open' && T(o) === t && o.option_type === c.option_type && o.direction === c.direction);
       const kind = c.direction === 'short' ? (c.option_type === 'call' ? 'calls' : 'puts') : c.option_type === 'call' ? 'calls bought' : 'insurance puts';
-      const pl = num(c.realized_pl) ?? 0, at = c.executed_at ? hm(Number(new Date(String(c.executed_at)).toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' })) * 60
-        + Number(new Date(String(c.executed_at)).toLocaleString('en-US', { timeZone: 'America/New_York', minute: 'numeric' }))) : '';
-      return { logo: t, title: `${company(t)} ${Number(c.strike)} ${kind}, ${opened ? 'rolled' : c.direction === 'short' ? 'bought back' : 'sold'}`,
-        sub: `${c.contracts} ${md(String(c.expiry))}${opened ? ` for ${md(String(opened.expiry))} ${Number(opened.strike)}s` : ''}${at ? ` · ${at}` : ''}`,
+      const unit = c.option_type === 'call' ? (n === 1 ? 'call' : 'calls') : n === 1 ? 'put' : 'puts';
+      const pl = g.reduce((a, r) => a + (made.get(r) ?? 0), 0), e = c.executed_at ? new Date(String(c.executed_at)) : null;
+      const when = e ? hm(Number(e.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' })) * 60
+        + Number(e.toLocaleString('en-US', { timeZone: 'America/New_York', minute: 'numeric' }))) : '';
+      return { logo: t, title: `${company(t)} ${usd(Number(c.strike))} ${kind}, ${opened ? 'rolled' : c.direction === 'short' ? 'bought back' : 'sold'}`,
+        sub: `${n} ${unit} · ${md(String(c.expiry))} expiry${opened ? ` · for ${md(String(opened.expiry))} ${usd(Number(opened.strike))}s` : ''}${when ? ` · ${when}` : ''}`,
         value: fK(pl), valueColor: col(pl), valueLabel: pl < 0 ? 'lost' : 'made' };
     });
     const rolls = rows.filter((r) => r.title.endsWith('rolled')).length;
@@ -700,7 +733,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const mkt = `Stocks ${spw >= 0 ? 'rose' : 'fell'}${on && Math.sign(on.move) === Math.sign(spw) ? ` on ${short(on.sector)}` : ''}`;
     both((p) => [
       ...(held && r.sold > 0 ? (r.kept >= 0
-        ? [sp(`${weekOpen ? 'So far, a' : 'A'} ${py(r.yieldPct)} week: you kept `), sp(p ? `${Math.round((r.kept / r.sold) * 100)}%` : fK(r.kept), true, 'green'), sp(p ? ' of what you sold. ' : ` of ${fK(r.sold)} sold. `)]
+        ? [sp(`${weekOpen ? 'So far, a' : 'A'} ${py(r.yieldPct)} week: you kept `), sp(p ? `${Math.round((r.kept / r.sold) * 100)}%` : fK(r.kept), true, 'green'), sp(p ? ` of what you ${r.open ? 'closed' : 'sold'}. ` : ` of ${fK(r.sold)} ${r.open ? 'closed' : 'sold'}. `)]
         : [sp(`${weekOpen ? 'So far, a' : 'A'} losing week: buying back cost `), ...(p ? [sp('more than you sold. ')] : [sp(fK(-r.kept), true, 'red'), sp(` more than the ${fK(r.sold)} sold. `)])])
         : []),
       sp(mkt), ...(held && sells ? [sp(`, and ${word(sells).toLowerCase()} ${sells === 1 ? 'sale comes' : 'sales come'} ${salesDay}.`)] : [sp('.')])]);

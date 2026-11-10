@@ -375,7 +375,7 @@ struct TimeValueSheet: View {
 
     /// A Ready to roll card (SunnyHomeChart, Nov 8): logo 32, the name 15/19 and leg 13/17, 8 apart, then at the foot
     /// what is left 24/28 heavy and why, 13/17. In the money it says just "0.41 ITM", 700, red, one line; else
-    /// "96% captured" (or "$0.04 a share left") 700 over "Roll to next week" 600, orange. Padding 12 top and bottom.
+    /// "96% captured" (or "$0.04 a share left") 700, orange (Nik 9 Nov: no "Roll to next week"). Padding 12 top and bottom.
     private func rollCard(_ r: Row) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             BLogo(ticker: r.t, size: 32)
@@ -409,7 +409,6 @@ struct TimeValueSheet: View {
                         let cp = Self.captured(r)
                         Text(cp >= 90 ? "\(cp)% captured" : "$\(String(format: "%.2f", r.perShare)) a share left")
                             .sType(SType(size: 13, weight: 700, line: 17, tracking: 0)).foregroundStyle(S.act)
-                        Text("Roll to next week").sType(SType(size: 13, weight: 600, line: 17, tracking: 0), tabular: false).foregroundStyle(S.act)
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
