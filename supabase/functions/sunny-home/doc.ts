@@ -309,7 +309,8 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
       : p >= 1000 ? Math.round(p).toLocaleString('en-US') : p.toFixed(2);
     const status = s === 'BTC-USD' || !closedState(String(m.market_state)) ? 'still trading' : 'closed';
     const trend = monthLine(s, p, m);
-    return { name, sub, value, move: moveText, moveColor: col(move), status, ...(trend ? { trend } : {}),
+    // ticker: the market's symbol, so a tap opens its chart (Nik 10 Nov 2026: "I also want charts on all these").
+    return { name, sub, ticker: s, value, move: moveText, moveColor: col(move), status, ...(trend ? { trend } : {}),
       aria: `${name} ${value}, ${upDown(move)} ${moveText}, ${status}${trend ? `, ${trend.text}` : ''}` };
   }).filter(Boolean) as Row[];
   const overnight = () => {

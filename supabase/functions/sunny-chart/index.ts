@@ -20,7 +20,7 @@
  * with how many analysts and the day it was read. Null when the name has no row from the last 30 days. Market data,
  * not the book's, so it is read with the service key.
  */
-const BUILD = '2026-11-09.1';
+const BUILD = '2026-11-10.1';
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -94,7 +94,8 @@ Deno.serve(async (req) => {
   if (!who) return json(401, { error: 'sign in' });
   const body = await req.json().catch(() => ({})) as Row;
   const t = String(body.t ?? '').toUpperCase(), book = String(body.book ?? '').toUpperCase();
-  if (!/^[A-Z.^=-]{1,12}$/.test(t)) return json(400, { error: 'send t' });
+  // Digits too: the Overnight markets open their charts by symbol, Shanghai's is 000001.SS (10 Nov 2026).
+  if (!/^[A-Z0-9.^=-]{1,12}$/.test(t)) return json(400, { error: 'send t' });
 
   try {
     const [res, tgt] = await Promise.all([chart(t), targets(t).catch(() => null)]);

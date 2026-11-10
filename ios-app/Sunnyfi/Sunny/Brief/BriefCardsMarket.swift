@@ -70,6 +70,7 @@ struct BIndexRow: View {
 
 struct BMarketsCard: View {
     let card: JSONValue
+    @Environment(BriefState.self) private var brief
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -98,8 +99,13 @@ struct BMarketsCard: View {
                     .frame(width: 92, alignment: .trailing)
                 }
                 .padding(.vertical, 9)
+                // A tap opens the market's chart (Nik 10 Nov 2026: "I also want charts on all these"), by its symbol.
+                .contentShape(Rectangle())
+                .onTapGesture { if let t = r["ticker"].string { brief.ticker = t } }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(r["aria"].string ?? "")
+                .accessibilityAddTraits(r["ticker"].string == nil ? [] : .isButton)
+                .accessibilityHint(r["ticker"].string == nil ? "" : "Opens its chart")
             }
             if let f = card["footer"].string {
                 Text(f).sType(SType(size: 12, weight: 500, line: 15, tracking: 0), tabular: false).foregroundStyle(S.secondary)

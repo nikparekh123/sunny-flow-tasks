@@ -47,6 +47,40 @@ enum TK {
     static let tcTint = S.dynA(0x0F7F86, 0.10, 0x4CC9D0, 0.14)
     static let band = S.dynA(0x767680, 0.14, 0x767680, 0.26)
 
+    /// The world markets Overnight lists (sunny-home WORLD), opened by symbol (10 Nov 2026): the name on the capsule,
+    /// the line under it, and how its price reads (an index in points, the 10-year yield in %, the rest in dollars).
+    enum Unit { case dollars, points, yield }
+    static let markets: [String: (name: String, sub: String, unit: Unit)] = [
+        "^N225": ("Nikkei", "Nikkei 225 · Japan", .points), "^HSI": ("Hang Seng", "Hang Seng Index · Hong Kong", .points),
+        "000001.SS": ("Shanghai", "Shanghai Composite · China", .points), "^GDAXI": ("DAX", "DAX · Germany", .points),
+        "^TNX": ("10y yield", "US 10-year Treasury yield", .yield), "DX-Y.NYB": ("Dollar", "US dollar index", .points),
+        "CL=F": ("Oil", "WTI crude futures", .dollars), "GC=F": ("Gold", "Gold futures", .dollars),
+        "BTC-USD": ("Bitcoin", "Bitcoin in dollars · trades 24/7", .dollars),
+    ]
+    static func unit(_ t: String) -> Unit { markets[t]?.unit ?? .dollars }
+    /// A price as the name trades: "$38.59", "$74,726.12", "60,459.58" for an index, "4.94%" for the yield.
+    static func price(_ v: Double, _ t: String) -> String {
+        let n = grouped(v)
+        switch unit(t) { case .dollars: return "$" + n; case .points: return n; case .yield: return String(format: "%.2f%%", v) }
+    }
+    /// A move in the name's own terms, unsigned: "$1.20", "512.40" points, "12 bp" for the yield.
+    static func change(_ v: Double, _ t: String) -> String {
+        unit(t) == .yield ? "\(Int((abs(v) * 100).rounded())) bp" : price(abs(v), t)
+    }
+    /// One formatter per number of decimals, built once (the axis asks on every frame of a drag).
+    nonisolated(unsafe) private static var groupedFmts: [Int: NumberFormatter] = [:]
+    private static let fmtLock = NSLock()
+    /// "60,459.58"; "70,000" with no decimals.
+    static func grouped(_ v: Double, _ dec: Int = 2) -> String {
+        fmtLock.lock(); defer { fmtLock.unlock() }
+        let f = groupedFmts[dec] ?? {
+            let f = NumberFormatter(); f.numberStyle = .decimal; f.locale = Locale(identifier: "en_US")
+            f.minimumFractionDigits = dec; f.maximumFractionDigits = dec
+            groupedFmts[dec] = f
+            return f
+        }()
+        return f.string(from: NSNumber(value: v)) ?? String(format: "%.\(dec)f", v)
+    }
     /// A percentage as the design writes it: one decimal, two under 0.1%.
     static func pct(_ x: Double) -> String { String(format: abs(x) < 0.1 ? "%.2f%%" : "%.1f%%", abs(x)) }
     /// A strike as the design's fk(): "40", "42.5", "40.85".
@@ -186,8 +220,9 @@ struct TickerChartPage: View {
     /// Held: the server sent legs (or shares) in this name; in sample mode, the sample book holds it.
     private var held: Bool { live ? !(wire?.positions.isEmpty ?? true) : SampleBook.book(acct)[t] != nil }
     /// The chips: Positions only for a name held (the design filters it out otherwise).
-    private var chips: [Layer] { Layer.allCases.filter { $0 != .pos || held } }
-    private var on: Set<Layer> { (lay ?? (held ? [.pos] : [])).filter { $0 != .pos || held } }
+    /// A world market has no walls or legs: Technicals only.
+    private var chips: [Layer] { Layer.allCases.filter { ($0 != .pos || held) && ($0 != .walls || TK.markets[t] == nil) } }
+    private var on: Set<Layer> { (lay ?? (held ? [.pos] : [])).filter { chips.contains($0) } }
 
     /// The range chips in words, and the phrase under the price.
     private static let rangeWords = ["1W": "1 week", "1M": "1 month", "3M": "3 months", "YTD": "year to date", "1Y": "1 year", "All": "all"]
@@ -229,7 +264,7 @@ struct TickerChartPage: View {
     /// The chart as one spoken line: "Nike price, past 3 months, from $33.10 to $35.28. Lines: Sold call 36 ×72, ...".
     private func chartSays(_ name: String, _ pts: [Double], _ now: Double, _ phrase: String, _ marks: [TKMark]) -> String {
         guard let a = pts.first, let b = pts.last else { return "\(name) price chart, no data" }
-        let f = { (v: Double) in String(format: "$%.2f", v) }
+        let f = { (v: Double) in TK.price(v, t) }
         let head = BSay.join(["\(name) price", phrase, "from \(f(a)) to \(f(b))", f(now) == f(b) ? nil : "now \(f(now))"])
         let ls = marks.map { m -> String in
             let said = BSay.words(m.label)
@@ -243,10 +278,12 @@ struct TickerChartPage: View {
         let mv = q.1 > 0 ? (q.0 - q.1) / q.1 * 100 : 0
         let all = live ? (wire?.closes ?? []) : SampleSeries.year(t)
         let ytd = live ? (wire?.ytdCount ?? 210) : 210
-        let n = ["1W": 5, "1M": 22, "3M": 63, "YTD": ytd, "1Y": 252, "All": all.count][range] ?? 63
+        // Bitcoin trades every day: seven closes a week, so its ranges hold 7/5 as many to cover the same weeks.
+        let wk = t == "BTC-USD" ? 7.0 / 5.0 : 1.0, d = { (x: Int) in Int((Double(x) * wk).rounded()) }
+        let n = ["1W": d(5), "1M": d(22), "3M": d(63), "YTD": ytd, "1Y": d(252), "All": all.count][range] ?? d(63)
         let pts = Array(all.suffix(n + 1))
         let ch = (pts.last ?? 0) - (pts.first ?? 0), chp = (pts.first ?? 0) > 0 ? ch / pts[0] * 100 : 0
-        let name = live ? (wire?.short ?? wire?.name ?? t) : (SampleBook.company[t] ?? t)
+        let name = TK.markets[t]?.sub ?? (live ? (wire?.short ?? wire?.name ?? t) : (SampleBook.company[t] ?? t))
         let dates = Array((live ? (wire?.dates ?? []) : SampleSeries.dates(all.count)).suffix(n + 1))
         let d0 = Self.firstLabel(dates.first, range)
         // "past 3 months"; All reads "since Nov 8, 2021" (the design's d0).
@@ -345,21 +382,23 @@ struct TickerChartPage: View {
         let sc = { (x: SType) in scales ? x.scaled(dts) : x }
         let w = { (s: String, x: SType) in TK.width(s, sc(x).size, x.weight) }
         let first = pts.first ?? 0
-        let rest = [w(String(format: "$%.2f", abs(ch)), tBold), w(TK.pct(chp), tBold), w(phrase, tMed)]
+        // The 10-year yield moves in bp alone (as Overnight writes it), never a percent of a percent.
+        let bp = TK.unit(t) == .yield
+        let rest = [w(TK.change(ch, t), tBold)] + (bp ? [] : [w(TK.pct(chp), tBold)]) + [w(phrase, tMed)]
         // The widest a scrub can read on this range: a wide date of its kind, the highest price, a two-digit move.
         let wide = range == "1W" ? "Wed May 28 close" : range == "1Y" || range == "All" ? "May 28, 2026" : "May 28"
-        let scrub = [w(wide, tSemi), w(String(format: "$%.2f", pts.max() ?? 0), tBold), w("88.8%", tBold), w("since " + d0, tMed)]
+        let scrub = [w(wide, tSemi), w(TK.price(pts.max() ?? 0, t), tBold), w("88.8%", tBold), w("since " + d0, tMed)]
         let lines = max(1, TKFlow.lines(rest, maxW: width), TKFlow.lines(scrub, maxW: width))
         return TKFlow(spacing: 6) {
             if let i = at {
                 let up = pts[i] >= first, mvp = first > 0 ? (pts[i] / first - 1) * 100 : 0
                 Text(Self.scrubLabel(dates[i], range)).sType(tSemi, tabular: false).foregroundStyle(TK.ink)
-                Text(String(format: "$%.2f", pts[i])).sType(tBold).foregroundStyle(TK.ink)
-                Text(TK.pct(mvp)).sType(tBold).foregroundStyle(up ? S.green : S.red)
+                Text(TK.price(pts[i], t)).sType(tBold).foregroundStyle(TK.ink)
+                Text(bp ? TK.change(pts[i] - first, t) : TK.pct(mvp)).sType(tBold).foregroundStyle(up ? S.green : S.red)
                 Text("since " + d0).sType(tMed, tabular: false).foregroundStyle(TK.mu)
             } else {
-                Text(String(format: "$%.2f", abs(ch))).sType(tBold).foregroundStyle(ch < 0 ? S.red : S.green)
-                Text(TK.pct(chp)).sType(tBold).foregroundStyle(ch < 0 ? S.red : S.green)
+                Text(TK.change(ch, t)).sType(tBold).foregroundStyle(ch < 0 ? S.red : S.green)
+                if !bp { Text(TK.pct(chp)).sType(tBold).foregroundStyle(ch < 0 ? S.red : S.green) }
                 Text(phrase).sType(tMed, tabular: false).foregroundStyle(TK.mu)
             }
         }
@@ -368,8 +407,8 @@ struct TickerChartPage: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(at.map { i in
             let up = pts[i] >= first
-            return "\(Self.scrubLabel(dates[i], range)), \(String(format: "$%.2f", pts[i])), \(up ? "up" : "down") \(TK.pct(first > 0 ? (pts[i] / first - 1) * 100 : 0)) since \(d0)"
-        } ?? "\(ch < 0 ? "down" : "up") \(String(format: "$%.2f", abs(ch))), \(TK.pct(chp)), \(phrase)")
+            return "\(Self.scrubLabel(dates[i], range)), \(TK.price(pts[i], t)), \(up ? "up" : "down") \(bp ? TK.change(pts[i] - first, t) : TK.pct(first > 0 ? (pts[i] / first - 1) * 100 : 0)) since \(d0)"
+        } ?? "\(ch < 0 ? "down" : "up") \(TK.change(ch, t)), \(bp ? "" : TK.pct(chp) + ", ")\(phrase)")
     }
 
     /// The head, 44 tall, 16 in: the X (a 44 glass circle, the cross 14 at 2) and 10 on the capsule with the logo
@@ -387,15 +426,15 @@ struct TickerChartPage: View {
             HStack(spacing: 8) {
                 // The logo for a name held; for any other, 6 of space instead (the design's noLogo span).
                 if held { BriefLogoDisc(t: t, size: 32, pct: 0.7) } else { Color.clear.frame(width: 6, height: 1).accessibilityHidden(true) }
-                Text(t).sType(SType(size: 15, weight: 800, line: 20, tracking: 0), tabular: false).foregroundStyle(TK.ink)
-                Text(String(format: "$%.2f", q.0)).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(TK.ink)
-                Text(TK.pct(mv)).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(mv < 0 ? S.red : S.green)
+                Text(TK.markets[t]?.name ?? t).sType(SType(size: 15, weight: 800, line: 20, tracking: 0), tabular: false).foregroundStyle(TK.ink)
+                Text(TK.price(q.0, t)).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(TK.ink)
+                Text(TK.unit(t) == .yield ? TK.change(q.0 - q.1, t) : TK.pct(mv)).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(mv < 0 ? S.red : S.green)
             }
             .lineLimit(1)
             .padding(.leading, 6).padding(.trailing, 16).frame(height: 44).glassEffect(.regular, in: .capsule)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(live && wire == nil ? name
-                : BSay.join([name, String(format: "$%.2f", q.0), "\(mv < 0 ? "down" : "up") \(TK.pct(mv)) today"]))
+                : BSay.join([name, TK.price(q.0, t), "\(mv < 0 ? "down" : "up") \(TK.unit(t) == .yield ? TK.change(q.0 - q.1, t) : TK.pct(mv)) today"]))
             .accessibilityAddTraits(.isHeader)
         }
         .padding(.horizontal, 16)
@@ -744,8 +783,9 @@ private struct TickerLine: View {
             let dec = stp >= 1 ? (stp.truncatingRemainder(dividingBy: 1) == 0 ? 0 : 1) : (abs(stp * 10 - (stp * 10).rounded()) < 1e-9 ? 1 : 2)
             let grid = Array(stride(from: (lo / stp).rounded(.up) * stp, through: hi + 1e-9, by: stp)).filter { Y($0) >= 4 && Y($0) <= H - 4 }
             let axis = grid.filter { abs(Y($0) - pyC) > 14 }
-            let fmt = { (v: Double) in String(format: "%.\(dec)f", v) }
-            let pill = String(format: "%.2f", px)
+            // Commas from 1,000 (an index reads 70,000, not 70000).
+            let fmt = { (v: Double) in abs(v) >= 1000 ? TK.grouped(v, dec) : String(format: "%.\(dec)f", v) }
+            let pill = px >= 1000 ? TK.grouped(px) : String(format: "%.2f", px)
             // ⚠ The price column is 56 as designed, wider when its widest number needs it: a number ends 8 in with
             // 4 clear of the plot, the pill ends 4 in. So no number is ever cut.
             let colW = max(56, (axis.map { TK.width(fmt($0), 12, 500) + 12 }.max() ?? 0), TK.width(pill, 12, 700) + 12 + 4)
