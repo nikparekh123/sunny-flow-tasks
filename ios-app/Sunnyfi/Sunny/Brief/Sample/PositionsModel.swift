@@ -35,7 +35,11 @@ struct PositionsModel {
     /// One chain's walls: Ceiling, Floor, Accelerator and Flip (the Walls layer and Walls by expiry).
     struct Chain: Hashable { let label: String; let kind: String; let days: Int; let trading: Int; let flip: Double?; let c: Double?; let f: Double?; let a: Double? }
     struct Holding { var value = 0.0; var today = 0.0 }
-    typealias Holdings = (sh: Holding, lp: Holding, oc: Holding, ip: Holding, sc: Holding, sp: Holding, timeLeaps: Double, timeOtm: Double, shareGain: Double)
+    /// sc and sp hold what the sold calls and puts would cost to buy back; timeSc and timeSp only their time value (an
+    /// in the money sale's intrinsic part is not left to earn: Nik, 10 Nov 2026, Positions read $14.3K of puts where
+    /// Home's Time value read $16.7K in all).
+    typealias Holdings = (sh: Holding, lp: Holding, oc: Holding, ip: Holding, sc: Holding, sp: Holding, timeLeaps: Double, timeOtm: Double, shareGain: Double,
+                          timeSc: Double, timeSp: Double)
 
     let t: String
     let company: String
@@ -177,7 +181,8 @@ struct PositionsModel {
     static func holdings(json n: JSONValue) -> Holdings {
         let h = n["h"]
         func p(_ k: String) -> Holding { Holding(value: h[k][0].double ?? 0, today: h[k][1].double ?? 0) }
-        return (p("sh"), p("lp"), p("oc"), p("ip"), p("sc"), p("sp"), h["tv"]["lp"].double ?? 0, h["tv"]["oc"].double ?? 0, n["gain"].double ?? 0)
+        return (p("sh"), p("lp"), p("oc"), p("ip"), p("sc"), p("sp"), h["tv"]["lp"].double ?? 0, h["tv"]["oc"].double ?? 0, n["gain"].double ?? 0,
+                h["tv"]["sc"].double ?? 0, h["tv"]["sp"].double ?? 0)
     }
 
     private static let MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -365,7 +370,7 @@ struct PositionsModel {
     func holdings() -> Holdings {
         if let liveH { return liveH }
         var sh = Holding(), lp = Holding(), oc = Holding(), ip = Holding(), sc = Holding(), sp = Holding()
-        var tl = 0.0, to = 0.0, gain = 0.0
+        var tl = 0.0, to = 0.0, gain = 0.0, tsc = 0.0, tsp = 0.0
         let mv = S0 - P0
         for l in legs {
             switch l.ty {
@@ -376,8 +381,13 @@ struct PositionsModel {
                     let i = Int(l.id.dropFirst()) ?? 0
                     if sold.indices.contains(i) {
                         let s = sold[i]
-                        if l.ty == .call { sc.value += Double(s.q) * 100 * s.now; sc.today += Double(s.q) * 100 * (s.at - s.now) }
-                        else { sp.value += Double(s.q) * 100 * s.now; sp.today += Double(s.q) * 100 * (s.at - s.now) }
+                        if l.ty == .call {
+                            sc.value += Double(s.q) * 100 * s.now; sc.today += Double(s.q) * 100 * (s.at - s.now)
+                            tsc += Double(s.q) * 100 * max(0, s.now - max(0, S0 - s.k))
+                        } else {
+                            sp.value += Double(s.q) * 100 * s.now; sp.today += Double(s.q) * 100 * (s.at - s.now)
+                            tsp += Double(s.q) * 100 * max(0, s.now - max(0, s.k - S0))
+                        }
                     }
                 } else {
                     let val = l.q * 100 * SampleEngine.bs(S0, l.K, l.T / 365, v, put: l.ty == .put)
@@ -389,6 +399,6 @@ struct PositionsModel {
                 }
             }
         }
-        return (sh, lp, oc, ip, sc, sp, tl, to, gain)
+        return (sh, lp, oc, ip, sc, sp, tl, to, gain, tsc, tsp)
     }
 }

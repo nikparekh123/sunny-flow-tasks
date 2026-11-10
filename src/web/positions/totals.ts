@@ -62,6 +62,10 @@ export function nameTotals(p: J): Map<string, Row> {
     if (acc.lp) acc.lp.tv = h.tv.lp;
     if (acc.oc) acc.oc.tv = h.tv.oc;
     if (acc.ip) acc.ip.tv = h.ip[0];
+    // Left to earn on what was sold is its time value alone: an in the money sale's intrinsic part is not earnable
+    // (Nik, 10 Nov 2026: Puts read $14.3K while Home's Time value read $16.7K for calls and puts together).
+    if (acc.sc) acc.sc.tv = h.tv.sc;
+    if (acc.sp) acc.sp.tv = h.tv.sp;
     const row = {} as Row;
     for (const g of GROUPS) {
       row[g.key] = acc[g.key] ?? (g.key === 'sc' && todo(t, 'sell') ? 'todo' : g.key === 'sp' && todo(t, 'put') ? 'todo' : null);

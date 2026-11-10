@@ -163,7 +163,7 @@ struct HomeView: View {
         .environment(\.sTypeScales, true)
         // The payload the old cards draw from, for Performance on the new Home (10 Nov 2026).
         .environment(\.homeWords, store.words ?? home)
-        // To do (10 Nov 2026): the quiet "7 to do" on Home and Positions, for book S's owners only (Nik, not Nicolay).
+        // To do (10 Nov 2026): the quiet "7 to do" on Home and Positions; each login sees its own list (Nik: his, shared by his two logins).
         .environment(\.todoTap, todo.allowed ? { brief.sheet = .todo } : nil)
         .animation(reduce ? S.fade : S.page, value: brief.onOverview)
         .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.45), value: brief.ticker)

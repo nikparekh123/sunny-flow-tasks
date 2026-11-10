@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // To do (handoff 2026-11-10-todo): Nik's own notes, one list for the app and the web, in public.todos.
-// RLS lets only owners of book S read or write it (Nik, 10 Nov 2026: "only for me to see, not Nicolay"), so the
-// header shows it only to such a login. Writes are optimistic and go out one at a time, in order, so a quick
+// RLS (migration 20261110170000): Nik's list is shared by book S's owners (his two logins) and seen by no one else;
+// any other book member (the cousin) gets a private list of his own (Nik, 10 Nov 2026: "yes give him his own private
+// list"). The header shows To do to any book member; the server decides which list comes back. Writes are optimistic and go out one at a time, in order, so a quick
 // check then uncheck lands in the order it was made. Every read pages past PostgREST's 1,000-row cap (done items
 // stay forever, so the table only grows).
 //
@@ -67,10 +68,11 @@ async function readAll(): Promise<Todo[]> {
   return all;
 }
 
-/** Is this login an owner of book S (the only one who sees the list)? */
-export function useTodoOwner(): boolean {
+/** Who this login is to the list: `on` for any book member (each has a list), `shared` for book S's owners (Nik's
+    two logins share one list; anyone else's is their own). */
+export function useTodoAccess(): { on: boolean; shared: boolean } {
   const { data } = useBooks();
-  return !!data?.some((m) => m.book_id === 'S' && m.role === 'owner');
+  return { on: !!data?.length, shared: !!data?.some((m) => m.book_id === 'S' && m.role === 'owner') };
 }
 
 /* ── Writes: optimistic, then one at a time in order ─────────────────────── */

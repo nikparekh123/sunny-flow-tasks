@@ -37,7 +37,7 @@ enum TD {
 // MARK: - The entry point
 
 extension EnvironmentValues {
-    /// Opens the To do sheet; nil hides "7 to do" (a login that is not an owner of book S, Nik's).
+    /// Opens the To do sheet; nil hides "7 to do" (no book membership read yet).
     @Entry var todoTap: (() -> Void)? = nil
 }
 
@@ -83,7 +83,7 @@ struct TodoSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("To do").sType(SType(size: 22, weight: 700, line: 28, tracking: 0), tabular: false).foregroundStyle(TD.ink)
                         .accessibilityAddTraits(.isHeader)
-                    Text("Shared by both accounts · \(n > 0 ? "\(n) open" : "Nothing open")")
+                    Text((store.shared ? "Shared by both accounts · " : "") + (n > 0 ? "\(n) open" : "Nothing open"))
                         .sType(SType(size: 13, weight: 400, line: 18, tracking: 0)).foregroundStyle(TD.mu)
                 }
                 Spacer(minLength: 0)

@@ -233,14 +233,7 @@ struct AccountChart: View {
             if let m = model, !m.available(range) { range = .all }
             if DebugPreset.gallery != nil || !DebugPreset.values.isEmpty { hidden = DebugPreset.bool("eye") }
         }
-        .task(id: readTick) {
-            guard readTick > 0, Self.timeValueRead(home) != nil else { return }
-            try? await Task.sleep(for: .milliseconds(1200))    // after the loading screen has gone
-            guard !Task.isCancelled else { return }
-            withAnimation(S.moving(S.fade, reduce)) { readOn = true }
-            try? await Task.sleep(for: .seconds(3))
-            withAnimation(S.moving(S.fade, reduce)) { readOn = false }
-        }
+        // No timed read under Time value any more (Nik, 10 Nov 2026: "remove the text UBER up, just write time value").
     }
 
     /// The one-word read that stands in for "Time value" for a few seconds
@@ -747,8 +740,7 @@ struct AccountChart: View {
             let tv = lastLive ? (home.account.timeValueSold ?? m.c.timeValue[i] ?? 0) : (m.c.timeValue[i] ?? 0)
             return [Stat(label: "Realized", value: r, color: S.lossInk(r)),
                     Stat(label: "Unrealized", value: u, color: S.lossInk(u)),
-                    Stat(label: "Time value", value: tv, color: S.lossInk(tv),
-                         read: scrubbing ? nil : Self.timeValueRead(home))]
+                    Stat(label: "Time value", value: tv, color: S.lossInk(tv))]
         case .shares?:
             let r = m.realized(.shares, .both, i) - m.realized(.shares, .both, s)
             let u = m.unreal(.shares, .both, i)

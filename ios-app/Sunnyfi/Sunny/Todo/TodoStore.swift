@@ -3,10 +3,11 @@
 //  Sunny
 //
 //  To do (handoff 2026-11-10-todo): Nik's own notes, no trades. One list for the app and the web, kept in Supabase
-//  (`public.todos`, migration 20261110150000). Nik, 10 Nov 2026: "only for me to see, not Nicolay": the table's RLS
-//  lets only book S's owners (Nik's two logins) read or write it, and the app shows the To do link only to them, so
-//  the cousin's login (book N only) never sees it. Writes land at once (the list shows them before the server
-//  answers); a failed write reads the list again.
+//  (`public.todos`, migrations 20261110150000 and 20261110170000). Nik, 10 Nov 2026: "only for me to see, not
+//  Nicolay", then "yes give him his own private list": RLS gives book S's owners (Nik's two logins) one shared list
+//  that no one else sees, and any other book member (the cousin) a private list of his own that Nik does not see.
+//  The server picks the list; the app only says "Shared by both accounts" on Nik's. Writes land at once (the list
+//  shows them before the server answers); a failed write reads the list again.
 //
 //  DEBUG, simulator only: `-todoSample` fills the list with the design's sample, dated from today, kept in memory.
 //
@@ -30,8 +31,10 @@ final class TodoStore {
     }
 
     private(set) var items: [Item] = []
-    /// An owner of book S is signed in: the link shows and the list reads.
+    /// A book member is signed in: the link shows and their list reads.
     private(set) var allowed = false
+    /// Nik's list (book S's owners, his two logins): its sheet says "Shared by both accounts".
+    private(set) var shared = false
     /// Ticked in the last 1.2 s: still in the open list, faded and struck through, until it moves into Done.
     private(set) var linger: Set<String> = []
 
@@ -51,11 +54,13 @@ final class TodoStore {
         false
         #endif
     }()
+    /// The login whose list is in memory.
+    private var lastUser: String?
     private var lingerTasks: [String: Task<Void, Never>] = [:]
     private var noteTasks: [String: Task<Void, Never>] = [:]
 
     private init() {
-        if sample { allowed = true; items = Self.sampleItems(TodoDates.today()) }
+        if sample { allowed = true; shared = true; items = Self.sampleItems(TodoDates.today()) }
     }
 
     // MARK: Reading
@@ -63,11 +68,15 @@ final class TodoStore {
     /// Who may see it, and the list. Called when Home comes up, when the app comes back, and when the sheet opens.
     func refresh() async {
         guard !sample else { return }
+        // Another login on this phone: drop the last one's list at once, so it never shows under the new one.
+        let uid = try? await SupabaseService.client.auth.session.user.id.uuidString
+        if uid != lastUser { items = []; linger = []; allowed = false; shared = false; lastUser = uid }
+        guard uid != nil else { return }
         do {
             struct Member: Decodable { let book_id: String; let role: String }
-            let ms: [Member] = try await SupabaseService.client.from("book_members").select("book_id,role")
-                .eq("book_id", value: "S").eq("role", value: "owner").execute().value
+            let ms: [Member] = try await SupabaseService.client.from("book_members").select("book_id,role").execute().value
             allowed = !ms.isEmpty
+            shared = ms.contains { $0.book_id == "S" && $0.role == "owner" }
             guard allowed else { items = []; return }
             let rows: [Item] = try await SupabaseService.client.from("todos")
                 .select("id,text,due,note,done,created_at").order("created_at").execute().value

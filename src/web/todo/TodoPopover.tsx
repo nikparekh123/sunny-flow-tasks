@@ -1,7 +1,7 @@
 // To do in the web header (handoff 2026-11-10-todo, "Web · header" and "Web · the popover"): "7 to do" left of the
 // privacy eye, quiet on purpose (#636366, under 4.5:1 by design, do not "fix" it), "To do" alone when nothing is
-// open. It opens a menu-glass popover with the list. Only an owner of book S sees either (Nik, 10 Nov 2026: "only
-// for me to see, not Nicolay").
+// open. It opens a menu-glass popover with the list. Nik's list is his alone (shared by his two logins); the cousin
+// gets a private list of his own, without "Shared by both accounts" (10 Nov 2026).
 //
 // The popover is drawn into the page frame (.sw) through a portal, outside the header, so its blur reaches the page.
 // The design's header is 48 tall with a 32 gap; the built one is 64 with 36, so the spec's relations are kept on it:
@@ -13,13 +13,13 @@ import { useNY } from '../lib/clock';
 import { useHome } from '../lib/data';
 import { useWeb } from '../lib/state';
 import { TodoList } from './TodoList';
-import { useTodoOwner, useTodos } from './useTodos';
+import { useTodoAccess, useTodos } from './useTodos';
 
 const HEADER_H = 64;
 
 type Api = ReturnType<typeof useTodos>;
 
-function Popover({ api, n, btn, kbd, onClose }: { api: Api; n: number; btn: RefObject<HTMLButtonElement>; kbd: boolean; onClose: (focusButton: boolean) => void }) {
+function Popover({ api, n, shared, btn, kbd, onClose }: { api: Api; n: number; shared: boolean; btn: RefObject<HTMLButtonElement>; kbd: boolean; onClose: (focusButton: boolean) => void }) {
   const box = useRef<HTMLDivElement>(null);
   const esc = useRef<(() => boolean) | null>(null);
   const today = useNY(60_000).date;
@@ -64,7 +64,7 @@ function Popover({ api, n, btn, kbd, onClose }: { api: Api; n: number; btn: RefO
           display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
           <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 600 }}>To do</span>
-          <span style={{ fontSize: 12, lineHeight: '16px', color: '#98989D' }}>Shared by both accounts · {n ? n + ' open' : 'Nothing open'}</span>
+          <span style={{ fontSize: 12, lineHeight: '16px', color: '#98989D' }}>{shared ? 'Shared by both accounts · ' : ''}{n ? n + ' open' : 'Nothing open'}</span>
         </div>
         <TodoList items={api.items ?? []} today={today} known={known} add={api.add} set={api.set} note={api.note} remove={api.remove} escRef={esc} focusAdd={kbd} />
       </div>
@@ -72,9 +72,9 @@ function Popover({ api, n, btn, kbd, onClose }: { api: Api; n: number; btn: RefO
   );
 }
 
-/** The header's "N to do" and its popover. Nothing for a login that is not an owner of book S. */
+/** The header's "N to do" and its popover, for any book member (each sees only their own list). */
 export function TodoButton() {
-  const owner = useTodoOwner();
+  const { on: owner, shared } = useTodoAccess();
   const api = useTodos(owner);
   const [open, setOpen] = useState(false);
   // Opened from the keyboard (Enter or Space: a click with no pointer): the caret goes to the add field.
@@ -95,7 +95,7 @@ export function TodoButton() {
           whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', transition: 'color .2s' }}>
         {n ? <><span style={{ fontWeight: 600 }}>{n}</span> to do</> : 'To do'}
       </button>
-      {open && host && createPortal(<Popover api={api} n={n} btn={btn} kbd={kbd} onClose={close} />, host)}
+      {open && host && createPortal(<Popover api={api} n={n} shared={shared} btn={btn} kbd={kbd} onClose={close} />, host)}
       <style>{`.sw .sw-todo:hover{color:#F5F5F7!important}.sw .td-mo:hover{background:rgba(118,118,128,.16)}`
         + `.sw .td-in{all:unset;box-sizing:border-box;font-family:inherit}.sw input.td-in:focus-visible{outline:none}`}</style>
     </>

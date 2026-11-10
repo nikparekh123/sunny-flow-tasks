@@ -331,9 +331,12 @@ private struct BookTotalsRow: View {
             (it.0, mode == 0 ? it.1 : mode == 1 ? (it.3 != 0 ? it.2 / it.3 * 100 : 0) : it.2)
         }
         // Sold cycles with Long (the design's totG: "Calls · time value", then % today, then $ today; Nik, 8 Nov 2026).
+        // Time value is the sales' time value alone (the engine's tv.sc and tv.sp), so Calls and Puts add up to Home's
+        // Time value; % and $ today stay on what they would cost to buy back.
         let scT = hs.reduce(0) { $0 + $1.sc.today }, spT = hs.reduce(0) { $0 + $1.sp.today }
-        let sold: [(String, Double, Bool)] = [("Calls", sc, scT), ("Puts", sp, spT)].filter { $0.1 != 0 }.map { it in
-            (it.0, mode == 0 ? it.1 : mode == 1 ? (it.1 != 0 ? it.2 / it.1 * 100 : 0) : it.2, false)
+        let tsc = hs.reduce(0) { $0 + $1.timeSc }, tsp = hs.reduce(0) { $0 + $1.timeSp }
+        let sold: [(String, Double, Bool)] = [("Calls", sc, scT, tsc), ("Puts", sp, spT, tsp)].filter { $0.1 != 0 }.map { it in
+            (it.0, mode == 0 ? it.3 : mode == 1 ? (it.1 != 0 ? it.2 / it.1 * 100 : 0) : it.2, false)
         }
         // ⚠ A tap on the strip cycles the view. Not a Button around the ScrollView: inside a sideways ScrollView the
         // button never fired on the phone (Nik, 8 Nov 2026: "it was supposed to be tappable"); the tap sits on the row.
@@ -1574,11 +1577,12 @@ private struct WholeBook: View {
                         }
                     }
                 }
-                let sold = [("Calls", h.sc), ("Puts", h.sp)].filter { $0.1.value != 0 || $0.1.today != 0 }
+                // Left to earn is the sales' time value alone (an in the money sale's intrinsic part is not earnable).
+                let sold = [("Calls", h.sc, h.timeSc), ("Puts", h.sp, h.timeSp)].filter { $0.1.value != 0 || $0.1.today != 0 }
                 if !sold.isEmpty {
                     group("Sold · left to earn") {
                         ForEach(sold, id: \.0) { r in
-                            row(r.0, SampleEngine.fK(r.1.value), "\(SampleEngine.fK(r.1.today)) kept", S.green, after: " left to earn")
+                            row(r.0, SampleEngine.fK(r.2), "\(SampleEngine.fK(r.1.today)) kept", S.green, after: " left to earn")
                         }
                     }
                 }

@@ -137,9 +137,13 @@ Deno.serve(async (req) => {
   const failures: { token_prefix: string; status: number; reason?: string }[] = [];
   const deliveredAlertIDs: string[] = [];
 
+  /* ⚠ A PERSONAL ALERT GOES TO ONE LOGIN (10 Nov 2026, To do). An alert whose meta names a user_id (the cousin's
+     own To do reminders) goes to that login's phones only: Nik is also a member of book N, so sending it by book
+     would put the cousin's notes on Nik's phone. */
   for (const alert of alerts) {
     let anyOK = false;
-    const who = inBook(alert.book_id ?? 'S');
+    const own = (alert.meta as Record<string, unknown> | null)?.user_id;
+    const who = typeof own === 'string' && own ? new Set([own]) : inBook(alert.book_id ?? 'S');
     const targets = devices.filter((d) => d.user_id && who.has(d.user_id));
     // No phone for this book yet: settle it, or it would hold the oldest-50
     // window and block every other book's alerts.
