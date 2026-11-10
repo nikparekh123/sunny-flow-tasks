@@ -19,14 +19,20 @@ const GROUPS: { k: string; l: string; status: boolean; re: RegExp }[] = [
 interface Trend { pts: number[]; color: string; text: string }
 interface ORow { name: string; sub: string; value: string; m: { t: string; c: string }; status: string; trend: Trend | null }
 
-/** The month's line: the closes stretched to the box, 1.5 px, in the month's colour; the words on hover. */
-function MonthLine({ t }: { t: Trend }) {
-  const lo = Math.min(...t.pts), hi = Math.max(...t.pts), span = hi - lo || 1, n = t.pts.length;
-  const d = t.pts.map((v, i) => `${i ? 'L' : 'M'}${((i / (n - 1)) * 100).toFixed(2)} ${(2 + (1 - (v - lo) / span) * 24).toFixed(2)}`).join(' ');
+/** The month's line, drawn as the app's design draws Overnight (SunnyBriefs): 72 x 30 with 3 of padding above and
+    below, the dashed line at where the month started, the line 1.5 in the month's colour, and a 2.5 dot at the end
+    while the market still trades; the words on hover. It shrinks as a whole when the column is narrower. */
+function MonthLine({ t, live }: { t: Trend; live: boolean }) {
+  const W = 72, H = 30, P = 3, n = t.pts.length;
+  const lo = Math.min(...t.pts), hi = Math.max(...t.pts), span = hi - lo || 1;
+  const x = (i: number) => +((i / (n - 1)) * W).toFixed(1), y = (v: number) => +(P + ((hi - v) / span) * (H - 2 * P)).toFixed(1);
+  const c = named(t.color, C.ink2), by = y(t.pts[0]);
   return (
-    <svg viewBox="0 0 100 28" preserveAspectRatio="none" role="img" aria-label={t.text} style={{ width: '100%', height: 28, display: 'block', overflow: 'visible' }}>
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={t.text} style={{ width: '100%', maxWidth: W, height: 'auto', display: 'block', overflow: 'visible' }}>
       <title>{t.text}</title>
-      <path d={d} fill="none" stroke={named(t.color, C.ink2)} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      <line x1={0} y1={by} x2={W} y2={by} style={{ stroke: C.ink2, strokeWidth: 1, strokeDasharray: '2 2.5', opacity: 0.6 }} />
+      <path d={'M' + t.pts.map((v, i) => `${x(i)} ${y(v)}`).join('L')} style={{ fill: 'none', stroke: c, strokeWidth: 1.5, strokeLinejoin: 'round', strokeLinecap: 'round' }} />
+      {live ? <circle cx={x(n - 1)} cy={y(t.pts[n - 1])} r={2.5} style={{ fill: c }} /> : null}
     </svg>
   );
 }
@@ -65,18 +71,19 @@ export default function Overnight({ card }: { card: J }) {
         {cols.map((g) => (
           <div key={g.k} style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             {g.l ? <span className="kicker" style={{ paddingBottom: 6 }}>{g.l}</span> : null}
-            {/* One grid a column: name and region, the month's line, value and move. The names and values take
-                what they need and the lines fill the rest, so a column's lines stand one above the other. */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0,1fr) max-content', alignItems: 'stretch' }}>
+            {/* One grid a column: name and region, the 72 x 30 line, value and move (the app's design, 12 apart). The
+                names and values take what they need, so a column's lines stand one above the other. */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0,72px) max-content', justifyContent: 'space-between', columnGap: 12, alignItems: 'stretch' }}>
               {g.rows.map((r) => {
-                const cell = { padding: '9px 0', borderTop: '1px solid rgba(255,255,255,.08)', display: 'flex', flexDirection: 'column' as const, gap: 1, justifyContent: 'center', minWidth: 0 };
+                const cell = { padding: '9px 0', display: 'flex', flexDirection: 'column' as const, gap: 1, justifyContent: 'center', minWidth: 0 };
                 return (
                   <Fragment key={r.name}>
+                    <span aria-hidden="true" style={{ gridColumn: '1 / -1', height: 1, background: 'rgba(255,255,255,.08)' }} />
                     <span style={cell}>
                       <span style={{ fontSize: 15, whiteSpace: 'nowrap' }}>{r.name}</span>
                       <span style={{ fontSize: 12, color: C.ink2, whiteSpace: 'nowrap' }}>{r.sub}</span>
                     </span>
-                    <span style={{ ...cell, padding: '9px 14px' }}>{r.trend ? <MonthLine t={r.trend} /> : null}</span>
+                    <span style={cell}>{r.trend ? <MonthLine t={r.trend} live={r.status === 'still trading'} /> : null}</span>
                     <span style={{ ...cell, alignItems: 'flex-end' }}>
                       <span style={{ fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap' }}>{r.value}</span>
                       <span style={{ fontSize: 12, fontWeight: 600, color: r.m.c, whiteSpace: 'nowrap' }}>{r.m.t}</span>

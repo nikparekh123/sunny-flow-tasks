@@ -78,35 +78,28 @@ struct BMarketsCard: View {
                 BSub(t: card["subtitle"].string).lineLimit(1)
             }
             .padding(.bottom, 12)   // 16 to the list, less its 4 pull-up
-            // One grid for the list: name and region, the month's line, price and move (Nik, 9 Nov 2026: trend lines,
-            // one month). The names and prices take what they need and the lines fill the rest, so they stand in one
-            // column. A modified GridRow stops being a row, so each cell carries its own padding, and the first cell
-            // speaks for the row (the server's aria, which ends with the month's words).
-            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 0) {
-                ForEach(Array(card["rows"].array.enumerated()), id: \.offset) { i, r in
-                    if i > 0 { BHairline() }
-                    GridRow(alignment: .center) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(r["name"].string ?? "").bLine(BK.row, tabular: false).foregroundStyle(S.ink)
-                            Text(r["sub"].string ?? "").bLine(BK.sub, tabular: false).foregroundStyle(S.secondary)
-                        }
-                        .padding(.vertical, 9)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(r["aria"].string ?? "")
-                        BMonthLine(trend: r["trend"])
-                            .frame(maxWidth: 120, minHeight: 24, maxHeight: 24)
-                            .frame(maxWidth: .infinity)
-                            .accessibilityHidden(true)
-                        VStack(alignment: .trailing, spacing: 2) {
-                            // Price and change 600 (Nov 8, was 700).
-                            Text(r["value"].string ?? "").bLine(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(S.ink)
-                            BMove(text: r["move"].string, color: r["moveColor"].string, type: SType(size: 13, weight: 600, line: 16, tracking: 0))
-                        }
-                        .padding(.vertical, 9)
-                        .gridColumnAlignment(.trailing)
-                        .accessibilityHidden(true)
+            // Each row as the design draws it (SunnyBriefs, Overnight as a list): name and region, a 72 x 30 line, then
+            // price and move in 92, 12 apart. The line is the month (Nik, 9 Nov 2026: one month, the design's look).
+            ForEach(Array(card["rows"].array.enumerated()), id: \.offset) { i, r in
+                if i > 0 { BHairline() }
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(r["name"].string ?? "").bLine(BK.row, tabular: false).foregroundStyle(S.ink).lineLimit(1)
+                        Text(r["sub"].string ?? "").bLine(BK.sub, tabular: false).foregroundStyle(S.secondary).lineLimit(1)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    BMonthLine(trend: r["trend"], live: r["status"].string == "still trading")
+                        .frame(width: 72, height: 30)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        // Price and change 600 (Nov 8, was 700).
+                        Text(r["value"].string ?? "").bLine(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(S.ink)
+                        BMove(text: r["move"].string, color: r["moveColor"].string, type: SType(size: 13, weight: 600, line: 16, tracking: 0))
+                    }
+                    .frame(width: 92, alignment: .trailing)
                 }
+                .padding(.vertical, 9)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(r["aria"].string ?? "")
             }
             if let f = card["footer"].string {
                 Text(f).sType(SType(size: 12, weight: 500, line: 15, tracking: 0), tabular: false).foregroundStyle(S.secondary)
@@ -118,34 +111,38 @@ struct BMarketsCard: View {
     }
 }
 
-/// A world market's month line (Nik, 9 Nov 2026): its closes over the last month, ending on today's price, stretched
-/// to the box, 1.5 pt in the month's colour (the server's `trend`: pts, color, text). Nothing when there is no line.
+/// A world market's month line, drawn as the design's Overnight line (SunnyBriefs): 72 x 30 with 3 of padding above
+/// and below, the dashed line at where the month started (the design's last close), the line 1.5 in the month's
+/// colour, and a 2.5 dot at the end while the market still trades. The server's `trend`: pts, color, text.
 struct BMonthLine: View {
     let trend: JSONValue
+    var live = false
     var body: some View {
         let pts = trend["pts"].array.compactMap { $0.double }
-        if pts.count >= 2 {
-            BLinePath(pts: pts)
-                .stroke(BK.color(trend["color"].string), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+        if pts.count >= 2, let lo = pts.min(), let hi = pts.max() {
+            let c = BK.color(trend["color"].string)
+            GeometryReader { g in
+                let w = g.size.width, h = g.size.height, pad: CGFloat = 3, span = hi - lo > 0 ? hi - lo : 1
+                let x = { (i: Int) in w * CGFloat(i) / CGFloat(pts.count - 1) }
+                let y = { (v: Double) in pad + (h - 2 * pad) * CGFloat((hi - v) / span) }
+                ZStack(alignment: .topLeading) {
+                    Path { p in p.move(to: CGPoint(x: 0, y: y(pts[0]))); p.addLine(to: CGPoint(x: w, y: y(pts[0]))) }
+                        .stroke(S.secondary.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [2, 2.5]))
+                    Path { p in
+                        for (i, v) in pts.enumerated() {
+                            if i == 0 { p.move(to: CGPoint(x: x(i), y: y(v))) } else { p.addLine(to: CGPoint(x: x(i), y: y(v))) }
+                        }
+                    }
+                    .stroke(c, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                    if live, let last = pts.last {
+                        Circle().fill(c).frame(width: 5, height: 5).position(x: x(pts.count - 1), y: y(last))
+                    }
+                }
+            }
+            .accessibilityHidden(true)
         } else {
             Color.clear
         }
-    }
-}
-
-/// Points as a line across the box, lowest at the bottom and highest at the top.
-struct BLinePath: Shape {
-    let pts: [Double]
-    func path(in r: CGRect) -> Path {
-        var p = Path()
-        guard pts.count >= 2, let lo = pts.min(), let hi = pts.max() else { return p }
-        let span = hi - lo > 0 ? hi - lo : 1
-        for (i, v) in pts.enumerated() {
-            let pt = CGPoint(x: r.minX + r.width * CGFloat(i) / CGFloat(pts.count - 1),
-                             y: r.minY + r.height * CGFloat(1 - (v - lo) / span))
-            if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
-        }
-        return p
     }
 }
 
