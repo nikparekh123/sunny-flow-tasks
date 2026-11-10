@@ -192,6 +192,9 @@ extension EnvironmentValues {
 
 struct AccountChart: View {
     @Environment(\.timeValueTap) private var timeValueTap
+    /// To do (10 Nov 2026): "7 to do" at the right end of the change line; nil hides it (not Nik's login).
+    @Environment(\.todoTap) private var todoTap
+    @State private var todo = TodoStore.shared
     let home: HomePayload
     /// Home opened or was pulled: Time value shows its read for a few seconds.
     var readTick = 0
@@ -311,7 +314,14 @@ struct AccountChart: View {
                 }
             }
             .frame(minHeight: 34)
-            changeLine
+            // The change line, and To do on its row at the right margin (handoff 2026-11-10-todo).
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                changeLine.layoutPriority(1)
+                if let tap = todoTap {
+                    Spacer(minLength: 8)
+                    TodoLink(open: todo.openCount, action: tap)
+                }
+            }
             depositLine
         }
     }

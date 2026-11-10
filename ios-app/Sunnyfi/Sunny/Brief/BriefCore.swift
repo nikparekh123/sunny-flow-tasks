@@ -117,7 +117,7 @@ enum BriefDebug {
     }
 }
 
-enum BriefSheetKind: String, Identifiable { case timeValue, economy; var id: String { rawValue } }
+enum BriefSheetKind: String, Identifiable { case timeValue, economy, todo; var id: String { rawValue } }
 
 // MARK: - State shared by Home, Positions and Overview
 

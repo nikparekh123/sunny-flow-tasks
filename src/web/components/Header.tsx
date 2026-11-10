@@ -2,6 +2,7 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import { headerTime, useNY } from '../lib/clock';
 import { useWeb } from '../lib/state';
+import { TodoButton } from '../todo/TodoPopover';
 
 export function Header() {
   const nav = useNavigate();
@@ -29,6 +30,7 @@ export function Header() {
           ))}
         </nav>
         <span style={{ flex: 1 }} />
+        <TodoButton />
         <button type="button" className="bare sw-pv" onClick={() => setPrivacy(!privacy)} aria-pressed={privacy} aria-label={pvL} title={pvL}
           style={{ flex: 'none', width: 36, height: 36, borderRadius: '50%', background: privacy ? 'rgba(255,255,255,.2)' : 'rgba(118,118,128,.2)',
             display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

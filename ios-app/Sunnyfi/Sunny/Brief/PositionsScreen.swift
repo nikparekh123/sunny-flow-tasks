@@ -36,6 +36,9 @@ private struct PosRule: View {
 }
 
 struct BriefPositionsScreen: View {
+    /// To do (10 Nov 2026): "7 to do" right of the title; nil hides it (not Nik's login).
+    @Environment(\.todoTap) private var todoTap
+    @State private var todo = TodoStore.shared
     @Environment(BriefState.self) private var brief
     @Environment(HomeRouter.self) private var router
     @AppStorage(BriefPrivacy.key) private var privacy = false
@@ -110,9 +113,17 @@ struct BriefPositionsScreen: View {
                     // SunnyPositions.dc.html nav.isBar: 28/32 heavy (README 7 says 34; the design's CSS wins), its box
                     // at y 148, 32 under the strip (44 + 72). The strip keeps a 72 pt slot under the safe area and draws
                     // `lift` higher, so the page pulls up by `lift` (as Home does).
-                    Text("Positions").sType(SType(size: 28, weight: 800, line: 32, tracking: -0.02), tabular: false)
-                        .foregroundStyle(S.ink).padding(.horizontal, S.margin).padding(.top, brief.showsStrip ? 32 - AccountStrip.lift : 16)
-                        .accessibilityAddTraits(.isHeader)
+                    // To do (10 Nov 2026): right of the large title, baseline to baseline, on the 20 pt margin.
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("Positions").sType(SType(size: 28, weight: 800, line: 32, tracking: -0.02), tabular: false)
+                            .foregroundStyle(S.ink)
+                            .accessibilityAddTraits(.isHeader)
+                        if let tap = todoTap {
+                            Spacer(minLength: 8)
+                            TodoLink(open: todo.openCount, action: tap)
+                        }
+                    }
+                    .padding(.horizontal, S.margin).padding(.top, brief.showsStrip ? 32 - AccountStrip.lift : 16)
                     if live && names.isEmpty {
                         // An empty book (Nicolay's, until he trades): one line, as agreed.
                         VStack(alignment: .leading, spacing: 4) {

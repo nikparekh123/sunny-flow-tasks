@@ -33,6 +33,7 @@ struct HomeView: View {
     @State private var barGone = false
     /// New Home (handoff 6 Nov): the account on screen, shared by Home, Positions and Overview.
     @State private var brief = BriefState()
+    @State private var todo = TodoStore.shared
 
     var body: some View {
         ZStack {
@@ -107,7 +108,9 @@ struct HomeView: View {
         .onChange(of: store.home == nil) { _, _ in openPushed() }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
+            async let todos: Void = TodoStore.shared.refresh()
             await store.live()
+            await todos
         }
         // The opening bell at 9:30:00 New York on a trading day, while the app is open (block 29, Pass 5).
         .openingBell(calendar: store.home?.calendar ?? [])
@@ -160,6 +163,8 @@ struct HomeView: View {
         .environment(\.sTypeScales, true)
         // The payload the old cards draw from, for Performance on the new Home (10 Nov 2026).
         .environment(\.homeWords, store.words ?? home)
+        // To do (10 Nov 2026): the quiet "7 to do" on Home and Positions, for book S's owners only (Nik, not Nicolay).
+        .environment(\.todoTap, todo.allowed ? { brief.sheet = .todo } : nil)
         .animation(reduce ? S.fade : S.page, value: brief.onOverview)
         .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.45), value: brief.ticker)
         .sheet(item: Binding(get: { brief.sheet }, set: { brief.sheet = $0 })) { k in
@@ -168,6 +173,8 @@ struct HomeView: View {
                 case .timeValue: TimeValueSheet(acct: brief.account.sampleKey, privacy: UserDefaults.standard.bool(forKey: BriefPrivacy.key),
                                                 live: brief.live?.timeValue ?? .null) { brief.sheet = nil }
                 case .economy: EconomySheet(live: brief.live?.economy ?? .null) { brief.sheet = nil }
+                // To do (10 Nov 2026): Nik's own notes, over whatever tab is up.
+                case .todo: TodoSheet(known: Self.knownTickers(home, brief)) { brief.sheet = nil }
                 }
             }
             .environment(\.sTypeScales, true)
@@ -408,6 +415,13 @@ struct HomeView: View {
         guard let link = PushInbox.shared.link, store.home != nil else { return }
         PushInbox.shared.link = nil
         if link == "sunny://aftershock" { router.openAftershock(animated: false) }
+        // The 8:00 AM reminder for a to do due today opens the list.
+        if link == "sunny://todo", todo.allowed { brief.sheet = .todo }
+    }
+
+    /// The book's names and the watchlist: the first of them in a to do's text is 600 (Nik, 10 Nov 2026: those only).
+    static func knownTickers(_ home: HomePayload, _ brief: BriefState) -> Set<String> {
+        Set((brief.live?.names.compactMap { $0["t"].string } ?? []) + home.watchlist.map(\.ticker))
     }
 
     @ViewBuilder private func receipt(_ r: HomeRouter.Receipt, _ home: HomePayload) -> some View {
