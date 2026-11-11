@@ -103,6 +103,9 @@ struct SDPair {
     let up: Double
     let dn: Double
     let cop: Double
+    /// How far each breakeven is from today, in SD by this expiry.
+    let sdUp: Double
+    let sdDn: Double
 
     /// The row for k SD: the suggestion's own row (the moved strike) when k is the suggestion, else rows[k × 4].
     static func row(_ e: SDReply.Exp, _ k: Double, put: Bool) -> SDReply.Row {
@@ -118,9 +121,16 @@ struct SDPair {
         self.exp = e; self.ei = ei
         kc = p.kc ?? e.sug.kc; kp = p.kp ?? e.sug.kp
         call = Self.row(e, kc, put: false); put = Self.row(e, kp, put: true)
-        tot = call.pr + put.pr; up = call.K + tot; dn = put.K - tot
+        tot = call.pr + put.pr
+        // Only one side can end in the money, so all the premium cushions it, spread over that side's real count
+        // (Nik 11 Nov). With no calls or no puts it falls back to one of each.
+        let nc = Double(r.counts.calls), np = Double(r.counts.puts), all = nc * call.pr + np * put.pr
+        let real = nc > 0 && np > 0
+        up = call.K + (real ? all / nc : tot); dn = put.K - (real ? all / np : tot)
         let S = r.price, m = e.m
         cop = m > 0 && dn > 0 && S > 0 ? SDFmt.N(log(up / S) / m) - SDFmt.N(log(dn / S) / m) : 0
+        sdUp = m > 0 && S > 0 ? log(up / S) / m : 0
+        sdDn = m > 0 && S > 0 && dn > 0 ? log(S / dn) / m : 0
     }
 }
 

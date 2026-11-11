@@ -434,7 +434,7 @@ struct SDCard: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(privacy ? "Total hidden" : BriefWords.speech(totT)) for \(SDFmt.count(n.calls, "call")) and \(SDFmt.count(n.puts, "put")), \(SDFmt.f2(p.tot)) dollars a share")
             }
-            SDTimeline(S0: r.price, call: p.call, put: p.put, up: p.up, dn: p.dn)
+            SDTimeline(S0: r.price, call: p.call, put: p.put, up: p.up, dn: p.dn, sdUp: p.sdUp, sdDn: p.sdDn)
         }
         .padding(.top, 14).padding(.horizontal, 16).padding(.bottom, 12)
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(SDPal.tile))
@@ -570,7 +570,7 @@ private struct SDSideSwitch: View {
     }
 }
 
-/// The profit zone, 94 tall (card136 pz): the put and call at their prices on top with a tick down to the bar, the
+/// The profit zone, 101 tall (card136 pz): the put and call at their prices on top with a tick down to the bar, the
 /// distance from today to each (side colours at 55%), the bar (track, light green breakeven to breakeven, stronger
 /// green strike to strike), today's dot, then the lower breakeven, today and the upper breakeven. Scaled from the lower
 /// breakeven (or the put) to the upper (or the call), 12% padding each side.
@@ -580,6 +580,8 @@ private struct SDTimeline: View {
     let put: SDReply.Row
     let up: Double
     let dn: Double
+    let sdUp: Double
+    let sdDn: Double
     var body: some View {
         GeometryReader { g in
             let w = g.size.width
@@ -603,24 +605,26 @@ private struct SDTimeline: View {
                 Circle().fill(SDPal.ink).frame(width: 12, height: 12)
                     .background(Circle().fill(SDPal.dot).padding(-3))
                     .position(x: X(S0), y: 49)
-                foot(SDFmt.f2(dn), "breakeven").position(x: X(dn), y: 60 + 13.5)
+                foot(SDFmt.f2(dn), "breakeven", SDFmt.f2(sdDn) + " SD").position(x: X(dn), y: 60 + 20)
                 foot("$" + SDFmt.f2(S0), "today").position(x: X(S0), y: 60 + 13.5)
-                foot(SDFmt.f2(up), "breakeven").position(x: X(up), y: 60 + 13.5)
+                foot(SDFmt.f2(up), "breakeven", SDFmt.f2(sdUp) + " SD").position(x: X(up), y: 60 + 20)
             }
         }
-        .frame(height: 94)
+        .frame(height: 101)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Profit zone")
-        .accessibilityValue("Profit between the breakevens \(SDFmt.f2(dn)) and \(SDFmt.f2(up)). Today \(SDFmt.f2(S0)) dollars. "
+        .accessibilityValue("Profit between the breakevens \(SDFmt.f2(dn)), \(SDFmt.f2(sdDn)) SD down, and \(SDFmt.f2(up)), \(SDFmt.f2(sdUp)) SD up. Today \(SDFmt.f2(S0)) dollars. "
                             + "Put \(SDFmt.fk(put.K)), \(SDFmt.saidMove(put.K / S0 - 1)). Call \(SDFmt.fk(call.K)), \(SDFmt.saidMove(call.K / S0 - 1)).")
     }
     private func label(_ t: String, _ size: CGFloat, _ wt: CGFloat, _ c: Color) -> some View {
         Text(t).sType(SType(size: size, weight: wt, line: 14, tracking: 0)).foregroundStyle(c).lineLimit(1).fixedSize()
     }
-    private func foot(_ v: String, _ s: String) -> some View {
+    /// A label under the bar; a breakeven also says how far it is in SD (Nik 11 Nov).
+    private func foot(_ v: String, _ s: String, _ sd: String? = nil) -> some View {
         VStack(spacing: 0) {
             Text(v).sType(SType(size: 11, weight: 600, line: 14, tracking: 0)).foregroundStyle(SDPal.ink)
             Text(s).sType(SType(size: 10, weight: 400, line: 13, tracking: 0), tabular: false).foregroundStyle(SDPal.muT)
+            if let sd { Text(sd).sType(SType(size: 10, weight: 400, line: 13, tracking: 0)).foregroundStyle(SDPal.muT) }
         }
         .lineLimit(1).fixedSize()
     }

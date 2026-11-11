@@ -77,7 +77,7 @@ export interface SdView {
     zL: string; zW: string; mL: string; mW: string; today: string;
     top: { key: string; x: string; l: string; c: string }[];
     dist: { key: string; l: string; x: string; L: string; W: string; c: string }[];
-    bot: { key: string; x: string; l: string; s: string }[];
+    bot: { key: string; x: string; l: string; s: string; sd?: string }[];
   };
   ladC: LadRow[]; ladP: LadRow[];
   /** What the payoff chart draws (README 1.9). */
@@ -97,7 +97,13 @@ export function sdView(d: SdReply, pick: SdPick, set: (p: SdPick) => void): SdVi
   const samePick = mine && pick.ex === e.ex;
   const selC = samePick && okC(pick.c) ? pick.c! : e.sug.kc, selP = samePick && okP(pick.p) ? pick.p! : e.sug.kp;
   const rc = rowAt(e, selC, false) ?? e.sug.C, rp = rowAt(e, selP, true) ?? e.sug.P;
-  const tot = rc.pr + rp.pr, up = rc.K + tot, dn = rp.K - tot, cop = N(Math.log(up / S) / m) - N(Math.log(dn / S) / m);
+  // Only one side can end in the money, so all the premium cushions it, spread over that side's real count
+  // (Nik 11 Nov). With no calls or no puts it falls back to one of each.
+  const { calls, puts } = d.counts ?? { calls: 0, puts: 0 };
+  const tot = rc.pr + rp.pr, all = calls * rc.pr + puts * rp.pr, real = calls > 0 && puts > 0;
+  const up = rc.K + (real ? all / calls : tot), dn = rp.K - (real ? all / puts : tot);
+  const cop = N(Math.log(up / S) / m) - N(Math.log(dn / S) / m);
+  const sdUp = m > 0 ? Math.log(up / S) / m : 0, sdDn = m > 0 && dn > 0 ? Math.log(S / dn) / m : 0;
   const go = (q: Partial<SdPick>) => set({ t: d.t, ex: e.ex, c: selC, p: selP, ...q });
 
   const exps = d.exps.map((x, i) => ({
@@ -132,7 +138,11 @@ export function sdView(d: SdReply, pick: SdPick, set: (p: SdPick) => void): SdVi
   const pz = {
     zL: X2(dn), zW: W2(dn, up), mL: X2(rp.K), mW: W2(rp.K, rc.K), today: X2(S),
     top: [{ key: 'p', x: X2(rp.K), l: 'Put ' + fk(rp.K), c: P.PT }, { key: 'c', x: X2(rc.K), l: 'Call ' + fk(rc.K), c: P.CL }],
-    bot: [{ key: 'd', x: X2(dn), l: f2(dn), s: 'breakeven' }, { key: 't', x: X2(S), l: '$' + f2(S), s: 'today' }, { key: 'u', x: X2(up), l: f2(up), s: 'breakeven' }],
+    bot: [
+      { key: 'd', x: X2(dn), l: f2(dn), s: 'breakeven', sd: f2(sdDn) + ' SD' },
+      { key: 't', x: X2(S), l: '$' + f2(S), s: 'today' },
+      { key: 'u', x: X2(up), l: f2(up), s: 'breakeven', sd: f2(sdUp) + ' SD' },
+    ],
     dist: [
       { key: 'p', l: dir(rp.K / S - 1), x: X2((rp.K + S) / 2), L: X2(Math.min(rp.K, S)), W: W2(Math.min(rp.K, S), Math.max(rp.K, S)), c: P.PT },
       { key: 'c', l: dir(rc.K / S - 1), x: X2((rc.K + S) / 2), L: X2(Math.min(rc.K, S)), W: W2(Math.min(rc.K, S), Math.max(rc.K, S)), c: P.CL },
@@ -165,7 +175,6 @@ export function sdView(d: SdReply, pick: SdPick, set: (p: SdPick) => void): SdVi
     return put ? rows : rows.slice().reverse();
   };
 
-  const { calls, puts } = d.counts ?? { calls: 0, puts: 0 };
   return {
     t: d.t, S, pxT: '$' + f2(S), ei, e,
     ivT: pc(e.iv), sdP: '±' + pc(m), sdD: '±$' + f2(S * m),

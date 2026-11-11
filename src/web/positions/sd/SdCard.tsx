@@ -158,11 +158,12 @@ function Lad({ r, kc }: { r: LadRow; kc: string }) {
   );
 }
 
-/** The profit zone (web 100 tall): the strikes on top, the distance lines, the bar, today, the breakevens under it. */
+/** The profit zone (web 112 tall): the strikes on top, the distance lines, the bar, today, the breakevens under it
+    with how far each is in SD. */
 function Timeline({ v }: { v: SdView }) {
   const z = v.pz;
   return (
-    <div aria-label="Profit zone" style={{ position: 'relative', height: 100 }}>
+    <div aria-label="Profit zone" style={{ position: 'relative', height: 112 }}>
       <span aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: 50, height: 8, borderRadius: 4, background: 'rgba(255,255,255,.08)' }} />
       <span aria-hidden="true" style={{ position: 'absolute', top: 50, height: 8, left: z.zL, width: z.zW, borderRadius: 4, background: 'rgba(101,196,102,.28)' }} />
       <span aria-hidden="true" style={{ position: 'absolute', top: 50, height: 8, left: z.mL, width: z.mW, background: 'rgba(101,196,102,.6)' }} />
@@ -183,6 +184,7 @@ function Timeline({ v }: { v: SdView }) {
         <div key={x.key} style={{ position: 'absolute', top: 66, left: x.x, transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, whiteSpace: 'nowrap' }}>{x.l}</span>
           <span style={{ fontSize: 11, lineHeight: '14px', color: MU }}>{x.s}</span>
+          {x.sd && <span style={{ fontSize: 11, lineHeight: '14px', color: MU, whiteSpace: 'nowrap' }}>{x.sd}</span>}
         </div>
       ))}
     </div>
