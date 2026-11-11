@@ -11,7 +11,8 @@ const kick: CSSProperties = { fontSize: 11, lineHeight: '14px', fontWeight: 600,
 const GLASS = 'inset 0 0 0 .5px rgba(255,255,255,.22),inset 0 1px 0 rgba(255,255,255,.3),0 2px 8px rgba(0,0,0,.35)';
 const GRID = '76px repeat(5,minmax(0,1fr))';
 
-export function SdCard({ v, t, busy, failed, mask }: { v: SdView | null; t: string; busy: boolean; failed: boolean; mask: (s: string) => string }) {
+type TryTrades = NonNullable<SdView['tryIt']>['trades'];
+export function SdCard({ v, t, busy, failed, mask, onTry }: { v: SdView | null; t: string; busy: boolean; failed: boolean; mask: (s: string) => string; onTry?: (x: TryTrades) => void }) {
   return (
     <div className="tnum" style={{ fontFamily: "'Inter',system-ui,-apple-system,sans-serif", color: INK }}>
       <section aria-label="SD calculator" aria-busy={busy}
@@ -22,13 +23,13 @@ export function SdCard({ v, t, busy, failed, mask }: { v: SdView | null; t: stri
         </div>
         {!v ? (
           failed ? <span style={{ fontSize: 13, color: MU }}>Could not load {t}.</span> : <div style={{ minHeight: 640 }} />
-        ) : <Body v={v} mask={mask} />}
+        ) : <Body v={v} mask={mask} onTry={onTry} />}
       </section>
     </div>
   );
 }
 
-function Body({ v, mask }: { v: SdView; mask: (s: string) => string }) {
+function Body({ v, mask, onTry }: { v: SdView; mask: (s: string) => string; onTry?: (x: TryTrades) => void }) {
   return (
     <>
       {/* The expiry: a glass segmented control, 50 tall, the selected segment a glass thumb. */}
@@ -98,6 +99,7 @@ function Body({ v, mask }: { v: SdView; mask: (s: string) => string }) {
           </div>
         ))}
         <Chance v={v} mask={mask} />
+        {onTry && <TryIt v={v} onTry={onTry} />}
       </section>
 
       <section aria-label="Every SD" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -232,6 +234,7 @@ function Chance({ v, mask }: { v: SdView; mask: (s: string) => string }) {
             ))}
           </div>
         )}
+        <Qty v={v} />
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
           <span style={kick}>Chance of profit</span>
           <span style={{ fontSize: 32, lineHeight: '38px', fontWeight: 700, letterSpacing: '-.02em', color: '#65C466' }}>{cop}</span>
@@ -242,7 +245,60 @@ function Chance({ v, mask }: { v: SdView; mask: (s: string) => string }) {
           </span>
         </div>
       </div>
-      <Timeline z={cur ? cur.pz : v.pz} />
+      {(cur ? cur.pz : v.pz) && <Timeline z={(cur ? cur.pz : v.pz)!} />}
     </>
+  );
+}
+
+/** Try in What if (Nik, 11 Nov 2026): one press puts the picked call and put, on the rest of the counts, into What if,
+    so the payoff chart and its numbers show the whole book with the trade. A second press adds them again. */
+function TryIt({ v, onTry }: { v: SdView; onTry: (x: TryTrades) => void }) {
+  const [done, setDone] = useState(false);
+  useLayoutEffect(() => { setDone(false); }, [v.tryIt?.label]);
+  const x = v.tryIt;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+      <button type="button" className="bare" disabled={!x}
+        onClick={() => { if (!x) return; onTry(x.trades); setDone(true); window.setTimeout(() => setDone(false), 2400); }}
+        style={{ height: 34, padding: '0 16px', borderRadius: 17, fontSize: 14, fontWeight: 600, color: x ? '#1C1C1E' : MU,
+          background: x ? '#F5F5F7' : 'rgba(118,118,128,.24)', cursor: x ? 'pointer' : 'default' }}>
+        {done ? 'Added to What if' : 'Try in What if'}
+      </button>
+      <span style={{ fontSize: 13, lineHeight: '18px', color: MU }}>
+        {x ? x.label : 'Nothing left to sell on this expiry'}
+      </span>
+    </div>
+  );
+}
+
+/** How many to sell now (Nik, 11 Nov 2026; a stand-in until his design): calls and puts, each a number with − and +.
+    It starts at the rest of the counts after what is held on the expiry. */
+function Qty({ v }: { v: SdView }) {
+  // − and + are 32 by 32 with the sign centred; the number sits in the middle, 44 wide; one 34 tall capsule.
+  const btn = (on: boolean): CSSProperties => ({ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    borderRadius: 16, fontSize: 18, lineHeight: '18px', fontWeight: 500, color: on ? INK : 'rgba(152,152,157,.5)', cursor: on ? 'pointer' : 'default' });
+  const one = (label: string, n: number, set: (n: number) => void) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontSize: 13, lineHeight: '18px', color: MUT }}>
+      <span>{label}</span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', height: 34, padding: '0 1px', borderRadius: 17, background: 'rgba(118,118,128,.24)' }}>
+        <button type="button" className="bare" aria-label={`Fewer ${label.toLowerCase()}`} onClick={() => set(n - 1)} disabled={n <= 0} style={btn(n > 0)}>
+          <span aria-hidden="true">−</span>
+        </button>
+        <input aria-label={`${label} to sell`} inputMode="numeric" value={n} onChange={(e) => set(Number(e.target.value.replace(/\D/g, '')))}
+          onFocus={(e) => e.currentTarget.select()}
+          style={{ width: 44, height: 32, padding: 0, border: 0, outline: 'none', background: 'transparent', color: INK, fontSize: 15, fontWeight: 600,
+            textAlign: 'center', fontVariantNumeric: 'tabular-nums' }} />
+        <button type="button" className="bare" aria-label={`More ${label.toLowerCase()}`} onClick={() => set(n + 1)} style={btn(true)}>
+          <span aria-hidden="true">+</span>
+        </button>
+      </span>
+    </span>
+  );
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+      <span style={kick}>To sell</span>
+      {one('Calls', v.qty.c, v.qty.setC)}
+      {one('Puts', v.qty.p, v.qty.setP)}
+    </div>
   );
 }

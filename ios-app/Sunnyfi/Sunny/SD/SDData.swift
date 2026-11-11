@@ -105,26 +105,27 @@ enum SDClient {
 /// peak. The same sums as heldPair in _shared/sd-engine.ts. Nil when a side is empty or it never makes money.
 struct SDPairNums: Equatable {
     struct Leg: Equatable { let K: Double; let n: Double; let at: Double }
-    let up: Double, dn: Double, tot: Double, sdUp: Double, sdDn: Double, cop: Double
+    /// up is nil with no calls, dn with no puts: that side has no breakeven.
+    let up: Double?, dn: Double?, tot: Double, sdUp: Double?, sdDn: Double?, cop: Double
 
     static func of(calls: [Leg], puts: [Leg], S: Double, m: Double) -> SDPairNums? {
-        guard !calls.isEmpty, !puts.isEmpty, S > 0, m > 0 else { return nil }
+        guard !(calls.isEmpty && puts.isEmpty), S > 0, m > 0 else { return nil }
         let all = calls + puts, T = all.reduce(0) { $0 + $1.n * $1.at }
         func pl(_ X: Double) -> Double {
             T - calls.reduce(0) { $0 + $1.n * max(0, X - $1.K) } - puts.reduce(0) { $0 + $1.n * max(0, $1.K - X) }
         }
         let top = all.map(\.K).reduce(all[0].K) { pl($1) > pl($0) ? $1 : $0 }
-        guard pl(top) > 0, pl(0) <= 0 else { return nil }
+        guard pl(top) > 0 else { return nil }
         func root(_ lo0: Double, _ hi0: Double, up: Bool) -> Double {
             var lo = lo0, hi = hi0
             for _ in 0..<200 { let md = (lo + hi) / 2; if (pl(md) > 0) == up { lo = md } else { hi = md } }
             return (lo + hi) / 2
         }
-        var hi = top * 2
-        while pl(hi) > 0 { hi *= 2 }
-        let up = root(top, hi, up: true), dn = root(0, top, up: false)
-        return SDPairNums(up: up, dn: dn, tot: T * 100, sdUp: log(up / S) / m, sdDn: log(S / dn) / m,
-                          cop: SDFmt.N(log(up / S) / m) - SDFmt.N(log(dn / S) / m))
+        var up: Double? = nil, dn: Double? = nil
+        if !calls.isEmpty { var hi = top * 2; while pl(hi) > 0 { hi *= 2 }; up = root(top, hi, up: true) }
+        if !puts.isEmpty { guard pl(0) <= 0 else { return nil }; dn = root(0, top, up: false) }
+        return SDPairNums(up: up, dn: dn, tot: T * 100, sdUp: up.map { log($0 / S) / m }, sdDn: dn.map { log(S / $0) / m },
+                          cop: (up.map { SDFmt.N(log($0 / S) / m) } ?? 1) - (dn.map { SDFmt.N(log($0 / S) / m) } ?? 0))
     }
 }
 
@@ -193,7 +194,9 @@ final class SDStore {
     enum Level { case closed, half, full }
     enum Side { case calls, puts }
     /// What is picked: the expiry (nil = the first), the call and put SD (nil = the suggestion). A pin keeps the same.
-    struct Pick: Codable, Equatable { var ex: String? = nil; var kc: Double? = nil; var kp: Double? = nil }
+    /// nc and np: how many calls and puts to sell now (Nik, 11 Nov 2026), nil = the rest of the counts after what is
+    /// held on that expiry. A new expiry starts them over.
+    struct Pick: Codable, Equatable { var ex: String? = nil; var kc: Double? = nil; var kp: Double? = nil; var nc: Int? = nil; var np: Int? = nil }
 
     private(set) var replies: [String: SDReply] = [:]
     private(set) var failed: Set<String> = []
@@ -260,6 +263,20 @@ final class SDStore {
         open(book: book, t: t)
     }
     func close() { level = .closed }
+
+    /// Try in What if (Nik, 11 Nov 2026): the picked call and put on the rest of the counts, sent to the Positions
+    /// chart as a fix to preview. One per name; a new press replaces it.
+    struct Trial: Equatable {
+        struct Side: Equatable { let put: Bool; let K: Double; let n: Int; let pr: Double }
+        let book: String; let t: String; let ex: String; let label: String; let days: Double; let iv: Double; let sides: [Side]
+        var credit: Double { sides.reduce(0) { $0 + $1.pr * Double($1.n) * 100 } }
+        var act: String {
+            "Sell " + sides.map { "\($0.n) \(label) \(SDFmt.fk($0.K)) \($0.put ? ($0.n == 1 ? "put" : "puts") : ($0.n == 1 ? "call" : "calls"))" }.joined(separator: " and ")
+        }
+    }
+    private(set) var trials: [String: Trial] = [:]
+    func trial(book: String, t: String) -> Trial? { trials[Self.key(book, t)] }
+    func tryIt(_ x: Trial) { trials[Self.key(x.book, x.t)] = x; level = .closed }
     /// The grabber: half to full, full to half.
     func grab() { level = level == .full ? .half : .full }
     func setLevel(_ l: Level) { level = l }
@@ -270,6 +287,8 @@ final class SDStore {
         keepPin()
     }
     func choose(call k: Double) { pick.kc = k; keepPin() }
+    func setCount(calls n: Int) { pick.nc = max(0, n); keepPin() }
+    func setCount(puts n: Int) { pick.np = max(0, n); keepPin() }
     func choose(put k: Double) { pick.kp = k; keepPin() }
 
     /// The pin in the header: on keeps what is picked (its expiry fixed) on the chart; off lets it go.

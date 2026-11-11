@@ -413,27 +413,35 @@ struct SDCard: View {
             .map { SDPairNums.Leg(K: $0.K, n: $0.n, at: abs($0.be! - $0.K)) } }
         let hc = side(false), hp = side(true)
         let hold = SDPairNums.of(calls: hc, puts: hp, S: S0, m: e.m)
-        let restC = max(0, Double(n.calls) - hc.reduce(0) { $0 + $1.n }), restP = max(0, Double(n.puts) - hp.reduce(0) { $0 + $1.n })
-        let mix = hold == nil ? nil : SDPairNums.of(calls: hc + (restC > 0 ? [.init(K: p.call.K, n: restC, at: p.call.pr)] : []),
-                                                  puts: hp + (restP > 0 ? [.init(K: p.put.K, n: restP, at: p.put.pr)] : []), S: S0, m: e.m)
+        let restC = max(0, n.calls - Int(hc.reduce(0) { $0 + $1.n })), restP = max(0, n.puts - Int(hp.reduce(0) { $0 + $1.n }))
+        // How many to sell now (Nik, 11 Nov 2026): his count, else the rest of the counts after what he holds.
+        let qC = max(0, sd.pick.nc ?? restC), qP = max(0, sd.pick.np ?? restP)
+        let cNew = qC > 0 ? [SDPairNums.Leg(K: p.call.K, n: Double(qC), at: p.call.pr)] : []
+        let pNew = qP > 0 ? [SDPairNums.Leg(K: p.put.K, n: Double(qP), at: p.put.pr)] : []
+        let nw = SDPairNums.of(calls: cNew, puts: pNew, S: S0, m: e.m)
+        let mix = hold == nil ? nil : SDPairNums.of(calls: hc + cNew, puts: hp + pNew, S: S0, m: e.m)
         let tab = hold == nil ? 0 : pairTab
         let legs = { (ls: [SDPairNums.Leg], w: String) in ls.map { "\(SDFmt.count(Int($0.n), w)) \(SDFmt.fk($0.K))" }.joined(separator: ", ") }
-        let rest = [restC > 0 ? "\(SDFmt.count(Int(restC), "call")) \(SDFmt.fk(p.call.K))" : nil,
-                    restP > 0 ? "\(SDFmt.count(Int(restP), "put")) \(SDFmt.fk(p.put.K))" : nil].compactMap { $0 }.joined(separator: " and ")
+        let rest = [qC > 0 ? "\(SDFmt.count(qC, "call")) \(SDFmt.fk(p.call.K))" : nil,
+                    qP > 0 ? "\(SDFmt.count(qP, "put")) \(SDFmt.fk(p.put.K))" : nil].compactMap { $0 }.joined(separator: " and ")
+        let newN = [qC > 0 ? SDFmt.count(qC, "call") : nil, qP > 0 ? SDFmt.count(qP, "put") : nil].compactMap { $0 }.joined(separator: " and ")
+        let perShare = (qC > 0 ? p.call.pr : 0) + (qP > 0 ? p.put.pr : 0)
         // What the tab shows: the chance, the $, the line under the $, the strikes on the bar and its breakevens.
-        let v: (cop: Double, tot: Double, sub: String, callK: Double, putK: Double, up: Double, dn: Double, sdUp: Double, sdDn: Double) = {
+        typealias View_ = (cop: Double, tot: Double, sub: String, callK: Double?, putK: Double?, up: Double?, dn: Double?, sdUp: Double?, sdDn: Double?)
+        let v: View_ = {
             if tab == 1, let h = hold {
                 return (h.cop, h.tot, "taken in for " + legs(hc, "call") + " and " + legs(hp, "put"),
-                        hc.map(\.K).min() ?? h.up, hp.map(\.K).max() ?? h.dn, h.up, h.dn, h.sdUp, h.sdDn)
+                        hc.map(\.K).min(), hp.map(\.K).max(), h.up, h.dn, h.sdUp, h.sdDn)
             }
             if tab == 2, let b = mix {
-                return (b.cop, b.tot, rest.isEmpty ? "in all for what you hold, nothing left to sell" : "in all for what you hold plus " + rest,
-                        min(hc.map(\.K).min() ?? p.call.K, restC > 0 ? p.call.K : .infinity),
-                        max(hp.map(\.K).max() ?? p.put.K, restP > 0 ? p.put.K : -.infinity), b.up, b.dn, b.sdUp, b.sdDn)
+                return (b.cop, b.tot, rest.isEmpty ? "in all for what you hold, nothing new" : "in all for what you hold plus " + rest,
+                        (hc + cNew).map(\.K).min(), (hp + pNew).map(\.K).max(), b.up, b.dn, b.sdUp, b.sdDn)
             }
-            return (p.cop, (p.call.pr * Double(n.calls) + p.put.pr * Double(n.puts)) * 100,
-                    "\(SDFmt.count(n.calls, "call")) and \(SDFmt.count(n.puts, "put")) · $\(SDFmt.f2(p.tot)) a share",
-                    p.call.K, p.put.K, p.up, p.dn, p.sdUp, p.sdDn)
+            if let x = nw {
+                return (x.cop, x.tot, newN + " · $" + SDFmt.f2(perShare) + " a share",
+                        qC > 0 ? p.call.K : nil, qP > 0 ? p.put.K : nil, x.up, x.dn, x.sdUp, x.sdDn)
+            }
+            return (0, 0, "nothing to sell: set a count", nil, nil, nil, nil, nil, nil)
         }()
         let totT = BriefWords.plain(SDFmt.money(v.tot), privacy: privacy)
         // Roomier than the other tiles (Nik 11 Nov: "increase the height of the card"): 16 between the parts, 18 under the
@@ -448,6 +456,16 @@ struct SDCard: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.bottom, 2)
+            }
+            // How many to sell now (Nik, 11 Nov 2026; a stand-in until his design): calls and puts, each a stepper.
+            VStack(alignment: .leading, spacing: 6) {
+                Text("TO SELL").sType(SType(size: 11, weight: 600, line: 14, tracking: 0.05), tabular: false).foregroundStyle(SDPal.muT)
+                Stepper(value: Binding(get: { qC }, set: { sd.setCount(calls: $0) }), in: 0...9999) {
+                    Text("\(SDFmt.count(qC, "call")) at \(SDFmt.fk(p.call.K))").sType(SType(size: 15, weight: 600, line: 20, tracking: 0))
+                }
+                Stepper(value: Binding(get: { qP }, set: { sd.setCount(puts: $0) }), in: 0...9999) {
+                    Text("\(SDFmt.count(qP, "put")) at \(SDFmt.fk(p.put.K))").sType(SType(size: 15, weight: 600, line: 20, tracking: 0))
+                }
             }
             HStack(alignment: .bottom, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -467,7 +485,31 @@ struct SDCard: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(privacy ? "Amount hidden" : BriefWords.speech(totT)), \(v.sub)")
             }
-            SDTimeline(S0: S0, callK: v.callK, putK: v.putK, up: v.up, dn: v.dn, sdUp: v.sdUp, sdDn: v.sdDn)
+            if v.up != nil || v.dn != nil {
+                SDTimeline(S0: S0, callK: v.callK, putK: v.putK, up: v.up, dn: v.dn, sdUp: v.sdUp, sdDn: v.sdDn)
+            }
+            // Try in What if (11 Nov 2026): the count at the picked strikes goes to the Positions chart.
+            let sides = [qC > 0 ? SDStore.Trial.Side(put: false, K: p.call.K, n: qC, pr: p.call.pr) : nil,
+                         qP > 0 ? SDStore.Trial.Side(put: true, K: p.put.K, n: qP, pr: p.put.pr) : nil].compactMap { $0 }
+            let trial = sides.isEmpty ? nil : SDStore.Trial(book: sd.book, t: sd.t, ex: e.ex, label: e.label, days: e.cd, iv: e.iv, sides: sides)
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    if let trial { withAnimation(S.fade) { sd.tryIt(trial) } }
+                } label: {
+                    Text("Try in What if").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
+                        .foregroundStyle(trial == nil ? SDPal.mu : SDPal.cd)
+                        .frame(maxWidth: .infinity).frame(height: 44)
+                        .background(Capsule().fill(trial == nil ? SDPal.trk : SDPal.ink))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(trial == nil)
+                .accessibilityHint(trial == nil ? "" : "Shows it on the Positions chart with the whole book")
+                Text(trial?.act ?? "Nothing left to sell on \(e.label)")
+                    .sType(SType(size: 12, weight: 400, line: 16, tracking: 0)).foregroundStyle(SDPal.muT)
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
+            }
         }
         .padding(.top, 18).padding(.horizontal, 16).padding(.bottom, 22)
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(SDPal.tile))
@@ -610,34 +652,42 @@ private struct SDSideSwitch: View {
 /// breakeven (or the put) to the upper (or the call), 12% padding each side.
 private struct SDTimeline: View {
     let S0: Double
-    let callK: Double
-    let putK: Double
-    let up: Double
-    let dn: Double
-    let sdUp: Double
-    let sdDn: Double
+    /// A missing side (a calls-only or puts-only sale) is nil: no strike, no breakeven, and its end stays green.
+    let callK: Double?
+    let putK: Double?
+    let up: Double?
+    let dn: Double?
+    let sdUp: Double?
+    let sdDn: Double?
     var body: some View {
         GeometryReader { g in
             let w = g.size.width
-            // Today is always on the bar, even when it has moved past a strike or a breakeven.
-            let a0 = min(dn, putK, S0), b0 = max(up, callK, S0), pad = (b0 - a0) * 0.12, A = a0 - pad, B = max(b0 + pad, A + 1e-6)
+            // Today is always on the bar, even when it has moved past a strike or a breakeven; a missing side gets room
+            // to match the other.
+            let lo = [dn, putK, S0].compactMap { $0 }.min() ?? S0, hi = [up, callK, S0].compactMap { $0 }.max() ?? S0
+            let a0 = (dn == nil && putK == nil) ? S0 - max(hi - S0, S0 * 0.02) * 0.6 : lo
+            let b0 = (up == nil && callK == nil) ? S0 + max(S0 - a0, S0 * 0.02) * 0.6 : hi
+            let pad = (b0 - a0) * 0.12, A = a0 - pad, B = max(b0 + pad, A + 1e-6)
             let X = { (v: Double) -> CGFloat in CGFloat((v - A) / (B - A)) * w }
-            let feet = [(SDFmt.f2(dn) + " (BE)", "\(SDFmt.pc(dn / S0 - 1)) (\(String(format: "%.1f", sdDn)) SD)", X(dn)),
-                        ("$" + SDFmt.f2(S0), "today", X(S0)),
-                        (SDFmt.f2(up) + " (BE)", "\(SDFmt.pc(up / S0 - 1)) (\(String(format: "%.1f", sdUp)) SD)", X(up))]
+            let zl = dn ?? A, zr = up ?? B, ml = putK ?? A, mr = callK ?? B
+            let feet: [(String, String, CGFloat)] = (dn.map { [(SDFmt.f2($0) + " (BE)", "\(SDFmt.pc($0 / S0 - 1)) (\(String(format: "%.1f", sdDn ?? 0)) SD)", X($0))] } ?? [])
+                + [("$" + SDFmt.f2(S0), "today", X(S0))]
+                + (up.map { [(SDFmt.f2($0) + " (BE)", "\(SDFmt.pc($0 / S0 - 1)) (\(String(format: "%.1f", sdUp ?? 0)) SD)", X($0))] } ?? [])
             let at = Self.spread(feet.map { ($0.2, Self.footWidth($0.0, $0.1)) }, W: w)
+            let sides: [(isCall: Bool, K: Double)] = [putK.map { (false, $0) }, callK.map { (true, $0) }].compactMap { $0 }
             ZStack(alignment: .topLeading) {
                 Capsule().fill(SDPal.trk).frame(width: w, height: 6).offset(y: 46)
-                Capsule().fill(SDPal.gz).frame(width: max(0, X(up) - X(dn)), height: 6).offset(x: X(dn), y: 46)
-                Rectangle().fill(SDPal.gz2).frame(width: max(0, X(callK) - X(putK)), height: 6).offset(x: X(putK), y: 46)
-                ForEach([false, true], id: \.self) { isCall in
-                    let K = isCall ? callK : putK, c = SDPal.side(!isCall)
+                Capsule().fill(SDPal.gz).frame(width: max(0, X(zr) - X(zl)), height: 6).offset(x: X(zl), y: 46)
+                Rectangle().fill(SDPal.gz2).frame(width: max(0, X(mr) - X(ml)), height: 6).offset(x: X(ml), y: 46)
+                ForEach(sides.indices, id: \.self) { i in
+                    let isCall = sides[i].isCall, K = sides[i].K, c = SDPal.side(!isCall)
                     // A side already in the money draws no distance: its line would lie over the other side's.
                     if isCall ? K > S0 : K < S0 {
                         Capsule().fill(c).opacity(0.55).frame(width: abs(X(K) - X(S0)), height: 2).offset(x: min(X(K), X(S0)), y: 36)
                         // With the other side in the money between today and this strike, the label sits between the
                         // two strikes, off the other side's line.
-                        let o = isCall ? putK : callK, from = (isCall ? o > S0 && o < K : o < S0 && o > K) ? o : S0
+                        let o = isCall ? putK : callK
+                        let from = o.flatMap { o in (isCall ? o > S0 && o < K : o < S0 && o > K) ? o : nil } ?? S0
                         label(SDFmt.dir(K / S0 - 1), 11, 700, c).position(x: (X(K) + X(from)) / 2, y: 18 + 7)
                     }
                     VStack(spacing: 2) {
@@ -656,8 +706,16 @@ private struct SDTimeline: View {
         .frame(height: 94)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Profit zone")
-        .accessibilityValue("Profit between the breakevens \(SDFmt.f2(dn)), \(SDFmt.f2(sdDn)) SD and \(SDFmt.saidMove(dn / S0 - 1)), and \(SDFmt.f2(up)), \(SDFmt.f2(sdUp)) SD and \(SDFmt.saidMove(up / S0 - 1)). Today \(SDFmt.f2(S0)) dollars. "
-                            + "Put \(SDFmt.fk(putK)), \(SDFmt.saidMove(putK / S0 - 1)). Call \(SDFmt.fk(callK)), \(SDFmt.saidMove(callK / S0 - 1)).")
+        .accessibilityValue(said)
+    }
+    private var said: String {
+        var s = "Profit"
+        if let dn { s += " above \(SDFmt.f2(dn)), \(SDFmt.f2(sdDn ?? 0)) SD and \(SDFmt.saidMove(dn / S0 - 1))" }
+        if let up { s += (dn == nil ? "" : " and") + " below \(SDFmt.f2(up)), \(SDFmt.f2(sdUp ?? 0)) SD and \(SDFmt.saidMove(up / S0 - 1))" }
+        s += ". Today \(SDFmt.f2(S0)) dollars."
+        if let putK { s += " Put \(SDFmt.fk(putK)), \(SDFmt.saidMove(putK / S0 - 1))." }
+        if let callK { s += " Call \(SDFmt.fk(callK)), \(SDFmt.saidMove(callK / S0 - 1))." }
+        return s
     }
     /// The labels under the bar, each centred under its point, then pushed apart so none touch (8 apart), and kept
     /// within 12 of the bar's ends (the tile's padding is 16).

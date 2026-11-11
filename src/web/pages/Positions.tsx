@@ -302,7 +302,8 @@ function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy, clos
             <span style={{ fontSize: 12, color: MU }}>one at a time</span>
           </div>
           {layer === 'sd' && (
-            <SdCard v={sdV} t={t} busy={sdQ.isPlaceholderData || (!!sdV && sdV.t !== t)} failed={sdQ.isError || (!!sdData && !sdV)} mask={mask} />
+            <SdCard v={sdV} t={t} busy={sdQ.isPlaceholderData || (!!sdV && sdV.t !== t)} failed={sdQ.isError || (!!sdData && !sdV)} mask={mask}
+              onTry={(xs) => wf.addMany(xs)} />
           )}
           <Compare dL={dL} rows={cmpRows} top={top} mask={mask} />
         </div>

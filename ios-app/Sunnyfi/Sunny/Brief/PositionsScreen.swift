@@ -165,7 +165,7 @@ struct BriefPositionsScreen: View {
                                             legFilter: $legFilter, layer: $layer, chain: $chain, fix: $fix, wallsKind: $wallsKind, zoom: $zoom,
                                             privacy: privacy, late: live && brief.asOf() != nil,
                                             // No SD on the chart (Nik, 11 Nov 2026: "looks very busy"): the sheet only.
-                                            sdLines: nil, sdOn: sdUp, sdPinned: false,
+                                            sdLines: nil, sdOn: sdUp, sdPinned: false, sdTrial: sd.trial(book: sdBook, t: name),
                                             onSd: toggleSD, onChartY: { chartY = $0 })
                                 .id("\(acct)-\(name)")
                         }
@@ -595,6 +595,8 @@ private struct PositionsDetail: View {
     var sdLines: SDLines? = nil
     var sdOn = false
     var sdPinned = false
+    /// Try in What if from the SD card (11 Nov 2026): shown as the first fix and picked when it arrives.
+    var sdTrial: SDStore.Trial? = nil
     var onSd: () -> Void = {}
     var onChartY: (CGFloat) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduce
@@ -618,7 +620,14 @@ private struct PositionsDetail: View {
         let st = m.stops[stop], px = price ?? m.S0, tt = st.tt
         let pl = m.pl(px, tt, off: off), g = m.greeks(px, tt, off: off), fl = late ? nil : m.flip(tt, off: off)
         let short = g.d < 0
-        let fixes = m.fixes(px, tt, off: off)
+        let tried = sdTrial.map { x in
+            PositionsModel.Fix(id: "sd", title: "SD pick · \(x.label)", cost: x.credit, act: x.act,
+                               extra: x.sides.enumerated().map { i, s in
+                                   PositionsModel.Leg(id: "sd\(i)", group: "s", ty: s.put ? .put : .call, K: s.K, q: -Double(s.n), T: x.days, ex: x.label,
+                                                      title: "", kind: nil, src: "sd", iv: x.iv)
+                               }, credit: true)
+        }
+        let fixes = (tried.map { [$0] } ?? []) + m.fixes(px, tt, off: off)
         let picked = fixes.first { $0.id == fix }
         VStack(alignment: .leading, spacing: 0) {
             // The chart card, edge to edge on its own fill: padding 16 20 12, 10 between parts, a 0.5 rule above
@@ -762,6 +771,10 @@ private struct PositionsDetail: View {
                         if !fixes.isEmpty {
                             FixesTiles(m: m, px: px, tt: tt, off: off, fixes: fixes, picked: $fix, privacy: privacy)
                         }
+                        // A trade sent from the SD card is picked as it arrives, so the chart shows it at once.
+                        Color.clear.frame(height: 0)
+                            .onChange(of: sdTrial) { _, x in withAnimation(S.fade) { fix = x == nil ? nil : "sd" } }
+                            .onAppear { if sdTrial != nil, fix == nil { fix = "sd" } }
                     }
                     .padding(.top, 16)
                 }
@@ -1566,7 +1579,7 @@ private struct FixesTiles: View {
         // The design's fixes: one row each, 10 apart, padding 12 14, radius 14: the name and its cost 15/20 bold on
         // one line, what it is 13/18, where it leaves you 13/18 bold; the picked one white with a 2 pt ink ring.
         VStack(alignment: .leading, spacing: 10) {
-            Text("Fixes").sType(SType(size: 13, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
+            Text(fixes.allSatisfy(\.credit) ? "What if" : "Fixes").sType(SType(size: 13, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
                 .accessibilityAddTraits(.isHeader)
             ForEach(fixes) { f in
                 let ad = m.delta(px, tt, off: off, extra: f.extra), ap = m.pl(px, tt, off: off, extra: f.extra), on = picked == f.id
@@ -1575,7 +1588,8 @@ private struct FixesTiles: View {
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(f.title).sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
                             Spacer(minLength: 0)
-                            BriefWords.line(SampleEngine.fK(f.cost), privacy: privacy).sType(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(S.ink)
+                            BriefWords.line((f.credit ? "+" : "") + SampleEngine.fK(f.cost), privacy: privacy).sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
+                                .foregroundStyle(f.credit ? S.green : S.ink)
                         }
                         Text(f.act).sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false).foregroundStyle(PosC.mu)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1591,7 +1605,7 @@ private struct FixesTiles: View {
                 }
                 .buttonStyle(.plain)
                 // One element; the picked fix is selected. Money "hidden" with privacy on.
-                .accessibilityLabel("\(f.title), costs \(PosSay.moneyK(f.cost, privacy)). \(PosSay.words(f.act)). Then \(PosSay.side(ad)) delta, \(PosSay.signed(ap, privacy, k: true))")
+                .accessibilityLabel("\(f.title), \(f.credit ? "brings in" : "costs") \(PosSay.moneyK(f.cost, privacy)). \(PosSay.words(f.act)). Then \(PosSay.side(ad)) delta, \(PosSay.signed(ap, privacy, k: true))")
                 .accessibilityAddTraits(on ? .isSelected : [])
                 .accessibilityHint(on ? "Takes its preview off the chart" : "Previews it on the chart, dashed green")
             }

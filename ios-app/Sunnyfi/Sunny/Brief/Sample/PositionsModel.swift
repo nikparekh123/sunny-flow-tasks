@@ -32,6 +32,8 @@ struct PositionsModel {
         /// Live: the expiry as the server sends it ("2026-11-13"), for SD on your positions (11 Nov 2026); "" for shares
         /// and the sample book.
         var iso: String = ""
+        /// A leg tried from the SD card (src "sd", 11 Nov 2026): its IV, for Black-Scholes, since no grid knows it.
+        var iv: Double? = nil
     }
     /// A date slider stop: days on, short label, phrase, long label.
     struct Stop: Hashable { let tt: Double; let short: String; let phrase: String; let long: String; var friday: Bool { short.contains(" ") } }
@@ -235,6 +237,7 @@ struct PositionsModel {
         l.ty == .shares ? l.q * S : l.q * 100 * SampleEngine.bs(S, l.K, max(0, l.T - tt) / 365, vol ?? v, put: l.ty == .put)
     }
     func legPL(_ l: Leg, _ S: Double, _ tt: Double) -> Double {
+        if l.src == "sd" { return value(l, S, tt, vol: l.iv) - value(l, S0, 0, vol: l.iv) }
         guard let g else { return value(l, S, tt) - value(l, S0, 0) }
         if l.ty == .shares { return l.q * (S - S0) }
         let key = l.src ?? l.id
@@ -246,6 +249,7 @@ struct PositionsModel {
         return 0
     }
     func legDelta(_ l: Leg, _ S: Double, _ tt: Double) -> Double {
+        if l.src == "sd" { return l.q * 100 * SampleEngine.delta(S, l.K, max(0, l.T - tt) / 365, l.iv ?? v, put: l.ty == .put) }
         guard let g else { return l.ty == .shares ? l.q : l.q * 100 * SampleEngine.delta(S, l.K, max(0, l.T - tt) / 365, v, put: l.ty == .put) }
         if l.ty == .shares { return l.q }
         let key = l.src ?? l.id
@@ -322,7 +326,11 @@ struct PositionsModel {
 
     // MARK: Fixes (only when short at the price and date)
 
-    struct Fix: Identifiable { let id: String; let title: String; let cost: Double; let act: String; let extra: [Leg] }
+    struct Fix: Identifiable {
+        let id: String; let title: String; let cost: Double; let act: String; let extra: [Leg]
+        /// Money in rather than out (the SD card's sale, 11 Nov 2026).
+        var credit = false
+    }
     func fixes(_ S: Double, _ tt: Double, off: Set<String>) -> [Fix] {
         let need = max(0, -delta(S, tt, off: off))
         guard need > 0 else { return [] }
