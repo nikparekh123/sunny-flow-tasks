@@ -52,7 +52,8 @@ struct BriefPositionsScreen: View {
     @State private var legFilter = "All"
     @State private var layer: String? = nil
     @State private var fix: String?
-    @State private var totalsMode = 0
+    /// The totals row's view: 0 Paid, 1 Value now, 2 Time value (opens on Time value, as before).
+    @State private var totalsMode = 2
     @State private var wallsKind = "All"
     /// The payoff chart's price range, an index into PositionsModel.zooms (Nov 8): ±25% each time the tab opens,
     /// kept across names while it stays open, as the design's z45.
@@ -161,7 +162,9 @@ struct BriefPositionsScreen: View {
                         }
                         // In a ZStack so a new name crossfades in place (S.fade) instead of stacking under the old one.
                         ZStack(alignment: .topLeading) {
-                            PositionsDetail(m: m, stop: Binding(get: { min(stop, m.stops.count - 1) }, set: { stop = $0 }), price: $price, off: $off,
+                            // $stop itself, clamped inside: a Binding(get:set:) built here read as changed on every tab
+                            // switch and redrew the chart twice each time (Nik, 11 Nov 2026: a jerk on the switch).
+                            PositionsDetail(m: m, stop: $stop, price: $price, off: $off,
                                             legFilter: $legFilter, layer: $layer, chain: $chain, fix: $fix, wallsKind: $wallsKind, zoom: $zoom,
                                             privacy: privacy, late: live && brief.asOf() != nil,
                                             // No SD on the chart (Nik, 11 Nov 2026: "looks very busy"): the sheet only.
@@ -388,26 +391,24 @@ private struct BookTotalsRow: View {
     let hs: [PositionsModel.Holdings]
     @Binding var mode: Int
     let privacy: Bool
+    /// One column (Nik, 11 Nov 2026, the same three views as the web): what was paid (or taken in), its value now (or
+    /// the cost to buy back), its time value (nil for shares), and whether it was sold.
+    struct Col { let name: String; let paid: Double; let now: Double; let tv: Double?; let sold: Bool
+        /// Up when what was bought is worth more, or when what was sold costs less to buy back; on what was paid.
+        var pct: Double { paid > 0 ? (sold ? paid - now : now - paid) / paid * 100 : 0 }
+    }
+    static let views = ["paid", "value now", "time value"]
+    static let said = ["paid", "value now", "time value"]
+    private func sum(_ f: (PositionsModel.Holdings) -> Double) -> Double { hs.reduce(0) { $0 + f($1) } }
     var body: some View {
-        let gain = hs.reduce(0) { $0 + $1.shareGain }, tl = hs.reduce(0) { $0 + $1.timeLeaps }, to = hs.reduce(0) { $0 + $1.timeOtm }
-        let ip = hs.reduce(0) { $0 + $1.ip.value }, sc = hs.reduce(0) { $0 + $1.sc.value }, sp = hs.reduce(0) { $0 + $1.sp.value }
-        let shT = hs.reduce(0) { $0 + $1.sh.today }, lpT = hs.reduce(0) { $0 + $1.lp.today }, ocT = hs.reduce(0) { $0 + $1.oc.today }, ipT = hs.reduce(0) { $0 + $1.ip.today }
-        let shV = hs.reduce(0) { $0 + $1.sh.value }, lpV = hs.reduce(0) { $0 + $1.lp.value }, ocV = hs.reduce(0) { $0 + $1.oc.value }
-        let views = ["time value", "% today", "$ today"]
-        let said = ["time value", "percent change today", "dollar change today"]
-        let longItems: [(String, Double, Double, Double)] = [("Shares", gain, shT, shV), ("LEAPS", tl, lpT, lpV), ("OTM calls", to, ocT, ocV), ("Insurance puts", ip, ipT, ip)]
-        // What each Long figure shows in this view: the name and the value.
-        let shown: [(name: String, v: Double)] = longItems.filter { $0.1 != 0 || $0.2 != 0 }.map { it in
-            (it.0, mode == 0 ? it.1 : mode == 1 ? (it.3 != 0 ? it.2 / it.3 * 100 : 0) : it.2)
-        }
-        // Sold cycles with Long (the design's totG: "Calls · time value", then % today, then $ today; Nik, 8 Nov 2026).
-        // Time value is the sales' time value alone (the engine's tv.sc and tv.sp), so Calls and Puts add up to Home's
-        // Time value; % and $ today stay on what they would cost to buy back.
-        let scT = hs.reduce(0) { $0 + $1.sc.today }, spT = hs.reduce(0) { $0 + $1.sp.today }
-        let tsc = hs.reduce(0) { $0 + $1.timeSc }, tsp = hs.reduce(0) { $0 + $1.timeSp }
-        let sold: [(String, Double, Bool)] = [("Calls", sc, scT, tsc), ("Puts", sp, spT, tsp)].filter { $0.1 != 0 }.map { it in
-            (it.0, mode == 0 ? it.3 : mode == 1 ? (it.1 != 0 ? it.2 / it.1 * 100 : 0) : it.2, false)
-        }
+        let long = [Col(name: "Shares", paid: sum { $0.paid.sh }, now: sum { $0.sh.value }, tv: nil, sold: false),
+                    Col(name: "LEAPS", paid: sum { $0.paid.lp }, now: sum { $0.lp.value }, tv: sum { $0.timeLeaps }, sold: false),
+                    Col(name: "OTM calls", paid: sum { $0.paid.oc }, now: sum { $0.oc.value }, tv: sum { $0.timeOtm }, sold: false),
+                    Col(name: "Insurance puts", paid: sum { $0.paid.ip }, now: sum { $0.ip.value }, tv: sum { $0.timeIp }, sold: false)]
+            .filter { $0.paid != 0 || $0.now != 0 }
+        let sold = [Col(name: "Calls", paid: sum { $0.paid.sc }, now: sum { $0.sc.value }, tv: sum { $0.timeSc }, sold: true),
+                    Col(name: "Puts", paid: sum { $0.paid.sp }, now: sum { $0.sp.value }, tv: sum { $0.timeSp }, sold: true)]
+            .filter { $0.paid != 0 || $0.now != 0 }
         // ⚠ A tap on the strip cycles the view. Not a Button around the ScrollView: inside a sideways ScrollView the
         // button never fired on the phone (Nik, 8 Nov 2026: "it was supposed to be tappable"); the tap sits on the row.
         let cycle = { withAnimation(S.fade) { mode = (mode + 1) % 3 } }
@@ -416,13 +417,9 @@ private struct BookTotalsRow: View {
                 // The design's totGrid: groups and items 16 apart with a 1 pt rule on the left of each after the
                 // first; padding 2 top, 6 bottom, 40 right, and the last 36 pt fade out.
                 HStack(alignment: .top, spacing: 0) {
-                    group("Long", shown.map { it in
-                        let lbl = mode == 0 ? (it.name == "Shares" ? "Shares · gain" : it.name == "Insurance puts" ? "Insurance puts" : "\(it.name) · time value") : "\(it.name) · \(views[mode])"
-                        // The design's colour (tv$): time value in ink, the shares' gain and every % or $ change green or red.
-                        return (lbl, it.v, mode == 1, mode != 0 || it.name == "Shares")
-                    })
+                    group("Long", long)
                     if !sold.isEmpty {
-                        group("Sold", sold.map { ("\($0.0) · \(views[mode])", $0.1, mode == 1, mode != 0) })
+                        group("Sold", sold)
                             .padding(.leading, 16)
                             .overlay(alignment: .leading) { Rectangle().fill(Self.rule).frame(width: 1) }
                     }
@@ -441,49 +438,53 @@ private struct BookTotalsRow: View {
             }
         }
         .sensoryFeedback(.selection, trigger: mode)
-        // VoiceOver: the view on screen, then every figure with its sign as a word (money "hidden" with privacy on).
+        // VoiceOver: the view on screen, then every figure (money "hidden" with privacy on).
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default, cycle)
-        .accessibilityLabel("Book totals, \(said[mode])")
-        .accessibilityValue(spoken(shown, sold))
-        .accessibilityHint("Shows \(said[(mode + 1) % 3]) next")
+        .accessibilityLabel("Book totals, \(Self.said[mode])")
+        .accessibilityValue(spoken(long, sold))
+        .accessibilityHint("Shows \(Self.said[(mode + 1) % 3]) next")
     }
 
-    private func spoken(_ long: [(name: String, v: Double)], _ sold: [(String, Double, Bool)]) -> String {
-        let l = long.map { it -> String in
-            let what = mode == 0 ? (it.name == "Shares" ? "Shares gain" : it.name == "Insurance puts" ? "Insurance puts" : "\(it.name) time value") : it.name
-            let amount = mode == 1 ? "\(it.v < 0 ? "down" : "up") \(String(format: "%.1f", abs(it.v))) percent"
-                : mode == 2 ? PosSay.signed(it.v, privacy, k: true)
-                : (it.v < 0 && !privacy ? "down " : "") + PosSay.moneyK(it.v, privacy)
-            return "\(what), \(amount)"
-        }
-        let s = sold.map { it -> String in
-            let amount = mode == 1 ? "\(it.1 < 0 ? "down" : "up") \(String(format: "%.1f", abs(it.1))) percent"
-                : mode == 2 ? PosSay.signed(it.1, privacy, k: true) : PosSay.moneyK(it.1, privacy)
-            return "\(it.0) \(mode == 0 ? "time value" : ""), \(amount)"
+    /// A column's label in this view: what was sold was taken in, and costs that much to buy back now.
+    private func label(_ c: Col) -> String {
+        "\(c.name) · " + (c.sold && mode == 0 ? "taken in" : c.sold && mode == 1 ? "to buy back" : Self.views[mode])
+    }
+
+    private func spoken(_ long: [Col], _ sold: [Col]) -> String {
+        let one = { (c: Col) -> String in
+            switch mode {
+            case 0: return "\(c.name) \(c.sold ? "taken in" : "paid"), \(PosSay.moneyK(c.paid, privacy))"
+            case 1: return "\(c.name) \(c.sold ? "to buy back" : "value now"), \(PosSay.moneyK(c.now, privacy)), \(c.pct < 0 ? "down" : "up") \(String(format: "%.1f", abs(c.pct))) percent"
+            default: return c.tv.map { "\(c.name) time value, \(PosSay.moneyK($0, privacy))" } ?? "\(c.name), no time value"
+            }
         }
         var parts: [String] = []
-        if !l.isEmpty { parts.append("Long. " + l.joined(separator: "; ")) }
-        if !s.isEmpty { parts.append("Sold. " + s.joined(separator: "; ")) }
+        if !long.isEmpty { parts.append("Long. " + long.map(one).joined(separator: "; ")) }
+        if !sold.isEmpty { parts.append("Sold. " + sold.map(one).joined(separator: "; ")) }
         return parts.joined(separator: ". ")
     }
 
-    /// The design's TBL: rgba(29,29,31,.12) light, white 14% dark.
     static let rule = PosC.totRule
 
-    /// Items: the label, the value, whether it is a %, and whether its colour is its sign (else ink, red below zero).
-    private func group(_ h: String, _ items: [(String, Double, Bool, Bool)]) -> some View {
+    /// A group's columns: the figure (22/28 bold), in Value now the % change on what was paid under it (13/16, green
+    /// up, red down), then the label (13/16, the cards' mu); 16 either side of each rule.
+    private func group(_ h: String, _ items: [Col]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(h).sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
             HStack(alignment: .top, spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.offset) { i, it in
-                    // 22/28 bold, 2, then the label 13/16 in the cards' mu; 16 either side of each rule.
+                ForEach(Array(items.enumerated()), id: \.offset) { i, c in
                     VStack(alignment: .leading, spacing: 2) {
-                        BriefWords.line(it.2 ? String(format: "%.1f%%", abs(it.1)) : SampleEngine.fK(it.1), privacy: privacy)
+                        let fig = mode == 0 ? SampleEngine.fK(c.paid) : mode == 1 ? SampleEngine.fK(c.now) : c.tv.map { SampleEngine.fK($0) } ?? "-"
+                        BriefWords.line(fig, privacy: privacy)
                             .sType(SType(size: 22, weight: 700, line: 28, tracking: -0.01))
-                            .foregroundStyle(it.1 < 0 ? S.red : it.3 ? S.green : S.ink)
-                        Text(it.0).sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)
+                            .foregroundStyle(mode == 2 && c.tv == nil ? S.muted : mode == 2 && c.sold ? S.green : S.ink)
+                        if mode == 1 {
+                            Text(String(format: "%.1f%%", abs(c.pct))).sType(SType(size: 13, weight: 600, line: 16, tracking: 0))
+                                .foregroundStyle(c.pct > 0 ? S.green : c.pct < 0 ? S.red : S.muted)
+                        }
+                        Text(label(c)).sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)
                     }
                     .fixedSize()
                     .padding(.leading, i > 0 ? 16 : 0).padding(.trailing, 16)
@@ -617,7 +618,7 @@ private struct PositionsDetail: View {
         // Everything on and under the chart reads the zoomed model (m45(t, zi)): the scale, the grid, the strikes,
         // walls, the turns-short price and the ladder's prices follow the range.
         let zi = min(zoom, self.m.widestZoom), m = self.m.zoomed(PositionsModel.zooms[zi])
-        let st = m.stops[stop], px = price ?? m.S0, tt = st.tt
+        let si = min(stop, m.stops.count - 1), st = m.stops[si], px = price ?? m.S0, tt = st.tt
         let pl = m.pl(px, tt, off: off), g = m.greeks(px, tt, off: off), fl = late ? nil : m.flip(tt, off: off)
         let short = g.d < 0
         let tried = sdTrial.map { x in
@@ -678,7 +679,7 @@ private struct PositionsDetail: View {
                     .frame(height: 226)
                     .sensoryFeedback(.selection, trigger: zoomSteps)
                     .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(BriefPositionsScreen.page)).minY } action: { onChartY($0) }
-                DateSlider(m: m, stop: $stop)
+                DateSlider(m: m, stop: Binding(get: { min(stop, m.stops.count - 1) }, set: { stop = $0 }))
             }
             .padding(.horizontal, S.margin)
             .padding(.top, 16).padding(.bottom, 12)
@@ -1859,4 +1860,10 @@ private struct WholeBook: View {
         .accessibilityLabel(l)
         .accessibilityValue(BriefWords.speech(BriefWords.plain(v, privacy: privacy) + after + ", " + BriefWords.plain(sub, privacy: privacy)))
     }
+}
+
+/// Positions has no inputs: everything it shows comes from its own state and what it observes, so a parent redraw (a
+/// tab change, a refresh) never needs to rebuild it (Nik, 11 Nov 2026: a jerk on every tab switch).
+extension BriefPositionsScreen: Equatable {
+    nonisolated static func == (a: Self, b: Self) -> Bool { true }
 }

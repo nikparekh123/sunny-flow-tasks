@@ -44,7 +44,10 @@ struct PositionsModel {
     /// in the money sale's intrinsic part is not left to earn: Nik, 10 Nov 2026, Positions read $14.3K of puts where
     /// Home's Time value read $16.7K in all).
     typealias Holdings = (sh: Holding, lp: Holding, oc: Holding, ip: Holding, sc: Holding, sp: Holding, timeLeaps: Double, timeOtm: Double, shareGain: Double,
-                          timeSc: Double, timeSp: Double)
+                          timeSc: Double, timeSp: Double, timeIp: Double, paid: Paid)
+    /// What was paid for each group (Nik, 11 Nov 2026: Paid · Value now · Time value): the cost of the shares and of
+    /// what was bought, the premium taken in for what was sold. book-engine.ts holdings().paid, from Home's brief.
+    struct Paid { var sh = 0.0, lp = 0.0, oc = 0.0, ip = 0.0, sc = 0.0, sp = 0.0 }
 
     let t: String
     let company: String
@@ -186,8 +189,11 @@ struct PositionsModel {
     static func holdings(json n: JSONValue) -> Holdings {
         let h = n["h"]
         func p(_ k: String) -> Holding { Holding(value: h[k][0].double ?? 0, today: h[k][1].double ?? 0) }
+        let pd = h["paid"]
+        let paid = Paid(sh: pd["sh"].double ?? 0, lp: pd["lp"].double ?? 0, oc: pd["oc"].double ?? 0, ip: pd["ip"].double ?? 0,
+                        sc: pd["sc"].double ?? 0, sp: pd["sp"].double ?? 0)
         return (p("sh"), p("lp"), p("oc"), p("ip"), p("sc"), p("sp"), h["tv"]["lp"].double ?? 0, h["tv"]["oc"].double ?? 0, n["gain"].double ?? 0,
-                h["tv"]["sc"].double ?? 0, h["tv"]["sp"].double ?? 0)
+                h["tv"]["sc"].double ?? 0, h["tv"]["sp"].double ?? 0, h["tv"]["ip"].double ?? 0, paid)
     }
 
     private static let MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -381,22 +387,22 @@ struct PositionsModel {
     func holdings() -> Holdings {
         if let liveH { return liveH }
         var sh = Holding(), lp = Holding(), oc = Holding(), ip = Holding(), sc = Holding(), sp = Holding()
-        var tl = 0.0, to = 0.0, gain = 0.0, tsc = 0.0, tsp = 0.0
+        var tl = 0.0, to = 0.0, gain = 0.0, tsc = 0.0, tsp = 0.0, tip = 0.0, paid = Paid()
         let mv = S0 - P0
         for l in legs {
             switch l.ty {
             case .shares:
-                sh.value += l.q * S0; sh.today += l.q * mv; gain += l.q * (S0 - l.K)
+                sh.value += l.q * S0; sh.today += l.q * mv; gain += l.q * (S0 - l.K); paid.sh += l.q * (l.K > 0 ? l.K : S0)
             default:
                 if l.q < 0 {
                     let i = Int(l.id.dropFirst()) ?? 0
                     if sold.indices.contains(i) {
                         let s = sold[i]
                         if l.ty == .call {
-                            sc.value += Double(s.q) * 100 * s.now; sc.today += Double(s.q) * 100 * (s.at - s.now)
+                            sc.value += Double(s.q) * 100 * s.now; sc.today += Double(s.q) * 100 * (s.at - s.now); paid.sc += Double(s.q) * 100 * s.at
                             tsc += Double(s.q) * 100 * max(0, s.now - max(0, S0 - s.k))
                         } else {
-                            sp.value += Double(s.q) * 100 * s.now; sp.today += Double(s.q) * 100 * (s.at - s.now)
+                            sp.value += Double(s.q) * 100 * s.now; sp.today += Double(s.q) * 100 * (s.at - s.now); paid.sp += Double(s.q) * 100 * s.at
                             tsp += Double(s.q) * 100 * max(0, s.now - max(0, s.k - S0))
                         }
                     }
@@ -404,12 +410,13 @@ struct PositionsModel {
                     let val = l.q * 100 * SampleEngine.bs(S0, l.K, l.T / 365, v, put: l.ty == .put)
                     let tday = legDelta(l, S0, 0) * mv
                     let intrinsic = l.q * 100 * (l.ty == .put ? max(0, l.K - S0) : max(0, S0 - l.K))
-                    if l.ty == .put { ip.value += val; ip.today += tday }
-                    else if l.T > 400 { lp.value += val; lp.today += tday; tl += val - intrinsic }
-                    else { oc.value += val; oc.today += tday; to += val - intrinsic }
+                    // The sample book has no prices paid on record for what was bought: paid reads today's value.
+                    if l.ty == .put { ip.value += val; ip.today += tday; tip += val - intrinsic; paid.ip += val }
+                    else if l.T > 400 { lp.value += val; lp.today += tday; tl += val - intrinsic; paid.lp += val }
+                    else { oc.value += val; oc.today += tday; to += val - intrinsic; paid.oc += val }
                 }
             }
         }
-        return (sh, lp, oc, ip, sc, sp, tl, to, gain, tsc, tsp)
+        return (sh, lp, oc, ip, sc, sp, tl, to, gain, tsc, tsp, tip, paid)
     }
 }

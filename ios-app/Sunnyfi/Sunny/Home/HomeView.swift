@@ -129,7 +129,9 @@ struct HomeView: View {
                     NavigationStack {
                         ZStack {
                             SBackground()
-                            BriefHomeScreen(store: store, home: home)
+                            // Equatable on the build (Nik, 11 Nov 2026: a jerk on every tab switch): a tab change or a
+                            // refresh with the same build no longer redraws the whole Home.
+                            BriefHomeScreen(store: store, home: home).equatable()
                         }
                         .toolbar(.hidden, for: .navigationBar)
                     }
@@ -140,7 +142,8 @@ struct HomeView: View {
                     // data until Pass 2 feeds the new screen.
                     NavigationStack {
                         // Pass 2: the new screen on the real book once the server's brief is in; the old cards until then.
-                        if BriefDebug.sample || (brief.live != nil && brief.live?.error == nil) { BriefPositionsScreen().toolbar(.hidden, for: .navigationBar) }
+                        // Equatable (always equal): Positions redraws from its own state and data, not when Home's parent does.
+                        if BriefDebug.sample || (brief.live != nil && brief.live?.error == nil) { BriefPositionsScreen().equatable().toolbar(.hidden, for: .navigationBar) }
                         else { SunnyPositionsTab(store: store) }
                     }
                     .modifier(OwnTabBar())
@@ -183,13 +186,9 @@ struct HomeView: View {
             .presentationBackground(S.sheetFill)
         }
         .overlay {
-            SunnyTabBar(tab: router.tab, pick: pickTab, search: openSearch)
-                .offset(y: barDown || brief.onOverview || brief.ticker != nil ? 120 : 0)
-                .opacity(barGone || brief.onOverview || brief.ticker != nil ? 0 : 1)
-                .allowsHitTesting(!router.searchOpen && !brief.onOverview && brief.ticker == nil)
-                .animation(reduce ? S.fade : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: brief.onOverview)
-                // A ticker chart pushed from a tile: the bar leaves with it (it used to vanish at once).
-                .animation(reduce ? S.fade : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: brief.ticker != nil)
+            // Its own view, so the tab it reads redraws the bar alone (Nik, 11 Nov 2026: a jerk on every tab switch,
+            // because reading router.tab here rebuilt Home and Positions together, about 250 ms each time).
+            TabBarHost(router: router, brief: brief, barDown: barDown, barGone: barGone, reduce: reduce, pick: pickTab, search: openSearch)
         }
         // The SD calculator (11 Nov 2026), from the SD chip on Positions: a sheet over the page and the tab bar.
         .overlay { SDSheetHost() }
@@ -476,6 +475,26 @@ struct HomeUnavailable: View {
 }
 
 /// A tab's content without the system's tab bar, keeping the 49 pt it held so the pages sit where they did.
+/// The tab bar, apart from HomeView's body: what it reads (the tab, Search, Overview, a ticker chart) redraws it alone.
+private struct TabBarHost: View {
+    let router: HomeRouter
+    let brief: BriefState
+    let barDown: Bool
+    let barGone: Bool
+    let reduce: Bool
+    let pick: (HomeRouter.Tab) -> Void
+    let search: (_ listening: Bool) -> Void
+    var body: some View {
+        SunnyTabBar(tab: router.tab, pick: pick, search: search)
+            .offset(y: barDown || brief.onOverview || brief.ticker != nil ? 120 : 0)
+            .opacity(barGone || brief.onOverview || brief.ticker != nil ? 0 : 1)
+            .allowsHitTesting(!router.searchOpen && !brief.onOverview && brief.ticker == nil)
+            .animation(reduce ? S.fade : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: brief.onOverview)
+            // A ticker chart pushed from a tile: the bar leaves with it (it used to vanish at once).
+            .animation(reduce ? S.fade : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: brief.ticker != nil)
+    }
+}
+
 private struct OwnTabBar: ViewModifier {
     func body(content: Content) -> some View {
         content

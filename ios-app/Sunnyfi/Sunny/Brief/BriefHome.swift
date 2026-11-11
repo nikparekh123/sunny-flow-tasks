@@ -423,3 +423,9 @@ extension View {
         modifier(BriefCardChrome(radius: radius, padding: padding))
     }
 }
+
+/// A parent redraw (a tab change, Search, a refresh that brought the same build) leaves Home alone: it redraws when its
+/// build changes, and from what it observes itself (Nik, 11 Nov 2026: a jerk on every tab switch, about 250 ms).
+extension BriefHomeScreen: Equatable {
+    nonisolated static func == (a: Self, b: Self) -> Bool { a.store === b.store && a.home.builtAt == b.home.builtAt }
+}
