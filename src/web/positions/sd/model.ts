@@ -19,12 +19,19 @@ export interface SdExp {
   hist: { n: number; est: boolean };
 }
 export interface SdSold { put: boolean; K: number; n: number; ex: string; be: number | null }
+/** What you hold (Nik 11 Nov): one expiry's sold calls and sold puts as a pair, worked out by the server at the sale
+    prices; tot is the premium taken in, in dollars. */
+export interface SdHeld {
+  ex: string; label: string; calls: { K: number; n: number }[]; puts: { K: number; n: number }[];
+  tot: number; up: number; dn: number; sdUp: number; sdDn: number; cop: number;
+}
 export interface SdReply {
   ok: boolean; v: number; t: string; name: string; S: number; prev: number; move: number; open: boolean; today: string;
   cfg: { cLo: number; cHi: number; pLo: number; pHi: number };
   counts: { calls: number; puts: number };
   sold: SdSold[];
   exps: SdExp[];
+  held?: SdHeld[];
 }
 
 /** The web card is always dark: pal136(true). */
@@ -73,16 +80,48 @@ export interface SdView {
   sig: { key: string; k: string; v: string; vc: string; tag: string; tagc: string; s: string; fx: { key: number; t: string; c: string }[] }[];
   rng: { key: string; h: string; c: string; rT: string; o: { key: string; sd: string; strike: string; pr: string; won: string; sug: boolean; on: boolean; go: () => void }[] }[];
   both: { cop: string; prT: string; tot: number; totN: string };
-  pz: {
-    zL: string; zW: string; mL: string; mW: string; today: string;
-    top: { key: string; x: string; l: string; c: string }[];
-    dist: { key: string; l: string; x: string; L: string; W: string; c: string }[];
-    bot: { key: string; x: string; l: string; s: string; sd?: string }[];
-  };
+  pz: SdZone;
+  /** What you hold on the picked expiry, when you have sold calls and sold puts on it. */
+  held: { label: string; cop: string; tot: number; legsT: string; pz: SdZone } | null;
   ladC: LadRow[]; ladP: LadRow[];
   /** What the payoff chart draws (README 1.9). */
-  chart: { band: [number, number]; C: { K: number; label: string }; P: { K: number; label: string }; sold: { K: number; be: number | null; label: string }[] };
+  chart: {
+    band: [number, number]; C: { K: number; label: string }; P: { K: number; label: string }; sold: { K: number; be: number | null; label: string }[];
+    /** Each held pair's two breakevens (Nik 11 Nov, option 3). */
+    pair: { K: number; label: string }[];
+  };
 }
+/** The profit zone's drawing, in % of its width. */
+export interface SdZone {
+  zL: string; zW: string; mL: string; mW: string; today: string;
+  top: { key: string; x: string; l: string; c: string }[];
+  dist: { key: string; l: string; x: string; L: string; W: string; c: string }[];
+  bot: { key: string; x: string; l: string; s: string }[];
+}
+
+/** The profit zone from the lower breakeven (or the put) to the upper (or the call), 12% padding each side; under the
+    bar each breakeven in two lines, `36.54 (BE)` over `4.3% (1.2 SD)` (Nik 11 Nov). */
+function zoneOf(S: number, pK: number, cK: number, dn: number, up: number, sdDn: number, sdUp: number): SdZone {
+  // Today is always on the bar, even when it has moved past a strike or a breakeven.
+  const a0 = Math.min(dn, pK, S), b0 = Math.max(up, cK, S), pad = (b0 - a0) * 0.12, A = a0 - pad, B = b0 + pad;
+  const X2 = (v: number) => ((v - A) / (B - A) * 100).toFixed(2) + '%', W2 = (u: number, v: number) => ((v - u) / (B - A) * 100).toFixed(2) + '%';
+  return {
+    zL: X2(dn), zW: W2(dn, up), mL: X2(pK), mW: W2(pK, cK), today: X2(S),
+    top: [{ key: 'p', x: X2(pK), l: 'Put ' + fk(pK), c: P.PT }, { key: 'c', x: X2(cK), l: 'Call ' + fk(cK), c: P.CL }],
+    bot: [
+      { key: 'd', x: X2(dn), l: f2(dn) + ' (BE)', s: `${pc(dn / S - 1)} (${sdDn.toFixed(1)} SD)` },
+      { key: 't', x: X2(S), l: '$' + f2(S), s: 'today' },
+      { key: 'u', x: X2(up), l: f2(up) + ' (BE)', s: `${pc(up / S - 1)} (${sdUp.toFixed(1)} SD)` },
+    ],
+    // A side already in the money draws no distance: its line would lie over the other side's.
+    dist: [
+      // With the other side in the money between today and this strike, the label sits between the two strikes.
+      ...(pK < S ? [{ key: 'p', l: dir(pK / S - 1), x: X2((pK + (cK < S && cK > pK ? cK : S)) / 2), L: X2(pK), W: W2(pK, S), c: P.PT }] : []),
+      ...(cK > S ? [{ key: 'c', l: dir(cK / S - 1), x: X2((cK + (pK > S && pK < cK ? pK : S)) / 2), L: X2(S), W: W2(S, cK), c: P.CL }] : []),
+    ],
+  };
+}
+const legsOf = (ls: { K: number; n: number }[], one: string, many: string) => ls.map((l) => `${l.n} ${l.n === 1 ? one : many} ${fk(l.K)}`).join(', ');
 export interface LadRow { key: string; sdL: string; K: string; pct: string; prT: string; be: string; itm: string; bg: string; ring: string; rad: string; fw: number; sug: boolean; dc: string }
 
 /** card136, web mode, on the server's reply. */
@@ -132,22 +171,12 @@ export function sdView(d: SdReply, pick: SdPick, set: (p: SdPick) => void): SdVi
     { key: 'p', h: 'Sell put', c: P.PT, rT: range(cfg.pLo, cfg.pHi), o: opts(true) },
   ];
 
-  // The timeline: from the lower breakeven (or the put) to the upper breakeven (or the call), 12% padding each side.
-  const a0 = Math.min(dn, rp.K), b0 = Math.max(up, rc.K), pad = (b0 - a0) * 0.12, A = a0 - pad, B = b0 + pad;
-  const X2 = (v: number) => ((v - A) / (B - A) * 100).toFixed(2) + '%', W2 = (u: number, v: number) => ((v - u) / (B - A) * 100).toFixed(2) + '%';
-  const pz = {
-    zL: X2(dn), zW: W2(dn, up), mL: X2(rp.K), mW: W2(rp.K, rc.K), today: X2(S),
-    top: [{ key: 'p', x: X2(rp.K), l: 'Put ' + fk(rp.K), c: P.PT }, { key: 'c', x: X2(rc.K), l: 'Call ' + fk(rc.K), c: P.CL }],
-    bot: [
-      { key: 'd', x: X2(dn), l: f2(dn), s: 'breakeven', sd: f2(sdDn) + ' SD' },
-      { key: 't', x: X2(S), l: '$' + f2(S), s: 'today' },
-      { key: 'u', x: X2(up), l: f2(up), s: 'breakeven', sd: f2(sdUp) + ' SD' },
-    ],
-    dist: [
-      { key: 'p', l: dir(rp.K / S - 1), x: X2((rp.K + S) / 2), L: X2(Math.min(rp.K, S)), W: W2(Math.min(rp.K, S), Math.max(rp.K, S)), c: P.PT },
-      { key: 'c', l: dir(rc.K / S - 1), x: X2((rc.K + S) / 2), L: X2(Math.min(rc.K, S)), W: W2(Math.min(rc.K, S), Math.max(rc.K, S)), c: P.CL },
-    ],
-  };
+  const pz = zoneOf(S, rp.K, rc.K, dn, up, sdDn, sdUp);
+  const hd = (d.held ?? []).find((h) => h.ex === e.ex);
+  const held = hd ? {
+    label: hd.label, cop: pc(hd.cop), tot: hd.tot, legsT: legsOf(hd.calls, 'call', 'calls') + ' and ' + legsOf(hd.puts, 'put', 'puts'),
+    pz: zoneOf(S, Math.max(...hd.puts.map((x) => x.K)), Math.min(...hd.calls.map((x) => x.K)), hd.dn, hd.up, hd.sdDn, hd.sdUp),
+  } : null;
 
   // Every SD: the boxed range the rules allow, the picked row ringed, the suggestion's dot.
   const zone = (k: number, lo: number, hi: number, on: boolean, put: boolean, flip: boolean) => {
@@ -180,12 +209,13 @@ export function sdView(d: SdReply, pick: SdPick, set: (p: SdPick) => void): SdVi
     ivT: pc(e.iv), sdP: '±' + pc(m), sdD: '±$' + f2(S * m),
     exps, sig, rng,
     both: { cop: pc(cop), prT: '$' + f2(tot), tot: (rc.pr * calls + rp.pr * puts) * 100, totN: `${calls} ${calls === 1 ? 'call' : 'calls'} and ${puts} ${puts === 1 ? 'put' : 'puts'}` },
-    pz, ladC: lad(false), ladP: lad(true),
+    pz, held, ladC: lad(false), ladP: lad(true),
     chart: {
       band: e.band,
       C: { K: rc.K, label: `${fk(rc.K)} call · ${e.label}` },
       P: { K: rp.K, label: `${fk(rp.K)} put · ${e.label}` },
       sold: (d.sold ?? []).map((s) => ({ K: s.K, be: s.be, label: `Sold ${fk(s.K)} ${s.put ? 'put' : 'call'}` + (s.be != null ? ` · BE ${f2(s.be)}` : '') })),
+      pair: (d.held ?? []).flatMap((h) => [h.dn, h.up].map((K) => ({ K, label: `${h.label} pair · BE ${f2(K)}` }))),
     },
   };
 }

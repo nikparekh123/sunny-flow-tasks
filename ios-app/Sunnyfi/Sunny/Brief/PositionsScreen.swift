@@ -909,6 +909,10 @@ private struct PositionsChart: View {
         }
         out.append(Line(k: s.putK, label: "\(SDFmt.fk(s.putK)) put · \(s.ex)", color: SDPal.PT, dash: [4, 3], width: 1.5, opacity: 1, centred: true))
         out.append(Line(k: s.callK, label: "\(SDFmt.fk(s.callK)) call · \(s.ex)", color: SDPal.CL, dash: [4, 3], width: 1.5, opacity: 1, centred: true))
+        // What you hold: each pair's breakevens, green dotted, the label from the axis up (Nik 11 Nov).
+        for q in s.pair {
+            out.append(Line(k: q.K, label: q.label, color: SDPal.G, dash: Line.dotted, width: 1.5, opacity: 1, top: false, centred: true, size: 10, weight: 600))
+        }
         return out.filter { $0.k >= m.X0 && $0.k <= m.X1 }
     }
 
@@ -979,6 +983,7 @@ private struct PositionsChart: View {
         if let d = sd {
             s += ". 1 SD by \(PosSay.words(d.ex)), \(SDFmt.f2(d.lo)) to \(SDFmt.f2(d.hi)). Call \(SDFmt.fk(d.callK)), put \(SDFmt.fk(d.putK))"
             for l in d.sold { s += ". Sold \(SDFmt.fk(l.K)) \(l.put ? "put" : "call")" + (l.be.map { ", breakeven \(SDFmt.f2($0))" } ?? "") }
+            for q in d.pair { s += ". \(q.label.replacingOccurrences(of: " · BE ", with: ", breakeven "))" }
         }
         return s
     }

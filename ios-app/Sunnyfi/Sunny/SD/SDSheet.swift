@@ -131,6 +131,7 @@ struct SDCard: View {
                 if !p.exp.sig.isEmpty { signals(p.exp) }
                 strikes(r, p)
                 both(r, p)
+                if let h = r.held?.first(where: { $0.ex == p.exp.ex }) { held(r, h) }
                 every(r, p)
             } else {
                 waiting(r)
@@ -434,7 +435,38 @@ struct SDCard: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(privacy ? "Total hidden" : BriefWords.speech(totT)) for \(SDFmt.count(n.calls, "call")) and \(SDFmt.count(n.puts, "put")), \(SDFmt.f2(p.tot)) dollars a share")
             }
-            SDTimeline(S0: r.price, call: p.call, put: p.put, up: p.up, dn: p.dn, sdUp: p.sdUp, sdDn: p.sdDn)
+            SDTimeline(S0: r.price, callK: p.call.K, putK: p.put.K, up: p.up, dn: p.dn, sdUp: p.sdUp, sdDn: p.sdDn)
+        }
+        .padding(.top, 14).padding(.horizontal, 16).padding(.bottom, 12)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(SDPal.tile))
+    }
+
+    /// What you hold (Nik 11 Nov): your sold calls and puts of the picked expiry as a pair, at what you sold them for.
+    /// The same tile as the chance of profit: the kicker with the expiry and the chance on the left, what was taken in
+    /// and the legs on the right, the timeline under them.
+    private func held(_ r: SDReply, _ h: SDReply.Held) -> some View {
+        let totT = BriefWords.plain(SDFmt.money(h.tot), privacy: privacy)
+        let side = { (ls: [SDReply.Held.Side], w: String) in ls.map { "\(SDFmt.count($0.n, w)) \(SDFmt.fk($0.K))" }.joined(separator: ", ") }
+        let legs = side(h.calls, "call") + " and " + side(h.puts, "put")
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .bottom, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("WHAT YOU HOLD · \(h.label.uppercased())").sType(SType(size: 11, weight: 600, line: 14, tracking: 0.05), tabular: false).foregroundStyle(SDPal.muT)
+                    Text(SDFmt.pc(h.cop)).sType(SType(size: 30, weight: 800, line: 36, tracking: -0.02)).foregroundStyle(SDPal.G)
+                }
+                .fixedSize()
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("What you hold by \(h.label), chance of profit \(SDFmt.saidPct(h.cop))")
+                Spacer(minLength: 0)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(totT).sType(SType(size: 17, weight: 700, line: 22, tracking: 0))
+                    Text("taken in for " + legs).sType(SType(size: 12, weight: 400, line: 16, tracking: 0)).foregroundStyle(SDPal.muT)
+                        .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(privacy ? "Amount hidden" : BriefWords.speech(totT)) taken in for \(legs)")
+            }
+            SDTimeline(S0: r.price, callK: h.calls.map(\.K).min() ?? h.up, putK: h.puts.map(\.K).max() ?? h.dn, up: h.up, dn: h.dn, sdUp: h.sdUp, sdDn: h.sdDn)
         }
         .padding(.top, 14).padding(.horizontal, 16).padding(.bottom, 12)
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(SDPal.tile))
@@ -570,14 +602,14 @@ private struct SDSideSwitch: View {
     }
 }
 
-/// The profit zone, 101 tall (card136 pz): the put and call at their prices on top with a tick down to the bar, the
+/// The profit zone, 94 tall (card136 pz): the put and call at their prices on top with a tick down to the bar, the
 /// distance from today to each (side colours at 55%), the bar (track, light green breakeven to breakeven, stronger
 /// green strike to strike), today's dot, then the lower breakeven, today and the upper breakeven. Scaled from the lower
 /// breakeven (or the put) to the upper (or the call), 12% padding each side.
 private struct SDTimeline: View {
     let S0: Double
-    let call: SDReply.Row
-    let put: SDReply.Row
+    let callK: Double
+    let putK: Double
     let up: Double
     let dn: Double
     let sdUp: Double
@@ -585,16 +617,27 @@ private struct SDTimeline: View {
     var body: some View {
         GeometryReader { g in
             let w = g.size.width
-            let a0 = min(dn, put.K), b0 = max(up, call.K), pad = (b0 - a0) * 0.12, A = a0 - pad, B = max(b0 + pad, A + 1e-6)
+            // Today is always on the bar, even when it has moved past a strike or a breakeven.
+            let a0 = min(dn, putK, S0), b0 = max(up, callK, S0), pad = (b0 - a0) * 0.12, A = a0 - pad, B = max(b0 + pad, A + 1e-6)
             let X = { (v: Double) -> CGFloat in CGFloat((v - A) / (B - A)) * w }
+            let feet = [(SDFmt.f2(dn) + " (BE)", "\(SDFmt.pc(dn / S0 - 1)) (\(String(format: "%.1f", sdDn)) SD)", X(dn)),
+                        ("$" + SDFmt.f2(S0), "today", X(S0)),
+                        (SDFmt.f2(up) + " (BE)", "\(SDFmt.pc(up / S0 - 1)) (\(String(format: "%.1f", sdUp)) SD)", X(up))]
+            let at = Self.spread(feet.map { ($0.2, Self.footWidth($0.0, $0.1)) }, W: w)
             ZStack(alignment: .topLeading) {
                 Capsule().fill(SDPal.trk).frame(width: w, height: 6).offset(y: 46)
                 Capsule().fill(SDPal.gz).frame(width: max(0, X(up) - X(dn)), height: 6).offset(x: X(dn), y: 46)
-                Rectangle().fill(SDPal.gz2).frame(width: max(0, X(call.K) - X(put.K)), height: 6).offset(x: X(put.K), y: 46)
+                Rectangle().fill(SDPal.gz2).frame(width: max(0, X(callK) - X(putK)), height: 6).offset(x: X(putK), y: 46)
                 ForEach([false, true], id: \.self) { isCall in
-                    let K = isCall ? call.K : put.K, c = SDPal.side(!isCall)
-                    Capsule().fill(c).opacity(0.55).frame(width: abs(X(K) - X(S0)), height: 2).offset(x: min(X(K), X(S0)), y: 36)
-                    label(SDFmt.dir(K / S0 - 1), 11, 700, c).position(x: (X(K) + X(S0)) / 2, y: 18 + 7)
+                    let K = isCall ? callK : putK, c = SDPal.side(!isCall)
+                    // A side already in the money draws no distance: its line would lie over the other side's.
+                    if isCall ? K > S0 : K < S0 {
+                        Capsule().fill(c).opacity(0.55).frame(width: abs(X(K) - X(S0)), height: 2).offset(x: min(X(K), X(S0)), y: 36)
+                        // With the other side in the money between today and this strike, the label sits between the
+                        // two strikes, off the other side's line.
+                        let o = isCall ? putK : callK, from = (isCall ? o > S0 && o < K : o < S0 && o > K) ? o : S0
+                        label(SDFmt.dir(K / S0 - 1), 11, 700, c).position(x: (X(K) + X(from)) / 2, y: 18 + 7)
+                    }
                     VStack(spacing: 2) {
                         label((isCall ? "Call " : "Put ") + SDFmt.fk(K), 11, 700, c)
                         RoundedRectangle(cornerRadius: 1).fill(c).frame(width: 2, height: 30)
@@ -605,26 +648,41 @@ private struct SDTimeline: View {
                 Circle().fill(SDPal.ink).frame(width: 12, height: 12)
                     .background(Circle().fill(SDPal.dot).padding(-3))
                     .position(x: X(S0), y: 49)
-                foot(SDFmt.f2(dn), "breakeven", SDFmt.f2(sdDn) + " SD").position(x: X(dn), y: 60 + 20)
-                foot("$" + SDFmt.f2(S0), "today").position(x: X(S0), y: 60 + 13.5)
-                foot(SDFmt.f2(up), "breakeven", SDFmt.f2(sdUp) + " SD").position(x: X(up), y: 60 + 20)
+                ForEach(feet.indices, id: \.self) { i in foot(feet[i].0, feet[i].1).position(x: at[i], y: 60 + 13.5) }
             }
         }
-        .frame(height: 101)
+        .frame(height: 94)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Profit zone")
-        .accessibilityValue("Profit between the breakevens \(SDFmt.f2(dn)), \(SDFmt.f2(sdDn)) SD down, and \(SDFmt.f2(up)), \(SDFmt.f2(sdUp)) SD up. Today \(SDFmt.f2(S0)) dollars. "
-                            + "Put \(SDFmt.fk(put.K)), \(SDFmt.saidMove(put.K / S0 - 1)). Call \(SDFmt.fk(call.K)), \(SDFmt.saidMove(call.K / S0 - 1)).")
+        .accessibilityValue("Profit between the breakevens \(SDFmt.f2(dn)), \(SDFmt.f2(sdDn)) SD and \(SDFmt.saidMove(dn / S0 - 1)), and \(SDFmt.f2(up)), \(SDFmt.f2(sdUp)) SD and \(SDFmt.saidMove(up / S0 - 1)). Today \(SDFmt.f2(S0)) dollars. "
+                            + "Put \(SDFmt.fk(putK)), \(SDFmt.saidMove(putK / S0 - 1)). Call \(SDFmt.fk(callK)), \(SDFmt.saidMove(callK / S0 - 1)).")
+    }
+    /// The labels under the bar, each centred under its point, then pushed apart so none touch (8 apart), and kept
+    /// within 12 of the bar's ends (the tile's padding is 16).
+    static func spread(_ items: [(c: CGFloat, w: CGFloat)], W: CGFloat) -> [CGFloat] {
+        let order = items.indices.sorted { items[$0].c < items[$1].c }
+        var c = order.map { items[$0].c }
+        let wd = order.map { items[$0].w }
+        for i in c.indices { c[i] = max(c[i], i == 0 ? wd[i] / 2 - 12 : c[i - 1] + wd[i - 1] / 2 + 8 + wd[i] / 2) }
+        for i in c.indices.reversed() { c[i] = min(c[i], i == c.count - 1 ? W + 12 - wd[i] / 2 : c[i + 1] - wd[i + 1] / 2 - 8 - wd[i] / 2) }
+        var out = Array(repeating: CGFloat(0), count: items.count)
+        for (j, i) in order.enumerated() { out[i] = c[j] }
+        return out
+    }
+    private static let footF1 = SType(size: 11, weight: 600, line: 14, tracking: 0).uiFont(tabular: true)
+    private static let footF2 = SType(size: 10, weight: 400, line: 13, tracking: 0).uiFont(tabular: false)
+    static func footWidth(_ a: String, _ b: String) -> CGFloat {
+        ceil(max(NSAttributedString(string: a, attributes: [.font: footF1]).size().width,
+                 NSAttributedString(string: b, attributes: [.font: footF2]).size().width))
     }
     private func label(_ t: String, _ size: CGFloat, _ wt: CGFloat, _ c: Color) -> some View {
         Text(t).sType(SType(size: size, weight: wt, line: 14, tracking: 0)).foregroundStyle(c).lineLimit(1).fixedSize()
     }
-    /// A label under the bar; a breakeven also says how far it is in SD (Nik 11 Nov).
-    private func foot(_ v: String, _ s: String, _ sd: String? = nil) -> some View {
+    /// A label under the bar: today, or a breakeven as `36.54 (BE)` over `4.3% (1.2 SD)` (Nik 11 Nov).
+    private func foot(_ v: String, _ s: String) -> some View {
         VStack(spacing: 0) {
             Text(v).sType(SType(size: 11, weight: 600, line: 14, tracking: 0)).foregroundStyle(SDPal.ink)
             Text(s).sType(SType(size: 10, weight: 400, line: 13, tracking: 0), tabular: false).foregroundStyle(SDPal.muT)
-            if let sd { Text(sd).sType(SType(size: 10, weight: 400, line: 13, tracking: 0)).foregroundStyle(SDPal.muT) }
         }
         .lineLimit(1).fixedSize()
     }

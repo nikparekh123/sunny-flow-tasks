@@ -18,6 +18,8 @@ export interface SdLines {
   band: { l: number; w: number } | null;
   picks: { k: string; x: number; label: string; put: boolean }[];
   sold: { k: string; x: number | null; xb: number | null; label: string }[];
+  /** What you hold: each pair's two breakevens, green dotted with a green label at the foot (Nik 11 Nov). */
+  pair: { k: string; x: number; label: string }[];
 }
 interface Props {
   xs: number[]; vW: number[]; vB: number[]; chg: boolean; S0: number; v0: number;
@@ -180,7 +182,7 @@ export function PayoffChart(p: Props) {
     }
     const bp: { ln: number; a: number; b: number }[] = [];
     if (short) { const w = textW(short.label, 600, 11) + 12, c = short.x / 100 * bw; bp.push({ ln: 0, a: c - w / 2, b: c + w / 2 }, { ln: 1, a: c - w / 2, b: c + w / 2 }); }
-    for (const x of [...sd.sold].filter((s) => s.x != null).sort((a, b) => a.x! - b.x!)) {
+    for (const x of [...sd.sold.filter((s) => s.x != null), ...sd.pair].sort((a, b) => a.x! - b.x!)) {
       const w = textW(x.label, 600, 11) + 10, c = x.x! / 100 * bw, a = c - w / 2, b = c + w / 2;
       let ln = 0;
       while (bp.some((q) => q.ln === ln && a < q.b + 6 && b > q.a - 6)) ln++;
@@ -252,6 +254,14 @@ export function PayoffChart(p: Props) {
         })}
         {sd?.picks.map((x) => (
           <span key={x.k} aria-hidden="true" style={{ position: 'absolute', top: 22, bottom: 32, left: x.x.toFixed(2) + '%', borderLeft: '1.5px dashed ' + (x.put ? '#D49A5A' : '#6FA0F6'), pointerEvents: 'none' }} />
+        ))}
+        {sd?.pair.map((q) => {
+          const b = SD_BOT[Math.min(SD_BOT.length - 1, sdLane.bot.get(q.k) ?? 0)];
+          return <span key={q.k} aria-hidden="true" style={{ position: 'absolute', top: 22, bottom: b >= 30 ? b + 16 : 32, left: q.x.toFixed(2) + '%', borderLeft: '1.5px dotted #65C466', pointerEvents: 'none' }} />;
+        })}
+        {sd?.pair.map((q) => (
+          <span key={q.k + 'l'} style={{ position: 'absolute', bottom: SD_BOT[Math.min(SD_BOT.length - 1, sdLane.bot.get(q.k) ?? 0)], left: q.x.toFixed(2) + '%', transform: 'translateX(-50%)',
+            fontSize: 11, lineHeight: '14px', fontWeight: 600, color: '#65C466', whiteSpace: 'nowrap', pointerEvents: 'none', ...SD_LBL }}>{q.label}</span>
         ))}
         {sd?.sold.map((q) => q.x != null && (
           <span key={q.k} style={{ position: 'absolute', bottom: SD_BOT[Math.min(SD_BOT.length - 1, sdLane.bot.get(q.k) ?? 0)], left: q.x.toFixed(2) + '%', transform: 'translateX(-50%)',

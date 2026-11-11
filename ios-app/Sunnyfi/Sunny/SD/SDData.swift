@@ -41,6 +41,13 @@ nonisolated struct SDReply: Decodable, Sendable {
         let key: String; let k: String; let v: String; let vTone: String?; let tag: String?; let tagTone: String?; let s: String?; let fx: [[String]]?
     }
     nonisolated struct Hist: Decodable, Sendable { let n: Int?; let est: Bool? }
+    /// What you hold (Nik 11 Nov): one expiry's sold calls and sold puts as a pair, at the sale prices. tot is the
+    /// premium taken in, in dollars; up and dn the breakevens, sdUp and sdDn how far each is in SD; cop the chance.
+    nonisolated struct Held: Decodable, Sendable, Equatable {
+        nonisolated struct Side: Decodable, Sendable, Equatable { let K: Double; let n: Int }
+        let ex: String; let label: String; let calls: [Side]; let puts: [Side]
+        let tot: Double; let up: Double; let dn: Double; let sdUp: Double; let sdDn: Double; let cop: Double
+    }
     nonisolated struct Exp: Decodable, Sendable {
         let ex: String; let label: String; let long: String?; let td: Double?; let cd: Double; let T: Double?; let iv: Double; let m: Double
         let earn: Bool?; let band: [Double]; let sug: Sug; let rows: Rows; let sig: [Sig]; let hist: Hist?
@@ -60,7 +67,9 @@ nonisolated struct SDReply: Decodable, Sendable {
     let counts: Counts
     let sold: [Sold]
     let exps: [Exp]
-    enum CodingKeys: String, CodingKey { case t, name, strategy, price = "S", prev, move, open, today, cfg, counts, sold, exps }
+    /// Absent from replies before 11 Nov 2026 (sunny-sd v2).
+    let held: [Held]?
+    enum CodingKeys: String, CodingKey { case t, name, strategy, price = "S", prev, move, open, today, cfg, counts, sold, exps, held }
 }
 
 enum SDClient {
@@ -135,7 +144,7 @@ struct SDPair {
 }
 
 /// What the Positions chart draws while the sheet is open or pinned (README 1.9): the ±1 SD band, the two picked
-/// strikes labelled with the expiry, and every sold leg with its breakeven.
+/// strikes labelled with the expiry, every sold leg with its breakeven, and each held pair's two breakevens.
 struct SDLines: Equatable {
     let lo: Double
     let hi: Double
@@ -143,6 +152,9 @@ struct SDLines: Equatable {
     let putK: Double
     let ex: String
     let sold: [SDReply.Sold]
+    /// What you hold: each pair's breakevens, "Nov 20 pair · BE 117.56" (Nik 11 Nov, option 3).
+    var pair: [Pair] = []
+    struct Pair: Equatable { let K: Double; let label: String }
 }
 
 @MainActor @Observable
@@ -260,7 +272,8 @@ final class SDStore {
         let open = isOpen(on: t) && self.book == book
         guard let p = open ? pick : pins[Self.key(book, t)], let r = reply(book, t), let pr = SDPair(r, p) else { return nil }
         let e = pr.exp
-        return SDLines(lo: e.band.first ?? r.price, hi: e.band.count > 1 ? e.band[1] : r.price, callK: pr.call.K, putK: pr.put.K, ex: e.label, sold: r.sold)
+        return SDLines(lo: e.band.first ?? r.price, hi: e.band.count > 1 ? e.band[1] : r.price, callK: pr.call.K, putK: pr.put.K, ex: e.label, sold: r.sold,
+                       pair: (r.held ?? []).flatMap { h in [h.dn, h.up].map { SDLines.Pair(K: $0, label: "\(h.label) pair · BE \(SDFmt.f2($0))") } })
     }
 
     /// The half sheet shows 600 pt (README 1.1). On a phone too short to keep the 190 pt chart above it, less.

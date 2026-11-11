@@ -2,9 +2,9 @@
 // Markup copied from SunnySD.dc.html with `web` true: always dark, under the chart, full width of the left column.
 // Top to bottom: the title and the IV line, the expiry control, the signals, the trade (strike rows, chance of profit
 // and the timeline), Every SD.
-import type { CSSProperties } from 'react';
+import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { money } from '../../lib/format';
-import type { LadRow, SdView } from './model';
+import type { LadRow, SdView, SdZone } from './model';
 
 const INK = '#F5F5F7', MU = '#98989D', MUT = '#AEAEB2';
 const kick: CSSProperties = { fontSize: 11, lineHeight: '14px', fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: MUT };
@@ -107,7 +107,22 @@ function Body({ v, mask }: { v: SdView; mask: (s: string) => string }) {
             <span>for</span><span>{v.both.totN}</span><span>·</span><span>{v.both.prT}</span><span>a share</span>
           </span>
         </div>
-        <Timeline v={v} />
+        <Timeline z={v.pz} />
+        {v.held && (
+          <>
+            {/* What you hold (Nik 11 Nov): your sold calls and puts of this expiry as a pair, at what you sold them for. */}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap', paddingTop: 14, borderTop: '1px solid rgba(255,255,255,.08)' }}>
+              <span style={kick}>What you hold · {v.held.label}</span>
+              <span style={{ fontSize: 32, lineHeight: '38px', fontWeight: 700, letterSpacing: '-.02em', color: '#65C466' }}>{v.held.cop}</span>
+              <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', fontSize: 14, lineHeight: '20px', color: MUT }}>
+                <span>Taken in</span>
+                <span style={{ fontSize: 20, lineHeight: '24px', fontWeight: 700, color: INK }}>{mask(money(v.held.tot))}</span>
+                <span>for</span><span>{v.held.legsT}</span>
+              </span>
+            </div>
+            <Timeline z={v.held.pz} />
+          </>
+        )}
       </section>
 
       <section aria-label="Every SD" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -158,12 +173,22 @@ function Lad({ r, kc }: { r: LadRow; kc: string }) {
   );
 }
 
-/** The profit zone (web 112 tall): the strikes on top, the distance lines, the bar, today, the breakevens under it
-    with how far each is in SD. */
-function Timeline({ v }: { v: SdView }) {
-  const z = v.pz;
+/** The profit zone (web 100 tall): the strikes on top, the distance lines, the bar, today, the breakevens under it
+    as `36.54 (BE)` over `4.3% (1.2 SD)`. */
+function Timeline({ z }: { z: SdZone }) {
+  // The labels under the bar, each centred under its point, then pushed apart so none touch (10 apart).
+  const box = useRef<HTMLDivElement>(null);
+  const [bw, setBw] = useState(0);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setBw(el.clientWidth));
+    ro.observe(el); setBw(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+  const at = bw ? spread(z.bot.map((x) => ({ c: parseFloat(x.x) / 100 * bw, w: Math.max(textW(x.l, 600, 12), textW(x.s, 400, 11)) })), bw) : null;
   return (
-    <div aria-label="Profit zone" style={{ position: 'relative', height: 112 }}>
+    <div ref={box} aria-label="Profit zone" style={{ position: 'relative', height: 100 }}>
       <span aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: 50, height: 8, borderRadius: 4, background: 'rgba(255,255,255,.08)' }} />
       <span aria-hidden="true" style={{ position: 'absolute', top: 50, height: 8, left: z.zL, width: z.zW, borderRadius: 4, background: 'rgba(101,196,102,.28)' }} />
       <span aria-hidden="true" style={{ position: 'absolute', top: 50, height: 8, left: z.mL, width: z.mW, background: 'rgba(101,196,102,.6)' }} />
@@ -180,13 +205,30 @@ function Timeline({ v }: { v: SdView }) {
         </div>
       ))}
       <span aria-hidden="true" style={{ position: 'absolute', top: 48, left: z.today, width: 12, height: 12, marginLeft: -6, borderRadius: 6, background: '#F5F5F7', boxShadow: '0 0 0 3px #0B0B0C' }} />
-      {z.bot.map((x) => (
-        <div key={x.key} style={{ position: 'absolute', top: 66, left: x.x, transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      {z.bot.map((x, i) => (
+        <div key={x.key} style={{ position: 'absolute', top: 66, left: at ? at[i] : x.x, transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, whiteSpace: 'nowrap' }}>{x.l}</span>
-          <span style={{ fontSize: 11, lineHeight: '14px', color: MU }}>{x.s}</span>
-          {x.sd && <span style={{ fontSize: 11, lineHeight: '14px', color: MU, whiteSpace: 'nowrap' }}>{x.sd}</span>}
+          <span style={{ fontSize: 11, lineHeight: '14px', color: MU, whiteSpace: 'nowrap' }}>{x.s}</span>
         </div>
       ))}
     </div>
   );
 }
+
+/** Centres pushed apart left to right, then back from the right edge, so no two labels touch; kept on the card. */
+function spread(items: { c: number; w: number }[], W: number): number[] {
+  const order = items.map((_, i) => i).sort((a, b) => items[a].c - items[b].c);
+  const c = order.map((i) => items[i].c), w = order.map((i) => items[i].w);
+  for (let i = 0; i < c.length; i++) c[i] = Math.max(c[i], i ? c[i - 1] + w[i - 1] / 2 + 10 + w[i] / 2 : w[i] / 2);
+  for (let i = c.length - 1; i >= 0; i--) c[i] = Math.min(c[i], i < c.length - 1 ? c[i + 1] - w[i + 1] / 2 - 10 - w[i] / 2 : W - w[i] / 2);
+  const out: number[] = [];
+  order.forEach((i, j) => { out[i] = c[j]; });
+  return out;
+}
+let measure: CanvasRenderingContext2D | null = null;
+const textW = (s: string, wt: number, px: number) => {
+  if (!measure && typeof document !== 'undefined') measure = document.createElement('canvas').getContext('2d');
+  if (!measure) return s.length * px * 0.6;
+  measure.font = `${wt} ${px}px Inter, system-ui, sans-serif`;
+  return measure.measureText(s).width;
+};

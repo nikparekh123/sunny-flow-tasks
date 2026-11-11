@@ -218,6 +218,7 @@ function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy, clos
       picks: [{ k: 'c', ...c.C, put: false }, { k: 'p', ...c.P, put: true }].filter((x) => inR(x.K)).map((x) => ({ k: x.k, x: xpS(x.K), label: x.label, put: x.put })),
       sold: c.sold.map((s, i) => ({ k: 's' + i, x: inR(s.K) ? xpS(s.K) : null, xb: s.be != null && inR(s.be) ? xpS(s.be) : null, label: s.label }))
         .filter((s) => s.x != null || s.xb != null),
+      pair: c.pair.filter((q) => inR(q.K)).map((q, i) => ({ k: 'h' + i, x: xpS(q.K), label: q.label })),
     };
   })() : null;
   if (layer === 'walls') {

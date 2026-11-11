@@ -206,3 +206,27 @@ export function legSd(o: { S: number; K: number; put: boolean; sold: boolean; iv
     l2: itm ? '' : `${sd.toFixed(2)} SD by ${o.exLabel}`,
     l3: o.sold ? `${pc(odds)} expires worthless` : `${pc(pItm)} ends in the money` };
 }
+
+/** What you hold (Nik 11 Nov): the sold calls and sold puts of one expiry as a pair. Only one side can end in the
+    money, so all the premium you took in cushions it. At an expiry price X the pair makes
+    sum(n x premium) - sum over calls n x max(0, X - K) - sum over puts n x max(0, K - X); the breakevens are where
+    that crosses zero, below and above its peak. `m` is the expiry's IV x sqrt(T). Null when a leg has no sale price
+    or the pair never makes money. dn is null when the puts' premium covers a fall to zero. */
+export interface Held { up: number; dn: number | null; tot: number; sdUp: number; sdDn: number | null; cop: number }
+export function heldPair(calls: Leg[], puts: Leg[], S: number, m: number): Held | null {
+  if (!calls.length || !puts.length || [...calls, ...puts].some((l) => l.at == null || !(l.n > 0))) return null;
+  const T = [...calls, ...puts].reduce((a, l) => a + l.n * (l.at as number), 0);
+  const pl = (X: number) => T - calls.reduce((a, l) => a + l.n * Math.max(0, X - l.K), 0) - puts.reduce((a, l) => a + l.n * Math.max(0, l.K - X), 0);
+  const top = [...calls, ...puts].map((l) => l.K).reduce((b, K) => (pl(K) > pl(b) ? K : b));
+  if (!(pl(top) > 0)) return null;
+  const root = (lo: number, hi: number, up: boolean) => {
+    for (let i = 0; i < 200; i++) { const md = (lo + hi) / 2; if ((pl(md) > 0) === up) lo = md; else hi = md; }
+    return (lo + hi) / 2;
+  };
+  let hi = top * 2; while (pl(hi) > 0) hi *= 2;
+  const up = root(top, hi, true), dn = pl(0) > 0 ? null : root(0, top, false);
+  const mm = Math.max(1e-6, m);
+  const sdUp = Math.log(up / S) / mm, sdDn = dn ? Math.log(S / dn) / mm : null;
+  const cop = N(Math.log(up / S) / mm) - (dn ? N(Math.log(dn / S) / mm) : 0);
+  return { up, dn, tot: T * 100, sdUp, sdDn, cop };
+}

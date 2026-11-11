@@ -16,9 +16,9 @@
  * close the quotes are the closing ones, so premiums are the closing mid (Nik A3).
  * No em dashes in any words written here (Nik).
  */
-import { calc, cover, CFG, dir, f1, f2, fk, KS, netDelta, pc, row, won, bs as bsQ, type Expiry, type Fx, type Leg, type Name, type Quote, type Row } from '../_shared/sd-engine.ts';
+import { calc, cover, CFG, dir, f1, f2, fk, heldPair, KS, netDelta, pc, row, won, bs as bsQ, type Expiry, type Fx, type Leg, type Name, type Quote, type Row } from '../_shared/sd-engine.ts';
 
-const BUILD = '2026-11-11.1';
+const BUILD = '2026-11-11.2';
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -336,6 +336,17 @@ Deno.serve(async (req) => {
       sold: [...name.soldCalls.map((l) => ({ put: false, K: l.K, n: l.n, ex: l.ex, be: l.at != null ? +(l.K + l.at).toFixed(4) : null })),
              ...name.soldPuts.map((l) => ({ put: true, K: l.K, n: l.n, ex: l.ex, be: l.at != null ? +(l.K - l.at).toFixed(4) : null }))],
       exps: exps.map((x) => x.data),
+      // What you hold (Nik 11 Nov): each expiry where you have sold calls AND sold puts, as one pair, at the sale prices.
+      held: [...new Set(name.soldCalls.map((l) => l.ex))].filter((ex) => name.soldPuts.some((l) => l.ex === ex)).sort().flatMap((ex) => {
+        const cs = name.soldCalls.filter((l) => l.ex === ex), ps = name.soldPuts.filter((l) => l.ex === ex);
+        const m = exps.find((x) => x.data.ex === ex)?.data.m ?? iv30 * Math.sqrt(yrs(ex));
+        const h = heldPair(cs, ps, S, m);
+        if (!h || h.dn == null) return [];
+        const side = (ls: Leg[]) => ls.map((l) => ({ K: l.K, n: l.n })).sort((a, b) => a.K - b.K);
+        const r4 = (v: number | null) => (v == null ? null : +v.toFixed(4));
+        return [{ ex, label: md(ex), calls: side(cs), puts: side(ps), tot: Math.round(h.tot),
+          up: r4(h.up), dn: r4(h.dn), sdUp: r4(h.sdUp), sdDn: r4(h.sdDn), cop: r4(h.cop) }];
+      }),
     });
   } catch (e) {
     return json(502, { ok: false, build: BUILD, t, error: String((e as Error)?.message ?? e) });
