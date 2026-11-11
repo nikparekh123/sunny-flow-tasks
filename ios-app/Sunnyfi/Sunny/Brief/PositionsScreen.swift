@@ -164,7 +164,8 @@ struct BriefPositionsScreen: View {
                             PositionsDetail(m: m, stop: Binding(get: { min(stop, m.stops.count - 1) }, set: { stop = $0 }), price: $price, off: $off,
                                             legFilter: $legFilter, layer: $layer, chain: $chain, fix: $fix, wallsKind: $wallsKind, zoom: $zoom,
                                             privacy: privacy, late: live && brief.asOf() != nil,
-                                            sdLines: sd.lines(book: sdBook, t: name), sdOn: sdUp, sdPinned: sd.isPinned(sdBook, name),
+                                            // No SD on the chart (Nik, 11 Nov 2026: "looks very busy"): the sheet only.
+                                            sdLines: nil, sdOn: sdUp, sdPinned: false,
                                             onSd: toggleSD, onChartY: { chartY = $0 })
                                 .id("\(acct)-\(name)")
                         }
@@ -325,8 +326,8 @@ struct BriefPositionsScreen: View {
     }
     /// Live: ask for the name on screen when it is missing or priced on an older build.
     private func load() {
-        // A pinned name's SD lines are worked out again from a fresh reply (one a minute at most).
-        if !name.isEmpty, sd.isPinned(sdBook, name) || sd.isOpen(on: name) { sd.load(book: sdBook, t: name) }
+        // The open sheet's name is asked again (one a minute at most). No pins since 11 Nov 2026: no SD on the chart.
+        if !name.isEmpty, sd.isOpen(on: name) { sd.load(book: sdBook, t: name) }
         guard live, !name.isEmpty, let b = brief.book, let built = brief.built,
               let n = liveNames.first(where: { $0["t"].string == name }) else { return }
         brief.positions.load(book: b, t: name, built: built, name: n)

@@ -51,7 +51,7 @@ export const f2 = (x: number) => x.toFixed(2);
 /** A strike as listed: 40, 42.5, 40.85. */
 export const fk = (x: number) => (x % 1 ? (Math.round(x * 100) % 10 ? x.toFixed(2) : x.toFixed(1)) : String(x));
 /** ATM, 0.25 SD, 0.5 SD, 1.0 SD. */
-export const sdl = (k: number) => (k === 0 ? 'ATM' : (k % 1 ? String(k) : k.toFixed(1)) + ' SD');
+export const sdl = (k: number) => (k < 0 ? 'ITM' : k === 0 ? 'ATM' : (k % 1 ? String(k) : k.toFixed(1)) + ' SD');
 /** The design's normal CDF (Abramowitz and Stegun 26.2.17). */
 export const N = (x: number) => {
   const t = 1 / (1 + 0.2316419 * Math.abs(x)), d = 0.3989422804014327 * Math.exp(-x * x / 2),
@@ -61,7 +61,7 @@ export const N = (x: number) => {
 const same = (a: number, b: number) => Math.abs(a - b) < 1e-9;
 const steps = (lo: number, hi: number) => { const o: number[] = []; for (let k = lo; k <= hi + 1e-9; k += 0.25) o.push(Math.round(k * 4) / 4); return o; };
 /** "0.5 to 1.25 SD", "ATM to 1 SD" (Nik, D2: the put row's label reads ATM to 1 SD). */
-const range = (lo: number, hi: number) => (lo === 0 ? 'ATM' : String(lo)) + ' to ' + String(hi) + ' SD';
+const range = (lo: number, hi: number) => (lo < 0 ? 'ITM' : lo === 0 ? 'ATM' : String(lo)) + ' to ' + String(hi) + ' SD';
 
 /* ── What the user picked: the expiry, then a call and a put SD (default: that expiry's suggestion) ── */
 export interface SdPick { t: string; ex: string | null; c: number | null; p: number | null }
@@ -191,7 +191,8 @@ export function sdView(d: SdReply, pick: SdPick, set: (p: SdPick) => void): SdVi
     };
   };
   const lad = (put: boolean): LadRow[] => {
-    const lo = put ? cfg.pLo : cfg.cLo, hi = put ? cfg.pHi : cfg.cHi, Kf = put ? e.sug.P.K : e.sug.C.K;
+    // The table's rows start at ATM: one strike in the money (k below 0) is a tile only.
+    const lo = Math.max(0, put ? cfg.pLo : cfg.cLo), hi = put ? cfg.pHi : cfg.cHi, Kf = put ? e.sug.P.K : e.sug.C.K;
     const rows = (put ? e.rows.p : e.rows.c).map((r) => {
       const sug = same(r.k, put ? e.sug.kp : e.sug.kc), on = same(r.k, put ? selP : selC);
       return {

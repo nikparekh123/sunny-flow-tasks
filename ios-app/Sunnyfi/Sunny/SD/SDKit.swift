@@ -68,11 +68,11 @@ enum SDFmt {
         k == 0 ? "ATM" : k.truncatingRemainder(dividingBy: 1) != 0 ? "\(k)" : String(format: "%.1f", k)
     }
     /// "ATM", "0.25 SD", "1.0 SD" (the tiles).
-    static func sdl(_ k: Double) -> String { k == 0 ? "ATM" : sdNum(k) + " SD" }
+    static func sdl(_ k: Double) -> String { k < 0 ? "ITM" : k == 0 ? "ATM" : sdNum(k) + " SD" }
     /// "0.5 to 1.25 SD", "ATM to 1 SD" (the rows' range, D2).
     static func range(_ lo: Double, _ hi: Double) -> String {
         func g(_ v: Double) -> String { v.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(v)) : "\(v)" }
-        return (lo == 0 ? "ATM" : g(lo)) + " to " + g(hi) + " SD"
+        return (lo < 0 ? "ITM" : lo == 0 ? "ATM" : g(lo)) + " to " + g(hi) + " SD"
     }
     /// Money: $624, $5.9K, $1.2M.
     static func money(_ x: Double) -> String { SampleEngine.fK(x) }

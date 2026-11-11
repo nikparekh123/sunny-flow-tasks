@@ -15,7 +15,7 @@ import { clock12, ny, shortDate } from '../lib/clock';
 import { useHome, usePositions, usePrefetchPositions, useSd, useTicker, type J } from '../lib/data';
 import { arrow, count, level, money, pct, price } from '../lib/format';
 import { useWeb } from '../lib/state';
-import { PayoffChart, ZS, FIT, type Line, type SdLines } from '../positions/PayoffChart';
+import { PayoffChart, ZS, FIT, type Line } from '../positions/PayoffChart';
 import { SdCard } from '../positions/sd/SdCard';
 import { NO_PICK, sdView, type SdPick, type SdReply } from '../positions/sd/model';
 import { Compare, EveryLeg, Lists, PriceDateGrid, type CmpRow, type LegRow } from '../positions/Tables';
@@ -209,18 +209,7 @@ function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy, clos
   const short = shW != null && xpS(shW) <= 100 ? { x: xpS(shW), label: 'makes the most at ' + price(shW) } : null;
   const inR = (k: number) => k >= S0 * (1 - ZR) && k <= S0 * (1 + ZR);
   const lines: Line[] = [];
-  // SD on the chart (README 1.9): the ±1 SD band of the picked expiry, the two picked strikes, every sold leg; only
-  // what falls inside the chart's prices, and only once the reply is this name's.
-  const sdLines: SdLines | null = sdV && sdV.t === t ? (() => {
-    const c = sdV.chart, l = Math.max(0, xpS(c.band[0])), r = Math.min(100, xpS(c.band[1]));
-    return {
-      band: r > l ? { l, w: r - l } : null,
-      picks: [{ k: 'c', ...c.C, put: false }, { k: 'p', ...c.P, put: true }].filter((x) => inR(x.K)).map((x) => ({ k: x.k, x: xpS(x.K), label: x.label, put: x.put })),
-      sold: c.sold.map((s, i) => ({ k: 's' + i, x: inR(s.K) ? xpS(s.K) : null, xb: s.be != null && inR(s.be) ? xpS(s.be) : null, label: s.label }))
-        .filter((s) => s.x != null || s.xb != null),
-      pair: c.pair.filter((q) => inR(q.K)).map((q, i) => ({ k: 'h' + i, x: xpS(q.K), label: q.label })),
-    };
-  })() : null;
+  // No SD on the chart (Nik, 11 Nov 2026: "looks very busy"): the SD layer shows its card under the chart only.
   if (layer === 'walls') {
     const c = m.chainFor(seg.iso);
     if (c) ([['Ceiling', c.c], ['Floor', c.f]] as const).forEach(([l, w]) => { if (w && inR(w.k)) lines.push({ k: l, x: xpS(w.k), label: `${l} ${fk(w.k)} · ${c.label}`, kind: 'wall' }); });
@@ -294,7 +283,7 @@ function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy, clos
             ))}
           </div>
           <PayoffChart xs={ch.xs} vW={ch.vW} vB={ch.vB} chg={chg} S0={S0} v0={v0} zi={zi} widest={widest} setZoom={setZoom}
-            band={sdLines ? null : band} short={short} lines={lines} sd={sdLines} privacy={privacy} />
+            band={band} short={short} lines={lines} privacy={privacy} />
           <span style={{ fontSize: 12, lineHeight: '18px', color: MU, paddingTop: 6 }}>{legend} Pinch, − and + zoom from ±5% to ±50%; double-click or the reset arrow goes back to ±25%.</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>

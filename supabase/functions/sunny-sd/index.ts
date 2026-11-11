@@ -16,9 +16,9 @@
  * close the quotes are the closing ones, so premiums are the closing mid (Nik A3).
  * No em dashes in any words written here (Nik).
  */
-import { calc, cover, CFG, dir, f1, f2, fk, heldPair, KS, netDelta, pc, row, won, bs as bsQ, type Expiry, type Fx, type Leg, type Name, type Quote, type Row } from '../_shared/sd-engine.ts';
+import { calc, cover, CFG, dir, f1, f2, fk, heldPair, ITM, KS, netDelta, pc, row, won, bs as bsQ, type Expiry, type Fx, type Leg, type Name, type Quote, type Row } from '../_shared/sd-engine.ts';
 
-const BUILD = '2026-11-11.2';
+const BUILD = '2026-11-11.3';
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -197,7 +197,7 @@ Deno.serve(async (req) => {
   const t0 = Date.now(), { day: today, mins } = nyParts();
 
   try {
-    const [hist, ivRows, earn, divs, cal, snap, quote, allEx] = await Promise.all([
+    const [hist, ivRows, earn, divs, cal, snap, quote, allEx, gex] = await Promise.all([
       bars(t),
       db(`ticker_iv_daily?ticker=eq.${t}&select=snapshot_date,atm_iv&atm_iv=gt.0&order=snapshot_date.asc&limit=2000`),
       db(`earnings_events?ticker=eq.${t}&report_date=gte.${today}&select=report_date,report_time&order=report_date.asc&limit=1`),
@@ -206,6 +206,8 @@ Deno.serve(async (req) => {
       db(`home_snapshot?book_id=eq.${book}&select=inputs:payload->brief_inputs,strategies:payload->strategies,names:payload->brief->names`, who),
       db(`ticker_quotes_latest?ticker=eq.${t}&select=spot,day_change_pct`),
       expirations(t, useTheta),
+      // The walls card (Nik 11 Nov: walls are a nudge, never the rule): each expiry's last logged walls.
+      db(`gex_walls?ticker=eq.${t}&expiry=not.is.null&day=gte.${addDays(today, -7)}&select=day,expiry,call_wall,call_wall2,put_wall,put_wall2&order=day.desc,id.asc`),
     ]);
 
     // ── Expiries: the first five, then the next monthly after them; today's only while it still trades ──
@@ -238,6 +240,13 @@ Deno.serve(async (req) => {
     const rsi = Math.round(rsi14(withNow.slice(-120)));
     const last20 = hist.d.map((d, i) => ({ d, h: hist.h[i], l: hist.l[i] })).slice(-20);
     const sup = Math.min(...last20.map((b) => b.l)), res = Math.max(...last20.map((b) => b.h));
+    // The momentum rules' inputs (Nik 11 Nov): the 50-day and 200-day of the closes, the 52-week low, today's move.
+    const avg = (n: number) => (closes.length >= n ? closes.slice(-n).reduce((a, b) => a + b, 0) / n : null);
+    const ma50 = avg(50), ma200 = avg(200);
+    const lows = hist.l.slice(-252).filter((x) => x > 0), lo52 = lows.length >= 200 ? Math.min(...lows) : null;
+    const day1 = prev > 0 ? S / prev - 1 : 0;
+    const wallBy = new Map<string, Row_>();
+    for (const w of gex) if (!wallBy.has(String(w.expiry))) wallBy.set(String(w.expiry), w);
 
     // ── IV: the 30-day (saved daily), 5 sessions ago, rank over a year; the 5-year line for won (Nik A1) ──
     const ivBy = new Map(ivRows.map((r) => [String(r.snapshot_date), Number(r.atm_iv)]));
@@ -267,7 +276,7 @@ Deno.serve(async (req) => {
     const r = Number(inputs?.r ?? 0.04);
     const divYr = divs.filter((d) => String(d.ex_date) >= addDays(today, -370) && String(d.ex_date) < today);
     const q = S > 0 ? divYr.reduce((a, d) => a + Number(d.cash_amount), 0) / S : 0;
-    const name: Name = { t, S, S5, iv5, iv30, hv20, rank, ratio: hv20 > 0 ? iv30 / hv20 : 1, rsi, sup, res, r, q, shares,
+    const name: Name = { t, S, S5, iv5, iv30, hv20, rank, ratio: hv20 > 0 ? iv30 / hv20 : 1, rsi, sup, res, r, q, shares, ma50, ma200, lo52, day1,
       soldCalls: L('sc'), soldPuts: L('sp'), longCalls: L('otm'), longPuts: L('ins') };
     const leaps = L('leaps');
     const cv = cover(name), nd = netDelta(name, leaps);
@@ -300,12 +309,29 @@ Deno.serve(async (req) => {
       const sg = (o: Row_) => sig.push({ tag: '', tagTone: 'mu', s: '', vTone: 'ink', fx: [] as Fx[], ...o });
       const wk = S / S5 - 1, dS = (v: number) => Math.log(v / S) / m;
       sg({ key: 'wk', k: 'This week', v: dir(wk), vTone: wk < 0 ? 'red' : 'green', tag: f1(Math.abs(R.z)) + ' SD', fx: R.fx.wk });
+      // The trend the put table reads (Nik 11 Nov): the 50-day and 200-day, and the 52-week low.
+      // One short word as the value (a card is narrow); the averages say why underneath.
+      const f50 = ma50 ? f2(ma50) : '', f200 = ma200 ? f2(ma200) : '';
+      sg({ key: 'tr', k: 'Trend', v: R.trend === 'up' ? 'Up' : R.trend === 'mid' ? 'Mixed' : 'Down',
+        vTone: R.trend === 'up' ? 'green' : R.trend === 'down' ? 'red' : 'ink',
+        s: R.trend === 'up' ? `Over the 50-day ${f50} and the 200-day ${f200}`
+          : R.trend === 'down' ? (f50 ? `Under the 50-day ${f50}` : 'No 50-day yet')
+          : f200 ? `Over the 50-day ${f50}, under the 200-day ${f200}` : (f50 ? `Over the 50-day ${f50}` : 'No 50-day yet') });
       sg({ key: 'iv', k: 'IV edge', v: R.rich ? 'Rich' : R.cheap ? 'Cheap' : 'None',
         s: limited === 'none' ? 'No saved IV · based on recent volatility' : `IV30 ${pc(iv30)} · HV20 ${pc(hv20)} · rank ${Math.round(rank)}${limited ? ' · limited history' : ''}`, fx: R.fx.iv });
-      if (rsi >= CFG.rsiHi || rsi <= CFG.rsiLo) sg({ key: 'rsi', k: 'RSI 14', v: String(rsi), tag: rsi >= CFG.rsiHi ? 'Overbought' : 'Oversold', tagTone: 'or', fx: R.fx.rsi });
-      const dr = dS(res), du = -dS(sup);
-      if (dr <= 1.25 || R.fx.res.length) sg({ key: 'res', k: 'Resistance', v: f2(res), tag: f1(dr) + ' SD up', s: R.fx.res.length ? '' : (res > R.C.K ? 'Above the ' + fk(R.C.K) + ' call' : 'Under the ' + fk(R.C.K) + ' call'), fx: R.fx.res });
-      if (du <= 1.25 || R.fx.sup.length) sg({ key: 'sup', k: 'Support', v: f2(sup), tag: f1(du) + ' SD down', s: R.fx.sup.length ? '' : (sup < R.P.K ? 'Below the ' + fk(R.P.K) + ' put' : 'Above the ' + fk(R.P.K) + ' put'), fx: R.fx.sup });
+      // Walls and the 20-day range: a nudge card only, they move no strike (Nik 11 Nov).
+      const wl = wallBy.get(ex);
+      const ceil = wl ? [wl.call_wall, wl.call_wall2].map(Number).filter((k) => k > S).sort((a, b) => a - b)[0] ?? null : null;
+      const floor = wl ? [wl.put_wall, wl.put_wall2].map(Number).filter((k) => k > 0 && k < S).sort((a, b) => b - a)[0] ?? null : null;
+      const rng = `20-day ${f2(sup)} to ${f2(res)}`;
+      if (ceil != null || floor != null) {
+        const nx: Fx[] = [];
+        if (ceil != null) nx.push(['n', `Call ${fk(R.C.K)} ${R.C.K > ceil ? 'over' : R.C.K === ceil ? 'at' : 'under'} the ceiling`]);
+        if (floor != null) nx.push(['n', `Put ${fk(R.P.K)} ${R.P.K < floor ? 'under' : R.P.K === floor ? 'at' : 'over'} the floor`]);
+        sg({ key: 'lv', k: 'Walls', v: ceil != null ? 'Ceiling ' + fk(ceil) : 'Floor ' + fk(floor!),
+          tag: ceil != null ? f1(dS(ceil)) + ' SD up' : f1(-dS(floor!)) + ' SD down',
+          s: [ceil != null && floor != null ? `Floor ${fk(floor)}, ${f1(-dS(floor))} SD down` : '', rng].filter(Boolean).join(' · '), fx: nx });
+      } else sg({ key: 'lv', k: '20-day range', v: `${f2(sup)} to ${f2(res)}`, s: `${f1(-dS(sup))} SD down · ${f1(dS(res))} SD up` });
       if (R.ernB && er) sg({ key: 'er', k: 'Earnings', v: md(er.d), tag: 'before expiry', tagTone: 'or', s: '', fx: R.fx.er, erExp: true });
       if (exDiv && String(exDiv.ex_date) < ex && name.soldCalls.some((x) => x.K < S)) sg({ key: 'ex', k: 'Ex-dividend', v: md(String(exDiv.ex_date)), tag: 'call in the money', tagTone: 'or', s: 'Early assignment risk' });
       if (cv.naked || nd < 0) sg({ key: 'cv', k: 'Your calls', v: cv.naked ? cv.naked + ' naked' : 'Net short', vTone: 'or', s: 'Net delta ' + (nd < 0 ? 'short ' : 'long ') + Math.round(Math.abs(nd)).toLocaleString('en-US') });
@@ -330,7 +356,8 @@ Deno.serve(async (req) => {
       ok: true, v: 1, build: BUILD, source: useTheta ? 'theta' : 'polygon', ms: Date.now() - t0,
       t, name: shortName, strategy, S: +S.toFixed(4), prev: +prev.toFixed(4), move: prev > 0 ? +(S / prev - 1).toFixed(5) : 0,
       open: mins >= 9 * 60 + 30 && mins < 16 * 60, today,
-      cfg: { cLo: CFG.cLo, cHi: CFG.cHi, pLo: CFG.pLo, pHi: CFG.pHi },
+      // The 20% day opens the calls to ATM, a 2 SD drop in an uptrend the puts to one strike in the money.
+      cfg: { cLo: exps.some((x) => x.R.kc === 0) ? 0 : CFG.cLo, cHi: CFG.cHi, pLo: exps.some((x) => x.R.kp < 0) ? ITM : CFG.pLo, pHi: CFG.pHi },
       counts,
       // The chart lines: what was sold, at the values from when it was sold.
       sold: [...name.soldCalls.map((l) => ({ put: false, K: l.K, n: l.n, ex: l.ex, be: l.at != null ? +(l.K + l.at).toFixed(4) : null })),

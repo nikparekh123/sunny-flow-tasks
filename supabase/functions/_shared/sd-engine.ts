@@ -28,7 +28,7 @@ export const dl = (S: number, K: number, T: number, s: number, q: number, r: num
 };
 
 /** The rules' thresholds (README 1.5; Nik D4: fixed in code for now). pHi 1.0 (Nik D2: puts ATM to 1 SD). */
-export const CFG = { c0: 0.5, cLo: 0.5, cHi: 1.25, p0: 1, pLo: 0, pHi: 1, zDn: -1, zDn2: -0.5, zUp: 0.5, zUp2: 1,
+export const CFG = { c0: 0.5, cLo: 0.25, cHi: 1.25, p0: 1, pLo: 0, pHi: 1, freak: 0.2, zDn: -1, zDn2: -0.5, zUp: 0.5, zUp2: 1,
   rkHi: 70, rkLo: 20, rtHi: 1.3, rtLo: 1, rsiHi: 70, rsiLo: 30, sr: 0.25, nudge: 0.25, spr: 0.1, oi: 100 };
 /** The Every SD table's steps. */
 export const KS = [0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -52,6 +52,9 @@ export interface Leg { K: number; n: number; ex: string; at: number | null; iv: 
 export interface Name {
   t: string; S: number; S5: number; iv5: number; iv30: number; hv20: number; rank: number; ratio: number;
   rsi: number; sup: number; res: number; r: number; q: number;
+  /** The momentum rules' inputs (Nik 11 Nov): the 50-day and 200-day averages of the closes, the 52-week low,
+      and today's move as a fraction (for the 20% day). */
+  ma50?: number | null; ma200?: number | null; lo52?: number | null; day1?: number;
   shares: number; soldCalls: Leg[]; soldPuts: Leg[]; longCalls: Leg[]; longPuts: Leg[];
 }
 export type Fx = [kind: 'c' | 'p' | 'b' | 'x' | 'n', text: string];
@@ -60,7 +63,7 @@ export interface Row { k: number; K: number; x: number; kA: number; pr: number; 
 export const f1 = (x: number) => x.toFixed(1), f2 = (x: number) => x.toFixed(2);
 /** A strike as the design writes it: "40", "42.5", "40.85". */
 export const fk = (x: number) => (x % 1 ? (Math.round(x * 100) % 10 ? x.toFixed(2) : x.toFixed(1)) : String(x));
-export const sdl = (k: number) => (k === 0 ? 'ATM' : (k % 1 ? String(k) : k.toFixed(1)) + ' SD');
+export const sdl = (k: number) => (k < 0 ? 'ITM' : k === 0 ? 'ATM' : (k % 1 ? String(k) : k.toFixed(1)) + ' SD');
 /** A percentage, one decimal, two under 0.1%; never a sign. */
 export const pc = (x: number) => { const a = Math.abs(x) * 100; return (a < 0.1 ? a.toFixed(2) : a.toFixed(1)) + '%'; };
 export const dir = (x: number) => (x >= 0 ? '↑ ' : '↓ ') + pc(x);
@@ -84,52 +87,75 @@ export function row(c: Name, e: Expiry, k: number, put: boolean, K0?: number): R
 export interface Calc {
   m: number; z: number; rich: boolean; cheap: boolean; ernB: boolean;
   kc: number; kp: number; mvC: boolean; mvP: boolean; capC: boolean; capP: boolean;
+  /** The trend (Nik 11 Nov): above the 50-day and 200-day, above the 50-day only, or below the 50-day. */
+  trend: Trend;
+  /** How far over the 52-week low, in weekly SD (null without a year of lows). */
+  d52: number | null;
   C: Row; P: Row; fx: { wk: Fx[]; iv: Fx[]; rsi: Fx[]; er: Fx[]; res: Fx[]; sup: Fx[] };
 }
+export type Trend = 'up' | 'mid' | 'down';
+/** One strike in the money for a put, as k: the first listed strike over the price. */
+export const ITM = -0.25;
 
-/** The suggestion (README 1.5): the week, rich or cheap, RSI, earnings, clamp, then support and resistance. */
-export function calc(c: Name, e: Expiry, o: { c0?: number; p0?: number; atm?: boolean } = {}): Calc {
-  const G = CFG, S = c.S, m = e.iv * Math.sqrt(e.T), atm = o.atm !== false;
-  const c0 = o.c0 ?? G.c0, p0 = o.p0 ?? G.p0, ernB = e.earnB;
-  const z = Math.log(S / c.S5) / (c.iv5 * Math.sqrt(5 / 252));
-  let kc = c0, kp = p0;
+/** The trend from the price against the 50-day and 200-day: both above is up, the 50-day only is mid, under
+    the 50-day is down. Without averages it reads mid. */
+export function trendOf(S: number, ma50: number | null | undefined, ma200: number | null | undefined): Trend {
+  if (!(ma50 && ma50 > 0)) return 'mid';
+  if (S <= ma50) return 'down';
+  return ma200 && ma200 > 0 && S > ma200 ? 'up' : 'mid';
+}
+
+/** The suggestion, momentum rules agreed with Nik on 11 Nov 2026. The week's move in SD (z, the name's own
+    weekly SD) and the trend pick both sides from two tables; earnings and IV rich or cheap move them after;
+    then the clamp. Support, resistance and the walls no longer move a strike (shown in a card only).
+      Calls: up about 20% in one day ATM (the only ATM call); up 2 SD 0.25; up 1-2 SD 0.5; flat (under 1 SD
+      either way) 0.5, or 0.75 above the 50-day and 200-day; down 1-2 SD 0.75; down 2 SD 0.5.
+      Puts (up / mid / down trend): down 2 SD one strike ITM / ATM / by the 52-week low (under 1 weekly SD
+      over it ATM, 1-2 SD 0.25, more 0.5); down 1-2 SD 0.5 / 0.75 / 1.0; flat 0.75 / 1.0 / 1.0; up 1 SD or
+      more 1.0. Puts never pause.
+      Earnings before the expiry: the call 0.5 SD further out, the put stays at 1 SD (nothing closer).
+      IV rich: both 0.25 SD closer (not in an earnings window); cheap: both 0.25 SD further out.
+      Clamp: calls 0.25 to 1.25 (ATM only on the 20% day), puts ATM to 1 (one strike ITM only when the
+      table picked it). */
+export function calc(c: Name, e: Expiry, _o: { c0?: number; p0?: number; atm?: boolean } = {}): Calc {
+  const G = CFG, S = c.S, m = e.iv * Math.sqrt(e.T), ernB = e.earnB;
+  const w = c.iv5 * Math.sqrt(5 / 252), z = Math.log(S / c.S5) / w;
   const fx: Calc['fx'] = { wk: [], iv: [], rsi: [], er: [], res: [], sup: [] };
-  // 1. The week. In an earnings window nothing moves closer.
-  if (z <= G.zDn) { kc += 0.5; if (!ernB) kp = atm ? 0 : 0.25; }
-  else if (z <= G.zDn2) { kc += 0.25; if (!ernB) kp -= 0.25; }
-  else if (z >= G.zUp2) kp += 0.5;
-  else if (z >= G.zUp) kp += 0.25;
-  if (z <= G.zDn) fx.wk.push(['c', 'Call 0.5 SD wider'], ernB ? ['n', 'Put kept: earnings'] : ['p', 'Put to ' + (atm ? 'ATM' : '0.25 SD')]);
-  else if (z <= G.zDn2) fx.wk.push(['c', 'Call 0.25 SD wider'], ernB ? ['n', 'Put kept: earnings'] : ['p', 'Put 0.25 SD closer']);
-  else if (z >= G.zUp2) fx.wk.push(['p', 'Put 0.5 SD wider']);
-  else if (z >= G.zUp) fx.wk.push(['p', 'Put 0.25 SD wider']);
-  if (z <= G.zDn && c.soldCalls.length) fx.wk.push(['x', 'Buy back the ' + [...new Set(c.soldCalls.map((x) => fk(x.K)))].join(' and ') + ' calls, no roll down']);
-  // 2. Rich or cheap, on the 30-day IV. Rich wins when both read true.
+  const trend = trendOf(S, c.ma50, c.ma200);
+  const wk30 = (c.iv30 || c.iv5) * Math.sqrt(5 / 252);
+  const d52 = c.lo52 && c.lo52 > 0 && wk30 > 0 ? Math.log(S / c.lo52) / wk30 : null;
+  const freak = (c.day1 ?? 0) >= G.freak;
+  const up2 = z >= 2, up1 = z >= 1 && !up2, dn2 = z <= -2, dn1 = z <= -1 && !dn2;
+  // 1. The calls, from the week (and the trend in a flat week).
+  let kc = freak ? 0 : up2 ? 0.25 : up1 ? 0.5 : dn1 ? 0.75 : dn2 ? 0.5 : trend === 'up' ? 0.75 : 0.5;
+  // 2. The puts, from the week and the trend.
+  let kp: number, why52 = '';
+  if (dn2) {
+    if (trend === 'up') kp = ITM;
+    else if (trend === 'mid') kp = 0;
+    else {
+      kp = d52 == null ? 0.5 : d52 < 1 ? 0 : d52 < 2 ? 0.25 : 0.5;
+      if (d52 != null) why52 = `${f1(d52)} SD over the 52-week low`;
+    }
+  } else if (dn1) kp = trend === 'up' ? 0.5 : trend === 'mid' ? 0.75 : 1;
+  else if (z >= 1) kp = 1;
+  else kp = trend === 'up' ? 0.75 : 1;
+  const tabC = kc, tabP = kp;
+  // 3. Earnings before the expiry: the call further out, the put back at 1 SD.
+  if (ernB) { kc += 0.5; kp = Math.max(kp, G.pHi); fx.er.push(['c', 'Call 0.5 SD wider'], ['p', 'Put stays at 1 SD'], ['n', 'Nothing moves closer']); }
+  // 4. Rich or cheap, on the 30-day IV. Rich wins when both read true; rich moves nothing in an earnings window.
   const rich = c.rank >= G.rkHi || c.ratio >= G.rtHi, cheap = !rich && (c.rank <= G.rkLo || c.ratio <= G.rtLo);
   if (rich && !ernB) { kc -= 0.25; kp -= 0.25; } else if (cheap) { kc += 0.25; kp += 0.25; }
   if (rich) fx.iv.push(ernB ? ['n', 'Skipped: earnings'] : ['b', 'Both 0.25 SD closer']); else if (cheap) fx.iv.push(['b', 'Both 0.25 SD wider']);
-  // 3. RSI only widens.
-  const ob = c.rsi >= G.rsiHi, os = c.rsi <= G.rsiLo;
-  if (ob) { kp += 0.25; fx.rsi.push(['p', 'Put 0.25 SD wider']); }
-  if (os) { kc += 0.25; fx.rsi.push(['c', 'Call 0.25 SD wider']); }
-  // 4. Earnings before expiry.
-  if (ernB) { kc += 0.5; kp += 0.5; fx.er.push(['b', 'Both 0.5 SD wider'], ['n', 'Nothing moves closer']); }
   // 5. Clamp and round to 0.25.
   const cl = (v: number, lo: number, hi: number) => Math.round(Math.min(hi, Math.max(lo, v)) * 4) / 4;
-  const kc5 = cl(kc, G.cLo, G.cHi), kp5 = cl(kp, G.pLo, G.pHi);
-  // 6. Support and resistance: within 0.25 SD of the strike, out to the first listed strike past it, 0.25 SD at most.
-  let Kc = snapTo(e.strikes, S * Math.exp(kc5 * m)), Kp = snapTo(e.strikes, S * Math.exp(-kp5 * m)), mvC = false, mvP = false;
-  if (c.res > Kc && Math.log(c.res / Kc) / m <= G.sr) {
-    const K = e.strikes.find((s) => s > c.res + 1e-9);
-    if (K != null && Math.log(K / Kc) / m <= G.nudge) { Kc = K; mvC = true; }
-  }
-  if (c.sup < Kp && Math.log(Kp / c.sup) / m <= G.sr) {
-    const K = [...e.strikes].reverse().find((s) => s < c.sup - 1e-9);
-    if (K != null && Math.log(Kp / K) / m <= G.nudge) { Kp = K; mvP = true; }
-  }
-  if (mvC) fx.res.push(['c', 'Call out to ' + fk(Kc)]);
-  if (mvP) fx.sup.push(['p', 'Put out to ' + fk(Kp)]);
-  return { m, z, rich, cheap, ernB, kc: kc5, kp: kp5, mvC, mvP, capC: kc5 !== kc, capP: kp5 !== kp,
+  const kc5 = cl(kc, freak && !ernB ? 0 : G.cLo, G.cHi), kp5 = cl(kp, tabP === ITM && !ernB ? ITM : G.pLo, G.pHi);
+  // What the week and the trend picked, said on the week's card.
+  const putSay = (k: number) => (k === ITM ? 'Put one strike in the money' : k === 0 ? 'Put at the money' : `Put ${sdl(k)}`);
+  fx.wk.push(['c', freak ? 'Call at the money: up 20% today' : `Call ${sdl(tabC)}`], ['p', putSay(tabP) + (why52 ? `: ${why52}` : '')]);
+  const Kc = snapTo(e.strikes, S * Math.exp(kc5 * m));
+  const Kp = kp5 < 0 ? (e.strikes.find((s) => s > S + 1e-9) ?? snapTo(e.strikes, S)) : snapTo(e.strikes, S * Math.exp(-kp5 * m));
+  return { m, z, rich, cheap, ernB, kc: kc5, kp: kp5, mvC: false, mvP: false, capC: kc5 !== kc, capP: kp5 !== kp, trend, d52,
     C: row(c, e, kc5, false, Kc), P: row(c, e, kp5, true, Kp), fx };
 }
 

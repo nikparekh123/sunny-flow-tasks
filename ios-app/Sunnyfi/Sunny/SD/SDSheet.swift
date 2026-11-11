@@ -159,10 +159,9 @@ struct SDCard: View {
         .accessibilityLabel(sd.level == .full ? "Show half the calculator" : "Show the whole calculator")
     }
 
-    /// Ticker 28/34 800, price 22/28 600, the move 15/20 600; the pin and X (30 pt circles); IV · 1 SD 13/18 muted.
+    /// Ticker 28/34 800, price 22/28 600, the move 15/20 600; the X (a 30 pt circle); IV · 1 SD 13/18 muted.
     private func header(_ r: SDReply, _ p: SDPair) -> some View {
         let mv = r.move ?? (r.prev.map { $0 > 0 ? r.price / $0 - 1 : 0 } ?? 0), e = p.exp
-        let pinned = sd.isPinned(sd.book, sd.t)
         return VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .center, spacing: 12) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -177,15 +176,7 @@ struct SDCard: View {
                 .accessibilityLabel("\(r.name ?? r.t), \(SDFmt.f2(r.price)) dollars, \(SDFmt.saidMove(mv)) today")
                 Spacer(minLength: 0)
                 HStack(spacing: 8) {
-                    circle(bg: pinned ? SDPal.ink : SDPal.trk) {
-                        SDPinGlyph().stroke(pinned ? SDPal.cd : SDPal.ink, style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
-                            .frame(width: 12, height: 12)
-                    } action: { withAnimation(S.fade) { sd.togglePin() } }
-                    .accessibilityLabel("Pin to the chart")
-                    .accessibilityValue(pinned ? "On" : "Off")
-                    .accessibilityHint("Keeps the SD band and both strikes on the chart after the calculator closes")
-                    .accessibilityAddTraits(.isToggle)
-                    .sensoryFeedback(.selection, trigger: pinned)
+                    // No pin: it only kept the SD lines on the chart, and the chart no longer draws them (Nik, 11 Nov 2026).
                     circle(bg: SDPal.trk) {
                         Path { q in q.move(to: CGPoint(x: 2.5, y: 2.5)); q.addLine(to: CGPoint(x: 9.5, y: 9.5)); q.move(to: CGPoint(x: 9.5, y: 2.5)); q.addLine(to: CGPoint(x: 2.5, y: 9.5)) }
                             .stroke(SDPal.mu, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
@@ -352,8 +343,9 @@ struct SDCard: View {
 
     private func strikeRow(_ r: SDReply, _ p: SDPair, put: Bool) -> some View {
         let lo = put ? r.cfg.pLo : r.cfg.cLo, hi = put ? r.cfg.pHi : r.cfg.cHi, e = p.exp
-        let ks = stride(from: lo, through: hi + 1e-9, by: 0.25).map { ($0 * 4).rounded() / 4 }
         let sugK = put ? e.sug.kp : e.sug.kc, sel = put ? p.kp : p.kc, est = e.hist?.est == true
+        // One strike in the money (k below 0) is a tile only on an expiry that suggests it (Nik 11 Nov).
+        let ks = stride(from: lo, through: hi + 1e-9, by: 0.25).map { ($0 * 4).rounded() / 4 }.filter { $0 >= 0 || abs($0 - sugK) < 1e-6 }
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Circle().fill(SDPal.side(put)).frame(width: 8, height: 8)
@@ -361,7 +353,7 @@ struct SDCard: View {
                 Text(SDFmt.range(lo, hi)).sType(SType(size: 13, weight: 500, line: 16, tracking: 0)).foregroundStyle(SDPal.mu)
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(put ? "Sell put" : "Sell call"), \(lo == 0 ? "at the money" : SDFmt.sdNum(lo)) to \(SDFmt.sdNum(hi)) SD")
+            .accessibilityLabel("\(put ? "Sell put" : "Sell call"), \(lo < 0 ? "one strike in the money" : lo == 0 ? "at the money" : SDFmt.sdNum(lo)) to \(SDFmt.sdNum(hi)) SD")
             .accessibilityAddTraits(.isHeader)
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
@@ -477,7 +469,8 @@ struct SDCard: View {
     /// "Every SD" 17/22 700 and the Calls | Puts switch; the rows 0 to 2.0 SD for that side, the allowed range boxed.
     private func every(_ r: SDReply, _ p: SDPair) -> some View {
         let put = sd.side == .puts, e = p.exp
-        let lo = put ? r.cfg.pLo : r.cfg.cLo, hi = put ? r.cfg.pHi : r.cfg.cHi
+        // The table's rows start at ATM: one strike in the money is a tile only.
+        let lo = max(0, put ? r.cfg.pLo : r.cfg.cLo), hi = put ? r.cfg.pHi : r.cfg.cHi
         let rows = put ? e.rows.p : e.rows.c
         let inZ = { (k: Double) in k >= lo - 1e-9 && k <= hi + 1e-9 }
         let pre = rows.filter { $0.k < lo - 1e-9 }, zone = rows.filter { inZ($0.k) }, post = rows.filter { $0.k > hi + 1e-9 }
