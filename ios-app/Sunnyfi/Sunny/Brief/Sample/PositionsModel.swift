@@ -29,6 +29,9 @@ struct PositionsModel {
         /// Live: the grid a fix's leg reads (a sold leg's key, or "fix-otm"), and how many of it.
         var src: String? = nil
         var mult: Double = 1
+        /// Live: the expiry as the server sends it ("2026-11-13"), for SD on your positions (11 Nov 2026); "" for shares
+        /// and the sample book.
+        var iso: String = ""
     }
     /// A date slider stop: days on, short label, phrase, long label.
     struct Stop: Hashable { let tt: Double; let short: String; let phrase: String; let long: String; var friday: Bool { short.contains(" ") } }
@@ -156,7 +159,7 @@ struct PositionsModel {
             let ty: SampleEngine.Ty = l.ty == "S" ? .shares : l.ty == "P" ? .put : .call
             let kind: SampleBook.Bought.Kind? = l.kind == "leaps" ? .leaps : l.kind == "otm" ? .otm : l.kind == "ins" ? .ins : nil
             L.append(Leg(id: l.k, group: l.q < 0 && ty != .shares ? "s" : "l", ty: ty, K: l.K, q: l.q, T: l.days,
-                         ex: Self.md(l.ex), title: l.label, kind: kind))
+                         ex: Self.md(l.ex), title: l.label, kind: kind, iso: ty == .shares ? "" : l.ex))
             if l.earned != 0 { e[l.k] = l.earned }
             grid.pl[l.k] = l.pl; grid.d[l.k] = l.d; grid.th[l.k] = l.th; grid.vg[l.k] = l.vg; grid.now[l.k] = l.value
             if let p0 = l.pl0 { grid.pl0[l.k] = p0 }

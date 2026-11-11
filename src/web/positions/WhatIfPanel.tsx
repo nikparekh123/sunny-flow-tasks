@@ -5,6 +5,8 @@ import { count, money, price } from '../lib/format';
 import { expLabel, fk, tradeName, type PLeg, type Pricer, type Trade } from './model';
 import type { Draft } from './whatif';
 import { HAIR, HAIR_S, K, MU, Seg, Switch, cl, kicker } from './ui';
+import { LegSdLines, TradeSdLine } from './sd/LegLines';
+import type { LegLines } from './sd/legs';
 
 interface Props {
   t: string;
@@ -24,6 +26,9 @@ interface Props {
   setDraft: (d: Draft) => void;
   add: (u: Omit<Trade, 'id' | 'on'>) => void;
   reset: () => void;
+  /** SD on your positions (139a): each option leg's three lines, and Try a trade's one line. */
+  sdOf?: (l: PLeg) => LegLines | null;
+  tryLine?: LegLines | null;
 }
 
 const select = { boxSizing: 'border-box', width: '100%', height: 36, border: 'none', borderRadius: 10, padding: '0 8px', background: 'rgba(118,118,128,.24)',
@@ -52,7 +57,7 @@ export function WhatIfPanel(p: Props) {
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         <span style={{ ...kicker, paddingBottom: 6 }}>Your {t} legs</span>
         {legs.map((l) => {
-          const o = off.has(l.k), cc = l.value;
+          const o = off.has(l.k), cc = l.value, s = p.sdOf?.(l) ?? null;
           return (
             <div key={l.k} className="tnum" style={{ display: 'grid', gridTemplateColumns: '48px minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '9px 0', borderTop: HAIR }}>
               <Switch on={!o} label={(o ? 'Switch on ' : 'Switch off ') + l.lb} onToggle={() => p.toggleLeg(l.k)} />
@@ -60,7 +65,14 @@ export function WhatIfPanel(p: Props) {
                 <span style={{ fontSize: 15 }}>{l.lb}</span>
                 <span style={{ fontSize: 12, color: MU }}>{l.ct} · {l.qt}</span>
               </span>
-              {o && <span style={{ fontSize: 12, fontWeight: 600, color: cl(cc), textAlign: 'right', whiteSpace: 'nowrap' }}>{mask('close · ' + cashWords(cc))}</span>}
+              {/* The three lines sit right of the title, in the row's empty right side; a leg switched off keeps its
+                  closing cash, right-aligned under them. Shares get nothing. */}
+              {(s || o) && (
+                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                  {s && <LegSdLines v={s} />}
+                  {o && <span style={{ fontSize: 12, fontWeight: 600, color: cl(cc), textAlign: 'right', whiteSpace: 'nowrap' }}>{mask('close · ' + cashWords(cc))}</span>}
+                </span>
+              )}
             </div>
           );
         })}
@@ -101,6 +113,9 @@ export function WhatIfPanel(p: Props) {
           <button type="button" className="bare swp-add" onClick={() => p.add({ side: draft.side, ty: draft.ty, K: draft.K, ex: draft.ex, n: draft.n })}
             style={{ flex: 'none', padding: '8px 20px', borderRadius: 999, background: K, color: '#000000', fontSize: 14, fontWeight: 600 }}>Add</button>
         </div>
+        {/* Under the summary line, the trade's strike against today (README "Try a trade"): the full width, so it
+            stays one line beside nothing; it follows the strike, expiry, side and Buy or Sell. */}
+        {p.tryLine && <TradeSdLine v={p.tryLine} style={{ marginTop: -8 }} />}
         {tradeRows.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {tradeRows.map(({ l, u }) => {

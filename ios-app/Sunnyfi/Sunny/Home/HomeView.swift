@@ -191,6 +191,8 @@ struct HomeView: View {
                 // A ticker chart pushed from a tile: the bar leaves with it (it used to vanish at once).
                 .animation(reduce ? S.fade : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: brief.ticker != nil)
         }
+        // The SD calculator (11 Nov 2026), from the SD chip on Positions: a sheet over the page and the tab bar.
+        .overlay { SDSheetHost() }
         .environment(brief)
         .onAppear(perform: briefSetup)
         // The server's brief, decoded once per build (memoized; HomeStore ticks every 15 to 30 s).
@@ -198,6 +200,7 @@ struct HomeView: View {
             brief.fresh = (SXClient.parseDate(home.fresh.marks ?? ""), SXClient.parseDate(home.fresh.trades ?? ""))
             brief.ingest(home.brief, key: home.builtAt, book: store.bookIDNow, overview: home.overview, books: store.books)
             brief.calendar = home.calendar   // early closes move the moments (Audit 7)
+            SDStore.shared.setLegs(home.legs)   // each leg's own IV, for SD on your positions (11 Nov 2026)
         }
         // The strip picked a book: read its Home (Overview stays on S's last build).
         .onChange(of: brief.account) { _, a in

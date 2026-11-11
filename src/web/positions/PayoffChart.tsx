@@ -1,8 +1,9 @@
 // The payoff chart (README 2, "Payoff chart"): the P&L at the picked date across today's price ± the zoom, green above
 // zero and red below, the book as it is dashed when there are changes, the priced move as a soft band, today's line
-// and dot, the orange "makes the most at" line, Walls or Technicals, the zoom capsule, and the axis under it.
+// and dot, the orange "makes the most at" line, Walls, Technicals or SD (its band, picked strikes and sold legs), the
+// zoom capsule, and the axis under it.
 // The hover (line, dot, G2 tooltip) paints straight into the page from refs: no React render per mouse move.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { money, price } from '../lib/format';
 
 export const ZS = [5, 8, 12, 18, 25, 35, 50];
@@ -10,12 +11,21 @@ export const ZS = [5, 8, 12, 18, 25, 35, 50];
 export const FIT = 4;
 
 export interface Line { k: string; x: number; label: string; kind: 'wall' | 'tech' }
+/** The SD layer's lines (README 1.9, Explorations 137b), x in % of the chart's width: the ±1 SD band of the picked
+    expiry, the two picked strikes dashed with their labels on top, and every sold leg solid with its breakeven dotted
+    and its label at the foot. Only what falls inside the chart's prices is passed. */
+export interface SdLines {
+  band: { l: number; w: number } | null;
+  picks: { k: string; x: number; label: string; put: boolean }[];
+  sold: { k: string; x: number | null; xb: number | null; label: string }[];
+}
 interface Props {
   xs: number[]; vW: number[]; vB: number[]; chg: boolean; S0: number; v0: number;
   zi: number; widest: number; setZoom: (z: number) => void;
   band: { l: number; w: number; label: string } | null;
   short: { x: number; label: string } | null;
   lines: Line[];
+  sd?: SdLines | null;
   privacy: boolean;
 }
 
@@ -29,13 +39,21 @@ const lerp = (xs: number[], ys: number[], x: number) => {
   return ys[i] + (ys[j] - ys[i]) * w;
 };
 const ud = (v: number, pv: boolean) => (v >= 0 ? 'Up ' : 'Down ') + (pv ? '$•••' : money(v));
+/** A label's width in Inter, measured once per string (the SD labels' lanes). */
+let measure: CanvasRenderingContext2D | null = null;
+const textW = (s: string, wt: number, px: number) => {
+  if (!measure && typeof document !== 'undefined') measure = document.createElement('canvas').getContext('2d');
+  if (!measure) return s.length * px * 0.6;
+  measure.font = `${wt} ${px}px Inter, system-ui, sans-serif`;
+  return measure.measureText(s).width;
+};
 const isTyping = (t: EventTarget | null) => {
   const el = t as HTMLElement | null;
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
 };
 
 export function PayoffChart(p: Props) {
-  const { xs, vW, vB, chg, S0, v0, zi, widest, setZoom, band, short, lines, privacy } = p;
+  const { xs, vW, vB, chg, S0, v0, zi, widest, setZoom, band, short, lines, sd, privacy } = p;
   const ZR = ZS[zi] / 100, X0 = S0 * (1 - ZR), X1 = S0 * (1 + ZR);
   const g = useMemo(() => {
     let mn = Math.min(0, ...vB, ...vW), mx = Math.max(0, ...vB, ...vW);
@@ -146,6 +164,32 @@ export function PayoffChart(p: Props) {
   const ns = { vectorEffect: 'non-scaling-stroke' } as const;
   // Away from where it opens (±25%, or the widest a narrow grid allows): only then the reset arrow shows.
   const zOn = zi !== Math.min(FIT, widest);
+  // The SD labels' lanes. On top, the picked strikes' labels sit at the top edge (137b); one that would run into the
+  // zoom capsule or the other label drops under the capsule. At the foot, the sold legs' labels take the design's two
+  // rows (0 and 14 px up), stepping round the orange "makes the most at" label, then a third row above it.
+  const sdLane = useMemo(() => {
+    const top = new Map<string, number>(), bot = new Map<string, number>();
+    if (!sd || !bw) return { top, bot };
+    const capW = 116 + (zOn ? 38 : 0);
+    const tp: { ln: number; a: number; b: number }[] = [{ ln: 0, a: bw - capW, b: bw + 999 }];
+    for (const x of [...sd.picks].sort((a, b) => a.x - b.x)) {
+      const w = textW(x.label, 700, 12) + 10, c = x.x / 100 * bw, a = c - w / 2, b = c + w / 2;
+      let ln = 0;
+      while (tp.some((q) => q.ln === ln && a < q.b + 6 && b > q.a - 6)) ln++;
+      tp.push({ ln, a, b }); top.set(x.k, ln);
+    }
+    const bp: { ln: number; a: number; b: number }[] = [];
+    if (short) { const w = textW(short.label, 600, 11) + 12, c = short.x / 100 * bw; bp.push({ ln: 0, a: c - w / 2, b: c + w / 2 }, { ln: 1, a: c - w / 2, b: c + w / 2 }); }
+    for (const x of [...sd.sold].filter((s) => s.x != null).sort((a, b) => a.x! - b.x!)) {
+      const w = textW(x.label, 600, 11) + 10, c = x.x! / 100 * bw, a = c - w / 2, b = c + w / 2;
+      let ln = 0;
+      while (bp.some((q) => q.ln === ln && a < q.b + 6 && b > q.a - 6)) ln++;
+      bp.push({ ln, a, b }); bot.set(x.k, ln);
+    }
+    return { top, bot };
+  }, [sd, bw, zOn, short]);
+  const SD_BOT = [0, 14, 30, 46, 62];
+  const SD_LBL = { background: 'rgba(6,8,7,.9)', borderRadius: 6, padding: '0 5px' } as const;
   return (
     <>
       <div ref={box} onPointerMove={onMove} onPointerDown={onDown} onPointerUp={onUp} onPointerLeave={onLeave} onPointerCancel={onLeave}
@@ -156,6 +200,10 @@ export function PayoffChart(p: Props) {
             background: 'linear-gradient(180deg,rgba(255,255,255,0),rgba(255,255,255,.05) 20%,rgba(255,255,255,.05) 80%,rgba(255,255,255,0))' }}>
             <span style={{ position: 'absolute', left: 8, top: 6, fontSize: 11, color: '#98989D', whiteSpace: 'nowrap' }}>{band.label}</span>
           </span>
+        )}
+        {sd?.band && (
+          <span aria-hidden="true" style={{ position: 'absolute', top: 22, bottom: 32, left: sd.band.l.toFixed(2) + '%', width: sd.band.w.toFixed(2) + '%',
+            background: 'rgba(118,118,128,.16)', pointerEvents: 'none' }} />
         )}
         <div style={{ position: 'absolute', left: 0, right: 0, top: 10, height: 'calc(100% - 20px)', pointerEvents: 'none' }}>
           <svg viewBox="0 0 400 100" preserveAspectRatio="none" aria-hidden="true" style={{ ...svg, clipPath: `inset(0 0 ${(100 - g.zy).toFixed(2)}% 0)` }}>
@@ -189,6 +237,33 @@ export function PayoffChart(p: Props) {
               background: 'rgba(8,18,20,.92)', boxShadow: 'inset 0 0 0 1px rgba(76,201,208,.35)', borderRadius: 6, padding: '2px 7px', whiteSpace: 'nowrap' }}>{x.label}</span>
           </span>
         ))}
+        {/* SD (137b). The lines first: every sold leg solid ink at its strike and dotted at its breakeven, the two picked
+            strikes dashed in the side colours. Then the labels over them: the picks' on top with the expiry, the sold legs'
+            at the foot. Each label sits on the page's own dark (as the "makes the most at" label does), so the today line
+            or the orange line never runs through its words. */}
+        {sd?.sold.map((q) => {
+          const b = SD_BOT[Math.min(SD_BOT.length - 1, sdLane.bot.get(q.k) ?? 0)];
+          return (
+            <Fragment key={q.k}>
+              {q.x != null && <span aria-hidden="true" style={{ position: 'absolute', top: 22, bottom: b >= 30 ? b + 16 : 32, left: q.x.toFixed(2) + '%', borderLeft: '1px solid rgba(245,245,247,.7)', pointerEvents: 'none' }} />}
+              {q.xb != null && <span aria-hidden="true" style={{ position: 'absolute', top: 22, bottom: 32, left: q.xb.toFixed(2) + '%', borderLeft: '1px dotted #98989D', pointerEvents: 'none' }} />}
+            </Fragment>
+          );
+        })}
+        {sd?.picks.map((x) => (
+          <span key={x.k} aria-hidden="true" style={{ position: 'absolute', top: 22, bottom: 32, left: x.x.toFixed(2) + '%', borderLeft: '1.5px dashed ' + (x.put ? '#D49A5A' : '#6FA0F6'), pointerEvents: 'none' }} />
+        ))}
+        {sd?.sold.map((q) => q.x != null && (
+          <span key={q.k} style={{ position: 'absolute', bottom: SD_BOT[Math.min(SD_BOT.length - 1, sdLane.bot.get(q.k) ?? 0)], left: q.x.toFixed(2) + '%', transform: 'translateX(-50%)',
+            fontSize: 11, lineHeight: '14px', fontWeight: 600, whiteSpace: 'nowrap', pointerEvents: 'none', ...SD_LBL }}>{q.label}</span>
+        ))}
+        {sd?.picks.map((x) => {
+          const ln = sdLane.top.get(x.k) ?? 0;
+          return (
+            <span key={x.k} style={{ position: 'absolute', top: ln ? 36 + (ln - 1) * 22 : 0, left: x.x.toFixed(2) + '%', transform: 'translateX(-50%)', fontSize: 12, lineHeight: '16px',
+              fontWeight: 700, color: x.put ? '#D49A5A' : '#6FA0F6', whiteSpace: 'nowrap', pointerEvents: 'none', ...SD_LBL }}>{x.label}</span>
+          );
+        })}
         <span style={{ position: 'absolute', left: '50%', top: 'calc(10px + (100% - 20px) * ' + g.fy(v0).toFixed(3) + ')', width: 14, height: 14, margin: '-7px 0 0 -7px',
           borderRadius: '50%', background: '#FFFFFF', boxShadow: '0 0 0 3px rgba(0,0,0,.6),0 0 16px rgba(255,255,255,.5)', pointerEvents: 'none' }} />
         <span ref={line} style={{ position: 'absolute', left: 0, top: 0, bottom: 0, borderLeft: '1px solid rgba(255,255,255,.4)', pointerEvents: 'none', opacity: 0 }}>

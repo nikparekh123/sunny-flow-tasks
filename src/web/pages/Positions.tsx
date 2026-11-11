@@ -4,20 +4,24 @@
 // order (short first, then thin, then the rest: Home's position rows); /positions/:t opens that name.
 //
 // Data, real only: Home's snapshot for the book (totals, names, the inputs the server priced on) and sunny-positions
-// for the name's grid (usePositions, asked again when Home rebuilds). The phone sums the same grid the same way
+// for the name's grid (usePositions, asked again when Home rebuilds), and sunny-sd for the SD layer (useSd, only while
+// that layer is on: the card under the chart and its lines on the chart). The phone sums the same grid the same way
 // (PositionsModel.swift); positions/model.ts is that port.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { BOOK_NAME } from '../components/AccountMenu';
 import { CountUp } from '../components/CountUp';
 import { clock12, ny, shortDate } from '../lib/clock';
-import { useHome, usePositions, usePrefetchPositions, useTicker, type J } from '../lib/data';
+import { useHome, usePositions, usePrefetchPositions, useSd, useTicker, type J } from '../lib/data';
 import { arrow, count, level, money, pct, price } from '../lib/format';
 import { useWeb } from '../lib/state';
-import { PayoffChart, ZS, FIT, type Line } from '../positions/PayoffChart';
+import { PayoffChart, ZS, FIT, type Line, type SdLines } from '../positions/PayoffChart';
+import { SdCard } from '../positions/sd/SdCard';
+import { NO_PICK, sdView, type SdPick, type SdReply } from '../positions/sd/model';
 import { Compare, EveryLeg, Lists, PriceDateGrid, type CmpRow, type LegRow } from '../positions/Tables';
 import { WhatIfPanel } from '../positions/WhatIfPanel';
-import { PosModel, Pricer, fk, updn, type GridW, type Inputs, type PLeg, type Seg } from '../positions/model';
+import { PosModel, Pricer, expLabel, fk, updn, type GridW, type Inputs, type PLeg, type Seg } from '../positions/model';
+import { closedDays, draftLines, legLines } from '../positions/sd/legs';
 import { useWhatIf, type Draft } from '../positions/whatif';
 import { bookTotals, nameTotals } from '../positions/totals';
 import { TotalsSwitch, TotalsTable, type TView } from '../positions/TotalsTable';
@@ -119,6 +123,8 @@ function Name({ book, t, name, payload }: { book: 'S' | 'N'; t: string; name: J;
   const shown = ready ? { t, grid: grid! } : last.current;
   const S0 = ready ? grid!.S0 : +name?.S0 || 0, P0 = ready ? grid!.P0 : +name?.P0 || S0, mv = P0 ? (S0 / P0 - 1) * 100 : 0;
   const strat = String(name?.strategy ?? '');
+  // The days the market is shut (Home's calendar): the SD lines on each leg count trading days around them.
+  const closed = useMemo(() => closedDays(payload?.calendar), [payload?.calendar]);
   const company = String(name?.name ?? t);
   return (
     <>
@@ -135,7 +141,7 @@ function Name({ book, t, name, payload }: { book: 'S' | 'N'; t: string; name: J;
           pointerEvents: ready ? 'auto' : 'none' }}>
           {!ready && q.isError && <span style={{ fontSize: 13, color: MU }}>Could not load {t}.</span>}
           <Detail book={book} t={shown.t} company={shown.t === t ? company : String(shown.t)} grid={shown.grid} inputs={payload?.brief_inputs ?? null}
-            fridayIso={payload?.brief?.friday ?? ''} mask={mask} privacy={privacy} />
+            fridayIso={payload?.brief?.friday ?? ''} mask={mask} privacy={privacy} closed={closed} />
         </div>
       ) : q.isError ? <span style={{ fontSize: 13, color: MU }}>Could not load {t}.</span>
         : <div style={{ minHeight: 600 }} />}
@@ -144,11 +150,14 @@ function Name({ book, t, name, payload }: { book: 'S' | 'N'; t: string; name: J;
 }
 
 // The page's own state, kept while the page is open and across names (README State: date, zoom, layer, legFilter).
-const pageState = { day: null as string | null, layer: '' as '' | 'walls' | 'tech', lf: 'all' as 'all' | 'sold' | 'long' };
+const pageState = { day: null as string | null, layer: '' as Layer, lf: 'all' as 'all' | 'sold' | 'long' };
+type Layer = '' | 'walls' | 'tech' | 'sd';
 
-function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy }:
-  { book: 'S' | 'N'; t: string; company: string; grid: GridW; inputs: Inputs | null; fridayIso: string; mask: (s: string) => string; privacy: boolean }) {
+function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy, closed }:
+  { book: 'S' | 'N'; t: string; company: string; grid: GridW; inputs: Inputs | null; fridayIso: string; mask: (s: string) => string; privacy: boolean; closed: Set<string> }) {
   const m = useMemo(() => new PosModel(grid, inputs), [grid, inputs]);
+  // SD on your positions (handoff 2026-11-11-sd-on-positions, 139a): every option leg's three lines.
+  const sdOf = useMemo(() => legLines(m, closed), [m, closed]);
   const wf = useWhatIf(book, t);
   const pr = useMemo(() => new Pricer(m, wf.trades), [m, wf.trades]);
   const S0 = m.S0;
@@ -162,11 +171,17 @@ function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy }:
   const [zoom, setZoom] = useState(FIT);
   const widest = m.widest(ZS), zi = Math.min(zoom, widest), ZR = ZS[zi] / 100;
   const [layer, setLayerS] = useState(pageState.layer);
-  const setLayer = (l: '' | 'walls' | 'tech') => { pageState.layer = l; setLayerS(l); };
+  const setLayer = (l: Layer) => { pageState.layer = l; setLayerS(l); };
   const [lf, setLfS] = useState(pageState.lf);
   const setLf = (f: 'all' | 'sold' | 'long') => { pageState.lf = f; setLfS(f); };
   // The 50-day average lives with the ticker chart's data; asked for only while Technicals is on.
   const chart = useTicker(layer === 'tech' ? t : null, book);
+  // The SD calculator (handoff 2026-11-11): asked for only while its layer is on. The pick (expiry, call SD, put SD)
+  // belongs to the name it was made on; a new name opens on its own suggestion.
+  const sdQ = useSd(book, layer === 'sd' ? t : null);
+  const [sdPick, setSdPick] = useState<SdPick>(NO_PICK);
+  const sdData = layer === 'sd' ? (sdQ.data as SdReply | undefined) : undefined;
+  const sdV = useMemo(() => (sdData ? sdView(sdData, sdPick, setSdPick) : null), [sdData, sdPick]);
 
   // The book as it is, and with the What if (legs off, trades on).
   const off = useMemo(() => new Set(wf.off.filter((k) => m.legs.some((l) => l.k === k))), [wf.off, m]);
@@ -194,6 +209,17 @@ function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy }:
   const short = shW != null && xpS(shW) <= 100 ? { x: xpS(shW), label: 'makes the most at ' + price(shW) } : null;
   const inR = (k: number) => k >= S0 * (1 - ZR) && k <= S0 * (1 + ZR);
   const lines: Line[] = [];
+  // SD on the chart (README 1.9): the ±1 SD band of the picked expiry, the two picked strikes, every sold leg; only
+  // what falls inside the chart's prices, and only once the reply is this name's.
+  const sdLines: SdLines | null = sdV && sdV.t === t ? (() => {
+    const c = sdV.chart, l = Math.max(0, xpS(c.band[0])), r = Math.min(100, xpS(c.band[1]));
+    return {
+      band: r > l ? { l, w: r - l } : null,
+      picks: [{ k: 'c', ...c.C, put: false }, { k: 'p', ...c.P, put: true }].filter((x) => inR(x.K)).map((x) => ({ k: x.k, x: xpS(x.K), label: x.label, put: x.put })),
+      sold: c.sold.map((s, i) => ({ k: 's' + i, x: inR(s.K) ? xpS(s.K) : null, xb: s.be != null && inR(s.be) ? xpS(s.be) : null, label: s.label }))
+        .filter((s) => s.x != null || s.xb != null),
+    };
+  })() : null;
   if (layer === 'walls') {
     const c = m.chainFor(seg.iso);
     if (c) ([['Ceiling', c.c], ['Floor', c.f]] as const).forEach(([l, w]) => { if (w && inR(w.k)) lines.push({ k: l, x: xpS(w.k), label: `${l} ${fk(w.k)} · ${c.label}`, kind: 'wall' }); });
@@ -216,8 +242,8 @@ function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy }:
   const fOk = (l: PLeg) => lf === 'all' || (lf === 'sold' ? l.group === 's' : l.group === 'l');
   const soFar = (l: PLeg) => (l.ty === 'S' ? l.q * (S0 - l.K) : l.at != null ? (l.now - l.at) * l.q * 100 : 0);
   const legRows: LegRow[] = [
-    ...base.filter(fOk).map((l) => ({ l, on: !off.has(l.k), toggle: () => wf.toggleLeg(l.k), added: false, sf: soFar(l), d: pr.dL(l, S0, m.today), th: pr.thL(l, S0, m.today) })),
-    ...pr.trades.filter(fOk).map((l) => { const u = wf.trades.find((x) => x.id === l.trade)!; return { l, on: !!u?.on, toggle: () => wf.toggleTrade(l.trade!), added: true, sf: null, d: pr.dL(l, S0, m.today), th: pr.thL(l, S0, m.today) }; }),
+    ...base.filter(fOk).map((l) => ({ l, on: !off.has(l.k), toggle: () => wf.toggleLeg(l.k), added: false, sf: soFar(l), d: pr.dL(l, S0, m.today), th: pr.thL(l, S0, m.today), sd: sdOf(l) })),
+    ...pr.trades.filter(fOk).map((l) => { const u = wf.trades.find((x) => x.id === l.trade)!; return { l, on: !!u?.on, toggle: () => wf.toggleTrade(l.trade!), added: true, sf: null, d: pr.dL(l, S0, m.today), th: pr.thL(l, S0, m.today), sd: sdOf(l) }; }),
   ];
   const ltot = { sf: base.filter((l) => !off.has(l.k)).reduce((a, l) => a + soFar(l), 0), d: pr.delta(wi, S0, m.today), th: wi.reduce((a, l) => a + pr.thL(l, S0, m.today), 0) };
 
@@ -267,7 +293,7 @@ function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy }:
             ))}
           </div>
           <PayoffChart xs={ch.xs} vW={ch.vW} vB={ch.vB} chg={chg} S0={S0} v0={v0} zi={zi} widest={widest} setZoom={setZoom}
-            band={band} short={short} lines={lines} privacy={privacy} />
+            band={sdLines ? null : band} short={short} lines={lines} sd={sdLines} privacy={privacy} />
           <span style={{ fontSize: 12, lineHeight: '18px', color: MU, paddingTop: 6 }}>{legend} Pinch, − and + zoom from ±5% to ±50%; double-click or the reset arrow goes back to ±25%.</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -282,12 +308,17 @@ function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy }:
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Chip on={layer === 'walls'} onPick={() => setLayer(layer === 'walls' ? '' : 'walls')}>Walls</Chip>
             <Chip on={layer === 'tech'} onPick={() => setLayer(layer === 'tech' ? '' : 'tech')}>Technicals</Chip>
+            <Chip on={layer === 'sd'} onPick={() => setLayer(layer === 'sd' ? '' : 'sd')}>SD</Chip>
             <span style={{ fontSize: 12, color: MU }}>one at a time</span>
           </div>
+          {layer === 'sd' && (
+            <SdCard v={sdV} t={t} busy={sdQ.isPlaceholderData || (!!sdV && sdV.t !== t)} failed={sdQ.isError || (!!sdData && !sdV)} mask={mask} />
+          )}
           <Compare dL={dL} rows={cmpRows} top={top} mask={mask} />
         </div>
         <WhatIfPanel t={t} pr={pr} legs={base} off={off} trades={wf.trades} nCh={nCh} cashC={cashC} draft={draft} strikes={strikeList} expiries={expiries}
-          mask={mask} toggleLeg={wf.toggleLeg} toggleTrade={wf.toggleTrade} remove={wf.remove} setDraft={wf.setDraft} add={wf.add} reset={wf.reset} />
+          mask={mask} toggleLeg={wf.toggleLeg} toggleTrade={wf.toggleTrade} remove={wf.remove} setDraft={wf.setDraft} add={wf.add} reset={wf.reset}
+          sdOf={sdOf} tryLine={draftLines(m, closed, draft, expLabel(draft.ex, m.wholeDays(draft.ex)))} />
       </div>
       <PriceDateGrid t={t} pr={pr} set={wi} cols={cols} picked={seg.i} onPick={pick} chg={chg} mask={mask} />
       <EveryLeg rows={legRows} total={ltot} filter={lf} setFilter={setLf} mask={mask} />

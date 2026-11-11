@@ -4,6 +4,8 @@
 import { count, money, price } from '../lib/format';
 import { fk, type ChainW, type DPt, type PLeg, type Pricer, type Seg } from './model';
 import { HAIR, HAIR_S, K, MU, O, R, Seg as SegCtl, Switch, cl, kicker } from './ui';
+import { LegSdLines } from './sd/LegLines';
+import type { LegLines } from './sd/legs';
 
 const tn = { fontVariantNumeric: 'tabular-nums' } as const;
 const side = (d: number) => (d < 0 ? 'Short ' : 'Long ') + count(d);
@@ -76,11 +78,12 @@ export function PriceDateGrid({ t, pr, set, cols, picked, onPick, chg, mask }:
   );
 }
 
-/* ── Every leg (52 · 1fr · 140 · 96 · 64 · 64 · 80 · 80 · 76) ─────────────── */
-export interface LegRow { l: PLeg; on: boolean; toggle: () => void; added: boolean; sf: number | null; d: number; th: number }
+/* ── Every leg (52 · 1fr · 140 · 96 · 64 · 64 · 80 · 80 · 76 · 160) ───────── */
+/** `sd`: SD on your positions (139a; Nik D1, 11 Nov 2026: a new column at the right end with the three lines). */
+export interface LegRow { l: PLeg; on: boolean; toggle: () => void; added: boolean; sf: number | null; d: number; th: number; sd?: LegLines | null }
 export function EveryLeg({ rows, total, filter, setFilter, mask }:
   { rows: LegRow[]; total: { sf: number; d: number; th: number }; filter: 'all' | 'sold' | 'long'; setFilter: (f: 'all' | 'sold' | 'long') => void; mask: (s: string) => string }) {
-  const cols = '52px minmax(0,1fr) 140px 96px 64px 64px 80px 80px 76px';
+  const cols = '52px minmax(0,1fr) 140px 96px 64px 64px 80px 80px 76px 160px';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 28 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 10 }}>
@@ -88,7 +91,7 @@ export function EveryLeg({ rows, total, filter, setFilter, mask }:
         <SegCtl label="Legs" items={[['all', 'All'], ['sold', 'Sold'], ['long', 'Long']]} value={filter} onPick={setFilter} />
       </div>
       <div style={{ ...tn, display: 'grid', gridTemplateColumns: cols, gap: 10, padding: '10px 0 8px', borderTop: HAIR_S, ...kicker }}>
-        <span>On</span><span>Leg</span><span>Contract</span><span>Count</span><span>At</span><span>Now</span><span>So far</span><span>Delta</span><span>Theta a day</span>
+        <span>On</span><span>Leg</span><span>Contract</span><span>Count</span><span>At</span><span>Now</span><span>So far</span><span>Delta</span><span>Theta a day</span><span />
       </div>
       {rows.map((r) => {
         const op = r.on ? 1 : 0.45;
@@ -106,6 +109,7 @@ export function EveryLeg({ rows, total, filter, setFilter, mask }:
             <span style={{ fontSize: 14, fontWeight: 600, color: r.sf == null ? MU : cl(r.sf), opacity: op }}>{r.sf == null ? 'new' : mask(money(r.sf))}</span>
             <span style={{ fontSize: 14, color: r.d < 0 ? R : K, opacity: op }}>{count(r.d)}</span>
             <span style={{ fontSize: 14, color: r.th >= 0 ? '#65C466' : R, opacity: op }}>{mask(money(r.th))}</span>
+            <span style={{ justifySelf: 'end', opacity: op }}>{r.sd && <LegSdLines v={r.sd} />}</span>
           </div>
         );
       })}

@@ -233,6 +233,21 @@ export function usePrefetchTicker(book: BookId | null | undefined) {
   };
 }
 
+/** One name's SD calculator (sunny-sd, handoff 2026-11-11): the expiries, the rows at 0 to 2 SD, the suggestion and
+    the signals. Asked for only while the SD layer is on (`t` null otherwise); read again every 60 s while the market
+    is open (the reply's `open`). The last name's reply stays on screen while the next one comes. */
+export function useSd(book: BookId | null | undefined, t: string | null | undefined) {
+  return useQuery({
+    queryKey: ['sw', 'sd', book, t],
+    enabled: !!book && !!t,
+    staleTime: 60_000,
+    gcTime: 30 * 60_000,
+    refetchInterval: (q) => ((q.state.data as J)?.open ? 60_000 : false),
+    placeholderData: (prev) => prev,
+    queryFn: () => (FX ? fx(`sd/${book}-${t}.json`) : callFn('sunny-sd', { book, t })),
+  });
+}
+
 /** One name's price history with its layers (positions, walls, technicals, targets). */
 const tickerKey = (t: string | null | undefined, book?: BookId | null) => ['sw', 'ticker', t, book ?? ''];
 const fetchTicker = (t: string, book?: BookId | null) => (FX ? fx(`charts/${book ?? 'S'}-${t}.json`) : callFn('sunny-chart', book ? { t, book } : { t }));

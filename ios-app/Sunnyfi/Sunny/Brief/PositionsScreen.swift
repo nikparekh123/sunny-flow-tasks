@@ -70,6 +70,17 @@ struct BriefPositionsScreen: View {
     private var weekend: Bool { brief.moment() == .weekend }
     @State private var chain = 0
     @State private var scrolled: CGFloat = 0
+    /// The SD calculator (11 Nov 2026, Explorations 137a): its sheet, its pins, and the chart lines it draws.
+    @State private var sd = SDStore.shared
+    /// The chart's top in the page, so the half sheet can scroll it up under the status bar (README 1.9).
+    @State private var chartY: CGFloat = 0
+    /// Where the page was before the sheet rose, and where the sheet put it: closing goes back when nothing moved it since.
+    @State private var sdBack: CGFloat?
+    @State private var sdTarget: CGFloat?
+    /// The book sunny-sd prices: the one on screen.
+    private var sdBook: String { brief.book ?? (pageBook == .nicolay ? "N" : "S") }
+    /// The sheet is up on this page's name.
+    private var sdUp: Bool { sd.isOpen(on: name) }
     /// Counts the logo picks a finger makes, for the selection haptic (a name set by the app makes none).
     @State private var logoPicks = 0
     /// The account switch, as Home does it: the page at 15% (`faded`) and 28 pt toward the new account (`slid`),
@@ -152,7 +163,9 @@ struct BriefPositionsScreen: View {
                         ZStack(alignment: .topLeading) {
                             PositionsDetail(m: m, stop: Binding(get: { min(stop, m.stops.count - 1) }, set: { stop = $0 }), price: $price, off: $off,
                                             legFilter: $legFilter, layer: $layer, chain: $chain, fix: $fix, wallsKind: $wallsKind, zoom: $zoom,
-                                            privacy: privacy, late: live && brief.asOf() != nil)
+                                            privacy: privacy, late: live && brief.asOf() != nil,
+                                            sdLines: sd.lines(book: sdBook, t: name), sdOn: sdUp, sdPinned: sd.isPinned(sdBook, name),
+                                            onSd: toggleSD, onChartY: { chartY = $0 })
                                 .id("\(acct)-\(name)")
                         }
                         .padding(.top, 16)
@@ -172,18 +185,41 @@ struct BriefPositionsScreen: View {
             }
             .padding(.bottom, 120)
             .containerRelativeFrame(.horizontal)
+            .coordinateSpace(.named(Self.page))
         }
         .scrollIndicators(.hidden)
         .scrollPosition($pos)
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, v in scrolled = v }
         .task {
             if let y = BriefDebug.scroll { try? await Task.sleep(for: .milliseconds(600)); pos.scrollTo(y: y) }
+            #if DEBUG && targetEnvironment(simulator)
+            // Screens checked in the simulator: `-sdOpen half|full` raises the SD sheet on the name on screen, `-sdPin` pins it.
+            let a = ProcessInfo.processInfo.arguments
+            if let i = a.firstIndex(of: "-sdOpen"), i + 1 < a.count {
+                try? await Task.sleep(for: .milliseconds(1500))
+                if !name.isEmpty { sd.open(book: sdBook, t: name); if a[i + 1] == "full" { try? await Task.sleep(for: .milliseconds(700)); sd.setLevel(.full) } }
+            }
+            if a.contains("-sdPin"), !name.isEmpty, !sd.isPinned(sdBook, name) {
+                try? await Task.sleep(for: .milliseconds(1500))
+                if !sd.isOpen(on: name) { sd.open(book: sdBook, t: name) }
+                try? await Task.sleep(for: .milliseconds(900))
+                sd.togglePin()
+            }
+            #endif
         }
         .background(SBackground(glows: false))
-        .overlay(alignment: .top) { BriefTopEdge() }
+        // While the SD sheet holds the chart up under the status bar (README 1.9) a solid strip sits behind the clock
+        // instead of the soft edge and the small title, which would cover the chart's top.
+        .overlay(alignment: .top) { BriefTopEdge().opacity(sdUp ? 0 : 1).animation(S.fade, value: sdUp) }
+        .overlay(alignment: .top) {
+            Color.clear.frame(height: 0)
+                .background(alignment: .bottom) { SDPal.strip.ignoresSafeArea(edges: .top) }
+                .opacity(sdUp ? 1 : 0).animation(S.fade, value: sdUp)
+                .allowsHitTesting(false).accessibilityHidden(true)
+        }
         // The nav bar's small title once the large one has scrolled under it (block 31): "NKE Positions".
         .overlay(alignment: .top) {
-            let shown = scrolled > (brief.showsStrip ? 110 : 40)
+            let shown = scrolled > (brief.showsStrip ? 110 : 40) && !sdUp
             Text("\(name) Positions").sFont(17, .semibold).foregroundStyle(S.ink)
                 .frame(maxWidth: .infinity).frame(height: 44)
                 .background(alignment: .bottom) { Rectangle().fill(.bar).ignoresSafeArea(edges: .top).frame(height: 120, alignment: .bottom) }
@@ -204,11 +240,42 @@ struct BriefPositionsScreen: View {
         }
         .onChange(of: brief.positionsName) { _, _ in arrive() }
         .onChange(of: names) { _, _ in arrive() }
-        .onChange(of: name) { _, t in if live, !t.isEmpty, let b = brief.book { UserDefaults.standard.set(t, forKey: "positions.last.\(b)") }; load() }
+        .onChange(of: name) { _, t in
+            if live, !t.isEmpty, let b = brief.book { UserDefaults.standard.set(t, forKey: "positions.last.\(b)") }
+            // The SD sheet follows the name on screen.
+            if sd.isOpen, !t.isEmpty { sd.follow(book: sdBook, t: t) }
+            load()
+        }
         .onChange(of: brief.built) { _, _ in load() }
         .onChange(of: model?.stops.count) { _, _ in arriveAtFriday() }
-        .onChange(of: pageBook) { _, _ in dip() }
+        .onChange(of: pageBook) { _, _ in sd.close(); dip() }
         .onChange(of: pageReady) { _, ready in if ready && faded { settle(wait: false) } }
+        .onChange(of: sd.level) { old, new in sdMoved(old, new) }
+        // Another tab: the sheet goes with the page.
+        .onDisappear { if sd.isOpen { sd.close() } }
+    }
+
+    static let page = "positionsPage"
+
+    /// The SD chip: up at half on this name, or down when it is up.
+    private func toggleSD() {
+        if sdUp { sd.close() } else if !name.isEmpty { sd.open(book: sdBook, t: name) }
+    }
+
+    /// README 1.9: the half sheet keeps the chart in sight. The page scrolls the plot up under the status bar (the design
+    /// moves it 190 pt; here the chart's place depends on the strip and the scroll, so it scrolls to the chart itself),
+    /// and goes back to where it was when the sheet closes, unless something scrolled it since.
+    private func sdMoved(_ old: SDStore.Level, _ new: SDStore.Level) {
+        let move = S.moving(S.standard(0.45), reduce)
+        if old == .closed, new != .closed, sdUp {
+            sdBack = scrolled
+            let y = max(0, chartY - 2)
+            sdTarget = y
+            withAnimation(move) { pos.scrollTo(y: y) }
+        } else if new == .closed {
+            if let back = sdBack, let t = sdTarget, abs(scrolled - t) < 4 { withAnimation(move) { pos.scrollTo(y: back) } }
+            sdBack = nil; sdTarget = nil
+        }
     }
 
     /// The switch's first frame, drawn with no animation: 15%, and 28 pt toward the new account (not under
@@ -258,6 +325,8 @@ struct BriefPositionsScreen: View {
     }
     /// Live: ask for the name on screen when it is missing or priced on an older build.
     private func load() {
+        // A pinned name's SD lines are worked out again from a fresh reply (one a minute at most).
+        if !name.isEmpty, sd.isPinned(sdBook, name) || sd.isOpen(on: name) { sd.load(book: sdBook, t: name) }
         guard live, !name.isEmpty, let b = brief.book, let built = brief.built,
               let n = liveNames.first(where: { $0["t"].string == name }) else { return }
         brief.positions.load(book: b, t: name, built: built, name: n)
@@ -520,6 +589,13 @@ private struct PositionsDetail: View {
     let privacy: Bool
     /// IBKR is late (README 9.4): the last values stay, the makes-the-most line goes.
     var late = false
+    /// The SD calculator (11 Nov 2026): its lines on the chart (sheet up or pinned), the chip's state, the chip, and
+    /// where the chart sits in the page (for the half sheet).
+    var sdLines: SDLines? = nil
+    var sdOn = false
+    var sdPinned = false
+    var onSd: () -> Void = {}
+    var onChartY: (CGFloat) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduce
     /// One per zoom step a finger (or VoiceOver) makes, for the selection haptic; the tab's own reset makes none.
     @State private var zoomSteps = 0
@@ -588,9 +664,10 @@ private struct PositionsDetail: View {
                 }
                 // The plot 190, strike ticks to 206, 4, then the price axis 16.
                 PositionsChart(m: m, tt: tt, price: $price, off: off, flip: fl, extra: picked?.extra ?? [], layer: layer, chain: chain,
-                               phrase: st.phrase, privacy: privacy, zoom: zi, zoomTo: zoomTo)
+                               phrase: st.phrase, privacy: privacy, zoom: zi, zoomTo: zoomTo, sd: sdLines)
                     .frame(height: 226)
                     .sensoryFeedback(.selection, trigger: zoomSteps)
+                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(BriefPositionsScreen.page)).minY } action: { onChartY($0) }
                 DateSlider(m: m, stop: $stop)
             }
             .padding(.horizontal, S.margin)
@@ -605,28 +682,19 @@ private struct PositionsDetail: View {
                 HStack(spacing: 8) {
                     ForEach(["Walls", "Technicals"], id: \.self) { l in
                         // Lines and labels come and go and the chain chips push the page down: moving, so instant under Reduce Motion.
-                        Button { withAnimation(S.moving(S.fade, reduce)) { layer = layer == l ? nil : l } } label: {
-                            Text(l).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false)
-                                .foregroundStyle(layer == l ? S.sheetFill : S.ink)
-                                .padding(.horizontal, 14).frame(height: 32)
-                                .background {
-                                    if layer == l { Capsule().fill(S.ink) }
-                                    else if scheme == .dark { Capsule().fill(S.track) }
-                                    else {
-                                        // White 55%, a white inner edge and a soft drop (the design's CHIP).
-                                        Capsule().fill(S.tile)
-                                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.9), lineWidth: 0.5))
-                                            .shadow(color: .black.opacity(0.06), radius: 1.5, y: 1)
-                                    }
-                                }
-                                .frame(height: 44).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(layer == l ? .isSelected : [])
+                        layerChip(l, on: layer == l) { withAnimation(S.moving(S.fade, reduce)) { layer = layer == l ? nil : l } }
+                            .accessibilityAddTraits(layer == l ? .isSelected : [])
                     }
+                    // The SD calculator (SunnyPositions.dc.html onSd, 11 Nov 2026): after Walls and Technicals, ink while its
+                    // sheet is up; pinned and closed, a pin before the letters (Explorations 137a).
+                    layerChip("SD", on: sdOn, pin: sdPinned && !sdOn, action: onSd)
+                        .accessibilityLabel("SD calculator")
+                        .accessibilityValue(sdPinned ? "Pinned to the chart" : "")
+                        .accessibilityAddTraits(sdOn ? .isSelected : [])
                 }
                 .padding(.vertical, -6)
                 .sensoryFeedback(.selection, trigger: layer)
+                .sensoryFeedback(.selection, trigger: sdOn)
                 if layer == "Walls" && chainChips.isEmpty {
                     Text("No walls saved for \(m.t) yet").sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(PosC.mu)
                 } else if layer == "Walls" {
@@ -724,6 +792,35 @@ private struct PositionsDetail: View {
         .accessibilityLabel(l)
         .accessibilityValue(said)
     }
+    /// A layer chip (the design's CHIP): 32 tall, 14 either side, 13/16 semibold; ink when on; a 44 pt target. `pin`
+    /// puts the SD pin (12 pt) before the letters.
+    private func layerChip(_ l: String, on: Bool, pin: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if pin {
+                    SDPinGlyph().stroke(S.ink, style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
+                        .frame(width: 12, height: 12).accessibilityHidden(true)
+                }
+                Text(l).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false)
+                    .foregroundStyle(on ? S.sheetFill : S.ink)
+            }
+            .padding(.horizontal, 14).frame(height: 32)
+            .background {
+                if on { Capsule().fill(S.ink) }
+                else if scheme == .dark { Capsule().fill(S.track) }
+                else {
+                    // White 55%, a white inner edge and a soft drop (the design's CHIP).
+                    Capsule().fill(S.tile)
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.9), lineWidth: 0.5))
+                        .shadow(color: .black.opacity(0.06), radius: 1.5, y: 1)
+                }
+            }
+            .animation(S.fade, value: on)
+            .frame(height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     /// A key: its mark (drawn, as in the design) 5 before the words, 12/16 medium.
     private func legend<M: View>(_ t: String, @ViewBuilder mark: () -> M) -> some View {
         HStack(spacing: 5) {
@@ -756,33 +853,116 @@ private struct PositionsChart: View {
     @State private var pinch: (d0: CGFloat, z0: Int)?
     /// Once a pinch begins, the finger left on the chart does not scrub until every finger has lifted (_on45).
     @State private var scrubOff = false
+    /// The SD calculator's lines (sheet up or pinned): the ±1 SD band, the picked strikes, the sold legs.
+    var sd: SDLines? = nil
 
-    typealias Line = (k: Double, label: String, color: Color, dashed: Bool)
+    /// A price line on the plot and its label. Walls: solid at 70%, labels from the top, left-aligned 2 right of the
+    /// line. Technicals: dashed 3 3 at 80%, labels centred from the axis up. SD (README 1.9): the picked strikes dashed
+    /// 1.5 in the side colours, labels centred on top; a sold leg solid ink at 70% with its breakeven dotted, the label
+    /// (10 pt) centred from the axis up. An empty label draws the line alone.
+    struct Line {
+        var k: Double
+        var label: String
+        var color: Color
+        var dash: [CGFloat] = []
+        var width: CGFloat = 1
+        var opacity: Double = 0.7
+        var top = true
+        var centred = false
+        var size: CGFloat = 11
+        var weight: CGFloat = 700
+        static let dashed: [CGFloat] = [3, 3]
+        static let dotted: [CGFloat] = [1, 2]
+    }
 
     /// The layer's price lines: this chain's walls, or the 20-day average and the month's high and low.
     private var layerLines: [Line] {
         if layer == "Walls" {
             guard m.chains.indices.contains(chain) else { return [] }
             let w = m.chains[chain], ex = w.label
-            var out: [(Double, String, Color, Bool)] = []
-            if let f = w.flip { out.append((f, "Flip · \(ex)", S.act, true)) }
-            if let c = w.c { out.append((c, "Ceiling · \(ex)", S.navy, false)) }
-            if let f = w.f { out.append((f, "Floor · \(ex)", S.brown, false)) }
-            if let a = w.a { out.append((a, "Accel. · \(ex)", S.brown, false)) }
-            return out.filter { $0.0 >= m.X0 && $0.0 <= m.X1 }
+            var out: [Line] = []
+            if let f = w.flip { out.append(Line(k: f, label: "Flip · \(ex)", color: S.act, dash: Line.dashed, opacity: 0.8)) }
+            if let c = w.c { out.append(Line(k: c, label: "Ceiling · \(ex)", color: S.navy)) }
+            if let f = w.f { out.append(Line(k: f, label: "Floor · \(ex)", color: S.brown)) }
+            if let a = w.a { out.append(Line(k: a, label: "Accel. · \(ex)", color: S.brown)) }
+            return out.filter { $0.k >= m.X0 && $0.k <= m.X1 }
         }
         if layer == "Technicals" {
             let tc = m.technicals
             return [(tc.sma, "20-day"), (tc.hi, "Month high"), (tc.lo, "Month low")].compactMap { v, l in
-                v.map { ($0, l, S.teal, true) } }.filter { $0.0 >= m.X0 && $0.0 <= m.X1 }
+                v.map { Line(k: $0, label: l, color: S.teal, dash: Line.dashed, opacity: 0.8, top: false, centred: true) } }
+                .filter { $0.k >= m.X0 && $0.k <= m.X1 }
         }
         return []
     }
 
+    /// README 1.9 (Explorations 137a): every sold leg (a solid ink line at the strike, a dotted line at its breakeven,
+    /// "Sold 104 call · BE 104.66"), then the two picked strikes ("103 call · Nov 6"). Only what falls inside the chart.
+    private var sdLines: [Line] {
+        guard let s = sd else { return [] }
+        var out: [Line] = []
+        for l in s.sold {
+            let side = l.put ? "put" : "call"
+            out.append(Line(k: l.K, label: "Sold \(SDFmt.fk(l.K)) \(side)" + (l.be.map { " · BE \(SDFmt.f2($0))" } ?? ""), color: S.ink,
+                            top: false, centred: true, size: 10, weight: 600))
+            if let be = l.be { out.append(Line(k: be, label: "", color: SDPal.mu, dash: Line.dotted, opacity: 1)) }
+        }
+        out.append(Line(k: s.putK, label: "\(SDFmt.fk(s.putK)) put · \(s.ex)", color: SDPal.PT, dash: [4, 3], width: 1.5, opacity: 1, centred: true))
+        out.append(Line(k: s.callK, label: "\(SDFmt.fk(s.callK)) call · \(s.ex)", color: SDPal.CL, dash: [4, 3], width: 1.5, opacity: 1, centred: true))
+        return out.filter { $0.k >= m.X0 && $0.k <= m.X1 }
+    }
+
+    /// A label's width: the words in their font, the pill's 3 either side and 2 to spare.
+    private static func labelWidth(_ l: Line) -> CGFloat {
+        let f = SType(size: l.size, weight: l.weight, line: l.size, tracking: 0).uiFont(tabular: true)
+        return ceil(NSAttributedString(string: l.label, attributes: [.font: f]).size().width) + 8
+    }
+
+    /// The shaded bands: the move priced to the date picked while Walls is on (one formula: iv × √(trading days ÷ 252),
+    /// navy 7%), and the SD calculator's ±1 SD band by the picked expiry (gray, README 1.9), where each falls on the chart.
+    private func bands(_ X: (Double) -> CGFloat) -> [(CGFloat, CGFloat, Color)] {
+        var out: [(CGFloat, CGFloat, Color)] = []
+        if layer == "Walls" {
+            let sdx = m.S0 * m.v * (max(tt, 1) / 252).squareRoot()
+            out.append((X(max(m.X0, m.S0 - sdx)), X(min(m.X1, m.S0 + sdx)), PosC.moveBand))
+        }
+        if let s = sd, s.hi > m.X0, s.lo < m.X1 { out.append((X(max(m.X0, s.lo)), X(min(m.X1, s.hi)), SDPal.band)) }
+        return out
+    }
+
+    /// A label placed on the plot: its line, its left edge and its top.
+    struct Placed: Identifiable { let id: String; let line: Line; let x: CGFloat; let y: CGFloat }
+
+    /// Every label in its lane (lane45), the top ones from 2 above the plot going down 16, the others from 16 above the
+    /// axis going up 16; clamped into the plot. `corner`: while zoomed, the top lanes keep clear of the "±12% · Fit"
+    /// capsule's width at the top right. Two legs can read the same ("Sold 40 call" twice): the second keys on its place.
+    static func placed(_ lines: [Line], W: CGFloat, H: CGFloat, X: (Double) -> CGFloat, corner: CGFloat = 0) -> [Placed] {
+        var out: [Placed] = []
+        for top in [true, false] {
+            let sorted = lines.filter { !$0.label.isEmpty && $0.top == top }.sorted { $0.k < $1.k }
+            let widths = sorted.map { labelWidth($0) }
+            var lefts: [CGFloat] = []
+            for (i, l) in sorted.enumerated() {
+                let x = l.centred ? X(l.k) - widths[i] / 2 : X(l.k) + 2
+                lefts.append(min(max(0, x), W - widths[i]))
+            }
+            let ln = lanes(sorted.indices.map { (lefts[$0], widths[$0]) },
+                           blocked: top && corner > 0 ? [(0, W - corner, W), (1, W - corner, W)] : [])
+            var seen: Set<String> = []
+            for (i, l) in sorted.enumerated() {
+                let id = seen.contains(l.label) ? "\(l.label)#\(i)" : l.label
+                seen.insert(l.label)
+                let y: CGFloat = top ? -2 + CGFloat(ln[i]) * 16 : H - 16 - CGFloat(ln[i]) * 16
+                out.append(Placed(id: id, line: l, x: lefts[i], y: y))
+            }
+        }
+        return out
+    }
+
     /// The design's lane45: each label takes the first lane where it clears every label already there by 4 pt.
     /// `x` is the label's left edge (clamped into the plot), `w` its width.
-    static func lanes(_ items: [(x: CGFloat, w: CGFloat)]) -> [Int] {
-        var placed: [(lane: Int, x0: CGFloat, x1: CGFloat)] = [], out: [Int] = []
+    static func lanes(_ items: [(x: CGFloat, w: CGFloat)], blocked: [(lane: Int, x0: CGFloat, x1: CGFloat)] = []) -> [Int] {
+        var placed: [(lane: Int, x0: CGFloat, x1: CGFloat)] = blocked, out: [Int] = []
         for it in items {
             var ln = 0
             while placed.contains(where: { $0.lane == ln && it.x < $0.x1 + 4 && it.x + it.w > $0.x0 - 4 }) { ln += 1 }
@@ -794,7 +974,13 @@ private struct PositionsChart: View {
     /// VoiceOver's value: "35 dollars 28, up 3,686, long 5,934 delta"; the P&L "hidden" with privacy on.
     private var said: String {
         let p = price ?? m.S0, pl = m.pl(p, tt, off: off)
-        return "\(PosSay.price(p)), \(PosSay.signed(pl, privacy, k: true)), \(PosSay.side(m.delta(p, tt, off: off))) delta"
+        var s = "\(PosSay.price(p)), \(PosSay.signed(pl, privacy, k: true)), \(PosSay.side(m.delta(p, tt, off: off))) delta"
+        // The SD lines, when they are on: "1 SD by November 13, 37.23 to 40.18. Call 40, put 37.5. Sold 40 call, breakeven 40.39."
+        if let d = sd {
+            s += ". 1 SD by \(PosSay.words(d.ex)), \(SDFmt.f2(d.lo)) to \(SDFmt.f2(d.hi)). Call \(SDFmt.fk(d.callK)), put \(SDFmt.fk(d.putK))"
+            for l in d.sold { s += ". Sold \(SDFmt.fk(l.K)) \(l.put ? "put" : "call")" + (l.be.map { ", breakeven \(SDFmt.f2($0))" } ?? "") }
+        }
+        return s
     }
 
     var body: some View {
@@ -803,33 +989,26 @@ private struct PositionsChart: View {
             let sc = m.scale(off: off)
             let X = { (px: Double) -> CGFloat in CGFloat((px - m.X0) / (m.X1 - m.X0)) * W }
             let px = price ?? m.S0
-            let xs = m.grid, lines = layerLines
-            // The move priced to the date picked, shaded while Walls is on (one formula: iv × √(trading days ÷ 252)).
-            let sdx = m.S0 * m.v * (max(tt, 1) / 252).squareRoot()
-            let band: (CGFloat, CGFloat)? = layer == "Walls" ? (X(max(m.X0, m.S0 - sdx)), X(min(m.X1, m.S0 + sdx))) : nil
+            let xs = m.grid, lines = layerLines + sdLines
+            let bands = bands(X)
             ZStack(alignment: .topLeading) {
                 // The line, its dot and a fix's preview as one vector: a new date morphs them (S.lineMorph, 0.3 s,
                 // instant under Reduce Motion). A leg or a fix switched on or off redraws at once, as before.
                 PayoffCanvas(ys: PosVector(xs.map { m.pl($0, tt, off: off) } + [m.pl(px, tt, off: off)]
                                            + (extra.isEmpty ? [] : xs.map { m.pl($0, tt, off: off, extra: extra) })),
-                             m: m, xs: xs, tt: tt, off: off, flip: flip, px: px, W: W, H: H, mn: sc.mn, mx: sc.mx, lines: lines, band: band)
+                             m: m, xs: xs, tt: tt, off: off, flip: flip, px: px, W: W, H: H, mn: sc.mn, mx: sc.mx, lines: lines, bands: bands)
                     .animation(nil, value: off)
                     .animation(nil, value: extra)
                     .animation(S.moving(S.lineMorph, reduce), value: tt)
-                // Layer labels in lanes, never overlapping (lane45): walls from the top, left-aligned 2 right of their
-                // line, lanes going down 16; technicals centred on theirs from 16 above the axis, lanes going up.
-                // Keyed by label, so a new chain's labels fade in where they belong.
-                let walls = layer == "Walls"
-                let sorted = lines.sorted { $0.k < $1.k }
-                let widths = sorted.map { CGFloat($0.label.count) * 6.6 + 8 }
-                let lefts = sorted.indices.map { i in min(max(0, walls ? X(sorted[i].k) + 2 : X(sorted[i].k) - widths[i] / 2), W - widths[i]) }
-                let lanes = Self.lanes(sorted.indices.map { (lefts[$0], widths[$0]) })
-                ForEach(Array(sorted.enumerated()), id: \.element.label) { i, l in
-                    Text(l.label).font(.inter(11, 700, tabular: true)).foregroundStyle(l.color)
+                // Labels in lanes, never overlapping (lane45). From the top, lanes going down 16: walls left-aligned 2
+                // right of their line, the SD strikes centred on theirs. From 16 above the axis, lanes going up:
+                // technicals and the sold legs, centred. Keyed by label, so a new chain's labels fade in where they belong.
+                ForEach(Self.placed(lines, W: W, H: H, X: X, corner: zoom != PositionsModel.fitZoom ? 104 : 0)) { p in
+                    Text(p.line.label).font(.inter(p.line.size, p.line.weight, tabular: true)).foregroundStyle(p.line.color)
                         .lineLimit(1).fixedSize()
                         .padding(.horizontal, 3).frame(height: 14)
                         .background(RoundedRectangle(cornerRadius: 4).fill(PosC.label))
-                        .offset(x: lefts[i], y: walls ? -2 + CGFloat(lanes[i]) * 16 : H - 16 - CGFloat(lanes[i]) * 16)
+                        .offset(x: p.x, y: p.y)
                 }
                 // The price axis: 12/16 semibold, 4 under the ticks; centred, or flush at either end.
                 let step = [0.5, 1, 2, 2.5, 5, 10, 20, 25, 50].first { (m.X1 - m.X0) / $0 <= 5 } ?? 50
@@ -998,8 +1177,8 @@ private struct PayoffCanvas: View, Animatable {
     let mn: Double
     let mx: Double
     let lines: [PositionsChart.Line]
-    /// The priced move's band (x from, x to) while Walls is on.
-    var band: (CGFloat, CGFloat)? = nil
+    /// Shaded bands (x from, x to, colour): the priced move while Walls is on, the ±1 SD band while SD is on.
+    var bands: [(CGFloat, CGFloat, Color)] = []
 
     var animatableData: PosVector {
         get { ys }
@@ -1022,15 +1201,16 @@ private struct PayoffCanvas: View, Animatable {
             let y0 = Y(0)
             let line = path { i in i < v.count ? v[i] : m.pl(xs[i], tt, off: off) }
             func vline(_ x: CGFloat) -> Path { Path { $0.move(to: CGPoint(x: x, y: 0)); $0.addLine(to: CGPoint(x: x, y: H)) } }
-            // The priced move while Walls is on (navy 7%).
-            if let b = band { ctx.fill(Path(CGRect(x: b.0, y: 0, width: max(0, b.1 - b.0), height: H)), with: .color(PosC.moveBand)) }
+            // The priced move while Walls is on (navy 7%); the ±1 SD band while SD is on (gray).
+            for b in bands { ctx.fill(Path(CGRect(x: b.0, y: 0, width: max(0, b.1 - b.0), height: H)), with: .color(b.2)) }
             var area = line; area.addLine(to: CGPoint(x: W, y: y0)); area.addLine(to: CGPoint(x: 0, y: y0)); area.closeSubpath()
             ctx.drawLayer { c in c.clip(to: Path(CGRect(x: -4, y: -40, width: W + 8, height: y0 + 40))); c.fill(area, with: .color(PosC.up)) }
             ctx.drawLayer { c in c.clip(to: Path(CGRect(x: -4, y: y0, width: W + 8, height: 260))); c.fill(area, with: .color(PosC.down)) }
             ctx.stroke(Path { $0.move(to: CGPoint(x: 0, y: y0)); $0.addLine(to: CGPoint(x: W, y: y0)) }, with: .color(PosC.mu.opacity(0.45)), lineWidth: 1)
-            // The layer's lines: walls solid at 70%, technicals dashed 3 3 at 80%.
+            // The price lines: walls solid at 70%, technicals dashed 3 3 at 80%; SD's strikes dashed 1.5, sold legs
+            // solid ink at 70%, their breakevens dotted.
             for l in lines {
-                ctx.stroke(vline(X(l.k)), with: .color(l.color.opacity(l.dashed ? 0.8 : 0.7)), style: StrokeStyle(lineWidth: 1, dash: l.dashed ? [3, 3] : []))
+                ctx.stroke(vline(X(l.k)), with: .color(l.color.opacity(l.opacity)), style: StrokeStyle(lineWidth: l.width, dash: l.dash))
             }
             if let f = flip, f <= m.X1 {
                 ctx.stroke(vline(X(f)), with: .color(S.act), style: StrokeStyle(lineWidth: 1.5, dash: [2, 3]))
@@ -1170,6 +1350,37 @@ private struct LegsList: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.dynamicTypeSize) private var dts
     @Environment(\.sTypeScales) private var scales
+    /// SD on your positions (11 Nov 2026, 139a): New York's clock and the market's closed days, and each leg's own IV.
+    @Environment(BriefState.self) private var brief
+    @State private var sd = SDStore.shared
+
+    /// A leg's three lines (sd-engine.ts legSd): from today's price, by the leg's own expiry, on its own IV (the name's
+    /// when it has none). Nil for shares and the sample book (no expiry date).
+    private func sdLines(_ l: PositionsModel.Leg) -> SDLegs.Lines? {
+        guard l.ty != .shares, !l.iso.isEmpty else { return nil }
+        let put = l.ty == .put, sold = l.q < 0
+        // The expiry as the row writes it: the end of its title ("Calls 40 ×50, Nov 13", "LEAPS 38 ×20, Sep ’27").
+        let exLabel = l.title.range(of: ", ", options: .backwards).map { String(l.title[$0.upperBound...]) } ?? l.ex
+        let closed = Set(brief.calendar.filter { $0.kind == "closed" }.map(\.date))
+        return SDLegs.lines(S: m.S0, K: l.K, put: put, sold: sold, ownIV: sd.ownIV[SDStore.ivKey(m.t, put: put, sold: sold, K: l.K, ex: l.iso)],
+                            nameIV: m.v, ex: l.iso, exLabel: exLabel, now: brief.now(), closed: closed)
+    }
+
+    /// 139a's three lines, right-aligned: how far in dollars (15/20 700, ink, orange when a sold leg needs a look), the
+    /// same in SD by its expiry (12/16 muted, none in the money), the odds in your favour (12/16 muted, orange on a sold
+    /// leg under 70%). Prices and odds: visible with privacy on. VoiceOver reads them with the leg.
+    private func legSD(_ s: SDLegs.Lines) -> some View {
+        VStack(alignment: .trailing, spacing: 0) {
+            Text(s.l1).sType(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(s.look ? SDPal.OR : S.ink)
+            if !s.l2.isEmpty {
+                Text(s.l2).sType(SType(size: 12, weight: 400, line: 16, tracking: 0)).foregroundStyle(PosC.mu)
+            }
+            Text(s.l3).sType(SType(size: 12, weight: 400, line: 16, tracking: 0)).foregroundStyle(s.lowOdds ? SDPal.OR : PosC.mu)
+        }
+        .lineLimit(1)
+        .fixedSize()
+        .accessibilityHidden(true)
+    }
     /// "Δ 1,925" in a leg's line: 13 semibold, tabular, at the phone's text size where the screen follows it.
     private var deltaFont: Font {
         let t = SType(size: 13, weight: 600, line: 18, tracking: 0)
@@ -1286,6 +1497,7 @@ private struct LegsList: View {
         let isOff = off.contains(l.id), p = isOff ? 0 : m.legPL(l, px, tt), d = m.legDelta(l, px, tt)
         let hurt = p < -0.5 && !isOff
         let rest: String = l.ty == .shares ? " · cost $\(String(format: "%.2f", l.K)), no decay" : " at $\(String(format: "%.2f", px))"
+        let sdl = sdLines(l)
         return Button { withAnimation(S.fade) { if isOff { off.remove(l.id) } else { off.insert(l.id) } } } label: {
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -1297,13 +1509,23 @@ private struct LegsList: View {
                             .sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
                             .foregroundStyle(isOff || abs(p) < 0.5 ? PosC.mu : p < 0 ? S.red : S.green)
                     }
-                    // The Δ part at 600 by its own font: `.fontWeight` cannot reach Inter's weight axis.
-                    (Text("Δ \(SampleEngine.fn(d))").font(deltaFont).foregroundStyle(d < 0 ? S.red : S.ink)
-                     + Text(rest).foregroundStyle(PosC.mu))
-                        .sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
-                        .fixedSize(horizontal: false, vertical: true)
-                    if isOff {
-                        Text("Off · tap to add back").sType(SType(size: 12, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                    // The Δ line keeps its place; SD on your positions (11 Nov 2026, 139a) sits right-aligned in the empty
+                    // space beside it, under the P&L.
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            // The Δ part at 600 by its own font: `.fontWeight` cannot reach Inter's weight axis.
+                            (Text("Δ \(SampleEngine.fn(d))").font(deltaFont).foregroundStyle(d < 0 ? S.red : S.ink)
+                             + Text(rest).foregroundStyle(PosC.mu))
+                                .sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
+                                .fixedSize(horizontal: false, vertical: true)
+                            if isOff {
+                                Text("Off · tap to add back").sType(SType(size: 12, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                            }
+                        }
+                        if let s = sdl {
+                            Spacer(minLength: 0)
+                            legSD(s)
+                        }
                     }
                 }
             }
@@ -1313,8 +1535,9 @@ private struct LegsList: View {
             .opacity(isOff ? 0.45 : 1)
         }
         .buttonStyle(.plain)
-        // A toggle: "Calls 36 times 72, October 30", on or off. Its P&L and delta are in VoiceOver's More Content.
-        .accessibilityLabel(PosSay.words(l.title))
+        // A toggle: "Calls 36 times 72, October 30", on or off, then its three SD lines. Its P&L and delta are in
+        // VoiceOver's More Content.
+        .accessibilityLabel(PosSay.words(l.title) + (sdl.map { ". " + SDLegs.said($0) } ?? ""))
         .accessibilityValue(isOff ? "off" : "on")
         .accessibilityAddTraits(.isToggle)
         .accessibilityHint(isOff ? "Tap to add it back" : "Tap to switch it off")
