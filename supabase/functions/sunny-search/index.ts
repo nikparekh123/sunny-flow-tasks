@@ -29,7 +29,7 @@ import { bookNames, caller, context, db, lookup, MENU, moreFor, OWNER_ONLY, SB_K
 import { checkAnswer } from './check.ts';
 import { COUNTS, fmt, SLOT, Slots } from './slots.ts';
 
-const BUILD = '2026-11-11.1';
+const BUILD = '2026-11-11.2';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';
@@ -39,7 +39,8 @@ const client = new Anthropic();
 // ── The tools: the lookups, and the web ──────────────────────────────────────────────────────────────────
 
 const TOOLS: Row[] = [
-  ...MENU.map((m) => ({ owner: OWNER_ONLY.has(m.name),
+  // No To do lookup (Nik, 11 Nov 2026: "Remove To do, we don't need it").
+  ...MENU.filter((m) => m.name !== 'todo').map((m) => ({ owner: OWNER_ONLY.has(m.name),
     name: m.name,
     description: m.shows,
     input_schema: { type: 'object', properties: m.args ?? {}, required: m.required ?? [], additionalProperties: false },
@@ -747,10 +748,10 @@ function questions(c: Ctx, owner: boolean): Row {
       `What’s ${t}’s 52-week range?`, `What do analysts say about ${t}?`, `When does ${t} report?`,
       `Tell me about ${t}`, `What’s happening with ${t}?`, `Show me ${t}’s world`, `How’s my ${t} position doing?`]),
   ];
-  // A viewer has no To do (31 Oct 2026): its question and Try chip go.
+  // No To do (11 Nov 2026): its question and Try chip are gone for everyone.
   const todoQ = 'What do I need to do today?';
-  return { questions: owner ? all : all.filter((q) => q !== todoQ),
-    tries: [`Give me an update on ${first}`, 'What’s the value of my calls sold?', owner ? todoQ : 'Show me all my positions', 'What’s my delta right now?'] };
+  return { questions: all.filter((q) => q !== todoQ),
+    tries: [`Give me an update on ${first}`, 'What’s the value of my calls sold?', 'Show me all my positions', 'What’s my delta right now?'] };
 }
 
 /** Suggestions in place of Recent (Nik, 28 Oct 2026): up to six questions picked from the book each time Search
@@ -760,10 +761,7 @@ async function suggest(c: Ctx, owner: boolean): Promise<Row[]> {
   const out: Row[] = [], seen = new Set<string>();
   const add = (q: string, why: string, t?: string) => { if (out.length < 6 && !out.some((x) => x.q === q)) { out.push({ q, why }); if (t) seen.add(t); } };
   // To do and the rolls are an owner's (31 Oct 2026); a viewer's plan is empty, so no roll is suggested either.
-  if (owner) {
-    const todo = (await lookup('todo', {}, c, owner).catch(() => null))?.data?.to_do ?? 0;
-    add('What do I need to do today?', todo ? `${todo} order${todo === 1 ? '' : 's'} in To do` : 'Nothing left in To do');
-  }
+  // No To do suggestion (11 Nov 2026).
   const plan = (c.p.plan ?? {}) as Record<string, Row>, mineSet = new Set(bookNames(c));
   const short = Object.entries(plan).map(([t, p]) => ({ t, s: p.story })).filter((x) => x.s && !x.s.earnings && x.s.need > 0)
     .sort((a, b) => b.s.need - a.s.need).slice(0, 2);

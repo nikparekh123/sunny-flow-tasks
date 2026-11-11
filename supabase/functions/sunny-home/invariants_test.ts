@@ -125,7 +125,7 @@ Deno.test('Caught · 3 · a put cover line that does not add up', () => {
   brief.position.cover = brief.position.cover.replace(/\d+%/, '99%');
   caught(checkInvariants({ ...p, brief }), 3);
 });
-Deno.test('Caught · 5 · Tomorrow says three orders, the card has two', () => {
+Deno.test('Caught · 5 · the page names an order', () => {
   const p = page('post'), full = clone(p.full);
   full.sections.find((s: Row) => s.kicker === 'Tomorrow').headline = [{ t: 'Three orders to place at the open.', b: true }];
   caught(checkInvariants({ ...p, full }), 5);
@@ -198,8 +198,8 @@ Deno.test('Overview · both books agree with each book', () => {
   const fails = checkOverview(o, sides, DIVS);
   assertEquals(fails.length, 0, show(fails));
   assertEquals(o.header, 'Both accounts · Tue Oct 27');
-  assertEquals(o.checks.map((c: Row) => c.name), ['Downside', 'Concentration', 'Pace', 'Calls at work', 'Delta', 'To do']);
-  assertEquals(o.checks.find((c: Row) => c.name === 'To do').big, '3');
+  // Five checks: To do left on 11 Nov 2026.
+  assertEquals(o.checks.map((c: Row) => c.name), ['Downside', 'Concentration', 'Pace', 'Calls at work', 'Delta']);
   assert(!/turns? short/.test(JSON.stringify(o)), 'Overview never says "turns short"');
   assert(!/—/.test(JSON.stringify(o)), 'no em dashes');
 });
@@ -208,12 +208,6 @@ Deno.test('Overview · caught · a Delta chip that disagrees with the book', () 
   const d = o.checks.find((c: Row) => c.name === 'Delta');
   d.chips = d.chips.map((c: string) => (c.startsWith('Nicolay') ? 'Nicolay all long' : c));
   caught(checkOverview(o, sides, DIVS), 2);
-});
-Deno.test('Overview · caught · a To do chip that disagrees with the orders', () => {
-  const { o, sides } = overview();
-  const d = o.checks.find((c: Row) => c.name === 'To do');
-  d.chips = d.chips.map((c: string) => (c.startsWith('Sunny') ? 'Sunny 9' : c));
-  caught(checkOverview(o, sides, DIVS), 5);
 });
 Deno.test('Overview · caught · Coming in that is not shares x per share', () => {
   const { o, sides } = overview();

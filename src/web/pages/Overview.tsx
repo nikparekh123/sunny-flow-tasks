@@ -17,12 +17,11 @@ import { Seg } from '../overview/Seg';
 
 const HAIR = '1px solid rgba(255,255,255,.08)', HAIR_S = '1px solid rgba(255,255,255,.14)';
 const GRID = 'minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr) 110px';
-/** The design's six rows, in its order, with what each measures. */
+/** The design's rows, in its order, with what each measures. To do left on 11 Nov 2026 (Nik: "we don't need it"). */
 const CHECKS: [string, string][] = [
   ['Pace', 'kept on what you bought'],
   ['Calls at work', 'calls sold ÷ shares ÷ 100'],
   ['Delta', 'short or thin by Friday'],
-  ['To do', 'orders for the open'],
   ['Downside', 'shares the puts cover'],
   ['Concentration', 'the biggest name, by capital bought'],
 ];
@@ -112,7 +111,7 @@ export default function Overview() {
       {ov && (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingBottom: 12 }}>
-            <span style={{ fontSize: 20, fontWeight: 600 }}>Six checks</span>
+            <span style={{ fontSize: 20, fontWeight: 600 }}>Five checks</span>
             <Seg<'wk'> label="Period" items={[['wk', 'This week']]} value={per} onChange={setPer} />
           </div>
           <div className="tnum" style={{ display: 'grid', gridTemplateColumns: GRID, gap: 16, padding: '10px 0 8px', borderTop: HAIR_S,

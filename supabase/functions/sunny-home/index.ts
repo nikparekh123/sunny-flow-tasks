@@ -28,7 +28,7 @@ import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-11.1';
+const BUILD = '2026-11-11.2';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -3087,7 +3087,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         }
         return Math.round(sh + calls);
       };
-      const docOrders = [...thisWeek].sort((a, b) => (['roll', 'buy', 'sell', 'put'].indexOf(a.kind) - ['roll', 'buy', 'sell', 'put'].indexOf(b.kind)));
+      // NO TO DO ORDERS (Nik, 11 Nov 2026: "Remove To do, we don't need it"): Home no longer says what to sell or buy
+      // this week. The plan is still worked out (home_todo) but nothing reads it on Home, the Overview or Search.
+      const docOrders: Row[] = [];
       const docs = buildDoc({ moment: brief.moment, today, mins: now.mins, isTrading, addDays, cal, brief, names: nameDays,
         market, sectors: sectorRows, futures, watch: watchlist as Row[], chart, yieldWeeks: yieldOut, payback, history,
         earnings, macro, divs, trades, orders: docOrders, aftershock, baseNow: baseAt(today), baseAt, econ: econRows, closes,
@@ -3115,13 +3117,13 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   if (bookId === 'S' && !brief.error) {
     try {
       const other = 'N';
-      const [snapN, todoN] = await Promise.all([
+      const [snapN] = await Promise.all([
         get(`home_snapshot?book_id=eq.${other}&select=brief:payload->brief,inputs:payload->brief_inputs,built_at`),
-        get(`home_todo?book_id=eq.${other}&select=orders:payload->top->this_week`),
       ]);
       const sides: BookSide[] = [
-        { id: 'S', name: 'Sunny', brief, inputs: briefInputs, orders: [...thisWeek] },
-        { id: other, name: 'Nicolay', brief: snapN[0]?.brief ?? null, inputs: snapN[0]?.inputs ?? null, orders: (todoN[0]?.orders ?? []) as Row[] },
+        // No To do orders (11 Nov 2026): the Overview counts none.
+        { id: 'S', name: 'Sunny', brief, inputs: briefInputs, orders: [] },
+        { id: other, name: 'Nicolay', brief: snapN[0]?.brief ?? null, inputs: snapN[0]?.inputs ?? null, orders: [] },
       ];
       const ov: Row = { ...buildOverview(sides, today, now.mins, companyOf), comingIn: comingIn(sides, divs, companyOf), other_built: snapN[0]?.built_at ?? null };
       const failedO = checkOverview(ov, sides, divs);

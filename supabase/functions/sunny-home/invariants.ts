@@ -7,7 +7,7 @@
 //    at the Friday stop, to the cent.
 //  2 Past-its-best names: By name rows = the logo strip's dots; the count line says the same number.
 //  3 Put cover: Your position's line = insurance puts x 100 / shares, capped at the shares, name by name.
-//  5 To do: the orders count in the lede = the Tomorrow headline = Tomorrow's orders card; weekend sales likewise.
+//  5 No orders: the page never names an order or a sale to place (To do removed 11 Nov 2026).
 //  6 Book today: the lede's figure = the Your book headline (session) = Your results' Made today (post).
 //  7 Weekend: the lede's yield = the Results card's yield.
 //  8 Payback: the month headline's % = the Payback card's %.
@@ -94,22 +94,9 @@ export function checkInvariants(x: CheckIn): Check[] {
     if (sh > 0 && !String(B.position.cover).includes(` ${want}.`)) fail(3, 'put cover', `"${B.position.cover}" vs ${want}`);
   }
 
-  // 5 · To do counts
-  const nOrders = x.orders.length, nSells = x.orders.filter((o) => o.kind === 'sell' || o.kind === 'put').length;
+  // 5 · No orders (11 Nov 2026, To do removed): the page never names an order or a sale to place.
   const lede = text(x.full?.lede);
-  const lo = lede.match(/(\w+) orders? to place at the open/);
-  if (moment === 'pre' && names.length && (lo ? count(lo[1]) : 0) !== nOrders) fail(5, 'To do', `pre lede "${lo?.[0]}" vs ${nOrders} orders`);
-  if (moment === 'post') {
-    const h = text(section(x.full, 'Tomorrow')?.headline).match(/^(\w+) orders? to place/);
-    const card = cards(x.full).find((c) => c.type === 'tomorrowOrders');
-    if ((h ? count(h[1]) : 0) !== nOrders) fail(5, 'To do', `Tomorrow headline vs ${nOrders} orders`);
-    if (nOrders && (!card || parseInt(String(card.count)) !== nOrders || card.rows?.length !== nOrders)) fail(5, 'To do', `Tomorrow's orders card ${card?.count} vs ${nOrders}`);
-  }
-  if (moment === 'weekend' && names.length) {
-    const lw = lede.match(/, and (\w+) sales? comes? \w+day/), hw = text((section(x.full, 'Next week') ?? section(x.full, 'Coming up'))?.headline).match(/^(\w+) sales? \w+day/);
-    if ((lw ? count(lw[1]) : 0) !== nSells) fail(5, 'To do', `weekend lede sales ${lw?.[1]} vs ${nSells}`);
-    if (nSells && (hw ? count(hw[1]) : 0) !== nSells) fail(5, 'To do', `Next week headline vs ${nSells} sales`);
-  }
+  if (/orders? to place|sales? to place|"tomorrowOrders"/.test(JSON.stringify(x.full ?? {}))) fail(5, 'To do', 'the page names an order');
 
   // 6 · the book today
   const AMT = '(\\$[\\d,]*\\d(?:\\.\\d+)?[KM]?|[\\d.]*\\d%)';
@@ -213,8 +200,7 @@ export function checkOverview(o: Row, books: OverviewSide[], divs: Row[] = []): 
       if (s > 0) { sh += s; cv += Math.min(s, c); }
     }
     if (sh > 0 && chip('Calls at work', b.name) !== `${b.name} ${Math.round(cv / sh * 100)}%`) fail(4, 'calls at work', `Overview "${chip('Calls at work', b.name)}" vs ${Math.round(cv / sh * 100)}% from ${b.name}'s legs`);
-    // 5 · To do per account = that book's orders
-    if (chip('To do', b.name) !== `${b.name} ${b.orders.length}`) fail(5, 'To do', `Overview "${chip('To do', b.name)}" vs ${b.orders.length} orders in ${b.name}'s`);
+    // 5 · To do per account: gone with the To do check (11 Nov 2026).
   }
   // 9 · dividends: Coming in = shares x per share, book by book
   if (o?.comingIn?.raw) {

@@ -144,7 +144,9 @@ export function buildOverview(books: BookSide[], today: string, mins: number, co
     books.filter((b) => (b.brief?.names ?? []).length > 0).map((b) => `${nm(b)} ${b.orders.length}`));
 
   // Coming in: dividends declared in the next 45 days on the shares each book holds (kept apart from pace)
-  const checks = [downside, conc, paceC, calls, delta, todo];
+  // Five checks: To do left on 11 Nov 2026 (Nik: "Remove To do, we don't need it").
+  const checks = [downside, conc, paceC, calls, delta];
+  void todo;
   const watch = checks.filter((c) => c.status === 'Watch').length;
 
   // The sentence: pace, a bad week, the put cover

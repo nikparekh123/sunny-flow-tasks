@@ -159,7 +159,9 @@ export function econRead(id: string, card: Row): { read?: string; readTone?: str
 export function buildDoc(x: DocIn): { full: Row; open: Row } {
   const stopped = new Set(x.feeds?.stopped ?? []);
   x = { ...x, earnings: stopped.has('earnings') ? [] : x.earnings, macro: stopped.has('macro') ? [] : x.macro,
-    divs: stopped.has('dividends') ? [] : x.divs, econ: stopped.has('econ') ? [] : x.econ };
+    divs: stopped.has('dividends') ? [] : x.divs, econ: stopped.has('econ') ? [] : x.econ,
+    // No To do orders on Home (Nik, 11 Nov 2026: "Remove To do, we don't need it"), whatever the caller passes.
+    orders: [] };
   const { moment, today, mins, addDays, isTrading } = x;
   const B = x.brief, F: string = B.friday, wk = moment === 'weekend';
   const session = ['bell', 'open', 'last20', 'last5'].includes(moment);
@@ -707,8 +709,8 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const nDown = names.filter((n) => n.move < 0).length, nUp = names.filter((n) => n.move > 0).length, fu = esPct ?? 0;
     const follow = fu >= 0 ? nUp >= nDown : nDown >= nUp;
     const word2 = follow === (fu >= 0) ? 'up' : 'down', cnt = word2 === 'up' ? nUp : nDown;
-    both(() => [sp('Futures are '), sp(fu >= 0 ? 'up' : 'down', true, col(fu)), sp(held ? `, your names ${follow ? 'are' : 'aren’t'}: ${cnt} of ${names.length} are ${word2} before the bell.` : '.'),
-      ...(held ? [sp(` ${ordersLine}`)] : [])]);
+    // No orders line (11 Nov 2026: To do removed).
+    both(() => [sp('Futures are '), sp(fu >= 0 ? 'up' : 'down', true, col(fu)), sp(held ? `, your names ${follow ? 'are' : 'aren’t'}: ${cnt} of ${names.length} are ${word2} before the bell.` : '.')]);
     if (held) owner.push({ key: 'lede' });
   } else if (moment === 'futures') {
     const asia = ['^N225', '^HSI', '000001.SS'].map((s) => num(mk(s)?.regular_change_pct)).filter((v) => v != null) as number[];
@@ -833,9 +835,9 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   } else if (moment === 'post') {
     S.push({ kicker: 'The market', headline: marketHead(), cards: [indexCards(), sectorsCard(false)] });
     S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), yourResults(), closedRolled(), held ? performanceCard() : null, yourPosition()] });
-    const tom = tomorrowOrders(), cl = comingLine();
-    S.push({ kicker: 'Tomorrow', headline: [sp(orders ? `${word(orders)} ${orders === 1 ? 'order' : 'orders'} to place at the open.` : 'Nothing to place at the open.', true)],
-      openHeadline: [sp(cl ? cl.line[0].t : 'Tomorrow.', true)], cards: [tom, cl], ownerCards: ['tomorrowOrders'] });
+    // No Tomorrow's orders (11 Nov 2026: To do removed): the section leads with what is coming.
+    const cl = comingLine();
+    S.push({ kicker: 'Tomorrow', headline: [sp(cl ? cl.line[0].t : 'Tomorrow.', true)], cards: [cl] });
   } else {
     S.push({ kicker: 'The week', headline: marketHead(), cards: [weekIndexes(), worldThisWeek(), economyCard(), sectorsCard(true)] });
     S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), held ? results() : null, held ? performanceCard() : null, yourPosition()] });
