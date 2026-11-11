@@ -99,6 +99,35 @@ enum SDClient {
     }
 }
 
+/// A pair of sold calls and sold puts on one expiry, any number of strikes (Nik 11 Nov): only one side can end in the
+/// money, so all the premium cushions it. At an expiry price X it makes sum(n x premium) minus each call's
+/// n x max(0, X - K) and each put's n x max(0, K - X); the breakevens are where that crosses zero either side of its
+/// peak. The same sums as heldPair in _shared/sd-engine.ts. Nil when a side is empty or it never makes money.
+struct SDPairNums: Equatable {
+    struct Leg: Equatable { let K: Double; let n: Double; let at: Double }
+    let up: Double, dn: Double, tot: Double, sdUp: Double, sdDn: Double, cop: Double
+
+    static func of(calls: [Leg], puts: [Leg], S: Double, m: Double) -> SDPairNums? {
+        guard !calls.isEmpty, !puts.isEmpty, S > 0, m > 0 else { return nil }
+        let all = calls + puts, T = all.reduce(0) { $0 + $1.n * $1.at }
+        func pl(_ X: Double) -> Double {
+            T - calls.reduce(0) { $0 + $1.n * max(0, X - $1.K) } - puts.reduce(0) { $0 + $1.n * max(0, $1.K - X) }
+        }
+        let top = all.map(\.K).reduce(all[0].K) { pl($1) > pl($0) ? $1 : $0 }
+        guard pl(top) > 0, pl(0) <= 0 else { return nil }
+        func root(_ lo0: Double, _ hi0: Double, up: Bool) -> Double {
+            var lo = lo0, hi = hi0
+            for _ in 0..<200 { let md = (lo + hi) / 2; if (pl(md) > 0) == up { lo = md } else { hi = md } }
+            return (lo + hi) / 2
+        }
+        var hi = top * 2
+        while pl(hi) > 0 { hi *= 2 }
+        let up = root(top, hi, up: true), dn = root(0, top, up: false)
+        return SDPairNums(up: up, dn: dn, tot: T * 100, sdUp: log(up / S) / m, sdDn: log(S / dn) / m,
+                          cop: SDFmt.N(log(up / S) / m) - SDFmt.N(log(dn / S) / m))
+    }
+}
+
 /// One expiry with the call and put picked, and the pair worked out as card136 does it.
 struct SDPair {
     let exp: SDReply.Exp

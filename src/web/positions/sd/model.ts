@@ -81,8 +81,10 @@ export interface SdView {
   rng: { key: string; h: string; c: string; rT: string; o: { key: string; sd: string; strike: string; pr: string; won: string; sug: boolean; on: boolean; go: () => void }[] }[];
   both: { cop: string; prT: string; tot: number; totN: string };
   pz: SdZone;
-  /** What you hold on the picked expiry, when you have sold calls and sold puts on it. */
-  held: { label: string; cop: string; tot: number; legsT: string; pz: SdZone } | null;
+  /** The chance tile's three tabs (Nik 11 Nov): New (the picked call and put on the full counts), What you hold (this
+      expiry's sold calls and puts at their sale prices), Both (what you hold plus the rest of the counts at the
+      picked strikes). Null when the expiry has no held pair: the tile shows New alone. */
+  tabs: PairTab[] | null;
   ladC: LadRow[]; ladP: LadRow[];
   /** What the payoff chart draws (README 1.9). */
   chart: {
@@ -122,6 +124,26 @@ function zoneOf(S: number, pK: number, cK: number, dn: number, up: number, sdDn:
   };
 }
 const legsOf = (ls: { K: number; n: number }[], one: string, many: string) => ls.map((l) => `${l.n} ${l.n === 1 ? one : many} ${fk(l.K)}`).join(', ');
+
+export interface PairTab { key: 'new' | 'hold' | 'both'; label: string; cop: string; tot: number; lead: string; tail: string; pz: SdZone }
+type PL = { K: number; n: number; at: number };
+/** A pair of sold calls and sold puts on one expiry, any number of strikes (Nik 11 Nov): only one side can end in the
+    money, so all the premium cushions it. The same sums as heldPair in _shared/sd-engine.ts. Null when a side is
+    empty, it never makes money, or the puts' premium covers a fall to zero. */
+export function pairOf(calls: PL[], puts: PL[], S: number, m: number) {
+  if (!calls.length || !puts.length || !(S > 0) || !(m > 0)) return null;
+  const all = [...calls, ...puts], T = all.reduce((a, l) => a + l.n * l.at, 0);
+  const pl = (X: number) => T - calls.reduce((a, l) => a + l.n * Math.max(0, X - l.K), 0) - puts.reduce((a, l) => a + l.n * Math.max(0, l.K - X), 0);
+  const top = all.map((l) => l.K).reduce((b, K) => (pl(K) > pl(b) ? K : b));
+  if (!(pl(top) > 0) || pl(0) > 0) return null;
+  const root = (lo: number, hi: number, up: boolean) => {
+    for (let i = 0; i < 200; i++) { const md = (lo + hi) / 2; if ((pl(md) > 0) === up) lo = md; else hi = md; }
+    return (lo + hi) / 2;
+  };
+  let hi = top * 2; while (pl(hi) > 0) hi *= 2;
+  const up = root(top, hi, true), dn = root(0, top, false);
+  return { up, dn, tot: T * 100, sdUp: Math.log(up / S) / m, sdDn: Math.log(S / dn) / m, cop: N(Math.log(up / S) / m) - N(Math.log(dn / S) / m) };
+}
 export interface LadRow { key: string; sdL: string; K: string; pct: string; prT: string; be: string; itm: string; bg: string; ring: string; rad: string; fw: number; sug: boolean; dc: string }
 
 /** card136, web mode, on the server's reply. */
@@ -172,11 +194,23 @@ export function sdView(d: SdReply, pick: SdPick, set: (p: SdPick) => void): SdVi
   ];
 
   const pz = zoneOf(S, rp.K, rc.K, dn, up, sdDn, sdUp);
-  const hd = (d.held ?? []).find((h) => h.ex === e.ex);
-  const held = hd ? {
-    label: hd.label, cop: pc(hd.cop), tot: hd.tot, legsT: legsOf(hd.calls, 'call', 'calls') + ' and ' + legsOf(hd.puts, 'put', 'puts'),
-    pz: zoneOf(S, Math.max(...hd.puts.map((x) => x.K)), Math.min(...hd.calls.map((x) => x.K)), hd.dn, hd.up, hd.sdDn, hd.sdUp),
-  } : null;
+  // The tabs: what you hold on this expiry, read from the sold legs (premium = the breakeven's distance from the strike).
+  const sideOf = (put: boolean) => (d.sold ?? []).filter((x) => x.put === put && x.ex === e.ex && x.be != null).map((x) => ({ K: x.K, n: x.n, at: Math.abs(x.be! - x.K) }));
+  const hc = sideOf(false), hp = sideOf(true);
+  const hold = pairOf(hc, hp, S, m);
+  const { calls: nC, puts: nP } = d.counts ?? { calls: 0, puts: 0 };
+  const restC = Math.max(0, nC - hc.reduce((a, l) => a + l.n, 0)), restP = Math.max(0, nP - hp.reduce((a, l) => a + l.n, 0));
+  const mix = hold ? pairOf([...hc, ...(restC ? [{ K: rc.K, n: restC, at: rc.pr }] : [])], [...hp, ...(restP ? [{ K: rp.K, n: restP, at: rp.pr }] : [])], S, m) : null;
+  const restT = [restC ? legsOf([{ K: rc.K, n: restC }], 'call', 'calls') : '', restP ? legsOf([{ K: rp.K, n: restP }], 'put', 'puts') : ''].filter(Boolean).join(' and ');
+  const lowK = (ls: { K: number }[]) => Math.min(...ls.map((l) => l.K)), highK = (ls: { K: number }[]) => Math.max(...ls.map((l) => l.K));
+  const tabs: PairTab[] | null = hold && mix ? [
+    { key: 'new', label: 'New', cop: pc(cop), tot: (rc.pr * nC + rp.pr * nP) * 100, lead: 'Total',
+      tail: `for ${nC} ${nC === 1 ? 'call' : 'calls'} and ${nP} ${nP === 1 ? 'put' : 'puts'} · $${f2(tot)} a share`, pz },
+    { key: 'hold', label: 'What you hold', cop: pc(hold.cop), tot: hold.tot, lead: 'Taken in', tail: `for ${legsOf(hc, 'call', 'calls')} and ${legsOf(hp, 'put', 'puts')}`,
+      pz: zoneOf(S, highK(hp), lowK(hc), hold.dn, hold.up, hold.sdDn, hold.sdUp) },
+    { key: 'both', label: 'Both', cop: pc(mix.cop), tot: mix.tot, lead: 'In all', tail: restT ? `for what you hold plus ${restT}` : 'for what you hold, nothing left to sell',
+      pz: zoneOf(S, restP ? Math.max(highK(hp), rp.K) : highK(hp), restC ? Math.min(lowK(hc), rc.K) : lowK(hc), mix.dn, mix.up, mix.sdDn, mix.sdUp) },
+  ] : null;
 
   // Every SD: the boxed range the rules allow, the picked row ringed, the suggestion's dot.
   const zone = (k: number, lo: number, hi: number, on: boolean, put: boolean, flip: boolean) => {
@@ -210,7 +244,7 @@ export function sdView(d: SdReply, pick: SdPick, set: (p: SdPick) => void): SdVi
     ivT: pc(e.iv), sdP: '±' + pc(m), sdD: '±$' + f2(S * m),
     exps, sig, rng,
     both: { cop: pc(cop), prT: '$' + f2(tot), tot: (rc.pr * calls + rp.pr * puts) * 100, totN: `${calls} ${calls === 1 ? 'call' : 'calls'} and ${puts} ${puts === 1 ? 'put' : 'puts'}` },
-    pz, held, ladC: lad(false), ladP: lad(true),
+    pz, tabs, ladC: lad(false), ladP: lad(true),
     chart: {
       band: e.band,
       C: { K: rc.K, label: `${fk(rc.K)} call · ${e.label}` },

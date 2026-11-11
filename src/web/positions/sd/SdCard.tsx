@@ -97,32 +97,7 @@ function Body({ v, mask }: { v: SdView; mask: (s: string) => string }) {
             </div>
           </div>
         ))}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap', paddingTop: 14, borderTop: '1px solid rgba(255,255,255,.08)' }}>
-          <span style={kick}>Chance of profit</span>
-          <span style={{ fontSize: 32, lineHeight: '38px', fontWeight: 700, letterSpacing: '-.02em', color: '#65C466' }}>{v.both.cop}</span>
-          <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 14, lineHeight: '20px', color: MUT }}>
-            {/* Each part its own flex item, 6 apart, as the design renders it. */}
-            <span>Total</span>
-            <span style={{ fontSize: 20, lineHeight: '24px', fontWeight: 700, color: INK }}>{mask(money(v.both.tot))}</span>
-            <span>for</span><span>{v.both.totN}</span><span>·</span><span>{v.both.prT}</span><span>a share</span>
-          </span>
-        </div>
-        <Timeline z={v.pz} />
-        {v.held && (
-          <>
-            {/* What you hold (Nik 11 Nov): your sold calls and puts of this expiry as a pair, at what you sold them for. */}
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap', paddingTop: 14, borderTop: '1px solid rgba(255,255,255,.08)' }}>
-              <span style={kick}>What you hold · {v.held.label}</span>
-              <span style={{ fontSize: 32, lineHeight: '38px', fontWeight: 700, letterSpacing: '-.02em', color: '#65C466' }}>{v.held.cop}</span>
-              <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', fontSize: 14, lineHeight: '20px', color: MUT }}>
-                <span>Taken in</span>
-                <span style={{ fontSize: 20, lineHeight: '24px', fontWeight: 700, color: INK }}>{mask(money(v.held.tot))}</span>
-                <span>for</span><span>{v.held.legsT}</span>
-              </span>
-            </div>
-            <Timeline z={v.held.pz} />
-          </>
-        )}
+        <Chance v={v} mask={mask} />
       </section>
 
       <section aria-label="Every SD" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -232,3 +207,42 @@ const textW = (s: string, wt: number, px: number) => {
   measure.font = `${wt} ${px}px Inter, system-ui, sans-serif`;
   return measure.measureText(s).width;
 };
+
+/** The chance tile (Nik 11 Nov): one bar, and when the expiry has a held pair three tabs over it: New (the picked call
+    and put on the full counts), What you hold, Both (what you hold plus the rest of the counts at the picked
+    strikes). The chance, the $ and the bar follow the tab. */
+function Chance({ v, mask }: { v: SdView; mask: (s: string) => string }) {
+  const [tab, setTab] = useState<'new' | 'hold' | 'both'>('new');
+  const tabs = v.tabs;
+  const cur = tabs?.find((x) => x.key === tab) ?? null;
+  const cop = cur ? cur.cop : v.both.cop, tot = cur ? cur.tot : v.both.tot;
+  const lead = cur ? cur.lead : 'Total', tail = cur ? cur.tail : `for ${v.both.totN} · ${v.both.prT} a share`;
+  return (
+    <>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,.08)' }}>
+        {tabs && (
+          <div role="radiogroup" aria-label="Which trade"
+            style={{ display: 'grid', gridTemplateColumns: `repeat(${tabs.length},minmax(0,1fr))`, maxWidth: 420, padding: 2, borderRadius: 12, background: 'rgba(118,118,128,.24)' }}>
+            {tabs.map((x) => (
+              <button key={x.key} type="button" role="radio" aria-checked={x.key === tab} onClick={() => setTab(x.key)} className="bare"
+                style={{ height: 30, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: x.key === tab ? 600 : 500, color: x.key === tab ? INK : MU,
+                  background: x.key === tab ? 'rgba(255,255,255,.20)' : 'transparent', boxShadow: x.key === tab ? GLASS : 'none', transition: 'background .2s,color .2s' }}>
+                {x.label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+          <span style={kick}>Chance of profit</span>
+          <span style={{ fontSize: 32, lineHeight: '38px', fontWeight: 700, letterSpacing: '-.02em', color: '#65C466' }}>{cop}</span>
+          <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', fontSize: 14, lineHeight: '20px', color: MUT }}>
+            <span>{lead}</span>
+            <span style={{ fontSize: 20, lineHeight: '24px', fontWeight: 700, color: INK }}>{mask(money(tot))}</span>
+            <span>{tail}</span>
+          </span>
+        </div>
+      </div>
+      <Timeline z={cur ? cur.pz : v.pz} />
+    </>
+  );
+}

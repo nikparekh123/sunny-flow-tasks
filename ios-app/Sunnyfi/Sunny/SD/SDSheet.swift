@@ -120,6 +120,8 @@ struct SDSheetHost: View {
 struct SDCard: View {
     let sd: SDStore
     let privacy: Bool
+    /// The chance tile's tab: 0 New, 1 What you hold, 2 Both (Nik 11 Nov).
+    @State private var pairTab = 0
 
     var body: some View {
         let r = sd.reply(sd.book, sd.t)
@@ -131,7 +133,6 @@ struct SDCard: View {
                 if !p.exp.sig.isEmpty { signals(p.exp) }
                 strikes(r, p)
                 both(r, p)
-                if let h = r.held?.first(where: { $0.ex == p.exp.ex }) { held(r, h) }
                 every(r, p)
             } else {
                 waiting(r)
@@ -402,65 +403,73 @@ struct SDCard: View {
 
     // MARK: Chance of profit and the timeline
 
-    /// On the tile fill, padding 14 16 12, radius 18: the kicker and the chance (30/36 800 green) on the left, the total
-    /// (17/22 700) and counts on the right; the timeline under them.
+    /// One tile, one bar, three tabs (Nik 11 Nov): New (the picked call and put on the full counts), What you hold
+    /// (this expiry's sold calls and puts at their sale prices) and Both (what you hold plus the rest of the counts at
+    /// the picked strikes). The tabs show only when the expiry has a held pair; the chance, the $ and the bar follow
+    /// the tab. On the tile fill, padding 18 16 22, radius 18.
     private func both(_ r: SDReply, _ p: SDPair) -> some View {
-        let n = r.counts, total = (p.call.pr * Double(n.calls) + p.put.pr * Double(n.puts)) * 100
-        let totT = BriefWords.plain(SDFmt.money(total), privacy: privacy)
-        let sub = "\(SDFmt.count(n.calls, "call")) and \(SDFmt.count(n.puts, "put")) · $\(SDFmt.f2(p.tot)) a share"
-        return VStack(alignment: .leading, spacing: 12) {
+        let n = r.counts, e = p.exp, S0 = r.price
+        let side = { (put: Bool) in r.sold.filter { $0.put == put && $0.ex == e.ex && $0.be != nil }
+            .map { SDPairNums.Leg(K: $0.K, n: $0.n, at: abs($0.be! - $0.K)) } }
+        let hc = side(false), hp = side(true)
+        let hold = SDPairNums.of(calls: hc, puts: hp, S: S0, m: e.m)
+        let restC = max(0, Double(n.calls) - hc.reduce(0) { $0 + $1.n }), restP = max(0, Double(n.puts) - hp.reduce(0) { $0 + $1.n })
+        let mix = hold == nil ? nil : SDPairNums.of(calls: hc + (restC > 0 ? [.init(K: p.call.K, n: restC, at: p.call.pr)] : []),
+                                                  puts: hp + (restP > 0 ? [.init(K: p.put.K, n: restP, at: p.put.pr)] : []), S: S0, m: e.m)
+        let tab = hold == nil ? 0 : pairTab
+        let legs = { (ls: [SDPairNums.Leg], w: String) in ls.map { "\(SDFmt.count(Int($0.n), w)) \(SDFmt.fk($0.K))" }.joined(separator: ", ") }
+        let rest = [restC > 0 ? "\(SDFmt.count(Int(restC), "call")) \(SDFmt.fk(p.call.K))" : nil,
+                    restP > 0 ? "\(SDFmt.count(Int(restP), "put")) \(SDFmt.fk(p.put.K))" : nil].compactMap { $0 }.joined(separator: " and ")
+        // What the tab shows: the chance, the $, the line under the $, the strikes on the bar and its breakevens.
+        let v: (cop: Double, tot: Double, sub: String, callK: Double, putK: Double, up: Double, dn: Double, sdUp: Double, sdDn: Double) = {
+            if tab == 1, let h = hold {
+                return (h.cop, h.tot, "taken in for " + legs(hc, "call") + " and " + legs(hp, "put"),
+                        hc.map(\.K).min() ?? h.up, hp.map(\.K).max() ?? h.dn, h.up, h.dn, h.sdUp, h.sdDn)
+            }
+            if tab == 2, let b = mix {
+                return (b.cop, b.tot, rest.isEmpty ? "in all for what you hold, nothing left to sell" : "in all for what you hold plus " + rest,
+                        min(hc.map(\.K).min() ?? p.call.K, restC > 0 ? p.call.K : .infinity),
+                        max(hp.map(\.K).max() ?? p.put.K, restP > 0 ? p.put.K : -.infinity), b.up, b.dn, b.sdUp, b.sdDn)
+            }
+            return (p.cop, (p.call.pr * Double(n.calls) + p.put.pr * Double(n.puts)) * 100,
+                    "\(SDFmt.count(n.calls, "call")) and \(SDFmt.count(n.puts, "put")) · $\(SDFmt.f2(p.tot)) a share",
+                    p.call.K, p.put.K, p.up, p.dn, p.sdUp, p.sdDn)
+        }()
+        let totT = BriefWords.plain(SDFmt.money(v.tot), privacy: privacy)
+        // Roomier than the other tiles (Nik 11 Nov: "increase the height of the card"): 16 between the parts, 18 under the
+        // tabs, 18 top and 22 bottom.
+        return VStack(alignment: .leading, spacing: 16) {
+            if hold != nil {
+                // The system segmented control: Liquid Glass on iOS 26 and later (Nik 11 Nov: "use iOS liquid glass tabs").
+                Picker("Which trade", selection: Binding(get: { tab }, set: { t in withAnimation(S.fade) { pairTab = t } })) {
+                    Text("New").tag(0)
+                    Text("What you hold").tag(1)
+                    Text("Both").tag(2)
+                }
+                .pickerStyle(.segmented)
+                .padding(.bottom, 2)
+            }
             HStack(alignment: .bottom, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("CHANCE OF PROFIT").sType(SType(size: 11, weight: 600, line: 14, tracking: 0.05), tabular: false).foregroundStyle(SDPal.muT)
-                    Text(SDFmt.pc(p.cop)).sType(SType(size: 30, weight: 800, line: 36, tracking: -0.02)).foregroundStyle(SDPal.G)
-                        .contentTransition(.numericText()).animation(S.fade, value: p.cop)
+                    Text(SDFmt.pc(v.cop)).sType(SType(size: 30, weight: 800, line: 36, tracking: -0.02)).foregroundStyle(SDPal.G)
+                        .contentTransition(.numericText()).animation(S.fade, value: v.cop)
                 }
                 .fixedSize()
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Chance of profit, \(SDFmt.saidPct(p.cop))")
+                .accessibilityLabel("Chance of profit, \(SDFmt.saidPct(v.cop))")
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(totT).sType(SType(size: 17, weight: 700, line: 22, tracking: 0))
-                    Text(sub).sType(SType(size: 12, weight: 400, line: 16, tracking: 0)).foregroundStyle(SDPal.muT)
+                    Text(v.sub).sType(SType(size: 12, weight: 400, line: 16, tracking: 0)).foregroundStyle(SDPal.muT)
                         .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(privacy ? "Total hidden" : BriefWords.speech(totT)) for \(SDFmt.count(n.calls, "call")) and \(SDFmt.count(n.puts, "put")), \(SDFmt.f2(p.tot)) dollars a share")
+                .accessibilityLabel("\(privacy ? "Amount hidden" : BriefWords.speech(totT)), \(v.sub)")
             }
-            SDTimeline(S0: r.price, callK: p.call.K, putK: p.put.K, up: p.up, dn: p.dn, sdUp: p.sdUp, sdDn: p.sdDn)
+            SDTimeline(S0: S0, callK: v.callK, putK: v.putK, up: v.up, dn: v.dn, sdUp: v.sdUp, sdDn: v.sdDn)
         }
-        .padding(.top, 14).padding(.horizontal, 16).padding(.bottom, 12)
-        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(SDPal.tile))
-    }
-
-    /// What you hold (Nik 11 Nov): your sold calls and puts of the picked expiry as a pair, at what you sold them for.
-    /// The same tile as the chance of profit: the kicker with the expiry and the chance on the left, what was taken in
-    /// and the legs on the right, the timeline under them.
-    private func held(_ r: SDReply, _ h: SDReply.Held) -> some View {
-        let totT = BriefWords.plain(SDFmt.money(h.tot), privacy: privacy)
-        let side = { (ls: [SDReply.Held.Side], w: String) in ls.map { "\(SDFmt.count($0.n, w)) \(SDFmt.fk($0.K))" }.joined(separator: ", ") }
-        let legs = side(h.calls, "call") + " and " + side(h.puts, "put")
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .bottom, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("WHAT YOU HOLD · \(h.label.uppercased())").sType(SType(size: 11, weight: 600, line: 14, tracking: 0.05), tabular: false).foregroundStyle(SDPal.muT)
-                    Text(SDFmt.pc(h.cop)).sType(SType(size: 30, weight: 800, line: 36, tracking: -0.02)).foregroundStyle(SDPal.G)
-                }
-                .fixedSize()
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("What you hold by \(h.label), chance of profit \(SDFmt.saidPct(h.cop))")
-                Spacer(minLength: 0)
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(totT).sType(SType(size: 17, weight: 700, line: 22, tracking: 0))
-                    Text("taken in for " + legs).sType(SType(size: 12, weight: 400, line: 16, tracking: 0)).foregroundStyle(SDPal.muT)
-                        .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(privacy ? "Amount hidden" : BriefWords.speech(totT)) taken in for \(legs)")
-            }
-            SDTimeline(S0: r.price, callK: h.calls.map(\.K).min() ?? h.up, putK: h.puts.map(\.K).max() ?? h.dn, up: h.up, dn: h.dn, sdUp: h.sdUp, sdDn: h.sdDn)
-        }
-        .padding(.top, 14).padding(.horizontal, 16).padding(.bottom, 12)
+        .padding(.top, 18).padding(.horizontal, 16).padding(.bottom, 22)
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(SDPal.tile))
     }
 
