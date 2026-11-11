@@ -28,7 +28,7 @@ import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-10.2';
+const BUILD = '2026-11-11.1';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -1407,9 +1407,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       if (!readsOf.has(String(r.ticker))) readsOf.set(String(r.ticker), r);
     }
   }
-  /* PUTS ONLY ABOVE THE 50-DAY (Nik, 23 Oct 2026): the weekly short puts netted about -$44 from 31 Aug
-     to 23 Oct, so a name sells puts only while its last close is above its 50-day average. The last
-     completed session's close (a row before today), from ticker-technicals. */
+  /* The last completed session's close and 50-day (a row before today), from ticker-technicals: shown
+     beside the puts. It no longer pauses them: NO PAUSE (Nik, 11 Nov 2026, "we don't pause at all",
+     everywhere). It replaced "puts only above the 50-day" (23 Oct 2026). */
   const above50 = new Map<string, { close: number; sma50: number }>();
   if (book.length) {
     for (const r of await get(`ticker_technicals?ticker=in.(${book.join(',')})&day=lt.${today}&day=gte.${addDays(today, -10)}`
@@ -1672,7 +1672,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const leftPuts = Math.max(0, putTarget - donePuts);
     const shelfExp = today >= saleDay ? targetExp : saleDay;
     const soldOn = (ty: string) => ls.filter((l) => l.side === 'sold' && l.type === ty && l.expiry >= shelfExp).reduce((a, l) => a + l.n, 0);
-    const m50 = above50.get(t), putsPaused = !!m50 && m50.close < m50.sma50;
+    // NO PAUSE (Nik, 11 Nov 2026): puts sell below the 50-day too. The paused branches below stay unreachable.
+    const m50 = above50.get(t), putsPaused = false;
     todo[t] = { cc: leapN, cs: soldOn('call'), pc: putTarget, ps: soldOn('put'),
       ...(putsPaused ? { pp: true, s50: r2(m50!.sma50) } : {}) };
     const plan = [
@@ -2413,7 +2414,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         const below = xs.filter((x) => spot <= x[1]).map((x) => String(x[0])), above = xs.filter((x) => spot > x[1]).map((x) => String(x[0]));
         const s50 = num((p?.puts as Row | undefined)?.s50) ?? num(T.sma50);
         if (s50 != null && spot < s50) v2.push({ key: 'trend', kind: 'down', tag: 'Hurts puts', lead: 'The trend is down',
-          body: `${nm} trades _below_ its ${and(below)}-day average${below.length > 1 ? 's' : ''}. Puts stay paused until it closes above the 50-day, ${usd(s50)}.` });
+          body: `${nm} trades _below_ its ${and(below)}-day average${below.length > 1 ? 's' : ''}, under the 50-day at ${usd(s50)}.` });
         else if (xs.length && !below.length) v2.push({ key: 'trend', kind: 'up', tag: 'Helps', lead: 'The trend is up',
           body: `${nm} trades above its ${and(above)}-day averages, so weekly puts can sell at the Floor.` });
         else if (xs.length) v2.push({ key: 'trend', kind: 'mixed', tag: 'Neutral', lead: 'The trend is mixed',

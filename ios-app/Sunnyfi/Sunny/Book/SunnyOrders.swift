@@ -146,7 +146,8 @@ enum POrders {
                 if p.puts.why.contains("nowall") { why.append("there is no put wall read yet") }
                 out.append(POrder(kind: .puts, status: .paused, head: "Sell · \(md) puts", title: "No puts this week",
                                   reason: (why.joined(separator: ", and ") + ".").capitalizedFirst,
-                                  note: "Resumes after a close above " + (p.puts.s50.map { PF.price($0) } ?? "the 50-day") + " with a Floor below price."))
+                                  // No 50-day pause since 11 Nov 2026 (Nik): only the report or the walls hold puts back.
+                                  note: p.puts.why.contains("earnings") ? "Resumes after the report." : "Resumes once a Floor sits below the price."))
             }
         }
         let order: [POrder.Status] = [.todo, .waiting, .done, .paused, .skipped]

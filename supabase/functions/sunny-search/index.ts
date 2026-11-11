@@ -29,7 +29,7 @@ import { bookNames, caller, context, db, lookup, MENU, moreFor, OWNER_ONLY, SB_K
 import { checkAnswer } from './check.ts';
 import { COUNTS, fmt, SLOT, Slots } from './slots.ts';
 
-const BUILD = '2026-11-10.1';
+const BUILD = '2026-11-11.1';
 const MODEL = 'claude-opus-5-5';
 /** Test runs may still try Haiku on its own (step 4). */
 const HAIKU = 'claude-haiku-5-5';

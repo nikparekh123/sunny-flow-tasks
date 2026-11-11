@@ -1102,7 +1102,7 @@ export const MENU: Row[] = [
       view: { type: 'string', enum: ['list', 'grid'], description: "'grid' only when he asks for charts (small charts); default list" } } },
   { name: 'hedges', shows: 'Hedge calls and insurance puts: held, needed, strike, cost; one name or a list of the names that need some', args: TICKER },
   { name: 'hedge_rungs', shows: 'Every hedge call and insurance put with days left; rolls are due at 45 days left', args: {} },
-  { name: 'put_gates', shows: 'Whether weekly puts can sell: above the 50-day, a Floor below, no Accelerator between; one name or all', args: TICKER },
+  { name: 'put_gates', shows: 'Whether weekly puts can sell: a Floor below and no Accelerator between, and where the price sits against its 50-day (shown only: since 11 Nov 2026 puts never pause below the 50-day); one name or all', args: TICKER },
   { name: 'yield', shows: 'Yield: premium sold, closing cost, hedges and net on the LEAPS base, for a week or a month', args: {
       period: { type: 'string', enum: ['week', 'month'] },
       at: { type: 'string', description: 'A date in the week, or a month like 2026-10; default now' } } },

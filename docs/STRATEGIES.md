@@ -34,7 +34,12 @@ Added on top, not instead. **Buy six-month puts roughly 1:1 against the LEAPs,
 twice a year. Sell a smaller weekly quantity of puts to fund them.** The aim is
 protection that pays for itself, never income.
 
-**From 2026-10-23: weekly puts only above the 50-day.** Nik: a name sells its weekly
+**From 2026-11-11: no pause.** Nik: "we don't pause at all", everywhere. Weekly puts sell
+below the 50-day too; To do no longer shows "Puts paused" and Search's put gates show the
+50-day for reference only. Only an earnings week or the walls (no put wall read, an
+Accelerator) hold puts back. The rule below is RETIRED and kept for its history.
+
+**From 2026-10-23 to 2026-11-10 (retired): weekly puts only above the 50-day.** Nik: a name sells its weekly
 puts only while its last close is above its 50-day average; below it, put sales pause
 (To do shows "Puts paused · Below the 50-day"). The weekly short puts netted about
 **-$44** from 31 Aug to 23 Oct (3 winning weeks, 3 losing), so they were adding drop
