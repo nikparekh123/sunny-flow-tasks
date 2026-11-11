@@ -74,19 +74,10 @@ function nextEvent(t: string, p: J): string {
   return c[0]?.[1] ?? '';
 }
 
-/** The name's first To do from the owners' list (calls to sell first, then the rest as the phone's cards order them:
-    sales and rolls before buys), in the design's short form: "Sell 17 $64 calls" → "To do: sell 17 calls". The verb
-    is the order's kind (sunny-home this_week: roll · buy · sell · put), so a roll's buy-back reads "roll 21 calls",
-    the same word as Ready to roll, and fits the footer beside the next event. */
-const VERB: Record<string, string> = { sell: 'sell', put: 'sell', roll: 'roll', buy: 'buy' };
-function todoOf(t: string, p: J): string {
-  const rows = ((p?.this_week ?? []) as J[]).filter((r) => r?.t === t);
-  if (!rows.length) return '';
-  const r = rows.find((x) => x.kind === 'sell') ?? rows.find((x) => x.kind !== 'buy') ?? rows[0];
-  const act = String(r.act ?? r.action ?? '').split(' · ')[0];
-  const m = /^(.*?)\s*(\d[\d,]*)\s.*?\b(calls?|puts?|shares?)\b/i.exec(act);
-  if (m) return `To do: ${VERB[r.kind] ?? m[1].trim().toLowerCase()} ${m[2]} ${m[3].toLowerCase()}`.replace(/\s+/g, ' ');
-  return act ? 'To do: ' + act.charAt(0).toLowerCase() + act.slice(1) : '';
+/** The name's To do in the footer: none since 11 Nov 2026 (Nik: "Remove To do, we don't need it"), so the footer
+    shows the next event alone. */
+function todoOf(_t: string, _p: J): string {
+  return '';
 }
 
 /** Every name in the book, unordered. Empty when the book holds nothing. */

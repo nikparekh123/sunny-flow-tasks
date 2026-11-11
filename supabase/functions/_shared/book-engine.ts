@@ -327,22 +327,28 @@ export interface Holdings {
   sh: [number, number]; lp: [number, number]; oc: [number, number]; ip: [number, number];   // [value, today]
   sc: [number, number]; sp: [number, number];                                                // [left to earn, kept]
   tv: { lp: number; oc: number; ip: number; sc: number; sp: number };                       // time value now
+  /** What was paid (Nik, 11 Nov 2026: Paid · Value now · Time value on Positions): the cost of the shares and of what
+      was bought; the premium taken in for what was sold. At today's value where a leg has no price on record. */
+  paid: { sh: number; lp: number; oc: number; ip: number; sc: number; sp: number };
 }
 export function holdings(nb: NameBook): Holdings {
-  const h: Holdings = { sh: [0, 0], lp: [0, 0], oc: [0, 0], ip: [0, 0], sc: [0, 0], sp: [0, 0], tv: { lp: 0, oc: 0, ip: 0, sc: 0, sp: 0 } };
+  const h: Holdings = { sh: [0, 0], lp: [0, 0], oc: [0, 0], ip: [0, 0], sc: [0, 0], sp: [0, 0], tv: { lp: 0, oc: 0, ip: 0, sc: 0, sp: 0 },
+    paid: { sh: 0, lp: 0, oc: 0, ip: 0, sc: 0, sp: 0 } };
   const mv = nb.S0 - nb.P0;
   for (const l of nb.legs) {
-    if (l.ty === 'S') { h.sh[0] += l.q * nb.S0; h.sh[1] += l.q * mv; continue; }
+    if (l.ty === 'S') { h.sh[0] += l.q * nb.S0; h.sh[1] += l.q * mv; h.paid.sh += l.q * (l.K > 0 ? l.K : nb.S0); continue; }
     const per = l.now ?? nb.val(l, nb.S0, nb.t0) / (l.q * 100);
     const intr = l.ty === 'C' ? Math.max(0, nb.S0 - l.K) : Math.max(0, l.K - nb.S0);
     const tv = Math.abs(l.q) * 100 * Math.max(0, per - intr);
     if (l.q < 0) {
       const key = l.kind === 'sp' ? 'sp' : 'sc';
       h[key][0] += -l.q * 100 * per; h[key][1] += l.at != null ? -l.q * 100 * (l.at - per) : 0; h.tv[key] += tv;
+      h.paid[key] += -l.q * 100 * (l.at ?? per);
       continue;
     }
     const key = l.kind === 'ins' ? 'ip' : l.kind === 'leaps' ? 'lp' : 'oc';
     h[key][0] += l.q * 100 * per; h[key][1] += nb.dl(l, nb.S0, nb.t0) * mv; h.tv[key] += tv;
+    h.paid[key] += l.q * 100 * (l.at ?? per);
   }
   return h;
 }

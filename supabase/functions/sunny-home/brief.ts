@@ -278,14 +278,18 @@ export function buildBrief(x: BriefIn) {
 }
 
 type H = Holdings;
-const zeroH = (): H => ({ sh: [0, 0], lp: [0, 0], oc: [0, 0], ip: [0, 0], sc: [0, 0], sp: [0, 0], tv: { lp: 0, oc: 0, ip: 0, sc: 0, sp: 0 } });
+const zeroH = (): H => ({ sh: [0, 0], lp: [0, 0], oc: [0, 0], ip: [0, 0], sc: [0, 0], sp: [0, 0], tv: { lp: 0, oc: 0, ip: 0, sc: 0, sp: 0 },
+  paid: { sh: 0, lp: 0, oc: 0, ip: 0, sc: 0, sp: 0 } });
+const KEYS = ['sh', 'lp', 'oc', 'ip', 'sc', 'sp'] as const;
 const roundH = (h: H): H => {
   const r = (p: [number, number]): [number, number] => [Math.round(p[0]), Math.round(p[1])];
   return { sh: r(h.sh), lp: r(h.lp), oc: r(h.oc), ip: r(h.ip), sc: r(h.sc), sp: r(h.sp),
-    tv: { lp: Math.round(h.tv.lp), oc: Math.round(h.tv.oc), ip: Math.round(h.tv.ip), sc: Math.round(h.tv.sc), sp: Math.round(h.tv.sp) } };
+    tv: { lp: Math.round(h.tv.lp), oc: Math.round(h.tv.oc), ip: Math.round(h.tv.ip), sc: Math.round(h.tv.sc), sp: Math.round(h.tv.sp) },
+    paid: Object.fromEntries(KEYS.map((k) => [k, Math.round(h.paid[k])])) as H['paid'] };
 };
 const addH = (a: H, b: H): H => {
   const s = (p: [number, number], q: [number, number]): [number, number] => [p[0] + q[0], p[1] + q[1]];
   return { sh: s(a.sh, b.sh), lp: s(a.lp, b.lp), oc: s(a.oc, b.oc), ip: s(a.ip, b.ip), sc: s(a.sc, b.sc), sp: s(a.sp, b.sp),
-    tv: { lp: a.tv.lp + b.tv.lp, oc: a.tv.oc + b.tv.oc, ip: a.tv.ip + b.tv.ip, sc: a.tv.sc + b.tv.sc, sp: a.tv.sp + b.tv.sp } };
+    tv: { lp: a.tv.lp + b.tv.lp, oc: a.tv.oc + b.tv.oc, ip: a.tv.ip + b.tv.ip, sc: a.tv.sc + b.tv.sc, sp: a.tv.sp + b.tv.sp },
+    paid: Object.fromEntries(KEYS.map((k) => [k, a.paid[k] + b.paid[k]])) as H['paid'] };
 };
