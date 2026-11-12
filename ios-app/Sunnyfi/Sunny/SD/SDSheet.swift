@@ -640,6 +640,9 @@ private struct SDLaneView: View {
                             .background(Capsule().fill(p.new ? c : SDPal.cd))
                             .overlay { if !p.new { Capsule().strokeBorder(c, lineWidth: 1.5) } }
                             .position(x: X(p.lx), y: p.y + 9)
+                        Text(p.sub).sType(SType(size: 11, weight: 400, line: 14, tracking: 0)).foregroundStyle(SDPal.mu)
+                            .lineLimit(1).fixedSize()
+                            .position(x: X(p.lx), y: p.y + 26)
                     }
                     ForEach(ln.bes) { b in
                         Path { q in q.move(to: CGPoint(x: X(b.x), y: b.notchTop)); q.addLine(to: CGPoint(x: X(b.x), y: b.notchTop + b.notchH)) }
@@ -795,6 +798,7 @@ private struct SDSideCard: View {
                     Text(l.K).sType(SType(size: 17, weight: 700, line: 22, tracking: 0)).foregroundStyle(col)
                     Text(l.pr).sType(SType(size: 12, weight: 400, line: 16, tracking: 0)).foregroundStyle(SDPal.muT)
                     Text(l.mv).sType(SType(size: 12, weight: 400, line: 16, tracking: 0)).foregroundStyle(SDPal.mu)
+                    if !l.won.isEmpty { Text(l.won).sType(SType(size: 12, weight: 400, line: 16, tracking: 0)).foregroundStyle(SDPal.mu) }
                 }
                 .fixedSize(horizontal: false, vertical: true)
             }

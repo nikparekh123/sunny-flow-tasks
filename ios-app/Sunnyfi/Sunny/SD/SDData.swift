@@ -327,7 +327,8 @@ struct SDSaleModel {
     enum Tone { case ink, mu, muT, green, red, orange }
     struct Span { let t: String; let w: CGFloat; let tone: Tone }
     /// A strike above a Held or New bar: its pill (outlined and dashed when held, filled when new) and its stem.
-    struct Pill: Identifiable { let id: String; let x: Double; let lx: Double; let y: CGFloat; let stemTop: CGFloat; let stemH: CGFloat; let label: String; let put: Bool; let new: Bool }
+    /// A strike on a lane: its pill and, under it, how far it is from today (Nik 12 Nov 2026: "↓ 9.2% · 1.55 SD").
+    struct Pill: Identifiable { let id: String; let x: Double; let lx: Double; let y: CGFloat; let stemTop: CGFloat; let stemH: CGFloat; let label: String; let sub: String; let put: Bool; let new: Bool }
     /// A breakeven: its notch on the bar and its label. `held`: Held's breakeven drawn above Both's bar (dashed, muted,
     /// a HELD chip). `ch` is the change against Held in Both, `chK` its direction (1 further out, -1 closer).
     struct BE: Identifiable {
@@ -346,7 +347,7 @@ struct SDSaleModel {
         let bt: CGFloat; let thk: CGFloat; let H: CGFloat
         let said: String
     }
-    struct LegLine: Identifiable { let id: Int; let K: String; let pr: String; let mv: String }
+    struct LegLine: Identifiable { let id: Int; let K: String; let pr: String; let mv: String; let won: String }
     struct Col { let held: Bool; let legs: [LegLine]; let empty: String; let be: String?; let beS: String }
     struct Card: Identifiable {
         let id: String; let put: Bool; let title: String; let cols: [Col]
@@ -464,7 +465,8 @@ struct SDSaleModel {
         todayT = "$" + f2(S) + " today"
 
         // The lanes, as the app lays them out.
-        let gP = 20.0, gB = 30.0, gB2 = 35.0
+        // Pills 30 apart now each carries its `% · SD` line (12 Nov 2026).
+        let gP = 20.0, gPill = 30.0, gB = 30.0, gB2 = 35.0
         let clamp = { (x: Double) in max(16, min(84, x)) }
         func lay(_ xs: [Double], _ gap: Double) -> [Int] {
             var rows: [[Double]] = []
@@ -494,14 +496,14 @@ struct SDSaleModel {
             let L = k == "h" ? K.h : k == "n" ? K.n : K.b, isB = k == "b"
             let on = k == "h" ? hasH : k == "n" ? hasN : hasH || hasN, thk: CGFloat = isB ? 14 : 10
             let pin = (on && !isB ? (k == "h" ? pillsH : pillsN) : []).filter { $0.K0 > K.A && $0.K0 < K.B }.sorted { xp($0.K0) < xp($1.K0) }
-            let pr = lay(pin.map { xp($0.K0) }, gP), tR = pr.isEmpty ? 0 : pr.max()! + 1
+            let pr = lay(pin.map { xp($0.K0) }, gPill), tR = pr.isEmpty ? 0 : pr.max()! + 1
             let gl = isB && both ? K.h.cr.sorted() : [], gr = lay(gl.map(xp), gP), gR = gr.isEmpty ? 0 : gr.max()! + 1
-            let bt: CGFloat = tR > 0 ? CGFloat(tR) * 22 + 8 : gR > 0 ? CGFloat(gR) * 34 + 6 : 6
+            let bt: CGFloat = tR > 0 ? CGFloat(tR) * 36 + 8 : gR > 0 ? CGFloat(gR) * 34 + 6 : 6
             let beTop = bt + thk + 8, rowH: CGFloat = isB ? 52 : 38
             let bl = on ? L.cr.sorted() : [], br = lay(bl.map(xp), isB ? gB2 : gB), bR = br.isEmpty ? 0 : br.max()! + 1
             let pills = pin.enumerated().map { i, q -> Pill in
-                let y = CGFloat(tR - 1 - pr[i]) * 22, x = xp(q.K0)
-                return Pill(id: q.key, x: x, lx: clamp(x), y: y, stemTop: y + 18, stemH: bt + thk - y - 18, label: q.label, put: q.put, new: q.new)
+                let y = CGFloat(tR - 1 - pr[i]) * 36, x = xp(q.K0)
+                return Pill(id: q.key, x: x, lx: clamp(x), y: y, stemTop: y + 33, stemH: bt + thk - y - 33, label: q.label, sub: mvS(q.K0), put: q.put, new: q.new)
             }
             var bes: [BE] = gl.enumerated().map { i, x in
                 BE(id: "g\(i)", x: xp(x), lx: clamp(xp(x)), notchTop: bt - 3, notchH: thk + 6, held: true, y: CGFloat(gR - 1 - gr[i]) * 34,
@@ -533,7 +535,7 @@ struct SDSaleModel {
         // The Calls and Puts cards (1.7).
         func won(_ Kx: Double, put: Bool, row: SDReply.Row?) -> String {
             let w = row?.won ?? (q401.isEmpty ? nil : { let z = log(Kx / S) / m; return put ? 1 - cdf(z) : cdf(z) }())
-            return w.map { " · " + pc($0) + "\u{00A0}won" } ?? ""
+            return w.map { pc($0) + "\u{00A0}won" } ?? ""
         }
         var cards: [Card] = []
         for put in [false, true] {
@@ -543,14 +545,14 @@ struct SDSaleModel {
             let hCol = Col(held: true, legs: hl.enumerated().map { i, l in
                 LegLine(id: i, K: fk(l.K) + " ×\(Int(l.n))",
                         pr: "Got $" + f2(l.got ?? 0) + " · " + bookMoney((l.got ?? 0) * l.n * 100) + (l.ex != e.ex ? " · " + PositionsModel.md(l.ex) : ""),
-                        mv: SDFmt.dir(l.K / S - 1) + won(l.K, put: put, row: nil))
+                        mv: mvS(l.K), won: won(l.K, put: put, row: nil))
             }, empty: "No \(side) held for \(exS) or later", be: hl.isEmpty ? nil : bH.map(f2) ?? "Beyond 6 SD", beS: mvS(bH))
             let nCol = Col(held: false, legs: nq > 0 ? [LegLine(id: 0, K: fk(rw.K) + " ×\(nq)", pr: "$" + f2(rw.pr) + " · " + SDFmt.money(rw.pr * Double(nq) * 100),
-                                                               mv: SDFmt.dir(rw.K / S - 1) + won(rw.K, put: put, row: rw))] : [],
+                                                               mv: mvS(rw.K), won: won(rw.K, put: put, row: rw))] : [],
                            empty: "No new \(side) yet", be: nq > 0 ? bN.map(f2) ?? "Beyond 6 SD" : nil, beS: mvS(bN))
             let bV = bB.map(f2) ?? "Beyond 6 SD"
-            var said = "\(put ? "Puts" : "Calls"). Held: " + (hl.isEmpty ? hCol.empty : hCol.legs.map { "\($0.K), \($0.pr), \($0.mv)" }.joined(separator: "; ") + ", breakeven \(hCol.be ?? "")")
-            said += ". New: " + (nq == 0 ? nCol.empty : nCol.legs.map { "\($0.K), \($0.pr), \($0.mv)" }.joined(separator: "; ") + ", breakeven \(nCol.be ?? "")")
+            var said = "\(put ? "Puts" : "Calls"). Held: " + (hl.isEmpty ? hCol.empty : hCol.legs.map { "\($0.K), \($0.pr), \($0.mv), \($0.won)" }.joined(separator: "; ") + ", breakeven \(hCol.be ?? "")")
+            said += ". New: " + (nq == 0 ? nCol.empty : nCol.legs.map { "\($0.K), \($0.pr), \($0.mv), \($0.won)" }.joined(separator: "; ") + ", breakeven \(nCol.be ?? "")")
             said += ". Both, breakeven \(bV), \(mvS(bB))" + (q.map { ". " + $0.t } ?? "")
             cards.append(Card(id: put ? "p" : "c", put: put, title: put ? "Puts" : "Calls", cols: [hCol, nCol], bV: bV, bS: mvS(bB),
                               from: (q?.k ?? 0) != 0 ? q?.from.map(f2) : nil, ch: q?.t, chK: q?.k ?? 0, said: SDFmt.words(said)))

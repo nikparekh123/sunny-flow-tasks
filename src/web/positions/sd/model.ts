@@ -105,7 +105,8 @@ export interface Side {
 /** A run of the head sentence. */
 export interface Run { t: string; w: number; c: string }
 /** A strike pill over a bar (x in % of the price scale). */
-export interface Pill { key: string; xv: number; l: string; c: string; nw: boolean }
+/** A strike on a lane: its pill and, under it, how far it is from today (Nik 12 Nov 2026: `↓ 9.2% · 1.55 SD`). */
+export interface Pill { key: string; xv: number; l: string; s: string; c: string; nw: boolean }
 /** A breakeven: the price, `↓ 9.3% · 1.34 SD`, and in Both the change against Held. */
 export interface Be { key: string; xv: number; v: string; s: string; ch: { t: string; c: string } | null }
 export interface Lane {
@@ -118,7 +119,8 @@ export interface Lane {
   held: Be[];
   bes: Be[];
 }
-export interface CardLeg { key: string; K: string; pr: string; mv: string }
+/** A leg in the Calls or Puts card: strike and count, what it took in, `↑ 5.7% · 0.60 SD` from today, its won rate. */
+export interface CardLeg { key: string; K: string; pr: string; mv: string; won: string }
 export interface CardCol { key: 'h' | 'n'; legs: CardLeg[]; emT: string; be: string; beS: string }
 export interface SideCard {
   key: 'c' | 'p'; h: string; col: string; cols: [CardCol, CardCol];
@@ -284,7 +286,7 @@ export function sdView(d: SdReply, pick: SdPick, set: (p: SdPick) => void): SdVi
     for (const l of ls) { const k = (l.put ? 'p' : 'c') + l.K, x = o.get(k); if (x) x.n += l.n; else o.set(k, { ...l }); }
     return [...o.values()];
   };
-  const pill = (key: string, K: number, n: number, put: boolean, nw: boolean): Pill => ({ key, xv: xp(K), l: `${fk(K)} ×${n}`, c: put ? P.PT : P.CL, nw });
+  const pill = (key: string, K: number, n: number, put: boolean, nw: boolean): Pill => ({ key, xv: xp(K), l: `${fk(K)} ×${n}`, s: mvS(K), c: put ? P.PT : P.CL, nw });
   const inAx = (K: number) => K > A && K < B;
   const pillsH = merge(hl).filter((l) => inAx(l.K)).map((l, i) => pill('h' + i, l.K, l.n, l.put, false));
   const pillsN = [...(nC && inAx(rc.K) ? [pill('nc', rc.K, nC, false, true)] : []), ...(nP && inAx(rp.K) ? [pill('np', rp.K, nP, true, true)] : [])];
@@ -320,9 +322,9 @@ export function sdView(d: SdReply, pick: SdPick, set: (p: SdPick) => void): SdVi
       key: put ? 'p' : 'c', h: put ? 'Puts' : 'Calls', col: put ? P.PT : P.CL,
       cols: [
         { key: 'h', emT: `No ${side} held for ${exS} or later`, be: beT(hb, 'h'), beS: mvS(hb),
-          legs: hs.map((l, i) => ({ key: 'h' + i, K: `${fk(l.K)} ×${l.n}`, pr: `Got ${price(l.got!)} · ${money(l.got! * l.n * 100)}${l.ex !== e.ex ? ' · ' + exL(l.ex) : ''}`, mv: `${dir(l.K / S - 1)} · ${wonK(l.K, put)}` })) },
+          legs: hs.map((l, i) => ({ key: 'h' + i, K: `${fk(l.K)} ×${l.n}`, pr: `Got ${price(l.got!)} · ${money(l.got! * l.n * 100)}${l.ex !== e.ex ? ' · ' + exL(l.ex) : ''}`, mv: mvS(l.K), won: wonK(l.K, put) })) },
         { key: 'n', emT: `No new ${side} yet`, be: beT(nb, 'n'), beS: mvS(nb),
-          legs: nq ? [{ key: 'n', K: `${fk(r.K)} ×${nq}`, pr: `${price(r.pr)} · ${money(r.pr * nq * 100)}`, mv: `${dir(r.K / S - 1)} · ${wonOf(r.won)}` }] : [] },
+          legs: nq ? [{ key: 'n', K: `${fk(r.K)} ×${nq}`, pr: `${price(r.pr)} · ${money(r.pr * nq * 100)}`, mv: mvS(r.K), won: wonOf(r.won) }] : [] },
       ],
       from: c && c.k !== 0 && c.from != null ? f2(c.from) : null, bV: beT(bB, 'b'), bS: mvS(bB),
       ch: c?.t ? { t: c.t, c: tone(c.k), bg: toneBg(c.k) } : null,

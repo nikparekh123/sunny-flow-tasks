@@ -210,6 +210,7 @@ function Sale({ v, mask, onTry, sdIn, live }: { v: SdView; mask: (s: string) => 
                         <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 700, color: cd.col }}>{lg.K}</span>
                         <span style={{ fontSize: 12, lineHeight: '16px', color: P.muT }}>{mask(lg.pr)}</span>
                         <span style={{ fontSize: 12, lineHeight: '16px', color: P.mu }}>{lg.mv}</span>
+                        {lg.won && <span style={{ fontSize: 12, lineHeight: '16px', color: P.mu }}>{lg.won}</span>}
                       </div>
                     ))}
                     {cl.legs.length ? (
@@ -304,12 +305,13 @@ function Lanes({ v, narrow, mask }: { v: SdView; narrow: boolean; mask: (s: stri
 
 function LaneRow({ ln, i, W, cols, narrow, todayX, mask }: { ln: Lane; i: number; W: number; cols: string; narrow: boolean; todayX: number; mask: (s: string) => string }) {
   const isB = ln.key === 'b', thk = isB ? 14 : 10;
-  const pills = lay(ln.pills.map((p) => ({ ...p, w: textW(p.l, 700, 11) + 14 })), W, GP, 3), tR = nRows(pills);
+  const pills = lay(ln.pills.map((p) => ({ ...p, w: Math.max(textW(p.l, 700, 11) + 14, textW(p.s, 400, 11) + 8) })), W, GP, 3), tR = nRows(pills);
   const chipW = textW('HELD', 700, 10) + 14;
   const held = lay(ln.held.map((b) => ({ ...b, w: Math.max(chipW + 5 + textW(b.v, 700, 12), textW(b.s, 400, 11)) + 8 })), W, GP, 3), gR = nRows(held);
   const bes = lay(ln.bes.map((b) => ({ ...b, w: Math.max(textW(b.v, 700, isB ? 15 : 13), textW(b.s, 400, 11), b.ch ? textW(b.ch.t, 700, 11) : 0) + 8 })), W, isB ? GB2 : GB, 3), bR = nRows(bes);
-  // The bar sits under the pills (22 a row) or Held's breakevens (34 a row); the breakevens hang under it.
-  const bt = tR ? tR * 22 + 8 : gR ? gR * 34 + 6 : 6, beTop = bt + thk + 8, rowH = isB ? 52 : 38;
+  // The bar sits under the pills (36 a row: the pill and its `% · SD`) or Held's breakevens (34 a row); the
+  // breakevens hang under it.
+  const bt = tR ? tR * PILL_ROW + 8 : gR ? gR * 34 + 6 : 6, beTop = bt + thk + 8, rowH = isB ? 52 : 38;
   const H = ln.on ? beTop + bR * rowH : bt + thk + 6, lt = Math.max(0, bt + thk / 2 - 10);
   return (
     <div style={{ display: 'grid', gridTemplateColumns: cols, columnGap: 20, rowGap: 8, alignItems: 'start',
@@ -329,7 +331,7 @@ function LaneRow({ ln, i, W, cols, narrow, todayX, mask }: { ln: Lane; i: number
           {ln.zones.map((z) => <span key={z.key} className="sdm" style={{ position: 'absolute', top: 0, bottom: 0, left: pct(z.L), width: pct(z.W), background: z.c }} />)}
           {ln.diff.map((z) => <span key={z.key} className="sdm" style={{ position: 'absolute', top: 0, bottom: 0, left: pct(z.L), width: pct(z.W), background: STRIPES }} />)}
         </div>
-        {pills.map((p) => <PillMark key={p.key} p={p} y={(tR - 1 - p.row) * 22} bottom={bt + thk} />)}
+        {pills.map((p) => <PillMark key={p.key} p={p} y={(tR - 1 - p.row) * PILL_ROW} bottom={bt + thk} />)}
         {held.map((b) => {
           const y = (gR - 1 - b.row) * 34;
           return (
@@ -357,11 +359,14 @@ function LaneRow({ ln, i, W, cols, narrow, todayX, mask }: { ln: Lane; i: number
   );
 }
 
-/** A strike: the pill (outlined and dashed for Held, filled and solid for New) and its stem down through the bar. */
+const PILL_ROW = 36;
+/** A strike: the pill (outlined and dashed for Held, filled and solid for New), under it `↓ 9.2% · 1.55 SD` from
+    today (11/14 muted), and its stem down through the bar. */
 function PillMark({ p, y, bottom }: { p: Placed<Pill & { w: number }>; y: number; bottom: number }) {
   return (
     <div aria-hidden="true" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-      <span className="sdm" style={{ position: 'absolute', top: y + 18, left: pct(p.xv), height: Math.max(0, bottom - y - 18), marginLeft: -1, borderLeft: `2px ${p.nw ? 'solid' : 'dashed'} ${p.c}` }} />
+      <span className="sdm" style={{ position: 'absolute', top: y + 33, left: pct(p.xv), height: Math.max(0, bottom - y - 33), marginLeft: -1, borderLeft: `2px ${p.nw ? 'solid' : 'dashed'} ${p.c}` }} />
+      <span className="sdm" style={{ position: 'absolute', top: y + 19, left: p.left, transform: 'translateX(-50%)', fontSize: 11, lineHeight: '14px', whiteSpace: 'nowrap', color: P.mu }}>{p.s}</span>
       <span className="sdm" style={{ position: 'absolute', top: y, left: p.left, transform: 'translateX(-50%)', height: 18, padding: '0 7px', borderRadius: 9, boxSizing: 'border-box',
         display: 'flex', alignItems: 'center', fontSize: 11, lineHeight: '14px', fontWeight: 700, whiteSpace: 'nowrap',
         background: p.nw ? p.c : P.bg, color: p.nw ? '#000000' : p.c, boxShadow: p.nw ? 'none' : 'inset 0 0 0 1.5px ' + p.c }}>{p.l}</span>
