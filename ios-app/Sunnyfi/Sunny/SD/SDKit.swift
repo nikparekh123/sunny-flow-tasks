@@ -20,21 +20,22 @@ enum SDPal {
     /// Call blue and put brown (README 1.8).
     static let CL = S.dyn(0x2E5ECA, 0x6FA0F6)
     static let PT = S.dyn(0x9A5B1F, 0xD49A5A)
-    static let tile = S.dynA(0x767680, 0.08, 0x767680, 0.18)       // strike tiles, the Both together panel
-    static let trk = S.dynA(0x767680, 0.12, 0x767680, 0.24)        // expiry chips, tracks, the X, the switch
-    static let ring = S.dynA(0x3C3C43, 0.3, 0xEBEBF5, 0.3)         // signal outlines, the grabber
+    static let tile = S.dynA(0x767680, 0.08, 0x767680, 0.18)       // strike tiles
+    static let trk = S.dynA(0x767680, 0.12, 0x767680, 0.24)        // expiry chips, the bars' track, the X
+    static let ring = S.dynA(0x3C3C43, 0.3, 0xEBEBF5, 0.3)         // signal outlines, the grabber, count fields, today's line
     static let cdMu = S.dynA(0xFFFFFF, 0.72, 0x000000, 0.6)        // muted text on an ink tile
-    static let segOn = S.dynA(0xFFFFFF, 1, 0xFFFFFF, 0.20)         // the Calls | Puts thumb
-    static let gz = S.dynA(0x327133, 0.16, 0x65C466, 0.28)         // breakeven to breakeven
-    static let gz2 = S.dynA(0x327133, 0.42, 0x65C466, 0.6)         // strike to strike
-    static let dot = S.dyn(0xF4F4F6, 0x141415)                     // the ring round today's dot
-    /// The allowed range in Every SD: tint, selected tint, outline (zone tints .06 / .14 light, .10 / .22 dark; outline .4 / .5).
-    static let czB = S.dynA(0x2E5ECA, 0.06, 0x6FA0F6, 0.10)
-    static let czB2 = S.dynA(0x2E5ECA, 0.14, 0x6FA0F6, 0.22)
-    static let czL = S.dynA(0x2E5ECA, 0.4, 0x6FA0F6, 0.5)
-    static let pzB = S.dynA(0x9A5B1F, 0.06, 0xD49A5A, 0.10)
-    static let pzB2 = S.dynA(0x9A5B1F, 0.14, 0xD49A5A, 0.22)
-    static let pzL = S.dynA(0x9A5B1F, 0.4, 0xD49A5A, 0.5)
+    static let rule = S.dynA(0x1D1D1F, 0.08, 0xFFFFFF, 0.10)       // 1 pt rules
+    /// What the sale does (143a, lanes() TH): the panel's ring, the Calls and Puts cards, the bars' profit and loss,
+    /// green and red text, their pills, and the grey pill.
+    static let panelRing = S.dynA(0xE3E5E8, 1, 0xFFFFFF, 0.14)
+    static let cardBg = S.dynA(0xF5F5F7, 1, 0xFFFFFF, 0.06)
+    static let zG = S.dyn(0x34C759, 0x30D158)
+    static let zR = S.dyn(0xFF3B30, 0xFF453A)
+    static let gT = S.dyn(0x1F7A36, 0x30D158)
+    static let rT = S.dyn(0xC4281C, 0xFF6961)
+    static let gB = S.dynA(0x34C759, 0.14, 0x30D158, 0.14)
+    static let rB = S.dynA(0xFF3B30, 0.12, 0xFF453A, 0.16)
+    static let nB = S.dynA(0x767680, 0.12, 0x767680, 0.24)
     /// The ±1 SD band on the Positions chart (137a).
     static let band = S.dynA(0x767680, 0.10, 0x767680, 0.20)
     /// The solid strip behind the status bar while the half sheet holds the chart up (README 1.9): the page's own top.
@@ -46,12 +47,8 @@ enum SDPal {
 
 /// card136's formats.
 enum SDFmt {
-    /// The design's normal CDF (Abramowitz and Stegun 26.2.17), the same digits as sd135.
-    static func N(_ x: Double) -> Double {
-        let t = 1 / (1 + 0.2316419 * abs(x)), d = 0.3989422804014327 * exp(-x * x / 2)
-        let q = d * t * (0.31938153 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))))
-        return x > 0 ? 1 - q : q
-    }
+    /// The design's normal CDF (Abramowitz and Stegun 26.2.17), the same digits as sd135 (one copy, in SDSale).
+    static func N(_ x: Double) -> Double { SDSale.N(x) }
     /// Two decimals as JavaScript's toFixed writes them (the web and sunny-sd round the same), never "-0.00".
     static func f2(_ x: Double) -> String { SDLegs.f2(abs(x) < 0.005 ? 0 : x) }
     /// A strike: 40, 42.5, 40.85.

@@ -3,7 +3,7 @@
 //  Sunny
 //
 //  Positions, one name at a time (block 31, Search Explorations 47a): the account strip (scrolls away), the
-//  large title, the book's totals in one sideways row (a tap cycles time value, % change, $ change), the logo
+//  large title, the book's totals in one sideways row (145b: Long, Hedge, Income; no tap), the logo
 //  strip (an orange dot = short at its priced move by Friday), the name row, then the chart card edge to edge
 //  (P&L and its status, the Greeks, the payoff on the date picked, drag to set the price, the date slider),
 //  Walls or Technicals, the legs (tap one to switch it off), the summary line, the fixes when short, Walls by
@@ -52,8 +52,6 @@ struct BriefPositionsScreen: View {
     @State private var legFilter = "All"
     @State private var layer: String? = nil
     @State private var fix: String?
-    /// The totals row's view: 0 Paid, 1 Value now, 2 Time value (opens on Time value, as before).
-    @State private var totalsMode = 2
     @State private var wallsKind = "All"
     /// The payoff chart's price range, an index into PositionsModel.zooms (Nov 8): ±25% each time the tab opens,
     /// kept across names while it stays open, as the design's z45.
@@ -146,7 +144,7 @@ struct BriefPositionsScreen: View {
                     }
                     if !names.isEmpty {
                         // Header gap 14 + the row's own 2 on top; 6 under it, then 20 to the logo strip.
-                        BookTotalsRow(hs: totals, mode: $totalsMode, privacy: privacy).padding(.top, 14)
+                        BookTotalsRow(hs: totals, privacy: privacy).padding(.top, 14)
                         LogoStrip(items: strip, selected: name) { t in
                             if t != name { logoPicks += 1 }
                             withAnimation(S.fade) { name = t; price = nil; off = []; fix = nil }
@@ -168,7 +166,7 @@ struct BriefPositionsScreen: View {
                                             legFilter: $legFilter, layer: $layer, chain: $chain, fix: $fix, wallsKind: $wallsKind, zoom: $zoom,
                                             privacy: privacy, late: live && brief.asOf() != nil,
                                             // No SD on the chart (Nik, 11 Nov 2026: "looks very busy"): the sheet only.
-                                            sdLines: nil, sdOn: sdUp, sdPinned: false, sdTrial: sd.trial(book: sdBook, t: name),
+                                            sdLines: nil, sdOn: sdUp, sdPinned: false,
                                             onSd: toggleSD, onChartY: { chartY = $0 })
                                 .id("\(acct)-\(name)")
                         }
@@ -385,113 +383,116 @@ private enum PosSay {
     }
 }
 
-// MARK: - Book totals (one sideways row)
+// MARK: - Book totals (one sideways row, 145b)
 
+/// The whole book's totals (handoff 2026-11-11-sd-whatif-totals 3.1, App Explorations 145b): one sideways row that
+/// snaps per group, fading at the right edge, no tap. ⚠ NIK'S GROUPING RULE (11 Nov 2026, over the README): LONG is
+/// the shares; HEDGE every call bought (LEAPS and OTM calls alike) and every put bought; INCOME everything sold. The
+/// same sums as the web's src/web/positions/totals.ts, from Home's holdings (`h`): bought and shares read their value
+/// now and the change on what was paid; what was sold reads what was collected, the time value left in brackets, and
+/// what is kept (collected less the cost to close) on what was collected. No minus signs (red), no arrows.
 private struct BookTotalsRow: View {
     let hs: [PositionsModel.Holdings]
-    @Binding var mode: Int
     let privacy: Bool
-    /// One column (Nik, 11 Nov 2026, the same three views as the web): what was paid (or taken in), its value now (or
-    /// the cost to buy back), its time value (nil for shares), and whether it was sold.
-    struct Col { let name: String; let paid: Double; let now: Double; let tv: Double?; let sold: Bool
-        /// Up when what was bought is worth more, or when what was sold costs less to buy back; on what was paid.
-        var pct: Double { paid > 0 ? (sold ? paid - now : now - paid) / paid * 100 : 0 }
+    /// One piece: what was paid (sold: collected), its value now (sold: the cost to close), its time value.
+    struct Fig { var paid = 0.0, now = 0.0, tv = 0.0 }
+    struct Piece { let label: String; let fig: Fig?; let sold: Bool }
+    /// A piece over the book: nil when no name holds it ("None").
+    private func sum(_ f: (PositionsModel.Holdings) -> Fig?) -> Fig? {
+        hs.compactMap(f).reduce(nil) { acc, x in Fig(paid: (acc?.paid ?? 0) + x.paid, now: (acc?.now ?? 0) + x.now, tv: (acc?.tv ?? 0) + x.tv) }
     }
-    static let views = ["paid", "value now", "time value"]
-    static let said = ["paid", "value now", "time value"]
-    private func sum(_ f: (PositionsModel.Holdings) -> Double) -> Double { hs.reduce(0) { $0 + f($1) } }
+    private static func held(_ paid: Double, _ now: Double) -> Bool { paid != 0 || now != 0 }
+
     var body: some View {
-        let long = [Col(name: "Shares", paid: sum { $0.paid.sh }, now: sum { $0.sh.value }, tv: nil, sold: false),
-                    Col(name: "LEAPS", paid: sum { $0.paid.lp }, now: sum { $0.lp.value }, tv: sum { $0.timeLeaps }, sold: false),
-                    Col(name: "OTM calls", paid: sum { $0.paid.oc }, now: sum { $0.oc.value }, tv: sum { $0.timeOtm }, sold: false),
-                    Col(name: "Insurance puts", paid: sum { $0.paid.ip }, now: sum { $0.ip.value }, tv: sum { $0.timeIp }, sold: false)]
-            .filter { $0.paid != 0 || $0.now != 0 }
-        let sold = [Col(name: "Calls", paid: sum { $0.paid.sc }, now: sum { $0.sc.value }, tv: sum { $0.timeSc }, sold: true),
-                    Col(name: "Puts", paid: sum { $0.paid.sp }, now: sum { $0.sp.value }, tv: sum { $0.timeSp }, sold: true)]
-            .filter { $0.paid != 0 || $0.now != 0 }
-        // ⚠ A tap on the strip cycles the view. Not a Button around the ScrollView: inside a sideways ScrollView the
-        // button never fired on the phone (Nik, 8 Nov 2026: "it was supposed to be tappable"); the tap sits on the row.
-        let cycle = { withAnimation(S.fade) { mode = (mode + 1) % 3 } }
-        Group {
-            ScrollView(.horizontal) {
-                // The design's totGrid: groups and items 16 apart with a 1 pt rule on the left of each after the
-                // first; padding 2 top, 6 bottom, 40 right, and the last 36 pt fade out.
-                HStack(alignment: .top, spacing: 0) {
-                    group("Long", long)
-                    if !sold.isEmpty {
-                        group("Sold", sold)
-                            .padding(.leading, 16)
-                            .overlay(alignment: .leading) { Rectangle().fill(Self.rule).frame(width: 1) }
-                    }
-                }
-                .padding(.leading, S.margin).padding(.trailing, 40)
-                .padding(.top, 2).padding(.bottom, 6)
-                .contentShape(Rectangle())
-                .onTapGesture(perform: cycle)
-            }
-            .scrollIndicators(.hidden)
-            .mask {
-                HStack(spacing: 0) {
-                    Rectangle()
-                    LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 36)
+        let groups: [(String, [Piece])] = [
+            ("Long", [Piece(label: "Shares", fig: sum { Self.held($0.paid.sh, $0.sh.value) ? Fig(paid: $0.paid.sh, now: $0.sh.value) : nil }, sold: false)]),
+            ("Hedge", [Piece(label: "Calls", fig: sum { Self.held($0.paid.lp + $0.paid.oc, $0.lp.value + $0.oc.value)
+                                                        ? Fig(paid: $0.paid.lp + $0.paid.oc, now: $0.lp.value + $0.oc.value, tv: $0.timeLeaps + $0.timeOtm) : nil }, sold: false),
+                       Piece(label: "Puts", fig: sum { Self.held($0.paid.ip, $0.ip.value) ? Fig(paid: $0.paid.ip, now: $0.ip.value, tv: $0.timeIp) : nil }, sold: false)]),
+            ("Income", [Piece(label: "Calls", fig: sum { Self.held($0.paid.sc, $0.sc.value) ? Fig(paid: $0.paid.sc, now: $0.sc.value, tv: $0.timeSc) : nil }, sold: true),
+                        Piece(label: "Puts", fig: sum { Self.held($0.paid.sp, $0.sp.value) ? Fig(paid: $0.paid.sp, now: $0.sp.value, tv: $0.timeSp) : nil }, sold: true)]),
+        ]
+        ScrollView(.horizontal) {
+            // Groups split by a 1 pt rule with 16 after it; pieces 16 apart; padding 2 top, 6 bottom, 40 right.
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(Array(groups.enumerated()), id: \.offset) { i, g in
+                    group(g.0, g.1)
+                        .padding(.leading, i > 0 ? 16 : 0)
+                        .overlay(alignment: .leading) { if i > 0 { Rectangle().fill(Self.rule).frame(width: 1) } }
                 }
             }
+            .padding(.top, 2).padding(.bottom, 6)
+            .scrollTargetLayout()
         }
-        .sensoryFeedback(.selection, trigger: mode)
-        // VoiceOver: the view on screen, then every figure (money "hidden" with privacy on).
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction(.default, cycle)
-        .accessibilityLabel("Book totals, \(Self.said[mode])")
-        .accessibilityValue(spoken(long, sold))
-        .accessibilityHint("Shows \(Self.said[(mode + 1) % 3]) next")
-    }
-
-    /// A column's label in this view: what was sold was taken in, and costs that much to buy back now.
-    private func label(_ c: Col) -> String {
-        "\(c.name) · " + (c.sold && mode == 0 ? "taken in" : c.sold && mode == 1 ? "to buy back" : Self.views[mode])
-    }
-
-    private func spoken(_ long: [Col], _ sold: [Col]) -> String {
-        let one = { (c: Col) -> String in
-            switch mode {
-            case 0: return "\(c.name) \(c.sold ? "taken in" : "paid"), \(PosSay.moneyK(c.paid, privacy))"
-            case 1: return "\(c.name) \(c.sold ? "to buy back" : "value now"), \(PosSay.moneyK(c.now, privacy)), \(c.pct < 0 ? "down" : "up") \(String(format: "%.1f", abs(c.pct))) percent"
-            default: return c.tv.map { "\(c.name) time value, \(PosSay.moneyK($0, privacy))" } ?? "\(c.name), no time value"
+        .scrollIndicators(.hidden)
+        .scrollTargetBehavior(.viewAligned)
+        .contentMargins(.leading, S.margin, for: .scrollContent)
+        .contentMargins(.trailing, 40, for: .scrollContent)
+        // The last 36 pt fade out.
+        .mask {
+            HStack(spacing: 0) {
+                Rectangle()
+                LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 36)
             }
         }
-        var parts: [String] = []
-        if !long.isEmpty { parts.append("Long. " + long.map(one).joined(separator: "; ")) }
-        if !sold.isEmpty { parts.append("Sold. " + sold.map(one).joined(separator: "; ")) }
-        return parts.joined(separator: ". ")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Book totals")
     }
 
     static let rule = PosC.totRule
 
-    /// A group's columns: the figure (22/28 bold), in Value now the % change on what was paid under it (13/16, green
-    /// up, red down), then the label (13/16, the cards' mu); 16 either side of each rule.
-    private func group(_ h: String, _ items: [Col]) -> some View {
+    /// A group: its name (11/14 700 uppercase, muted), then its pieces side by side.
+    private func group(_ h: String, _ items: [Piece]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(h).sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
+            Text(h.uppercased()).sType(SType(size: 11, weight: 700, line: 14, tracking: 0.05), tabular: false).foregroundStyle(S.muted)
+                .accessibilityHidden(true)
             HStack(alignment: .top, spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.offset) { i, c in
-                    VStack(alignment: .leading, spacing: 2) {
-                        let fig = mode == 0 ? SampleEngine.fK(c.paid) : mode == 1 ? SampleEngine.fK(c.now) : c.tv.map { SampleEngine.fK($0) } ?? "-"
-                        BriefWords.line(fig, privacy: privacy)
-                            .sType(SType(size: 22, weight: 700, line: 28, tracking: -0.01))
-                            .foregroundStyle(mode == 2 && c.tv == nil ? S.muted : mode == 2 && c.sold ? S.green : S.ink)
-                        if mode == 1 {
-                            Text(String(format: "%.1f%%", abs(c.pct))).sType(SType(size: 13, weight: 600, line: 16, tracking: 0))
-                                .foregroundStyle(c.pct > 0 ? S.green : c.pct < 0 ? S.red : S.muted)
-                        }
-                        Text(label(c)).sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)
-                    }
-                    .fixedSize()
-                    .padding(.leading, i > 0 ? 16 : 0).padding(.trailing, 16)
-                    .overlay(alignment: .leading) { if i > 0 { Rectangle().fill(Self.rule).frame(width: 1) } }
+                ForEach(Array(items.enumerated()), id: \.offset) { _, p in
+                    piece(h, p).padding(.trailing, 16)
                 }
             }
         }
+    }
+
+    /// A piece: the label (13/16 500 muted); the value (17/22 700), Income's time value in brackets beside it (13/16 500
+    /// muted); the change, $ and % (13/16 600, green up, red down). "None" when the book holds none.
+    private func piece(_ h: String, _ p: Piece) -> some View {
+        let muted = S.muted
+        return VStack(alignment: .leading, spacing: 1) {
+            Text(p.label).sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(muted)
+            if let f = p.fig {
+                let g = p.sold ? f.paid - f.now : f.now - f.paid, pct = f.paid > 0 ? g / f.paid : 0
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    BriefWords.line(SampleEngine.fK(p.sold ? f.paid : f.now), privacy: privacy)
+                        .sType(SType(size: 17, weight: 700, line: 22, tracking: -0.01)).foregroundStyle(S.ink)
+                    if p.sold {
+                        BriefWords.line("(" + SampleEngine.fK(f.tv) + ")", privacy: privacy)
+                            .sType(SType(size: 13, weight: 500, line: 16, tracking: 0)).foregroundStyle(muted)
+                    }
+                }
+                BriefWords.line(SampleEngine.fK(g) + " · " + SDLegs.pc(pct), privacy: privacy)
+                    .sType(SType(size: 13, weight: 600, line: 16, tracking: 0))
+                    .foregroundStyle(g > 0.5 ? S.green : g < -0.5 ? S.red : S.ink)
+            } else {
+                Text("None").sType(SType(size: 17, weight: 700, line: 22, tracking: -0.01), tabular: false).foregroundStyle(muted)
+            }
+        }
+        .lineLimit(1)
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(said(h, p))
+    }
+
+    /// "Income calls, collected $13.5K, time value left $9.6K, kept $3.9K, 28.9%" (3.1), as VoiceOver says it; money
+    /// "hidden" with privacy on.
+    private func said(_ h: String, _ p: Piece) -> String {
+        let name = "\(h) \(p.label.lowercased())"
+        guard let f = p.fig else { return "\(name), none" }
+        let m = { (x: Double) in BriefWords.plain(SampleEngine.fK(x), privacy: privacy) }
+        let g = p.sold ? f.paid - f.now : f.now - f.paid, pct = SDLegs.pc(f.paid > 0 ? g / f.paid : 0)
+        let s = p.sold ? "\(name), collected \(m(f.paid)), time value left \(m(f.tv)), \(g < 0 ? "lost" : "kept") \(m(g)), \(pct)"
+            : "\(name), \(m(f.now)), \(g < 0 ? "down" : "up") \(m(g)), \(pct)"
+        return BriefWords.speech(s)
     }
 }
 
@@ -596,8 +597,6 @@ private struct PositionsDetail: View {
     var sdLines: SDLines? = nil
     var sdOn = false
     var sdPinned = false
-    /// Try in What if from the SD card (11 Nov 2026): shown as the first fix and picked when it arrives.
-    var sdTrial: SDStore.Trial? = nil
     var onSd: () -> Void = {}
     var onChartY: (CGFloat) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduce
@@ -621,14 +620,7 @@ private struct PositionsDetail: View {
         let si = min(stop, m.stops.count - 1), st = m.stops[si], px = price ?? m.S0, tt = st.tt
         let pl = m.pl(px, tt, off: off), g = m.greeks(px, tt, off: off), fl = late ? nil : m.flip(tt, off: off)
         let short = g.d < 0
-        let tried = sdTrial.map { x in
-            PositionsModel.Fix(id: "sd", title: "SD pick · \(x.label)", cost: x.credit, act: x.act,
-                               extra: x.sides.enumerated().map { i, s in
-                                   PositionsModel.Leg(id: "sd\(i)", group: "s", ty: s.put ? .put : .call, K: s.K, q: -Double(s.n), T: x.days, ex: x.label,
-                                                      title: "", kind: nil, src: "sd", iv: x.iv)
-                               }, credit: true)
-        }
-        let fixes = (tried.map { [$0] } ?? []) + m.fixes(px, tt, off: off)
+        let fixes = m.fixes(px, tt, off: off)
         let picked = fixes.first { $0.id == fix }
         VStack(alignment: .leading, spacing: 0) {
             // The chart card, edge to edge on its own fill: padding 16 20 12, 10 between parts, a 0.5 rule above
@@ -772,10 +764,6 @@ private struct PositionsDetail: View {
                         if !fixes.isEmpty {
                             FixesTiles(m: m, px: px, tt: tt, off: off, fixes: fixes, picked: $fix, privacy: privacy)
                         }
-                        // A trade sent from the SD card is picked as it arrives, so the chart shows it at once.
-                        Color.clear.frame(height: 0)
-                            .onChange(of: sdTrial) { _, x in withAnimation(S.fade) { fix = x == nil ? nil : "sd" } }
-                            .onAppear { if sdTrial != nil, fix == nil { fix = "sd" } }
                     }
                     .padding(.top, 16)
                 }
@@ -1407,12 +1395,17 @@ private struct LegsList: View {
         return (scales ? t.scaled(dts) : t).font(tabular: true)
     }
 
+    /// ⚠ NIK'S GROUPING RULE (11 Nov 2026, over the handoff README's 144c): Long is the shares; Hedge every call
+    /// bought (LEAPS and OTM calls alike), then every put bought; Income everything sold, calls then puts. A name with
+    /// LEAPS and no shares (UBER, NFLX) has no Long and its LEAPS under Hedge. The same rule as the web's roleOf.
+    static func role(_ l: PositionsModel.Leg) -> String { l.ty == .shares ? "Long" : l.q < 0 ? "Income" : "Hedge" }
+
     var body: some View {
-        // The design's legs: All · Sold · Long (32 tall, 6 apart), then "N legs off · Show all" on its own line,
-        // then a section per group, 12 apart.
+        // The design's legs (144c): All · Long · Hedge · Income (32 tall, 6 apart), then "N legs off · Show all" on its
+        // own line, then a section per group, 12 apart.
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
-                ForEach(["All", "Sold", "Long"], id: \.self) { f in
+                ForEach(["All", "Long", "Hedge", "Income"], id: \.self) { f in
                     // Sections come and go and the page reflows: moving, so instant under Reduce Motion.
                     Button { withAnimation(S.moving(S.fade, reduce)) { filter = f } } label: {
                         Text(f).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false)
@@ -1432,13 +1425,17 @@ private struct LegsList: View {
                         .underline().frame(minHeight: 32)
                 }.buttonStyle(.plain)
             }
-            let sold = m.legs.filter { $0.group == "s" }, long = m.legs.filter { $0.group == "l" }
-            if filter != "Long" {
-                if sold.isEmpty { section("Sold", "Nothing sold this week", PosC.mu, []) }
-                else { section("Sold", total(sold), totalColor(sold), sold) }
+            // Calls before puts inside a group (a stable sort keeps the model's order within each).
+            let calls = { (ls: [PositionsModel.Leg]) in ls.filter { $0.ty != .put } + ls.filter { $0.ty == .put } }
+            let groups = ["Long", "Hedge", "Income"].filter { filter == "All" || filter == $0 }
+            ForEach(groups, id: \.self) { g in
+                let ls = calls(m.legs.filter { Self.role($0) == g })
+                if !ls.isEmpty { section(g, total(ls), totalColor(ls), ls) }
+                else if g == "Income" && m.ended.isEmpty { section("Income", "Nothing sold this week", PosC.mu, []) }
+                // An empty group is hidden on All (UBER has no Long); picked on its own, it says so.
+                else if filter == g && g != "Income" { section(g, g == "Long" ? "No shares" : "Nothing bought", PosC.mu, []) }
             }
-            if filter != "Sold" { section("Long", total(long), totalColor(long), long) }
-            if !m.ended.isEmpty && filter != "Long" { endedSection }
+            if !m.ended.isEmpty && (filter == "All" || filter == "Income") { endedSection }
         }
         .sensoryFeedback(.selection, trigger: filter)
         .sensoryFeedback(.selection, trigger: off)
@@ -1496,11 +1493,30 @@ private struct LegsList: View {
     }
     private func totalColor(_ ls: [PositionsModel.Leg]) -> Color { let v = sum(ls); return abs(v) < 0.5 ? PosC.mu : v < 0 ? S.red : S.green }
 
-    /// A group: its head (13/18 bold, the total 13/18 semibold on the right, 28 tall), then its rows, 6 apart.
+    /// A group's delta beside its name (144c): "Δ short 590", "Off" when every leg is off, none when it has no legs.
+    private func groupDelta(_ ls: [PositionsModel.Leg]) -> String {
+        guard !ls.isEmpty else { return "" }
+        if ls.allSatisfy({ off.contains($0.id) }) { return "Off" }
+        let d = ls.filter { !off.contains($0.id) }.reduce(0) { $0 + m.legDelta($1, px, tt) }
+        return "Δ \(d < 0 ? "short" : "long") \(SampleEngine.fn(d))"
+    }
+
+    /// A group: its head (the name 13/18 bold, its delta 13/18 semibold muted 6 after it, the total 13/18 semibold on
+    /// the right, 28 tall), then its rows, 6 apart.
     private func section(_ h: String, _ v: String, _ c: Color, _ ls: [PositionsModel.Leg]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let dl = groupDelta(ls)
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
-                Text(h).sType(SType(size: 13, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(h).sType(SType(size: 13, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                    if !dl.isEmpty {
+                        Text(dl).sType(SType(size: 13, weight: 600, line: 18, tracking: 0)).foregroundStyle(PosC.mu)
+                    }
+                }
+                .lineLimit(1)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(dl.isEmpty ? h : "\(h), \(PosSay.words(dl))")
+                .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
                 Text(v).sType(SType(size: 13, weight: 600, line: 18, tracking: 0)).foregroundStyle(c).lineLimit(1)
                     .accessibilityLabel(BriefMask.spoken(v))
@@ -1580,7 +1596,7 @@ private struct FixesTiles: View {
         // The design's fixes: one row each, 10 apart, padding 12 14, radius 14: the name and its cost 15/20 bold on
         // one line, what it is 13/18, where it leaves you 13/18 bold; the picked one white with a 2 pt ink ring.
         VStack(alignment: .leading, spacing: 10) {
-            Text(fixes.allSatisfy(\.credit) ? "What if" : "Fixes").sType(SType(size: 13, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
+            Text("Fixes").sType(SType(size: 13, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
                 .accessibilityAddTraits(.isHeader)
             ForEach(fixes) { f in
                 let ad = m.delta(px, tt, off: off, extra: f.extra), ap = m.pl(px, tt, off: off, extra: f.extra), on = picked == f.id
@@ -1589,8 +1605,7 @@ private struct FixesTiles: View {
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(f.title).sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
                             Spacer(minLength: 0)
-                            BriefWords.line((f.credit ? "+" : "") + SampleEngine.fK(f.cost), privacy: privacy).sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
-                                .foregroundStyle(f.credit ? S.green : S.ink)
+                            BriefWords.line(SampleEngine.fK(f.cost), privacy: privacy).sType(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(S.ink)
                         }
                         Text(f.act).sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false).foregroundStyle(PosC.mu)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1606,7 +1621,7 @@ private struct FixesTiles: View {
                 }
                 .buttonStyle(.plain)
                 // One element; the picked fix is selected. Money "hidden" with privacy on.
-                .accessibilityLabel("\(f.title), \(f.credit ? "brings in" : "costs") \(PosSay.moneyK(f.cost, privacy)). \(PosSay.words(f.act)). Then \(PosSay.side(ad)) delta, \(PosSay.signed(ap, privacy, k: true))")
+                .accessibilityLabel("\(f.title), costs \(PosSay.moneyK(f.cost, privacy)). \(PosSay.words(f.act)). Then \(PosSay.side(ad)) delta, \(PosSay.signed(ap, privacy, k: true))")
                 .accessibilityAddTraits(on ? .isSelected : [])
                 .accessibilityHint(on ? "Takes its preview off the chart" : "Previews it on the chart, dashed green")
             }
@@ -1813,20 +1828,26 @@ private struct WholeBook: View {
                 Text("Whole \(m.t) book").sType(SType(size: 20, weight: 700, line: 24, tracking: 0), tabular: false).foregroundStyle(S.ink)
                     .accessibilityAddTraits(.isHeader)
                 Text("Everything you hold in \(m.company), today").sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false).foregroundStyle(PosC.mu)
-                let long = [("Shares", h.sh), ("LEAPS", h.lp), ("OTM calls", h.oc), ("Insurance puts", h.ip)].filter { $0.1.value != 0 || $0.1.today != 0 }
-                if !long.isEmpty {
-                    group("Long") {
-                        ForEach(long, id: \.0) { r in
-                            row(r.0, SampleEngine.fK(r.1.value), "\(r.1.today < 0 ? "▼" : "▲") \(SampleEngine.fK(r.1.today)) today", r.1.today < 0 ? S.red : S.green)
+                // Nik's grouping rule (11 Nov 2026): Long the shares; Hedge every call bought (LEAPS and OTM calls as
+                // one) and every put bought; Income what is sold.
+                let hc = PositionsModel.Holding(value: h.lp.value + h.oc.value, today: h.lp.today + h.oc.today)
+                let parts: [(String, [(String, PositionsModel.Holding)])] = [("Long", [("Shares", h.sh)]), ("Hedge", [("Calls", hc), ("Puts", h.ip)])]
+                ForEach(parts, id: \.0) { g in
+                    let rows = g.1.filter { $0.1.value != 0 || $0.1.today != 0 }
+                    if !rows.isEmpty {
+                        group(g.0) {
+                            ForEach(rows, id: \.0) { r in
+                                row(r.0, SampleEngine.fK(r.1.value), "\(r.1.today < 0 ? "▼" : "▲") \(SampleEngine.fK(r.1.today)) today", r.1.today < 0 ? S.red : S.green)
+                            }
                         }
                     }
                 }
                 // Left to earn is the sales' time value alone (an in the money sale's intrinsic part is not earnable).
                 let sold = [("Calls", h.sc, h.timeSc), ("Puts", h.sp, h.timeSp)].filter { $0.1.value != 0 || $0.1.today != 0 }
                 if !sold.isEmpty {
-                    group("Sold · left to earn") {
+                    group("Income · left to earn") {
                         ForEach(sold, id: \.0) { r in
-                            row(r.0, SampleEngine.fK(r.2), "\(SampleEngine.fK(r.1.today)) kept", S.green, after: " left to earn")
+                            row(r.0, SampleEngine.fK(r.2), "\(SampleEngine.fK(r.1.today)) \(r.1.today < 0 ? "lost" : "kept")", r.1.today < 0 ? S.red : S.green, after: " left to earn")
                         }
                     }
                 }

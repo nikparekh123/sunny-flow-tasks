@@ -348,7 +348,8 @@ struct SXFlowGaps: Layout {
         var x = b.minX, y = b.minY, h: CGFloat = 0
         for s in subviews {
             let z = s.sizeThatFits(.unspecified)
-            if x > b.minX && x + z.width > b.maxX { y += h + row; x = b.minX; h = 0 }
+            // 0.5 pt of slack: the bounds come back from layout rounded, and a row measured to fit must not wrap here.
+            if x > b.minX && x + z.width > b.maxX + 0.5 { y += h + row; x = b.minX; h = 0 }
             s.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(z))
             x += z.width + column; h = max(h, z.height)
         }

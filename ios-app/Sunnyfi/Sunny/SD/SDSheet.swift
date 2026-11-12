@@ -2,14 +2,17 @@
 //  SDSheet.swift
 //  Sunny
 //
-//  The SD calculator sheet (handoff 11 Nov 2026, README 1.1 and 1.3, SunnySD.dc.html app card, Explorations 137a).
-//  The SD chip on Positions raises it to half (600 pt showing); the grabber, or a swipe up, takes it full (56 pt from
-//  the top, the page dimmed behind, the sheet scrolls); the grabber, a swipe down or a pull past the top takes it back
-//  to half. X, a tap on the dim, or a swipe down from half closes it. It lies over the tab bar, as the design's does.
+//  The SD calculator sheet, "What to sell" (handoff 2026-11-11-sd-whatif-totals README 1, App Explorations 143a,
+//  SunnySD.dc.html app card). The SD chip on Positions raises it to half (600 pt showing); the grabber, or a swipe up,
+//  takes it full (56 pt from the top, the page dimmed behind, the sheet scrolls); the grabber, a swipe down or a pull
+//  past the top takes it back to half. X, a tap on the dim, or a swipe down from half closes it. It lies over the tab
+//  bar, as the design's does.
 //
-//  Top to bottom, as the card: header (ticker, price, today's move, IV · 1 SD, the pin and X), the expiries, the
-//  signals (outlined, snap sideways), Sell call and Sell put tiles (the dot is the suggestion, ink is what is picked),
-//  Chance of profit with the total and the timeline, and Every SD with the Calls | Puts switch.
+//  Top to bottom, as the card: header (ticker, price, today's move, IV · 1 SD, the X), the expiries, the signals
+//  (outlined, snap sideways), How many (Sell call and Sell put, a number and the system stepper, both from 0), the
+//  strikes (calls then puts in one sideways strip; the dot is the suggestion, ink is what is picked), What the sale
+//  does (a sentence, then Held, + New and = Both on one price scale), the Calls and Puts cards, and the foot line.
+//  No Try in What if in the app (D2, Nik 11 Nov 2026). The numbers come from SDStore.sale (SDSale, the web's engine).
 //
 
 import SwiftUI
@@ -80,8 +83,9 @@ struct SDSheetHost: View {
             }
         }
         .scrollIndicators(.hidden)
-        // At half the sheet holds still (a swipe moves the sheet); full, it scrolls.
+        // At half the sheet holds still (a swipe moves the sheet); full, it scrolls, and a scroll puts the keyboard away.
         .scrollDisabled(!full)
+        .scrollDismissesKeyboard(.interactively)
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, v in topPull = v }
         .onScrollPhaseChange { old, new in
             // A pull down past the top, let go: back to half.
@@ -114,35 +118,60 @@ struct SDSheetHost: View {
     }
 }
 
+
 // MARK: - The card
 
-/// SunnySD.dc.html's app card: padding 0 20 48, 18 between parts.
+/// SunnySD.dc.html's app card: padding 0 20 48, 20 between parts.
 struct SDCard: View {
     let sd: SDStore
     let privacy: Bool
-    /// The chance tile's tab: 0 New, 1 What you hold, 2 Both (Nik 11 Nov).
-    @State private var pairTab = 0
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    /// What is being typed in a count field (false calls, true puts); nil shows the count.
+    @State private var typed: [Bool: String] = [:]
+    @FocusState private var field: Bool?
+
+    /// README 1.6: positions move 0.45 s on cubic-bezier(.3, 1.1, .4, 1); none with Reduce Motion.
+    static let motion = Animation.timingCurve(0.3, 1.1, 0.4, 1, duration: 0.45)
+    private var move: Animation? { reduce ? nil : Self.motion }
 
     var body: some View {
         let r = sd.reply(sd.book, sd.t)
-        VStack(alignment: .leading, spacing: 18) {
-            grabber
+        VStack(alignment: .leading, spacing: 20) {
             if let r, let p = SDPair(r, sd.pick) {
-                header(r, p)
-                expiries(r, p)
-                if !p.exp.sig.isEmpty { signals(p.exp) }
-                strikes(r, p)
-                both(r, p)
-                every(r, p)
+                let sm = sd.sale(r, p, privacy: privacy)
+                VStack(alignment: .leading, spacing: 14) {
+                    grabber
+                    header(r, p)
+                }
+                VStack(alignment: .leading, spacing: 14) {
+                    expiries(r, p)
+                    if !p.exp.sig.isEmpty { signals(p.exp) }
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    howMany(p, sm)
+                    strikes(r, p)
+                }
+                SDSalePanel(m: sm)
+                Text(sm.foot).sType(SType(size: 12, weight: 400, line: 16, tracking: 0), tabular: false).foregroundStyle(SDPal.mu)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
-                waiting(r)
+                VStack(alignment: .leading, spacing: 14) {
+                    grabber
+                    waiting(r)
+                }
             }
         }
         .padding(.horizontal, S.margin)
         .foregroundStyle(SDPal.ink)
         .sensoryFeedback(.selection, trigger: sd.pick)
-        .sensoryFeedback(.selection, trigger: sd.side)
+        // A count field raises the sheet full, so the keyboard never covers it.
+        .onChange(of: field) { _, f in
+            if let f { typed = [f: countOf(f) == 0 ? "" : "\(countOf(f))"]; if sd.level == .half { sd.setLevel(.full) } } else { typed = [:] }
+        }
     }
+
+    private func countOf(_ put: Bool) -> Int { put ? sd.pick.puts : sd.pick.calls }
+    private func setCount(_ put: Bool, _ n: Int) { withAnimation(move) { put ? sd.setCount(puts: n) : sd.setCount(calls: n) } }
 
     // MARK: Grabber and header
 
@@ -176,15 +205,8 @@ struct SDCard: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(r.name ?? r.t), \(SDFmt.f2(r.price)) dollars, \(SDFmt.saidMove(mv)) today")
                 Spacer(minLength: 0)
-                HStack(spacing: 8) {
-                    // No pin: it only kept the SD lines on the chart, and the chart no longer draws them (Nik, 11 Nov 2026).
-                    circle(bg: SDPal.trk) {
-                        Path { q in q.move(to: CGPoint(x: 2.5, y: 2.5)); q.addLine(to: CGPoint(x: 9.5, y: 9.5)); q.move(to: CGPoint(x: 9.5, y: 2.5)); q.addLine(to: CGPoint(x: 2.5, y: 9.5)) }
-                            .stroke(SDPal.mu, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
-                            .frame(width: 12, height: 12)
-                    } action: { sd.close() }
-                    .accessibilityLabel("Close the calculator")
-                }
+                // No pin (Nik, 11 Nov 2026): the chart no longer draws the SD lines.
+                closeButton
             }
             Text("IV \(SDFmt.pc(e.iv)) · 1 SD ±\(SDFmt.pc(e.m)) · ±$\(SDFmt.f2(r.price * e.m))")
                 .sType(SType(size: 13, weight: 400, line: 18, tracking: 0)).foregroundStyle(SDPal.mu)
@@ -192,14 +214,18 @@ struct SDCard: View {
         }
     }
 
-    /// A 30 pt circle with a 44 pt target.
-    private func circle<G: View>(bg: Color, @ViewBuilder glyph: () -> G, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            glyph().frame(width: 30, height: 30).background(Circle().fill(bg))
+    /// The X: a 30 pt circle with a 44 pt target.
+    private var closeButton: some View {
+        Button { sd.close() } label: {
+            Path { q in q.move(to: CGPoint(x: 2.5, y: 2.5)); q.addLine(to: CGPoint(x: 9.5, y: 9.5)); q.move(to: CGPoint(x: 9.5, y: 2.5)); q.addLine(to: CGPoint(x: 2.5, y: 9.5)) }
+                .stroke(SDPal.mu, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                .frame(width: 12, height: 12)
+                .frame(width: 30, height: 30).background(Circle().fill(SDPal.trk))
                 .frame(width: 44, height: 44).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .padding(-7)
+        .accessibilityLabel("Close the calculator")
     }
 
     /// No reply yet, or none to be had: the ticker and one line.
@@ -208,11 +234,7 @@ struct SDCard: View {
             HStack(alignment: .center) {
                 Text(sd.t).sType(SType(size: 28, weight: 800, line: 34, tracking: -0.02), tabular: false)
                 Spacer(minLength: 0)
-                circle(bg: SDPal.trk) {
-                    Path { q in q.move(to: CGPoint(x: 2.5, y: 2.5)); q.addLine(to: CGPoint(x: 9.5, y: 9.5)); q.move(to: CGPoint(x: 9.5, y: 2.5)); q.addLine(to: CGPoint(x: 2.5, y: 9.5)) }
-                        .stroke(SDPal.mu, style: StrokeStyle(lineWidth: 1.8, lineCap: .round)).frame(width: 12, height: 12)
-                } action: { sd.close() }
-                .accessibilityLabel("Close the calculator")
+                closeButton
             }
             if r != nil {
                 Text("No options to price for \(sd.t) yet.").sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(SDPal.mu)
@@ -230,13 +252,14 @@ struct SDCard: View {
 
     // MARK: Expiries
 
-    /// Chips 46 tall, radius 14, two lines (date 14/18 600 with the orange 5 pt earnings dot, days 11/14 500); picked ink.
+    /// Chips 46 tall, radius 14, two lines (date 14/18 600 with the orange 5 pt earnings dot, days 11/14 500); picked
+    /// ink. A new expiry puts the strikes back to its suggestion (README 1.2) and keeps the counts.
     private func expiries(_ r: SDReply, _ p: SDPair) -> some View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(Array(r.exps.enumerated()), id: \.element.ex) { i, e in
                     let on = i == p.ei, d = Int(e.cd.rounded())
-                    Button { withAnimation(S.fade) { sd.choose(ex: e.ex) } } label: {
+                    Button { withAnimation(move) { sd.choose(ex: e.ex) } } label: {
                         VStack(spacing: 1) {
                             HStack(spacing: 4) {
                                 Text(e.label).sType(SType(size: 14, weight: 600, line: 18, tracking: 0))
@@ -260,7 +283,6 @@ struct SDCard: View {
             .padding(.horizontal, S.margin)
         }
         .scrollIndicators(.hidden)
-        .scrollDisabled(false)
         .padding(.horizontal, -S.margin)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Expiry")
@@ -279,7 +301,6 @@ struct SDCard: View {
             .scrollTargetLayout()
         }
         .scrollIndicators(.hidden)
-        .scrollDisabled(false)
         .scrollTargetBehavior(.viewAligned)
         .contentMargins(.horizontal, S.margin, for: .scrollContent)
         .padding(.horizontal, -S.margin)
@@ -332,48 +353,110 @@ struct SDCard: View {
         Text(tag).sType(SType(size: 12, weight: 600, line: 16, tracking: 0)).foregroundStyle(g.tagTone == "or" ? SDPal.OR : SDPal.mu).lineLimit(1).fixedSize()
     }
 
-    // MARK: Strikes
+    // MARK: How many (README 1.4)
 
-    /// Sell call (cfg.cLo to cfg.cHi) and Sell put (cfg.pLo to cfg.pHi, ATM to 1 SD per D2), a tile per 0.25 SD.
-    private func strikes(_ r: SDReply, _ p: SDPair) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            strikeRow(r, p, put: false)
-            strikeRow(r, p, put: true)
+    /// Sell call on the left, Sell put under it on the right (the design's wrap at phone width): the kicker with its
+    /// dot, the number (52 x 32, 17/22 700, a 1 pt ring) and the system stepper, the hint under them (12/16).
+    private func howMany(_ p: SDPair, _ sm: SDSaleModel) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            countRow(put: false, hint: sm.callHint, over: sm.callHintOver)
+            countRow(put: true, hint: sm.putHint, over: false)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("How many")
+    }
+
+    private func countRow(put: Bool, hint: String, over: Bool) -> some View {
+        let n = countOf(put), name = put ? "Puts to sell" : "Calls to sell"
+        return VStack(alignment: put ? .trailing : .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Circle().fill(SDPal.side(put)).frame(width: 8, height: 8)
+                    Text(put ? "SELL PUT" : "SELL CALL").sType(SType(size: 11, weight: 600, line: 14, tracking: 0.05), tabular: false).foregroundStyle(SDPal.muT)
+                }
+                .fixedSize()
+                .accessibilityHidden(true)
+                TextField("0", text: Binding(get: { typed[put] ?? "\(n)" }, set: { t in
+                    let d = String(t.filter { $0.isASCII && $0.isNumber }.prefix(3))
+                    typed[put] = d
+                    setCount(put, Int(d) ?? 0)
+                }))
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .focused($field, equals: put)
+                .sType(SType(size: 17, weight: 700, line: 22, tracking: 0))
+                .padding(.horizontal, 10)
+                .frame(width: 52, height: 32)
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(field == put ? SDPal.ink : SDPal.ring, lineWidth: 1))
+                .accessibilityLabel(name)
+                // The system stepper (Liquid Glass on iOS 26).
+                Stepper(name, value: Binding(get: { n }, set: { field = nil; setCount(put, $0) }), in: 0...999)
+                    .labelsHidden()
+                    .fixedSize()
+                    .accessibilityValue("\(n)")
+            }
+            .frame(minHeight: 32)
+            Text(hint).sType(SType(size: 12, weight: 400, line: 16, tracking: 0), tabular: false)
+                .foregroundStyle(over ? SDPal.OR : SDPal.mu)
+                .multilineTextAlignment(put ? .trailing : .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .toolbar {
+            if field == put {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { field = nil }
+                }
+            }
         }
     }
 
-    private func strikeRow(_ r: SDReply, _ p: SDPair, put: Bool) -> some View {
+    // MARK: Strikes (README 1.5)
+
+    /// One sideways strip: the call tiles (cfg.cLo to cfg.cHi), a 1 pt rule, then the put tiles (cfg.pLo to cfg.pHi,
+    /// ATM to 1 SD per D2), a tile per 0.25 SD, each group under its range (11/14 500 muted).
+    private func strikes(_ r: SDReply, _ p: SDPair) -> some View {
+        ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 16) {
+                strikeGroup(r, p, put: false)
+                strikeGroup(r, p, put: true)
+                    .padding(.leading, 16)
+                    .overlay(alignment: .leading) { Rectangle().fill(SDPal.rule).frame(width: 1) }
+            }
+            .padding(.horizontal, S.margin)
+        }
+        .scrollIndicators(.hidden)
+        .padding(.horizontal, -S.margin)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Strikes")
+    }
+
+    private func strikeGroup(_ r: SDReply, _ p: SDPair, put: Bool) -> some View {
         let lo = put ? r.cfg.pLo : r.cfg.cLo, hi = put ? r.cfg.pHi : r.cfg.cHi, e = p.exp
         let sugK = put ? e.sug.kp : e.sug.kc, sel = put ? p.kp : p.kc, est = e.hist?.est == true
         // One strike in the money (k below 0) is a tile only on an expiry that suggests it (Nik 11 Nov).
         let ks = stride(from: lo, through: hi + 1e-9, by: 0.25).map { ($0 * 4).rounded() / 4 }.filter { $0 >= 0 || abs($0 - sugK) < 1e-6 }
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Circle().fill(SDPal.side(put)).frame(width: 8, height: 8)
-                Text(put ? "Sell put" : "Sell call").sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false)
-                Text(SDFmt.range(lo, hi)).sType(SType(size: 13, weight: 500, line: 16, tracking: 0)).foregroundStyle(SDPal.mu)
+                Circle().fill(SDPal.side(put)).frame(width: 6, height: 6)
+                Text(SDFmt.range(lo, hi)).sType(SType(size: 11, weight: 500, line: 14, tracking: 0)).foregroundStyle(SDPal.mu)
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(put ? "Sell put" : "Sell call"), \(lo < 0 ? "one strike in the money" : lo == 0 ? "at the money" : SDFmt.sdNum(lo)) to \(SDFmt.sdNum(hi)) SD")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(put ? "Puts" : "Calls"), \(lo < 0 ? "one strike in the money" : lo == 0 ? "at the money" : SDFmt.sdNum(lo)) to \(SDFmt.sdNum(hi)) SD")
             .accessibilityAddTraits(.isHeader)
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(ks, id: \.self) { k in
-                        let sug = abs(k - sugK) < 1e-6, on = abs(k - sel) < 1e-6, row = SDPair.row(e, k, put: put)
-                        tile(k: k, row: row, sug: sug, on: on, put: put, est: est) {
-                            withAnimation(S.fade) { put ? sd.choose(put: k) : sd.choose(call: k) }
-                        }
+            HStack(spacing: 6) {
+                ForEach(ks, id: \.self) { k in
+                    let sug = abs(k - sugK) < 1e-6, on = abs(k - sel) < 1e-6, row = SDPair.row(e, k, put: put)
+                    tile(k: k, row: row, sug: sug, on: on, put: put, est: est) {
+                        withAnimation(move) { put ? sd.choose(put: k) : sd.choose(call: k) }
                     }
                 }
-                .padding(.horizontal, S.margin)
             }
-            .scrollIndicators(.hidden)
-            .scrollDisabled(false)
-            .padding(.horizontal, -S.margin)
         }
     }
 
-    /// A tile 94 wide, radius 14: SD 11/14 600 with the 7 pt suggestion dot, strike 22/28 700, premium and won 12/16.
+    /// A tile 88 wide, radius 14: SD 11/14 600 with the 7 pt suggestion dot, strike 22/28 700, premium and won 12/16.
     private func tile(k: Double, row: SDReply.Row, sug: Bool, on: Bool, put: Bool, est: Bool, go: @escaping () -> Void) -> some View {
         let mc = on ? SDPal.cdMu : SDPal.muT
         let won = row.won.map { (est ? "≈ " : "") + SDFmt.pc($0) + " won" }
@@ -390,7 +473,7 @@ struct SDCard: View {
             }
             .lineLimit(1)
             .padding(.vertical, 10).padding(.horizontal, 12)
-            .frame(width: 94, alignment: .leading)
+            .frame(width: 88, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(on ? SDPal.ink : SDPal.tile))
             .contentShape(Rectangle())
         }
@@ -400,350 +483,333 @@ struct SDCard: View {
                             + (sug ? ", suggested" : ""))
         .accessibilityAddTraits(on ? .isSelected : [])
     }
-
-    // MARK: Chance of profit and the timeline
-
-    /// One tile, one bar, three tabs (Nik 11 Nov): New (the picked call and put on the full counts), What you hold
-    /// (this expiry's sold calls and puts at their sale prices) and Both (what you hold plus the rest of the counts at
-    /// the picked strikes). The tabs show only when the expiry has a held pair; the chance, the $ and the bar follow
-    /// the tab. On the tile fill, padding 18 16 22, radius 18.
-    private func both(_ r: SDReply, _ p: SDPair) -> some View {
-        let n = r.counts, e = p.exp, S0 = r.price
-        let side = { (put: Bool) in r.sold.filter { $0.put == put && $0.ex == e.ex && $0.be != nil }
-            .map { SDPairNums.Leg(K: $0.K, n: $0.n, at: abs($0.be! - $0.K)) } }
-        let hc = side(false), hp = side(true)
-        let hold = SDPairNums.of(calls: hc, puts: hp, S: S0, m: e.m)
-        let restC = max(0, n.calls - Int(hc.reduce(0) { $0 + $1.n })), restP = max(0, n.puts - Int(hp.reduce(0) { $0 + $1.n }))
-        // How many to sell now (Nik, 11 Nov 2026): his count, else the rest of the counts after what he holds.
-        let qC = max(0, sd.pick.nc ?? restC), qP = max(0, sd.pick.np ?? restP)
-        let cNew = qC > 0 ? [SDPairNums.Leg(K: p.call.K, n: Double(qC), at: p.call.pr)] : []
-        let pNew = qP > 0 ? [SDPairNums.Leg(K: p.put.K, n: Double(qP), at: p.put.pr)] : []
-        let nw = SDPairNums.of(calls: cNew, puts: pNew, S: S0, m: e.m)
-        let mix = hold == nil ? nil : SDPairNums.of(calls: hc + cNew, puts: hp + pNew, S: S0, m: e.m)
-        let tab = hold == nil ? 0 : pairTab
-        let legs = { (ls: [SDPairNums.Leg], w: String) in ls.map { "\(SDFmt.count(Int($0.n), w)) \(SDFmt.fk($0.K))" }.joined(separator: ", ") }
-        let rest = [qC > 0 ? "\(SDFmt.count(qC, "call")) \(SDFmt.fk(p.call.K))" : nil,
-                    qP > 0 ? "\(SDFmt.count(qP, "put")) \(SDFmt.fk(p.put.K))" : nil].compactMap { $0 }.joined(separator: " and ")
-        let newN = [qC > 0 ? SDFmt.count(qC, "call") : nil, qP > 0 ? SDFmt.count(qP, "put") : nil].compactMap { $0 }.joined(separator: " and ")
-        let perShare = (qC > 0 ? p.call.pr : 0) + (qP > 0 ? p.put.pr : 0)
-        // What the tab shows: the chance, the $, the line under the $, the strikes on the bar and its breakevens.
-        typealias View_ = (cop: Double, tot: Double, sub: String, callK: Double?, putK: Double?, up: Double?, dn: Double?, sdUp: Double?, sdDn: Double?)
-        let v: View_ = {
-            if tab == 1, let h = hold {
-                return (h.cop, h.tot, "taken in for " + legs(hc, "call") + " and " + legs(hp, "put"),
-                        hc.map(\.K).min(), hp.map(\.K).max(), h.up, h.dn, h.sdUp, h.sdDn)
-            }
-            if tab == 2, let b = mix {
-                return (b.cop, b.tot, rest.isEmpty ? "in all for what you hold, nothing new" : "in all for what you hold plus " + rest,
-                        (hc + cNew).map(\.K).min(), (hp + pNew).map(\.K).max(), b.up, b.dn, b.sdUp, b.sdDn)
-            }
-            if let x = nw {
-                return (x.cop, x.tot, newN + " · $" + SDFmt.f2(perShare) + " a share",
-                        qC > 0 ? p.call.K : nil, qP > 0 ? p.put.K : nil, x.up, x.dn, x.sdUp, x.sdDn)
-            }
-            return (0, 0, "nothing to sell: set a count", nil, nil, nil, nil, nil, nil)
-        }()
-        let totT = BriefWords.plain(SDFmt.money(v.tot), privacy: privacy)
-        // Roomier than the other tiles (Nik 11 Nov: "increase the height of the card"): 16 between the parts, 18 under the
-        // tabs, 18 top and 22 bottom.
-        return VStack(alignment: .leading, spacing: 16) {
-            if hold != nil {
-                // The system segmented control: Liquid Glass on iOS 26 and later (Nik 11 Nov: "use iOS liquid glass tabs").
-                Picker("Which trade", selection: Binding(get: { tab }, set: { t in withAnimation(S.fade) { pairTab = t } })) {
-                    Text("New").tag(0)
-                    Text("What you hold").tag(1)
-                    Text("Both").tag(2)
-                }
-                .pickerStyle(.segmented)
-                .padding(.bottom, 2)
-            }
-            // How many to sell now (Nik, 11 Nov 2026; a stand-in until his design): calls and puts, each a stepper.
-            VStack(alignment: .leading, spacing: 6) {
-                Text("TO SELL").sType(SType(size: 11, weight: 600, line: 14, tracking: 0.05), tabular: false).foregroundStyle(SDPal.muT)
-                Stepper(value: Binding(get: { qC }, set: { sd.setCount(calls: $0) }), in: 0...9999) {
-                    Text("\(SDFmt.count(qC, "call")) at \(SDFmt.fk(p.call.K))").sType(SType(size: 15, weight: 600, line: 20, tracking: 0))
-                }
-                Stepper(value: Binding(get: { qP }, set: { sd.setCount(puts: $0) }), in: 0...9999) {
-                    Text("\(SDFmt.count(qP, "put")) at \(SDFmt.fk(p.put.K))").sType(SType(size: 15, weight: 600, line: 20, tracking: 0))
-                }
-            }
-            HStack(alignment: .bottom, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("CHANCE OF PROFIT").sType(SType(size: 11, weight: 600, line: 14, tracking: 0.05), tabular: false).foregroundStyle(SDPal.muT)
-                    Text(SDFmt.pc(v.cop)).sType(SType(size: 30, weight: 800, line: 36, tracking: -0.02)).foregroundStyle(SDPal.G)
-                        .contentTransition(.numericText()).animation(S.fade, value: v.cop)
-                }
-                .fixedSize()
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Chance of profit, \(SDFmt.saidPct(v.cop))")
-                Spacer(minLength: 0)
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(totT).sType(SType(size: 17, weight: 700, line: 22, tracking: 0))
-                    Text(v.sub).sType(SType(size: 12, weight: 400, line: 16, tracking: 0)).foregroundStyle(SDPal.muT)
-                        .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(privacy ? "Amount hidden" : BriefWords.speech(totT)), \(v.sub)")
-            }
-            if v.up != nil || v.dn != nil {
-                SDTimeline(S0: S0, callK: v.callK, putK: v.putK, up: v.up, dn: v.dn, sdUp: v.sdUp, sdDn: v.sdDn)
-            }
-            // Try in What if (11 Nov 2026): the count at the picked strikes goes to the Positions chart.
-            let sides = [qC > 0 ? SDStore.Trial.Side(put: false, K: p.call.K, n: qC, pr: p.call.pr) : nil,
-                         qP > 0 ? SDStore.Trial.Side(put: true, K: p.put.K, n: qP, pr: p.put.pr) : nil].compactMap { $0 }
-            let trial = sides.isEmpty ? nil : SDStore.Trial(book: sd.book, t: sd.t, ex: e.ex, label: e.label, days: e.cd, iv: e.iv, sides: sides)
-            VStack(alignment: .leading, spacing: 6) {
-                Button {
-                    if let trial { withAnimation(S.fade) { sd.tryIt(trial) } }
-                } label: {
-                    Text("Try in What if").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
-                        .foregroundStyle(trial == nil ? SDPal.mu : SDPal.cd)
-                        .frame(maxWidth: .infinity).frame(height: 44)
-                        .background(Capsule().fill(trial == nil ? SDPal.trk : SDPal.ink))
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(trial == nil)
-                .accessibilityHint(trial == nil ? "" : "Shows it on the Positions chart with the whole book")
-                Text(trial?.act ?? "Nothing left to sell on \(e.label)")
-                    .sType(SType(size: 12, weight: 400, line: 16, tracking: 0)).foregroundStyle(SDPal.muT)
-                    .frame(maxWidth: .infinity)
-                    .multilineTextAlignment(.center)
-            }
-        }
-        .padding(.top, 18).padding(.horizontal, 16).padding(.bottom, 22)
-        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(SDPal.tile))
-    }
-
-    // MARK: Every SD
-
-    /// "Every SD" 17/22 700 and the Calls | Puts switch; the rows 0 to 2.0 SD for that side, the allowed range boxed.
-    private func every(_ r: SDReply, _ p: SDPair) -> some View {
-        let put = sd.side == .puts, e = p.exp
-        // The table's rows start at ATM: one strike in the money is a tile only.
-        let lo = max(0, put ? r.cfg.pLo : r.cfg.cLo), hi = put ? r.cfg.pHi : r.cfg.cHi
-        let rows = put ? e.rows.p : e.rows.c
-        let inZ = { (k: Double) in k >= lo - 1e-9 && k <= hi + 1e-9 }
-        let pre = rows.filter { $0.k < lo - 1e-9 }, zone = rows.filter { inZ($0.k) }, post = rows.filter { $0.k > hi + 1e-9 }
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 12) {
-                Text("Every SD").sType(SType(size: 17, weight: 700, line: 22, tracking: 0), tabular: false).accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 0)
-                SDSideSwitch(side: Binding(get: { sd.side }, set: { sd.side = $0 }))
-            }
-            VStack(spacing: 0) {
-                SDTableHead()
-                ForEach(pre, id: \.k) { row in tableRow(row, e, p, put: put, zone: nil) }
-                VStack(spacing: 0) {
-                    ForEach(Array(zone.enumerated()), id: \.element.k) { i, row in
-                        tableRow(row, e, p, put: put, zone: (first: i == 0, last: i == zone.count - 1))
-                    }
-                }
-                .overlay { if !zone.isEmpty { RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(put ? SDPal.pzL : SDPal.czL, lineWidth: 1) } }
-                ForEach(post, id: \.k) { row in tableRow(row, e, p, put: put, zone: nil) }
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Strikes by SD, \(put ? "puts" : "calls")")
-        }
-    }
-
-    /// One row: min 42 tall, padding 0 8, 13/16 (700 when picked). In the range: the side's light tint; picked: the
-    /// stronger tint and a 1.5 pt ring. The suggestion: a 6 pt dot after the SD; its moved strike after an arrow.
-    private func tableRow(_ row: SDReply.Row, _ e: SDReply.Exp, _ p: SDPair, put: Bool, zone: (first: Bool, last: Bool)?) -> some View {
-        let sugK = put ? e.sug.kp : e.sug.kc, sel = put ? p.kp : p.kc
-        let sug = abs(row.k - sugK) < 1e-6, on = abs(row.k - sel) < 1e-6
-        let moved = put ? e.sug.put.K : e.sug.call.K
-        let K = SDFmt.fk(row.K) + (sug && abs(moved - row.K) > 1e-9 ? " → " + SDFmt.fk(moved) : "")
-        let pr = (row.est ? "≈ " : "") + SDFmt.f2(row.pr) + (row.liq && !row.est ? " !" : "")
-        let r: CGFloat = 10
-        let shape = UnevenRoundedRectangle(topLeadingRadius: zone == nil || zone!.first ? r : 0, bottomLeadingRadius: zone == nil || zone!.last ? r : 0,
-                                           bottomTrailingRadius: zone == nil || zone!.last ? r : 0, topTrailingRadius: zone == nil || zone!.first ? r : 0,
-                                           style: .continuous)
-        let tint: Color = zone == nil ? .clear : on ? (put ? SDPal.pzB2 : SDPal.czB2) : (put ? SDPal.pzB : SDPal.czB)
-        return HStack(alignment: .center, spacing: 4) {
-            HStack(spacing: 4) {
-                Text(SDFmt.sdNum(row.k))
-                if sug { Circle().fill(SDPal.side(put)).frame(width: 6, height: 6) }
-            }
-            .frame(width: 40, alignment: .leading)
-            VStack(alignment: .trailing, spacing: 0) {
-                Text(K)
-                Text(SDFmt.dir(row.pct)).sType(SType(size: 10, weight: 500, line: 12, tracking: 0)).foregroundStyle(SDPal.mu)
-            }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            Text(pr).frame(maxWidth: .infinity, alignment: .trailing)
-            Text(SDFmt.f2(row.be)).frame(maxWidth: .infinity, alignment: .trailing)
-            Text(SDFmt.pc(row.itm)).frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .sType(SType(size: 13, weight: on ? 700 : 500, line: 16, tracking: 0))
-        .lineLimit(1).minimumScaleFactor(0.8)
-        .padding(.horizontal, 8)
-        .frame(minHeight: 42)
-        .background(shape.fill(tint))
-        .overlay { if on { shape.strokeBorder(SDPal.side(put), lineWidth: 1.5) } }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(SDFmt.saidSD(row.k))\(sug ? ", suggested" : "")\(on ? ", picked" : ""), strike \(SDFmt.fk(row.K))"
-                            + (sug && abs(moved - row.K) > 1e-9 ? " moved to \(SDFmt.fk(moved))" : "")
-                            + ", \(SDFmt.saidMove(row.pct)), premium \(SDFmt.f2(row.pr))\(row.est ? ", estimated" : "")\(row.liq && !row.est ? ", thin market" : "")"
-                            + ", breakeven \(SDFmt.f2(row.be)), \(SDFmt.saidPct(row.itm)) chance in the money"
-                            + (zone == nil ? "" : ", in the allowed range"))
-    }
 }
 
-/// The table's head: SD (40 wide), Strike, Premium, Breakeven, In the money; 11/13 600 muted, padding 0 8 4.
-private struct SDTableHead: View {
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 4) {
-            Text("SD").frame(width: 40, alignment: .leading)
-            Text("Strike").frame(maxWidth: .infinity, alignment: .trailing)
-            Text("Premium").frame(maxWidth: .infinity, alignment: .trailing)
-            Text("Breakeven").frame(maxWidth: .infinity, alignment: .trailing)
-            Text("In the money").frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .sType(SType(size: 11, weight: 600, line: 13, tracking: 0), tabular: false)
-        .foregroundStyle(SDPal.mu)
-        .lineLimit(1).minimumScaleFactor(0.8)
-        .padding(.horizontal, 8).padding(.bottom, 4)
-        .accessibilityHidden(true)
-    }
-}
+// MARK: - What the sale does (README 1.6 to 1.8)
 
-/// The glass Calls | Puts switch: a track (padding 2, fully round), a 76 x 28 thumb that springs across, 13/16 labels
-/// (600 on, 500 off). Each half is a 44 pt target.
-private struct SDSideSwitch: View {
-    @Binding var side: SDStore.Side
-    @Environment(\.colorScheme) private var scheme
+/// A panel with a 1 pt ring (padding 18, radius 20): the sentence, the title and the key, the three lanes, the Calls
+/// and Puts cards, and the note on legs left out. Draws SDSaleModel only.
+private struct SDSalePanel: View {
+    let m: SDSaleModel
     @Environment(\.accessibilityReduceMotion) private var reduce
+
     var body: some View {
-        let dark = scheme == .dark, put = side == .puts
-        ZStack(alignment: .leading) {
-            Capsule().fill(SDPal.trk).frame(width: 156, height: 32)
-            Capsule().fill(SDPal.segOn)
-                .overlay { if dark { Capsule().strokeBorder(Color.white.opacity(0.22), lineWidth: 0.5) } }
-                .overlay(alignment: .top) { if dark { Capsule().stroke(Color.white.opacity(0.3), lineWidth: 1).mask(alignment: .top) { Rectangle().frame(height: 1.5) } } }
-                .overlay { if !dark { Capsule().stroke(Color.black.opacity(0.06), lineWidth: 0.5) } }
-                .shadow(color: .black.opacity(dark ? 0.35 : 0.08), radius: dark ? 4 : 1, y: dark ? 2 : 1)
-                .frame(width: 76, height: 28)
-                .offset(x: 2 + (put ? 76 : 0))
-                .animation(S.moving(S.spring, reduce), value: side)
-            HStack(spacing: 0) {
-                ForEach([SDStore.Side.calls, .puts], id: \.self) { s in
-                    Button { side = s } label: {
-                        Text(s == .calls ? "Calls" : "Puts")
-                            .sType(SType(size: 13, weight: side == s ? 600 : 500, line: 16, tracking: 0), tabular: false)
-                            .foregroundStyle(SDPal.ink)
-                            .frame(width: 76, height: 44).contentShape(Rectangle())
+        VStack(alignment: .leading, spacing: 20) {
+            sentence
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(m.title.uppercased()).sType(SType(size: 11, weight: 600, line: 14, tracking: 0.05), tabular: false).foregroundStyle(SDPal.muT)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    SXFlowGaps(column: 12, row: 6) {
+                        key("Profit") { RoundedRectangle(cornerRadius: 4).fill(SDPal.zG) }
+                        key("Loss") { RoundedRectangle(cornerRadius: 4).fill(SDPal.zR) }
+                        if m.both {
+                            key("Changed by the sale") {
+                                RoundedRectangle(cornerRadius: 4).fill(SDPal.mu).overlay(SDStripes(step: 7, width: 3).fill(Color.black.opacity(0.4))).clipShape(RoundedRectangle(cornerRadius: 4))
+                            }
+                        }
+                        key("Held") { RoundedRectangle(cornerRadius: 4).fill(SDPal.cd).overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(SDPal.muT, lineWidth: 1.5)) }
+                        key("New") { RoundedRectangle(cornerRadius: 4).fill(SDPal.ink) }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(side == s ? .isSelected : [])
+                    .accessibilityHidden(true)
                 }
+                lanes
             }
-            .padding(.leading, 2)
+            if !m.cards.isEmpty {
+                VStack(alignment: .leading, spacing: 10) { ForEach(m.cards) { SDSideCard(c: $0) } }
+            }
+            if let g = m.gone {
+                Text(g).sType(SType(size: 12, weight: 400, line: 16, tracking: 0), tabular: false).foregroundStyle(SDPal.mu)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .frame(width: 156, height: 32)
+        .padding(18)
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(SDPal.panelRing, lineWidth: 1))
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Side")
+        .accessibilityLabel("What the sale does")
+    }
+
+    /// 15/22, each run its own weight and colour.
+    private var sentence: some View {
+        var a = AttributedString()
+        for s in m.head {
+            var r = AttributedString(s.t)
+            r.font = SType(size: 15, weight: s.w, line: 22, tracking: 0).font(tabular: true)
+            r.foregroundColor = SDSalePanel.color(s.tone)
+            a += r
+        }
+        let t = SType(size: 15, weight: 400, line: 22, tracking: 0)
+        return Text(a).lineSpacing(t.lineSpacing).padding(.vertical, max(0, t.line - t.uiFont().lineHeight) / 2)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(SDFmt.words(m.head.map(\.t).joined()))
+    }
+
+    static func color(_ t: SDSaleModel.Tone) -> Color {
+        switch t { case .ink: SDPal.ink; case .mu: SDPal.mu; case .muT: SDPal.muT; case .green: SDPal.gT; case .red: SDPal.rT; case .orange: SDPal.OR }
+    }
+
+    private func key<M: View>(_ t: String, @ViewBuilder mark: () -> M) -> some View {
+        HStack(spacing: 6) {
+            mark().frame(width: 16, height: 8)
+            Text(t).sType(SType(size: 12, weight: 400, line: 16, tracking: 0), tabular: false).foregroundStyle(SDPal.muT)
+        }
+    }
+
+    /// "$38.31 today" over the lanes, then Held, + New and = Both.
+    private var lanes: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            GeometryReader { g in
+                Text(m.todayT).sType(SType(size: 11, weight: 600, line: 14, tracking: 0)).foregroundStyle(SDPal.muT)
+                    .fixedSize()
+                    .position(x: g.size.width * max(0.1, min(0.9, m.todayX / 100)), y: 7)
+            }
+            .frame(height: 18)
+            .accessibilityHidden(true)
+            ForEach(Array(m.lanes.enumerated()), id: \.element.id) { i, ln in
+                SDLaneView(ln: ln, todayX: m.todayX)
+                    .padding(.top, i == 0 ? 0 : i == 1 ? 12 : 14)
+                    .padding(.bottom, i == 0 ? 12 : i == 1 ? 14 : 0)
+                    .overlay(alignment: .top) { if i == 2 { Rectangle().fill(SDPal.rule).frame(height: 1) } }
+            }
+        }
+        .animation(reduce ? nil : SDCard.motion, value: m.lanes.map(\.said))
     }
 }
 
-/// The profit zone, 94 tall (card136 pz): the put and call at their prices on top with a tick down to the bar, the
-/// distance from today to each (side colours at 55%), the bar (track, light green breakeven to breakeven, stronger
-/// green strike to strike), today's dot, then the lower breakeven, today and the upper breakeven. Scaled from the lower
-/// breakeven (or the put) to the upper (or the call), 12% padding each side.
-private struct SDTimeline: View {
-    let S0: Double
-    /// A missing side (a calls-only or puts-only sale) is nil: no strike, no breakeven, and its end stays green.
-    let callK: Double?
-    let putK: Double?
-    let up: Double?
-    let dn: Double?
-    let sdUp: Double?
-    let sdDn: Double?
+/// A chip: Held outlined, New filled ink, Both grey (20 tall, 11/14 700 uppercase; small: 16 tall, 10/12).
+private struct SDChip: View {
+    let t: String
+    let kind: Character
+    var small = false
     var body: some View {
-        GeometryReader { g in
-            let w = g.size.width
-            // Today is always on the bar, even when it has moved past a strike or a breakeven; a missing side gets room
-            // to match the other.
-            let lo = [dn, putK, S0].compactMap { $0 }.min() ?? S0, hi = [up, callK, S0].compactMap { $0 }.max() ?? S0
-            let a0 = (dn == nil && putK == nil) ? S0 - max(hi - S0, S0 * 0.02) * 0.6 : lo
-            let b0 = (up == nil && callK == nil) ? S0 + max(S0 - a0, S0 * 0.02) * 0.6 : hi
-            let pad = (b0 - a0) * 0.12, A = a0 - pad, B = max(b0 + pad, A + 1e-6)
-            let X = { (v: Double) -> CGFloat in CGFloat((v - A) / (B - A)) * w }
-            let zl = dn ?? A, zr = up ?? B, ml = putK ?? A, mr = callK ?? B
-            let feet: [(String, String, CGFloat)] = (dn.map { [(SDFmt.f2($0) + " (BE)", "\(SDFmt.pc($0 / S0 - 1)) (\(String(format: "%.1f", sdDn ?? 0)) SD)", X($0))] } ?? [])
-                + [("$" + SDFmt.f2(S0), "today", X(S0))]
-                + (up.map { [(SDFmt.f2($0) + " (BE)", "\(SDFmt.pc($0 / S0 - 1)) (\(String(format: "%.1f", sdUp ?? 0)) SD)", X($0))] } ?? [])
-            let at = Self.spread(feet.map { ($0.2, Self.footWidth($0.0, $0.1)) }, W: w)
-            let sides: [(isCall: Bool, K: Double)] = [putK.map { (false, $0) }, callK.map { (true, $0) }].compactMap { $0 }
-            ZStack(alignment: .topLeading) {
-                Capsule().fill(SDPal.trk).frame(width: w, height: 6).offset(y: 46)
-                Capsule().fill(SDPal.gz).frame(width: max(0, X(zr) - X(zl)), height: 6).offset(x: X(zl), y: 46)
-                Rectangle().fill(SDPal.gz2).frame(width: max(0, X(mr) - X(ml)), height: 6).offset(x: X(ml), y: 46)
-                ForEach(sides.indices, id: \.self) { i in
-                    let isCall = sides[i].isCall, K = sides[i].K, c = SDPal.side(!isCall)
-                    // A side already in the money draws no distance: its line would lie over the other side's.
-                    if isCall ? K > S0 : K < S0 {
-                        Capsule().fill(c).opacity(0.55).frame(width: abs(X(K) - X(S0)), height: 2).offset(x: min(X(K), X(S0)), y: 36)
-                        // With the other side in the money between today and this strike, the label sits between the
-                        // two strikes, off the other side's line.
-                        let o = isCall ? putK : callK
-                        let from = o.flatMap { o in (isCall ? o > S0 && o < K : o < S0 && o > K) ? o : nil } ?? S0
-                        label(SDFmt.dir(K / S0 - 1), 11, 700, c).position(x: (X(K) + X(from)) / 2, y: 18 + 7)
+        let shape = RoundedRectangle(cornerRadius: small ? 8 : 10, style: .continuous)
+        Text(t.uppercased())
+            .sType(small ? SType(size: 10, weight: 700, line: 12, tracking: 0.04) : SType(size: 11, weight: 700, line: 14, tracking: 0.04), tabular: false)
+            .foregroundStyle(kind == "n" ? SDPal.cd : SDPal.ink)
+            .lineLimit(1).fixedSize()
+            .padding(.horizontal, small ? 6 : 8)
+            .frame(height: small ? 16 : 20)
+            .background(shape.fill(kind == "n" ? SDPal.ink : kind == "b" ? SDPal.nB : SDPal.cd))
+            .overlay { if kind == "h" { shape.strokeBorder(SDPal.muT, lineWidth: 1.5) } }
+    }
+}
+
+/// Diagonal stripes at 135°: `width` on, the rest of `step` off (the design's repeating-linear-gradient).
+private struct SDStripes: Shape {
+    let step: CGFloat
+    let width: CGFloat
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        var x = r.minX - r.height
+        while x < r.maxX {
+            p.move(to: CGPoint(x: x, y: r.maxY)); p.addLine(to: CGPoint(x: x + width, y: r.maxY))
+            p.addLine(to: CGPoint(x: x + width + r.height, y: r.minY)); p.addLine(to: CGPoint(x: x + r.height, y: r.minY)); p.closeSubpath()
+            x += step
+        }
+        return p
+    }
+}
+
+/// One lane: its label row (the sign, the chip, the chance of profit 20 pt, 24 pt green in Both, the line after it,
+/// Both's change against Held), then the bar area: today's dashed line, the bar (green profit, red loss, stripes
+/// where Both's sign differs from Held's), the strikes above it, the breakevens under it (and Held's above Both's),
+/// and the white-ringed dot at today on Both. Every mark sits by .position in a fixed box.
+private struct SDLaneView: View {
+    let ln: SDSaleModel.Lane
+    let todayX: Double
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            label
+            GeometryReader { g in
+                let W = g.size.width, X = { (p: Double) in CGFloat(p / 100) * W }
+                ZStack(alignment: .topLeading) {
+                    Path { q in q.move(to: CGPoint(x: X(todayX), y: 0)); q.addLine(to: CGPoint(x: X(todayX), y: ln.H)) }
+                        .stroke(SDPal.ring, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    bar(W).frame(width: W, height: ln.thk).position(x: W / 2, y: ln.bt + ln.thk / 2)
+                    ForEach(ln.pills) { p in
+                        let c = SDPal.side(p.put)
+                        Path { q in q.move(to: CGPoint(x: X(p.x), y: p.stemTop)); q.addLine(to: CGPoint(x: X(p.x), y: p.stemTop + p.stemH)) }
+                            .stroke(c, style: StrokeStyle(lineWidth: 2, dash: p.new ? [] : [4, 3]))
+                        Text(p.label).sType(SType(size: 11, weight: 700, line: 14, tracking: 0))
+                            .foregroundStyle(p.new ? (scheme == .dark ? Color.black : Color.white) : c)
+                            .lineLimit(1).fixedSize()
+                            .padding(.horizontal, 7).frame(height: 18)
+                            .background(Capsule().fill(p.new ? c : SDPal.cd))
+                            .overlay { if !p.new { Capsule().strokeBorder(c, lineWidth: 1.5) } }
+                            .position(x: X(p.lx), y: p.y + 9)
                     }
-                    VStack(spacing: 2) {
-                        label((isCall ? "Call " : "Put ") + SDFmt.fk(K), 11, 700, c)
-                        RoundedRectangle(cornerRadius: 1).fill(c).frame(width: 2, height: 30)
+                    ForEach(ln.bes) { b in
+                        Path { q in q.move(to: CGPoint(x: X(b.x), y: b.notchTop)); q.addLine(to: CGPoint(x: X(b.x), y: b.notchTop + b.notchH)) }
+                            .stroke(b.held ? SDPal.muT : SDPal.ink, style: StrokeStyle(lineWidth: 2, dash: b.held ? [4, 3] : []))
+                        beLabel(b).frame(width: 240, height: 60, alignment: .top).position(x: X(b.lx), y: b.y + 30)
                     }
-                    .fixedSize()
-                    .position(x: X(K), y: 23)
+                    if ln.dot {
+                        Circle().fill(SDPal.ink).frame(width: 14, height: 14)
+                            .background(Circle().fill(SDPal.cd).padding(-3))
+                            .position(x: X(todayX), y: ln.bt + ln.thk / 2)
+                    }
                 }
-                Circle().fill(SDPal.ink).frame(width: 12, height: 12)
-                    .background(Circle().fill(SDPal.dot).padding(-3))
-                    .position(x: X(S0), y: 49)
-                ForEach(feet.indices, id: \.self) { i in foot(feet[i].0, feet[i].1).position(x: at[i], y: 60 + 13.5) }
+                .frame(width: W, height: ln.H, alignment: .topLeading)
+            }
+            .frame(height: ln.H)
+            .allowsHitTesting(false)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(ln.said)
+    }
+
+    /// The sign (10 wide), the chip, the chance, the line after it; Both's pill under them when it does not fit.
+    private var label: some View {
+        let lead = HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(ln.op).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(SDPal.muT).frame(width: 10, alignment: .leading)
+            SDChip(t: ln.name, kind: ln.id == "h" ? "h" : ln.id == "n" ? "n" : "b")
+        }
+        let cop = ln.cop.map { c in
+            Text(c).sType(SType(size: ln.id == "b" ? 24 : 20, weight: 700, line: ln.id == "b" ? 28 : 23, tracking: -0.02))
+                .foregroundStyle(ln.id == "b" ? SDPal.G : SDPal.ink).fixedSize()
+        }
+        let sub = Text(ln.sub).sType(SType(size: 12, weight: 400, line: 16, tracking: 0), tabular: false).foregroundStyle(SDPal.mu)
+        let pill = ln.ch.map { t in
+            Text(t).sType(SType(size: 12, weight: 600, line: 16, tracking: 0))
+                .foregroundStyle(ln.chK > 0 ? SDPal.gT : ln.chK < 0 ? SDPal.rT : SDPal.muT)
+                .padding(.vertical, 3).padding(.horizontal, 8)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(ln.chK > 0 ? SDPal.gB : ln.chK < 0 ? SDPal.rB : SDPal.nB))
+                .fixedSize()
+        }
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) { lead; cop; sub.fixedSize(); pill }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) { lead; cop; sub.fixedSize() }
+                pill
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) { lead; cop }
+                sub.fixedSize(horizontal: false, vertical: true)
+                pill
             }
         }
-        .frame(height: 94)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Profit zone")
-        .accessibilityValue(said)
     }
-    private var said: String {
-        var s = "Profit"
-        if let dn { s += " above \(SDFmt.f2(dn)), \(SDFmt.f2(sdDn ?? 0)) SD and \(SDFmt.saidMove(dn / S0 - 1))" }
-        if let up { s += (dn == nil ? "" : " and") + " below \(SDFmt.f2(up)), \(SDFmt.f2(sdUp ?? 0)) SD and \(SDFmt.saidMove(up / S0 - 1))" }
-        s += ". Today \(SDFmt.f2(S0)) dollars."
-        if let putK { s += " Put \(SDFmt.fk(putK)), \(SDFmt.saidMove(putK / S0 - 1))." }
-        if let callK { s += " Call \(SDFmt.fk(callK)), \(SDFmt.saidMove(callK / S0 - 1))." }
-        return s
+
+    /// The bar: the track, green where the lane profits and red where it loses, stripes where Both changed it.
+    private func bar(_ W: CGFloat) -> some View {
+        let X = { (p: Double) in CGFloat(p / 100) * W }
+        return ZStack(alignment: .topLeading) {
+            Rectangle().fill(SDPal.trk)
+            ForEach(ln.zones) { z in
+                Rectangle().fill(z.pos ? SDPal.zG : SDPal.zR)
+                    .frame(width: max(0, X(z.b) - X(z.a)), height: ln.thk)
+                    .position(x: (X(z.a) + X(z.b)) / 2, y: ln.thk / 2)
+            }
+            ForEach(ln.diff) { z in
+                SDStripes(step: 7, width: 3).fill(Color.black.opacity(0.4))
+                    .frame(width: max(0, X(z.b) - X(z.a)), height: ln.thk)
+                    .clipped()
+                    .position(x: (X(z.a) + X(z.b)) / 2, y: ln.thk / 2)
+            }
+        }
+        .clipShape(Capsule())
     }
-    /// The labels under the bar, each centred under its point, then pushed apart so none touch (8 apart), and kept
-    /// within 12 of the bar's ends (the tile's padding is 16).
-    static func spread(_ items: [(c: CGFloat, w: CGFloat)], W: CGFloat) -> [CGFloat] {
-        let order = items.indices.sorted { items[$0].c < items[$1].c }
-        var c = order.map { items[$0].c }
-        let wd = order.map { items[$0].w }
-        for i in c.indices { c[i] = max(c[i], i == 0 ? wd[i] / 2 - 12 : c[i - 1] + wd[i - 1] / 2 + 8 + wd[i] / 2) }
-        for i in c.indices.reversed() { c[i] = min(c[i], i == c.count - 1 ? W + 12 - wd[i] / 2 : c[i + 1] - wd[i + 1] / 2 - 8 - wd[i] / 2) }
-        var out = Array(repeating: CGFloat(0), count: items.count)
-        for (j, i) in order.enumerated() { out[i] = c[j] }
-        return out
-    }
-    private static let footF1 = SType(size: 11, weight: 600, line: 14, tracking: 0).uiFont(tabular: true)
-    private static let footF2 = SType(size: 10, weight: 400, line: 13, tracking: 0).uiFont(tabular: false)
-    static func footWidth(_ a: String, _ b: String) -> CGFloat {
-        ceil(max(NSAttributedString(string: a, attributes: [.font: footF1]).size().width,
-                 NSAttributedString(string: b, attributes: [.font: footF2]).size().width))
-    }
-    private func label(_ t: String, _ size: CGFloat, _ wt: CGFloat, _ c: Color) -> some View {
-        Text(t).sType(SType(size: size, weight: wt, line: 14, tracking: 0)).foregroundStyle(c).lineLimit(1).fixedSize()
-    }
-    /// A label under the bar: today, or a breakeven as `36.54 (BE)` over `4.3% (1.2 SD)` (Nik 11 Nov).
-    private func foot(_ v: String, _ s: String) -> some View {
-        VStack(spacing: 0) {
-            Text(v).sType(SType(size: 11, weight: 600, line: 14, tracking: 0)).foregroundStyle(SDPal.ink)
-            Text(s).sType(SType(size: 10, weight: 400, line: 13, tracking: 0), tabular: false).foregroundStyle(SDPal.muT)
+
+    /// A breakeven: the price (13, 15 in Both; 12 muted with a HELD chip for Held's above Both's), `↓ 4.2% · 0.85 SD`,
+    /// and in Both its change against Held in green or red; on the sheet's fill, padding 0 4.
+    private func beLabel(_ b: SDSaleModel.BE) -> some View {
+        VStack(spacing: 1) {
+            HStack(spacing: 5) {
+                if b.held { SDChip(t: "Held", kind: "h", small: true) }
+                Text(b.v).sType(SType(size: b.vSize, weight: 700, line: 18, tracking: 0)).foregroundStyle(b.held ? SDPal.muT : SDPal.ink)
+            }
+            Text(b.s).sType(SType(size: 11, weight: 400, line: 14, tracking: 0)).foregroundStyle(SDPal.mu)
+            if let ch = b.ch {
+                Text(ch).sType(SType(size: 11, weight: 700, line: 14, tracking: 0)).foregroundStyle(b.chK > 0 ? SDPal.gT : SDPal.rT)
+            }
         }
         .lineLimit(1).fixedSize()
+        .padding(.horizontal, 4)
+        .background(RoundedRectangle(cornerRadius: 4).fill(SDPal.cd))
+    }
+}
+
+/// The Calls or Puts card (1.7): Held | New, each leg and that side's breakeven, then = Both · breakeven with its
+/// change against Held (or New alone). Padding 16, radius 18, on the cards' fill.
+private struct SDSideCard: View {
+    let c: SDSaleModel.Card
+    var body: some View {
+        let col = SDPal.side(c.put)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Circle().fill(col).frame(width: 8, height: 8)
+                Text(c.title.uppercased()).sType(SType(size: 11, weight: 600, line: 14, tracking: 0.05), tabular: false).foregroundStyle(SDPal.muT)
+            }
+            HStack(alignment: .top, spacing: 0) {
+                column(c.cols[0], col).padding(.trailing, 14)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                column(c.cols[1], col).padding(.leading, 14)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .overlay(alignment: .leading) { Rectangle().fill(SDPal.rule).frame(width: 1) }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("=").sType(SType(size: 15, weight: 600, line: 14, tracking: 0), tabular: false).foregroundStyle(SDPal.muT)
+                    Text("BOTH · BREAKEVEN").sType(SType(size: 11, weight: 700, line: 14, tracking: 0.04), tabular: false).foregroundStyle(SDPal.ink)
+                }
+                let from = HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if let f = c.from {
+                        Text(f).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(SDPal.mu)
+                        Text("→").sType(SType(size: 15, weight: 400, line: 20, tracking: 0), tabular: false).foregroundStyle(SDPal.mu)
+                    }
+                    Text(c.bV).sType(SType(size: 26, weight: 700, line: 32, tracking: -0.02))
+                }
+                let s = Text(c.bS).sType(SType(size: 13, weight: 400, line: 18, tracking: 0)).foregroundStyle(SDPal.muT)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) { from; s }
+                    VStack(alignment: .leading, spacing: 2) { from; s }
+                }
+                if let ch = c.ch {
+                    Text(ch).sType(SType(size: 13, weight: 600, line: 18, tracking: 0))
+                        .foregroundStyle(c.chK > 0 ? SDPal.gT : c.chK < 0 ? SDPal.rT : SDPal.muT)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.vertical, 4).padding(.horizontal, 10)
+                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(c.chK > 0 ? SDPal.gB : c.chK < 0 ? SDPal.rB : SDPal.nB))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 14)
+            .overlay(alignment: .top) { Rectangle().fill(SDPal.rule).frame(height: 1) }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(SDPal.cardBg))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(c.said)
+    }
+
+    private func column(_ k: SDSaleModel.Col, _ col: Color) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SDChip(t: k.held ? "Held" : "New", kind: k.held ? "h" : "n")
+            ForEach(k.legs) { l in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(l.K).sType(SType(size: 17, weight: 700, line: 22, tracking: 0)).foregroundStyle(col)
+                    Text(l.pr).sType(SType(size: 12, weight: 400, line: 16, tracking: 0)).foregroundStyle(SDPal.muT)
+                    Text(l.mv).sType(SType(size: 12, weight: 400, line: 16, tracking: 0)).foregroundStyle(SDPal.mu)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            if k.legs.isEmpty {
+                Text(k.empty).sType(SType(size: 13, weight: 400, line: 18, tracking: 0), tabular: false).foregroundStyle(SDPal.mu)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let be = k.be {
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Breakeven").sType(SType(size: 11, weight: 600, line: 14, tracking: 0), tabular: false).foregroundStyle(SDPal.mu)
+                    Text(be).sType(SType(size: 17, weight: 700, line: 22, tracking: 0))
+                    Text(k.beS).sType(SType(size: 11, weight: 400, line: 14, tracking: 0)).foregroundStyle(SDPal.mu)
+                }
+            }
+        }
     }
 }
