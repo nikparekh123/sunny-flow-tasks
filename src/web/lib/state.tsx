@@ -6,7 +6,8 @@ import { useBooks, type BookId } from './data';
 import { maskMoney } from './format';
 
 export type Account = BookId | 'both';
-export type RailView = 'rails' | 'tiles';
+/** The Home rail: By ticker or By leg (handoff 2026-11-12-positions-rail), remembered per computer; opens on By ticker. */
+export type RailView = 'ticker' | 'leg';
 
 const read = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const write = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private window */ } };
@@ -57,8 +58,8 @@ export function WebStateProvider({ children }: { children: ReactNode }) {
 
   const [privacy, setPrivacyS] = useState(() => read('sw-privacy') === '1');
   const setPrivacy = useCallback((on: boolean) => { setPrivacyS(on); write('sw-privacy', on ? '1' : '0'); }, []);
-  const [railView, setRailViewS] = useState<RailView>(() => (read('sw-rail') === 'tiles' ? 'tiles' : 'rails'));
-  const setRailView = useCallback((v: RailView) => { setRailViewS(v); write('sw-rail', v); }, []);
+  const [railView, setRailViewS] = useState<RailView>(() => (read('sw-rail-by') === 'leg' ? 'leg' : 'ticker'));
+  const setRailView = useCallback((v: RailView) => { setRailViewS(v); write('sw-rail-by', v); }, []);
   const [tvOpen, setTvOpen] = useState(false);
 
   const book: BookId | null = !books.length ? null : account === 'both' ? (books.includes(lastBook) ? lastBook : books[0]) : account;

@@ -35,6 +35,7 @@ export interface Leg {
   label: string;      // "Calls 36 ×72, Oct 30"
   at?: number;        // sold at / paid, per share
   now?: number;       // mark now, per share
+  prev?: number;      // IBKR's mark at the Home rail's base close, per share (the fill price when opened since)
 }
 /** A dividend still to go ex: calendar days from now to the ex-date, cash per share. */
 export interface Div { days: number; amt: number }

@@ -29,6 +29,9 @@ export interface BriefIn {
   chain: Row[];                            // option_chain_next (ticker, expiry, side, strike, iv)
   divRows: Row[];                          // dividends (ticker, ex_date, cash_amount, frequency), oldest first
   strategies: Record<string, string>;
+  /** IBKR's daily positions (account_positions_daily: report_date, asset_category, underlying, put_call, strike, expiry,
+      mark_price), for the Home rail's Today: each option's mark at the base close (handoff 2026-11-12-positions-rail). */
+  posDaily?: Row[];
 }
 
 /** The moment, as the app's clock has it (BriefCore Moment.at). `close` is the day's close in minutes: 960, or 780 on
@@ -67,7 +70,9 @@ const CO: Record<string, string> = { BABA: 'Alibaba', LULU: 'Lululemon', NKE: 'N
 export const company = (t: string) => CO[t] ?? t;
 
 export interface NameInput { t: string; S0: number; P0: number; iv: number; legs: Leg[]; divs: Div[]; stops: Stop[]; fridayStop: number;
-  otm: { K: number; ex: string; days: number; label: string } | null; noIv?: boolean }
+  otm: { K: number; ex: string; days: number; label: string } | null; noIv?: boolean;
+  /** The share price at the rail's base close (P0 on a weekday; the last close before this week on the weekend). */
+  Pb?: number }
 
 export function buildBrief(x: BriefIn) {
   const { today, mins, addDays, isTrading } = x;
@@ -105,6 +110,27 @@ export function buildBrief(x: BriefIn) {
     if (d < lastSession) prevOf.set(t, p);
     if (d <= lastSession) closeOf.set(t, p);
   }
+
+  // ── The Home rail's base (handoff 2026-11-12-positions-rail, Nik 12 Nov 2026): Today counts from the session
+  //    before the last (the day's move, as P0); on the weekend This week counts from the last close before this
+  //    week's Monday. Each option leg carries IBKR's own mark at that close (account_positions_daily), never the
+  //    model; a leg opened after it counts from its fill price (R1). ──
+  const railWeek = wdN === 6 || wdN === 0;
+  const railBase0 = railWeek ? lastTradingOnOrBefore(addDays(today, wdN === 0 ? -7 : -6)) : lastTradingOnOrBefore(addDays(lastSession, -1));
+  const pos = x.posDaily ?? [];
+  const railBase = pos.reduce((m: string, r: Row) => { const d = String(r.report_date); return d <= railBase0 && d > m ? d : m; }, '');
+  const markAt = new Map<string, number>(), stkAt = new Map<string, number>();
+  for (const r of pos) {
+    if (String(r.report_date) !== railBase || r.mark_price == null) continue;
+    const u = String(r.underlying ?? r.symbol ?? '').toUpperCase();
+    if (r.asset_category === 'OPT') markAt.set(`${u}|${r.put_call}|${Number(r.strike)}|${String(r.expiry)}`, Number(r.mark_price));
+    else if (r.asset_category === 'STK') stkAt.set(u, Number(r.mark_price));
+  }
+  const closeAt = (t: string, d: string) => {
+    let v: number | undefined;
+    for (const c of x.closes) if (String(c.ticker).toUpperCase() === t && String(c.date) <= d) v = Number(c.close_price);
+    return v;
+  };
 
   // ── Dividends: the declared ones, then each name's regular one carried forward (answer C5) ──
   const divsOf = (t: string): Div[] => {
@@ -206,13 +232,20 @@ export function buildBrief(x: BriefIn) {
       const nm = kind === 'sc' ? 'Calls' : kind === 'sp' ? 'Puts' : kind === 'ins' ? 'Insurance puts' : kind === 'leaps' ? 'LEAPS' : 'OTM calls';
       legs.push({ k: `${kind}-${fk(l.strike)}-${l.expiry}`, kind, ty: l.type === 'call' ? 'C' : 'P', K: l.strike, q: l.side === 'sold' ? -l.n : l.n,
         days: +days.toFixed(4), iv: good(l.iv) ? l.iv! : impliedOf(l, S0) ?? (noIv ? 1e-4 : ivN), ex: l.expiry, label: `${nm} ${fk(l.strike)} ×${l.n}, ${el}`,
-        at: l.avg, ...(l.mark != null ? { now: l.mark } : {}) });
+        at: l.avg, ...(l.mark != null ? { now: l.mark } : {}),
+        ...((): { prev?: number } => {
+          if (!railBase) return {};
+          if (l.opened > railBase) return l.avg > 0 ? { prev: l.avg } : {};
+          const m = markAt.get(`${t}|${l.type === 'call' ? 'C' : 'P'}|${Number(l.strike)}|${l.expiry}`);
+          return m != null ? { prev: m } : {};
+        })() });
     }
     if (!legs.length) continue;
     const divs = divsOf(t), { stops, fri } = stopsFor(ls);
     const nb = new NameBook({ t, S0, P0, iv: ivN, legs, divs, r: RATE, noIv });
     books.push(nb);
-    inputs.push({ t, S0, P0, iv: ivN, legs, divs, stops, fridayStop: fri, otm: otmFor(S0), ...(noIv ? { noIv } : {}) });
+    const Pb = railWeek ? (closeAt(t, railBase0) ?? stkAt.get(t)) : P0;
+    inputs.push({ t, S0, P0, iv: ivN, legs, divs, stops, fridayStop: fri, otm: otmFor(S0), ...(noIv ? { noIv } : {}), ...(Pb ? { Pb } : {}) });
   }
 
   // ── Your position ──
@@ -273,7 +306,7 @@ export function buildBrief(x: BriefIn) {
       v: 1, moment, today, friday: F, fridayLabel: longDay(F), nextFriday, weekend, th: +th.toFixed(4),
       position, names, totals, timeValue,
     },
-    inputs: { v: 1, built_at: new Date().toISOString(), r: RATE, names: inputs },
+    inputs: { v: 1, built_at: new Date().toISOString(), r: RATE, names: inputs, rail: { week: railWeek, base: railBase || null } },
   };
 }
 
