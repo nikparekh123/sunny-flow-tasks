@@ -28,7 +28,7 @@ import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-12.6';
+const BUILD = '2026-11-12.8';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -3121,7 +3121,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       // NO TO DO ORDERS (Nik, 11 Nov 2026: "Remove To do, we don't need it"): Home no longer says what to sell or buy
       // this week. The plan is still worked out (home_todo) but nothing reads it on Home, the Overview or Search.
       const docOrders: Row[] = [];
-      const docs = buildDoc({ moment: brief.moment, today, mins: now.mins, isTrading, addDays, cal, brief, names: nameDays,
+      // SPY's last two years of closes: the market sentence's context (best day since, a run of days, the week).
+      const spyHist = await page(`daily_closes?ticker=eq.SPY&date=gte.${addDays(today, -800)}&order=date.asc&select=date,close_price`).catch(() => []);
+      const docs = buildDoc({ moment: brief.moment, today, mins: now.mins, isTrading, addDays, cal, brief, names: nameDays, spy: spyHist,
         market, sectors: sectorRows, futures, watch: watchlist as Row[], chart, yieldWeeks: yieldOut, payback, history,
         earnings, macro, divs, trades, orders: docOrders, aftershock, baseNow: baseAt(today), baseAt, econ: econRows, closes,
         perf: performance, perfFrom: CHART_START, feeds: { stopped: stoppedFeeds, marketAt } });

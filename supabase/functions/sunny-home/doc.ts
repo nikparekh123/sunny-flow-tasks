@@ -37,6 +37,8 @@ export interface DocIn {
   earnings: Row[]; macro: Row[]; divs: Row[]; trades: Row[]; orders: Row[]; aftershock: Row | null;
   econ?: Row[];                    // econ_cards (econ-sync, FRED): the twelve indicators
   closes?: Row[];                  // daily_closes (ticker, date, close_price), oldest first: the world markets' month lines
+  /** SPY's daily closes (date, close_price), oldest first, about two years: the market sentence's context. */
+  spy?: Row[];
   baseNow: number; baseAt: (d: string) => number;
   /** payload.performance (block 20): realized and open as [month, ticker, kind, $] rows; perfFrom = the book's chart start. */
   perf?: { realized: unknown[][]; unrealized: unknown[][] }; perfFrom?: string;
@@ -727,6 +729,72 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   const decisions = shorts.length;
   const decLine = decisions ? `${word(decisions)} ${decisions === 1 ? 'call' : 'calls'} to make before Friday.` : 'Nothing to decide before Friday.';
   const money = (v: number, privacy: boolean) => (privacy ? p1(pctOfBase(v)) : fK(v));
+  /* ── The market sentence's context (Nik, 12 Nov 2026: "add some context around previous day, last week and month
+     and change text based on that"). At most one clause, the most telling, checked in this order: a big day against
+     its history, a day that reverses a big one, a run of three or more, the week (1%+), the month (2%+). Then a short
+     second sentence when the week went the other way to today. From SPY's stored closes. ── */
+  const spyRows = (x.spy ?? []).map((r) => ({ d: String(r.date), c: Number(r.close_price) })).filter((r) => r.c > 0);
+  const movesTo = (incl: boolean) => {
+    const rs = spyRows.filter((r) => (incl ? r.d <= today : r.d < today));
+    return rs.slice(1).map((r, i) => ({ d: r.d, r: (r.c / rs[i].c - 1) * 100 }));
+  };
+  const dayName = (d: string) => (d === today ? 'today' : d === addDays(today, -1) ? 'yesterday' : DAY[ymd(d).wd]);
+  const ORD = ['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
+  const nth = (n: number) => ORD[n] ?? `${n}th`;
+  const since = (d: string) => {
+    const days = (Date.parse(today) - Date.parse(d)) / 864e5;
+    return days < 60 ? `since ${md(d)}` : days < 365 ? `in ${Math.round(days / 30.4)} months` : days < 730 ? 'in over a year' : 'in over two years';
+  };
+  const runOf = (rs: { r: number }[], sign: number) => { let n = 0; for (const z of [...rs].reverse()) { if (Math.sign(z.r) === sign && Math.abs(z.r) >= 0.05) n++; else break; } return n; };
+  const spyNow = num(spy?.price) ?? spyRows.at(-1)?.c ?? 0;
+  const monthStart = today.slice(0, 7) + '-01';
+  const monthBase = [...spyRows].reverse().find((r) => r.d < monthStart)?.c;
+  const inMonth = spyRows.some((r) => r.d >= monthStart && r.d < today);
+  const mtd = monthBase && spyNow && inMonth ? (spyNow / monthBase - 1) * 100 : null;
+  /** During the day and after the close: today's move `mv` against the days before it. */
+  const dayContext = (mv: number): { clause: string; still: string } => {
+    const rs = movesTo(false), last = rs.at(-1), w = ymd(today).wd === 1 ? null : weekPct(spy);
+    let clause = '';
+    if (sizeOf(mv) !== 'flat') {
+      if (Math.abs(mv) >= 1.5) {
+        const prior = [...rs].reverse().find((z) => (mv > 0 ? z.r >= mv : z.r <= mv));
+        clause = `the ${mv > 0 ? 'best' : 'worst'} day ${prior ? since(prior.d) : 'in over two years'}`;
+      } else if (last && Math.abs(last.r) >= 1 && Math.sign(last.r) !== Math.sign(mv)) {
+        clause = last.r > 0 ? `giving back ${Math.abs(mv) >= last.r ? 'all' : 'some'} of ${dayName(last.d)}’s ${p1(last.r)} gain`
+          : `bouncing back from ${dayName(last.d)}’s ${p1(last.r)} drop`;
+      } else {
+        const n = 1 + runOf(rs, Math.sign(mv));
+        if (n >= 3) clause = `a ${nth(n)} straight day ${mv > 0 ? 'up' : 'down'}`;
+      }
+    }
+    if (!clause && w != null && Math.abs(w) >= 1) clause = `${upDown(w)} ${p1(w)} this week`;
+    else if (!clause && mtd != null && Math.abs(mtd) >= 2) clause = `${upDown(mtd)} ${p1(mtd)} this month`;
+    const still = w != null && Math.abs(w) >= 1 && !clause.endsWith('this week') && sizeOf(mv) !== 'flat' && Math.sign(w) !== Math.sign(mv)
+      ? ` Still ${upDown(w)} ${p1(w)} this week.` : '';
+    return { clause, still };
+  };
+  /** Before the open and overnight: the last session, " after yesterday's 1.3% gain" or " after three straight down days". */
+  const lastContext = (): string => {
+    const rs = movesTo(true), last = rs.at(-1);
+    if (!last) return '';
+    if (Math.abs(last.r) >= 1) return ` after ${dayName(last.d)}’s ${p1(last.r)} ${last.r > 0 ? 'gain' : 'drop'}`;
+    const n = runOf(rs, Math.sign(last.r));
+    return n >= 3 ? ` after ${word(n).toLowerCase()} straight ${last.r > 0 ? 'up' : 'down'} days` : '';
+  };
+  /** The weekend: this week against past weeks (each week's last close), then the month. */
+  const weekContext = (wv: number): string => {
+    const byWeek = new Map<string, number>();
+    for (const r of spyRows) byWeek.set(addDays(r.d, -((ymd(r.d).wd + 6) % 7)), r.c);
+    const ks = [...byWeek.keys()].sort(), cur = addDays(today, -((ymd(today).wd + 6) % 7));
+    const ws = ks.slice(1).map((k, i) => ({ d: k, fri: addDays(k, 4), r: (byWeek.get(k)! / byWeek.get(ks[i])! - 1) * 100 })).filter((z) => z.d < cur);
+    const prev = ws.filter((z) => z.d < addDays(cur, -7));   // the weeks before this one
+    if (Math.abs(wv) >= 2) {
+      const prior = [...prev].reverse().find((z) => (wv > 0 ? z.r >= wv : z.r <= wv));
+      return `, the ${wv > 0 ? 'best' : 'worst'} week ${prior ? since(prior.fri) : 'in over two years'}`;
+    }
+    if (sizeOf(wv, true) !== 'flat') { const n = 1 + runOf(prev, Math.sign(wv)); if (n >= 3) return `, a ${nth(n)} straight weekly ${wv > 0 ? 'gain' : 'loss'}`; }
+    return mtd != null && Math.abs(mtd) >= 2 ? `, ${upDown(mtd)} ${p1(mtd)} this month` : '';
+  };
   let lede: Span[] = [], ledeP: Span[] = [];
   const both = (f: (p: boolean) => Span[]) => { lede = f(false); ledeP = f(true); };
   if (moment === 'pre') {
@@ -734,11 +802,11 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const follow = fu >= 0 ? nUp >= nDown : nDown >= nUp;
     const word2 = follow === (fu >= 0) ? 'up' : 'down', cnt = word2 === 'up' ? nUp : nDown;
     // No orders line (11 Nov 2026: To do removed).
-    const fz = sizeOf(fu);
+    const fz = sizeOf(fu), lc = lastContext();
     both(() => fz === 'flat'
-      ? [sp('Futures are '), sp('flat', true), sp(held ? `; ${nUp} of ${names.length} of your names are up before the bell.` : '.')]
+      ? [sp('Futures are '), sp('flat', true), sp(lc + (held ? `; ${nUp} of ${names.length} of your names are up before the bell.` : '.'))]
       : [sp('Futures are '), sp(fz === 'little' ? `a little ${higher(fu)}` : fz === 'sharp' ? `sharply ${higher(fu)}` : higher(fu), true, col(fu)),
-        sp(held ? `, your names ${follow ? 'are' : 'aren’t'}: ${cnt} of ${names.length} are ${word2} before the bell.` : '.')]);
+        sp(lc + (held ? `${lc ? ';' : ','} your names ${follow ? 'are' : 'aren’t'}: ${cnt} of ${names.length} are ${word2} before the bell.` : '.'))]);
     if (held) owner.push({ key: 'lede' });
   } else if (moment === 'futures') {
     const asia = ['^N225', '^HSI', '000001.SS'].map((s) => num(mk(s)?.regular_change_pct)).filter((v) => v != null) as number[];
@@ -746,13 +814,14 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const daxOpen = dax && !closedState(String(dax.market_state));
     const es = esPct ?? 0, ez = sizeOf(es);
     both(() => [...(ez === 'flat' ? [sp('Futures are '), sp('flat', true)]
-      : [sp('Futures point '), sp(ez === 'little' ? `a little ${higher(es)}` : ez === 'sharp' ? `sharply ${higher(es)}` : higher(es), true, col(es))]), sp(' overnight'),
+      : [sp('Futures point '), sp(ez === 'little' ? `a little ${higher(es)}` : ez === 'sharp' ? `sharply ${higher(es)}` : higher(es), true, col(es))]), sp(' overnight' + lastContext()),
       ...(a != null ? [sp(`: Asia ${asia.length && ['^N225', '^HSI', '000001.SS'].every((s) => closedState(String(mk(s)?.market_state))) ? 'closed' : 'is'} ${a >= 0 ? 'higher' : 'lower'}`)] : []),
       ...(daxOpen ? [sp(`, Europe opened ${(num(dax.regular_change_pct) ?? 0) >= 0 ? 'firm' : 'soft'}`)] : []), sp('.'),
       ...(held ? [sp(' Your names trade again at 4:00 AM.')] : [])]);
   } else if (session) {
     const lead = sec(false).sort((u, v) => v.move - u.move)[0], bt = bookToday, m = bt ? mostOf(Math.sign(bt.made) || -1) : null;
-    const dz = sizeOf(spyDay), leads = lead ? `, ${short(lead.sector)} leading.` : '.';
+    const dz = sizeOf(spyDay), ctx = dayContext(spyDay);
+    const leads = (ctx.clause ? `, ${ctx.clause}` : '') + (lead ? `, ${short(lead.sector)} leading.` : '.') + ctx.still;
     both((p) => [...(dz === 'flat' ? [sp('Stocks are '), sp('flat', true), sp(leads)]
       : [sp(`Stocks are ${dz === 'little' ? `a little ${higher(spyDay)}, ` : dz === 'sharp' ? `sharply ${higher(spyDay)}, ` : ''}${upDown(spyDay)}`),
         sp(` ${p1(spyDay)}`, true, col(spyDay)), sp(leads)]),
@@ -761,24 +830,27 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   } else if (moment === 'post') {
     const bt = bookToday, m = bt ? mostOf(Math.sign(bt.made) || -1) : null;
     const ah = [...names].filter((n) => n.ext != null && Math.abs(n.ext) >= 1).sort((u, v) => Math.abs(v.ext!) - Math.abs(u.ext!))[0];
-    const kind = m ? (Math.abs(m.today.sh) >= Math.abs(m.today.lp) ? 'shares' : 'LEAPS') : '';
-    const cz = sizeOf(spyDay);
-    both((p) => [...(cz === 'flat' ? [sp('Stocks closed '), sp('flat', true), sp('.')]
-      : [sp(`Stocks closed ${cz === 'little' ? `a little ${higher(spyDay)}, ` : cz === 'sharp' ? `sharply ${higher(spyDay)}, ` : ''}${upDown(spyDay)} `), sp(p1(spyDay), true, col(spyDay)), sp('.')]),
+    // The part of the name that moved the most (12 Nov 2026: a book of sold puts read "most of it Nvidia's shares").
+    const KW: Record<string, string> = { sh: 'shares', lp: 'LEAPS', oc: 'calls', ip: 'puts', sc: 'sold calls', sp: 'sold puts' };
+    const kind = m ? KW[(Object.entries(m.today) as [string, number][]).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0][0]] ?? 'shares' : '';
+    const cz = sizeOf(spyDay), cx = dayContext(spyDay), end = (cx.clause ? `, ${cx.clause}.` : '.') + cx.still;
+    both((p) => [...(cz === 'flat' ? [sp('Stocks closed '), sp('flat', true), sp(end)]
+      : [sp(`Stocks closed ${cz === 'little' ? `a little ${higher(spyDay)}, ` : cz === 'sharp' ? `sharply ${higher(spyDay)}, ` : ''}${upDown(spyDay)} `), sp(p1(spyDay), true, col(spyDay)), sp(end)]),
       ...(bt && held ? [sp(` Your book ${bt.made < 0 ? 'lost' : 'made'} `), sp(money(bt.made, p), true, col(bt.made)), sp(m ? `, most of it ${m.name}’s ${kind}.` : '.')] : []),
       ...(ah ? [sp(` ${ah.name} is ${upDown(ah.ext!)} ${p1(ah.ext!)} after hours.`)] : [])]);
   } else {
     const r = resultsWeek(), spw = weekPct(spy) ?? 0, sells = x.orders.filter((o) => o.kind === 'sell' || o.kind === 'put').length;
     const ss = sec(true).sort((u, v) => v.move - u.move), on = spw >= 0 ? ss[0] : ss[ss.length - 1];
     const wz = sizeOf(spw, true), rf = spw >= 0 ? 'rose' : 'fell';
-    const mkt = wz === 'flat' ? 'Stocks were flat on the week'
-      : `Stocks ${wz === 'little' ? `${rf} a little` : wz === 'sharp' ? `${rf} sharply` : rf}${on && Math.sign(on.move) === Math.sign(spw) ? ` on ${short(on.sector)}` : ''}`;
+    const wctx = weekContext(spw), onS = on && Math.sign(on.move) === Math.sign(spw) ? ` on ${short(on.sector)}` : '';
+    const mkt: Span[] = wz === 'flat' ? [sp('Stocks were flat on the week' + wctx)]
+      : [sp(`Stocks ${wz === 'little' ? `${rf} a little, ${upDown(spw)}` : wz === 'sharp' ? `${rf} sharply, ${upDown(spw)}` : rf} `), sp(p1(spw), true, col(spw)), sp(onS + wctx)];
     both((p) => [
       ...(held && r.sold > 0 ? (r.kept >= 0
         ? [sp(`${weekOpen ? 'So far, a' : 'A'} ${py(r.yieldPct)} week: you kept `), sp(p ? `${Math.round((r.kept / r.sold) * 100)}%` : fK(r.kept), true, 'green'), sp(p ? ` of what you ${r.open ? 'closed' : 'sold'}. ` : ` of ${fK(r.sold)} ${r.open ? 'closed' : 'sold'}. `)]
         : [sp(`${weekOpen ? 'So far, a' : 'A'} losing week: buying back cost `), ...(p ? [sp('more than you sold. ')] : [sp(fK(-r.kept), true, 'red'), sp(` more than the ${fK(r.sold)} sold. `)])])
         : []),
-      sp(mkt), ...(held && sells ? [sp(`, and ${word(sells).toLowerCase()} ${sells === 1 ? 'sale comes' : 'sales come'} ${salesDay}.`)] : [sp('.')])]);
+      ...mkt, ...(held && sells ? [sp(`, and ${word(sells).toLowerCase()} ${sells === 1 ? 'sale comes' : 'sales come'} ${salesDay}.`)] : [sp('.')])]);
     if (held && sells) owner.push({ key: 'lede' });
   }
 
