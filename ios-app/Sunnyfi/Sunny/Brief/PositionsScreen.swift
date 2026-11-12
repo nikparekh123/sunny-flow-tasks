@@ -1425,8 +1425,15 @@ private struct LegsList: View {
                         .underline().frame(minHeight: 32)
                 }.buttonStyle(.plain)
             }
-            // Calls before puts inside a group (a stable sort keeps the model's order within each).
-            let calls = { (ls: [PositionsModel.Leg]) in ls.filter { $0.ty != .put } + ls.filter { $0.ty == .put } }
+            // Soonest to expire first inside a group (Nik 12 Nov 2026), calls before puts on the same day, then by strike.
+            let calls = { (ls: [PositionsModel.Leg]) in
+                ls.sorted { a, b in
+                    let da = Int(a.T.rounded()), db = Int(b.T.rounded())
+                    if da != db { return da < db }
+                    if (a.ty == .put) != (b.ty == .put) { return b.ty == .put }
+                    return a.K < b.K
+                }
+            }
             let groups = ["Long", "Hedge", "Income"].filter { filter == "All" || filter == $0 }
             ForEach(groups, id: \.self) { g in
                 let ls = calls(m.legs.filter { Self.role($0) == g })
@@ -1501,21 +1508,36 @@ private struct LegsList: View {
         return "Δ \(d < 0 ? "short" : "long") \(SampleEngine.fn(d))"
     }
 
+    /// A group's theta, $ a day for the legs that are on; nil when it holds no options or every leg is off.
+    private func groupTheta(_ ls: [PositionsModel.Leg]) -> Double? {
+        let on = ls.filter { !off.contains($0.id) && $0.ty != .shares }
+        return on.isEmpty ? nil : on.reduce(0) { $0 + m.legTheta($1, px, tt) }
+    }
+    /// "Θ $12 a day": red when it costs, green when it earns, never a minus sign.
+    private func thetaText(_ v: Double) -> some View {
+        BriefWords.line("Θ " + SampleEngine.fK(v) + " a day", privacy: privacy)
+            .sType(SType(size: 12, weight: 600, line: 16, tracking: 0))
+            .foregroundStyle(abs(v) < 0.5 ? PosC.mu : v < 0 ? S.red : S.green)
+    }
+
     /// A group: its head (the name 13/18 bold, its delta 13/18 semibold muted 6 after it, the total 13/18 semibold on
-    /// the right, 28 tall), then its rows, 6 apart.
+    /// the right, 28 tall; the group's theta 12/16 under the name), then its rows, 6 apart.
     private func section(_ h: String, _ v: String, _ c: Color, _ ls: [PositionsModel.Leg]) -> some View {
-        let dl = groupDelta(ls)
+        let dl = groupDelta(ls), th = groupTheta(ls)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(h).sType(SType(size: 13, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                    if !dl.isEmpty {
-                        Text(dl).sType(SType(size: 13, weight: 600, line: 18, tracking: 0)).foregroundStyle(PosC.mu)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(h).sType(SType(size: 13, weight: 700, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                        if !dl.isEmpty {
+                            Text(dl).sType(SType(size: 13, weight: 600, line: 18, tracking: 0)).foregroundStyle(PosC.mu)
+                        }
                     }
+                    .lineLimit(1)
+                    if let th { thetaText(th) }
                 }
-                .lineLimit(1)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(dl.isEmpty ? h : "\(h), \(PosSay.words(dl))")
+                .accessibilityLabel((dl.isEmpty ? h : "\(h), \(PosSay.words(dl))") + (th.map { ", theta \(privacy ? "hidden" : PosSay.words(SampleEngine.fK($0))) a day" } ?? ""))
                 .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
                 Text(v).sType(SType(size: 13, weight: 600, line: 18, tracking: 0)).foregroundStyle(c).lineLimit(1)
@@ -1529,16 +1551,27 @@ private struct LegsList: View {
     /// A leg: padding 12 14, radius 14; the title 15/20 semibold and the P&L 15/20 bold on one baseline, 2, then
     /// "Δ 1,925" 13/18 semibold (red when it hurts) and the rest 13/18 medium secondary; switched off it fades to 45%
     /// and says so 2 under, in the same grid (12/16 bold).
+    /// A leg's title, strike first (Nik 12 Nov 2026: not "OTM calls" or "Insurance puts" on every strike; the group
+    /// says why it is held): "110 call · Jan 15", the date as its own title wrote it (so a LEAPS keeps "Jan ’29").
+    /// Shares keep theirs.
+    private func legName(_ l: PositionsModel.Leg) -> String {
+        guard l.ty != .shares else { return l.title }
+        let k = l.K.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(l.K)) : String(format: "%g", l.K)
+        let date = l.title.range(of: ", ", options: .backwards).map { String(l.title[$0.upperBound...]) } ?? l.ex
+        return "\(k) \(l.ty == .call ? "call" : "put") · \(date)"
+    }
+
     private func legCard(_ l: PositionsModel.Leg) -> some View {
         let isOff = off.contains(l.id), p = isOff ? 0 : m.legPL(l, px, tt), d = m.legDelta(l, px, tt)
         let hurt = p < -0.5 && !isOff
         let rest: String = l.ty == .shares ? " · cost $\(String(format: "%.2f", l.K)), no decay" : " at $\(String(format: "%.2f", px))"
+        let name = legName(l), lead = l.ty == .shares ? "" : "×\(SampleEngine.fn(abs(l.q))) · "
         let sdl = sdLines(l)
         return Button { withAnimation(S.fade) { if isOff { off.remove(l.id) } else { off.insert(l.id) } } } label: {
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(l.title).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                        Text(name).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
                         BriefWords.line(isOff ? "Off" : abs(p) < 0.5 ? "$0" : SampleEngine.fK(p), privacy: privacy && !isOff && abs(p) >= 0.5)
@@ -1550,10 +1583,19 @@ private struct LegsList: View {
                     HStack(alignment: .top, spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
                             // The Δ part at 600 by its own font: `.fontWeight` cannot reach Inter's weight axis.
-                            (Text("Δ \(SampleEngine.fn(d))").font(deltaFont).foregroundStyle(d < 0 ? S.red : S.ink)
+                            (Text(lead).foregroundStyle(PosC.mu)
+                             + Text("Δ \(SampleEngine.fn(d))").font(deltaFont).foregroundStyle(d < 0 ? S.red : S.ink)
                              + Text(rest).foregroundStyle(PosC.mu))
                                 .sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
                                 .fixedSize(horizontal: false, vertical: true)
+                            // Days left and theta (Nik 12 Nov 2026): "68 days · Θ $30 a day".
+                            if l.ty != .shares && !isOff {
+                                let th = m.legTheta(l, px, tt), dl = Int(l.T.rounded())
+                                (Text(dl <= 0 ? "today · " : dl == 1 ? "1 day · " : "\(dl) days · ").foregroundStyle(PosC.mu)
+                                 + BriefWords.line("Θ " + SampleEngine.fK(th) + " a day", privacy: privacy)
+                                    .foregroundStyle(abs(th) < 0.5 ? PosC.mu : th < 0 ? S.red : S.green))
+                                    .sType(SType(size: 12, weight: 600, line: 16, tracking: 0))
+                            }
                             if isOff {
                                 Text("Off · tap to add back").sType(SType(size: 12, weight: 700, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
                             }
@@ -1573,7 +1615,7 @@ private struct LegsList: View {
         .buttonStyle(.plain)
         // A toggle: "Calls 36 times 72, October 30", on or off, then its three SD lines. Its P&L and delta are in
         // VoiceOver's More Content.
-        .accessibilityLabel(PosSay.words(l.title) + (sdl.map { ". " + SDLegs.said($0) } ?? ""))
+        .accessibilityLabel(PosSay.words(name + (lead.isEmpty ? "" : ", " + lead.replacingOccurrences(of: " · ", with: ""))) + (sdl.map { ". " + SDLegs.said($0) } ?? ""))
         .accessibilityValue(isOff ? "off" : "on")
         .accessibilityAddTraits(.isToggle)
         .accessibilityHint(isOff ? "Tap to add it back" : "Tap to switch it off")

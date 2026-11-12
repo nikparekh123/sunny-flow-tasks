@@ -262,6 +262,14 @@ struct PositionsModel {
         if let a = g.pl0[key] { return (g.at(a, S * 1.002) - g.at(a, S * 0.998)) / (S * 0.004) * l.mult }
         return 0
     }
+    /// One leg's theta, $ a day at that price and date (Nik 12 Nov 2026, the legs list): the server's grid, as the
+    /// screen's Theta adds them up; the sample book steps its P&L a twentieth of a day. Shares have none.
+    func legTheta(_ l: Leg, _ S: Double, _ tt: Double) -> Double {
+        guard l.ty != .shares else { return 0 }
+        guard let g else { return (legPL(l, S, tt + 0.05) - legPL(l, S, tt)) / 0.05 }
+        guard let r = g.row(tt), let a = g.th[l.id], r < a.count else { return 0 }
+        return g.at(a[r], S)
+    }
     /// P&L from today plus the premium already earned on the sold legs that are on; extra = a fix's legs.
     func pl(_ S: Double, _ tt: Double, off: Set<String> = [], extra: [Leg] = []) -> Double {
         let on = legs.filter { !off.contains($0.id) } + extra

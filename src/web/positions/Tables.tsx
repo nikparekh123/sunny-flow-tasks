@@ -6,7 +6,7 @@ import { fk, type ChainW, type DPt, type PLeg, type Pricer, type Seg } from './m
 import { HAIR, HAIR_S, K, MU, O, R, Seg as SegCtl, Switch, cl, kicker } from './ui';
 import { LegSdLines } from './sd/LegLines';
 import type { LegLines } from './sd/legs';
-import { roleOf, type Role } from './totals';
+import { ROLES, roleOf, type Role } from './totals';
 
 const tn = { fontVariantNumeric: 'tabular-nums' } as const;
 const side = (d: number) => (d < 0 ? 'Short ' : 'Long ') + count(d);
@@ -100,9 +100,10 @@ export function EveryLeg({ rows, total, filter, setFilter, mask }:
         const op = r.on ? 1 : 0.45;
         return (
           <div key={(r.added ? 'a' : 'b') + r.l.k} style={{ ...tn, display: 'grid', gridTemplateColumns: cols, gap: 10, alignItems: 'center', padding: '11px 0', borderTop: HAIR }}>
-            <Switch on={r.on} label={(r.on ? 'Switch off ' : 'Switch on ') + r.l.lb} onToggle={r.toggle} />
+            <Switch on={r.on} label={(r.on ? 'Switch off ' : 'Switch on ') + (r.added ? r.l.lb : r.l.ct)} onToggle={r.toggle} />
             <span style={{ display: 'flex', flexDirection: 'column', opacity: op }}>
-              <span style={{ fontSize: 15 }}>{r.l.lb}</span>
+              {/* The leg's group, not "OTM calls" or "Insurance puts" (Nik 12 Nov 2026); a trade keeps its name. */}
+              <span style={{ fontSize: 15 }}>{r.added ? r.l.lb : ROLES.find((x) => x.k === roleOf(r.l))?.h ?? r.l.lb}</span>
               {r.added && <span style={{ fontSize: 11, fontWeight: 600, color: O }}>added, a what if</span>}
             </span>
             <span style={{ fontSize: 14, opacity: op }}>{r.l.ct}</span>

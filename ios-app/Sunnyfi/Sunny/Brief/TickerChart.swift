@@ -16,6 +16,10 @@
 //    closer and one is left and right to spread out the chart"): right spreads the days out around the day under
 //    the finger, left squeezes them back, from one week to the whole range; the auto price scale fits the days on
 //    screen. A double tap on the dates, Auto, or a new range goes back.
+//  · A pinch on the chart (Nik 12 Nov 2026: "when you pinch on the chart we should be able to zoom in also") follows
+//    the fingers: their spread sideways scales the days, up and down the prices, around the point between them. Held
+//    within 25° of flat it moves only the days, within 25° of upright only the prices, in between both. Same limits as
+//    the two drags; Auto or a double tap goes back.
 //  · A tag per leg ("Sold call 40 ×50"), 19 apart so none overlaps; off the scale it pins to the edge with an arrow.
 //  · ⚠ THE PAGE IS EXACTLY THE SCREEN. The layer chips sat at their own width in a plain HStack: one text size up
 //    they summed wider than the phone, the page grew past the screen and, centred, lost both edges (the price
@@ -604,6 +608,35 @@ struct TickerChartPage: View {
 // MARK: - The chart
 
 /// A level across the plot, drawn in the middle of its frame.
+/// A two-finger pinch that reports the fingers' spread across and down (SwiftUI's MagnifyGesture gives one scale for
+/// both, so it can't tell a sideways pinch from an upright one). `began` gets the point between the fingers in the
+/// view's own space; a moment with one finger up is skipped.
+private struct TKPinch: UIGestureRecognizerRepresentable {
+    var began: (CGPoint, CGSize) -> Void
+    var changed: (CGSize) -> Void
+    var ended: () -> Void
+    /// Recognised alongside the scrub (the first finger is already scrubbing when the second lands).
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith o: UIGestureRecognizer) -> Bool { true }
+    }
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+    func makeUIGestureRecognizer(context: Context) -> UIPinchGestureRecognizer {
+        let g = UIPinchGestureRecognizer()
+        g.delegate = context.coordinator
+        return g
+    }
+    func handleUIGestureRecognizerAction(_ g: UIPinchGestureRecognizer, context: Context) {
+        switch g.state {
+        case .began, .changed:
+            guard g.numberOfTouches >= 2 else { return }
+            let p0 = g.location(ofTouch: 0, in: nil), p1 = g.location(ofTouch: 1, in: nil)
+            let d = CGSize(width: abs(p1.x - p0.x), height: abs(p1.y - p0.y))
+            if g.state == .began { began(context.converter.localLocation, d) } else { changed(d) }
+        default: ended()
+        }
+    }
+}
+
 private struct TKHLine: Shape {
     func path(in r: CGRect) -> Path {
         Path { $0.move(to: CGPoint(x: 0, y: r.midY)); $0.addLine(to: CGPoint(x: r.maxX, y: r.midY)) }
@@ -706,6 +739,11 @@ private struct TickerLine: View {
     @State private var win: Win?
     @State private var tdrag: TDrag?
     @State private var lastDateTap = Date.distantPast
+    /// A pinch on the plot: the fingers' spread when it began, which scales it moves, and both scales then.
+    private struct Pinch { let d0: CGSize; let mx: Bool; let my: Bool; let a0: Double; let b0: Double; let at: Double; let fa: Double; let full: Double; let lo0: Double; let hi0: Double; let pv: Double; let span: Double }
+    @State private var pinch: Pinch?
+    /// A touch that became a pinch never scrubs again; the next touch does.
+    @State private var scrubOff = false
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     /// 14 clear over the plot, 12 under it (PT, PB).
@@ -803,12 +841,15 @@ private struct TickerLine: View {
                     .contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance: 0)
                         .onChanged { v in
-                            guard N > 0 else { return }
+                            if v.translation == .zero { scrubOff = false }   // a new touch
+                            guard N > 0, pinch == nil, !scrubOff else { return }
                             let f = Double(max(0, min(1, v.location.x / max(1, XW))))
                             let i = min(Int(floor(w.b + 1e-9)), max(Int(ceil(w.a - 1e-9)), Int((w.a + f * (w.b - w.a)).rounded())))
                             if i != si { var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { si = i } }
                         }
                         .onEnded { _ in var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { si = nil } })
+                    // The pinch (Nik 12 Nov 2026): it follows the fingers, sideways the days, up and down the prices.
+                    .gesture(pinchGesture(N: N, XW: XW, H: H, lo: lo, hi: hi, w: w, span: a.hi - a.lo))
                     .position(x: W / 2, y: H / 2)
                     .accessibilityHidden(true)
                 // The last close: a 9 pt dot ringed 2 in the page colour, at today.
@@ -1086,6 +1127,47 @@ private struct TickerLine: View {
                 let now = Date()
                 if now.timeIntervalSince(lastDateTap) < 0.32 { lastDateTap = .distantPast; reset(price: false) } else { lastDateTap = now }
             }
+    }
+
+    /// The pinch at the fingers' spread now: the days scale by how much wider (or narrower) the fingers are apart
+    /// sideways than when it began, the prices by how much further apart up and down; the day and the price between
+    /// the fingers stay put. The same limits as the two drags: one week to the whole range, a sixth to four times the
+    /// auto price span.
+    /// The pinch on the plot: at its start, the day and price between the fingers and which scales it moves (within
+    /// 25° of flat the days only, within 25° of upright the prices only, between them both).
+    private func pinchGesture(N: Int, XW: CGFloat, H: CGFloat, lo: Double, hi: Double, w: Win, span: Double) -> TKPinch {
+        TKPinch(
+            began: { mid, d in
+                let full = Double(max(1, N - 1))
+                let deg = atan2(Double(d.height), Double(d.width)) * 180 / .pi
+                let fa = Double(max(0, min(1, mid.x / max(1, XW))))
+                let pv = hi - Double((mid.y - Self.PT) / max(1, H - Self.PT - Self.PB)) * (hi - lo)
+                pinch = Pinch(d0: d, mx: deg < 65 && d.width > 20 && full > 5, my: deg > 25 && d.height > 20,
+                              a0: w.a, b0: w.b, at: w.a + fa * (w.b - w.a), fa: fa, full: full,
+                              lo0: lo, hi0: hi, pv: min(hi, max(lo, pv)), span: span)
+                scrubOff = true
+                var tx = Transaction(); tx.disablesAnimations = true
+                withTransaction(tx) { si = nil }
+            },
+            changed: { d in pinchTo(d) },
+            ended: { pinch = nil })
+    }
+
+    private func pinchTo(_ d: CGSize) {
+        guard let p = pinch else { return }
+        var tx = Transaction(); tx.disablesAnimations = true
+        withTransaction(tx) {
+            if p.mx {
+                let span = min(p.full, max(min(p.full, 5), (p.b0 - p.a0) * Double(p.d0.width / max(1, d.width))))
+                let st = min(max(0, p.at - p.fa * span), p.full - span)
+                win = span >= p.full - 1e-9 ? nil : Win(a: st, b: st + span)
+            }
+            if p.my {
+                let s0 = p.hi0 - p.lo0, f = min(p.span * 4, max(p.span / 6, s0 * Double(p.d0.height / max(1, d.height)))) / s0
+                vr = Scale(lo: p.pv - (p.pv - p.lo0) * f, hi: p.pv + (p.hi0 - p.pv) * f)
+            }
+            si = nil
+        }
     }
 
     /// Back to auto: a 520 ms ease-out glide (the design's anim), none under Reduce Motion. Auto puts both scales

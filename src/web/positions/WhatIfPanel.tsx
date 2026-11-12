@@ -39,8 +39,15 @@ const cashWords = (c: number) => (c >= 0 ? money(c) + ' in' : 'costs ' + money(c
 const dTx = (v: number) => (Math.round(v) < 0 ? 'short ' : 'long ') + count(v);
 /** A net that is short reads orange. */
 const dCol = (v: number) => (Math.round(v) < 0 ? O : K);
-/** A leg's sub line: "36 · Oct 30 · ×72", or "3,000 shares". */
-const subOf = (l: PLeg) => (l.ty === 'S' ? count(l.q) + ' shares' : fk(l.K) + ' · ' + l.exL + ' · ×' + count(l.q));
+/** A leg's title, strike first (Nik 12 Nov 2026: not "OTM calls" or "Insurance puts" on every strike; the group says
+    why it is held): "110 call · Jan 15", or "Shares". */
+const titleOf = (l: PLeg) => (l.ty === 'S' ? 'Shares' : `${fk(l.K)} ${l.ty === 'C' ? 'call' : 'put'} · ${l.exL}`);
+/** Days left (Nik 12 Nov 2026): "64 days", "1 day", "today". */
+const daysTx = (d: number) => (d <= 0 ? 'today' : d === 1 ? '1 day' : count(d) + ' days');
+/** The count under it: "×9", or "3,000 shares". */
+const subOf = (l: PLeg) => (l.ty === 'S' ? count(l.q) + ' shares' : '×' + count(l.q));
+/** Theta a day, the Every leg table's number: red when it costs, green when it earns, never a minus sign. */
+const thTx = (v: number, mask: (s: string) => string) => 'Θ ' + mask(money(v)) + ' a day';
 
 export function WhatIfPanel(p: Props) {
   const { t, pr, legs, off, trades, nCh, cashC, draft, strikes, expiries, mask } = p;
@@ -57,15 +64,20 @@ export function WhatIfPanel(p: Props) {
   // Income everything sold, calls then puts. Delta is the page's (each leg's today, at today's price); the net counts
   // every leg switched on and every trade switched on, the SD calculator's included.
   const dOf = (l: PLeg) => pr.dL(l, m.S0, m.today);
+  const thOf = (l: PLeg) => (l.ty === 'S' ? 0 : pr.thL(l, m.S0, m.today));
   const tradesOn = pr.trades.filter((l) => trades.find((u) => u.id === l.trade)?.on);
   const dN0 = pr.delta(legs, m.S0, m.today), dN1 = pr.delta([...legs.filter((l) => !off.has(l.k)), ...tradesOn], m.S0, m.today);
   const moved = Math.round(dN1) !== Math.round(dN0);
   const groups = ROLES.map((r) => {
-    const ls = legs.filter((l) => roleOf(l) === r.k).sort((a, b) => +isPut(a) - +isPut(b));
+    // Soonest to expire first (Nik 12 Nov 2026), calls before puts on the same day, then by strike.
+    const ls = legs.filter((l) => roleOf(l) === r.k)
+      .sort((a, b) => (a.ex < b.ex ? -1 : a.ex > b.ex ? 1 : +isPut(a) - +isPut(b) || a.K - b.K));
     const allOff = ls.every((l) => off.has(l.k));
     // Switch all off while any is on; Switch all on once every one is off.
     const toggle = () => ls.forEach((l) => { if (off.has(l.k) === !allOff) return; p.toggleLeg(l.k); });
-    return { k: r.k, h: r.h, ls, allOff, d: ls.reduce((a, l) => a + (off.has(l.k) ? 0 : dOf(l)), 0), toggle };
+    const on = ls.filter((l) => !off.has(l.k));
+    return { k: r.k, h: r.h, ls, allOff, d: on.reduce((a, l) => a + dOf(l), 0), th: on.reduce((a, l) => a + thOf(l), 0),
+      opt: ls.some((l) => l.ty !== 'S'), toggle };
   }).filter((g) => g.ls.length > 0);
   return (
     <div className="g1" style={{ flex: '1 1 340px', minWidth: 0, borderRadius: 24, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -90,7 +102,9 @@ export function WhatIfPanel(p: Props) {
               borderTop: '1px solid rgba(255,255,255,.16)' }}>
               <span className="tnum" style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                 <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600 }}>{g.h}</span>
-                <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: MU }}>{g.allOff ? 'Off' : 'Δ ' + dTx(g.d)}</span>
+                <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: MU }}>
+                  {g.allOff ? 'Off' : <>Δ {dTx(g.d)}{g.opt && <> · <span style={{ color: cl(g.th) }}>{thTx(g.th, mask)}</span></>}</>}
+                </span>
               </span>
               <button type="button" className="bare swp-all" onClick={g.toggle}
                 style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: MU, padding: '6px 0' }}>{g.allOff ? 'Switch all on' : 'Switch all off'}</button>
@@ -98,15 +112,17 @@ export function WhatIfPanel(p: Props) {
             {g.ls.map((l) => {
               // A leg switched off dims to 42% and says what closing it would do: a bought leg brings cash in, buying
               // back a sold one costs. Shares get no SD lines.
-              const o = off.has(l.k), cc = l.value, s = p.sdOf?.(l) ?? null, op = o ? 0.42 : 1, sub = subOf(l);
+              const o = off.has(l.k), cc = l.value, s = p.sdOf?.(l) ?? null, op = o ? 0.42 : 1, sub = subOf(l), ttl = titleOf(l), th = thOf(l), days = daysTx(m.wholeDays(l.ex));
               return (
                 <div key={l.k} className="tnum" style={{ display: 'grid', gridTemplateColumns: '48px minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '10px 0', borderTop: HAIR }}>
-                  <Switch on={!o} label={(o ? 'Switch on ' : 'Switch off ') + l.lb.toLowerCase() + ', ' + sub} onToggle={() => p.toggleLeg(l.k)} />
+                  <Switch on={!o} label={(o ? 'Switch on ' : 'Switch off ') + ttl + ', ' + sub} onToggle={() => p.toggleLeg(l.k)} />
                   <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                     <span style={{ display: 'flex', flexDirection: 'column', opacity: op, transition: 'opacity .2s' }}>
-                      <span style={{ fontSize: 15, lineHeight: '20px' }}>{l.lb}</span>
-                      <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>{sub}</span>
-                      <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>Δ {dTx(dOf(l))}</span>
+                      <span style={{ fontSize: 15, lineHeight: '20px' }}>{ttl}</span>
+                      {/* Count, days left and theta (Nik 12 Nov 2026); a leg's delta is in the Every leg table, and the
+                          net above shows what switching it does. */}
+                      <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>{sub}{l.ty !== 'S' && ' · ' + days}</span>
+                      {l.ty !== 'S' && <span style={{ fontSize: 12, lineHeight: '16px', color: cl(th), whiteSpace: 'nowrap' }}>{thTx(th, mask)}</span>}
                     </span>
                     {o && <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: cl(cc), whiteSpace: 'nowrap' }}>{mask('close · ' + cashWords(cc))}</span>}
                   </span>
