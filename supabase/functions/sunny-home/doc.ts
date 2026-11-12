@@ -20,6 +20,9 @@ type Span = { t: string; b?: boolean; c?: string };
 
 export interface NameDay {
   t: string; shares: number; leaps: number; S0: number; P0: number;
+  /** Open option contracts of every kind: the Your names tile of a name held only in options (book N's sold puts,
+      12 Nov 2026) is sized by the shares they control, else it had no tile at all. */
+  opts?: number;
   weekBase: number | null;                 // the last close before this week's Monday
   ext: number | null;                      // pre-market or after-hours % since the last close (Yahoo)
   today: { sh: number; lp: number; oc: number; ip: number; sc: number; sp: number };   // $ since the last close
@@ -67,6 +70,14 @@ const p1 = (x: number) => { const q = Math.abs(x); return `${Math.round(q * 100)
 const py = (x: number) => `${Math.abs(x).toFixed(2)}%`;
 const col = (x: number) => (x < 0 ? 'red' : 'green');
 const upDown = (x: number) => (x < 0 ? 'down' : 'up');
+/* How big a market move is, in words (Nik, 12 Nov 2026: "Stocks are up 0.09%" read as a rally on a flat day). A day:
+   under 0.15% flat, under 0.5% a little, under 1.5% plain, else sharply; a week: 0.3%, 1% and 3%. */
+type Size = 'flat' | 'little' | 'plain' | 'sharp';
+const sizeOf = (x: number, week = false): Size => {
+  const a = Math.abs(x), [f, l, p] = week ? [0.3, 1, 3] : [0.15, 0.5, 1.5];
+  return a < f ? 'flat' : a < l ? 'little' : a < p ? 'plain' : 'sharp';
+};
+const higher = (x: number) => (x < 0 ? 'lower' : 'higher');
 const hm = (m: number) => { const h = Math.floor(m / 60), mm = m % 60; const hh = h % 12 || 12; return `${hh}:${String(mm).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
 const tm = (t: string | null | undefined) => (t ? hm(Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5))) : '');
 const num = (v: unknown) => (v == null || v === '' || !isFinite(Number(v)) ? null : Number(v));
@@ -137,20 +148,33 @@ const ECON_READ: Record<string, { better: 'up' | 'down'; bands: [number, string,
   card_delinquency:   { better: 'down', bands: [[2.5, 'Few behind', 'good'], [3.5, 'Normal', 'okay'], [Infinity, 'Many behind', 'bad']] },
   debt_service:       { better: 'down', bands: [[10.5, 'Light', 'good'], [12, 'Normal', 'okay'], [Infinity, 'Heavy', 'bad']] },
 };
+/** "195K" → 195000, "4.3%" → 4.3; NaN when it isn't a number. */
+const econNum = (raw: unknown) => {
+  const m = String(raw ?? '').trim().match(/^([+-]?[0-9.]+)\s*([KM%]?)/i);
+  return m ? Number(m[1]) * (m[2].toUpperCase() === 'K' ? 1e3 : m[2].toUpperCase() === 'M' ? 1e6 : 1) : NaN;
+};
+/* A trend only when the last two readings moved the same way (Nik, 12 Nov 2026: claims 195K, 195K, 191K, 200K read
+   "Strong jobs, but getting worse" on one week; "we need to say the trend is changing or needs confirmation"). One
+   reading against the one before it says "worse this week, not yet a trend", coloured by the level, not orange. */
 export function econRead(id: string, card: Row): { read?: string; readTone?: string; trendTone?: string } {
   const rule = ECON_READ[id];
-  const raw = String(card.chart?.points?.at?.(-1)?.value ?? card.value ?? '').trim();
-  const m = raw.match(/^([+-]?[0-9.]+)\s*([KM%]?)/i);
-  if (!rule || !m) return {};
-  const v = Number(m[1]) * (m[2].toUpperCase() === 'K' ? 1e3 : m[2].toUpperCase() === 'M' ? 1e6 : 1);
-  if (!Number.isFinite(v)) return {};
+  const v = econNum(card.chart?.points?.at?.(-1)?.value ?? card.value);
+  if (!rule || !Number.isFinite(v)) return {};
   const [, word, level] = rule.bands.find(([hi]) => v < hi) ?? rule.bands[rule.bands.length - 1];
   const dir = card.arrow === '↗' ? 'up' : card.arrow === '↘' ? 'down' : null;
   const better = dir == null ? null : dir === rule.better;
+  const pts = (card.chart?.points ?? []) as Row[], vs = pts.map((p) => econNum(p.value));
+  const n = vs.length, before = n >= 3 && Number.isFinite(vs[n - 2]) && Number.isFinite(vs[n - 3]) ? Math.sign(vs[n - 2] - vs[n - 3]) : 0;
+  const confirmed = dir != null && before === (dir === 'up' ? 1 : -1);
+  // The reading's own cadence from its labels: quarterly "Q4 2026", weekly "Nov 7" (or "This week"), monthly "Sep".
+  const lbs = pts.map((p) => String(p.label ?? ''));
+  const per = lbs.some((l) => /^Q\d/.test(l)) ? 'this quarter' : lbs.some((l) => /\d|week/i.test(l)) ? 'this week' : 'this month';
+  const plain = level === 'good' ? 'green' : level === 'bad' ? 'red' : 'secondary';
   const read = better == null ? word
+    : !confirmed ? `${word}, ${better ? 'better' : 'worse'} ${per}, not yet a trend`
     : better ? `${word}, ${level === 'bad' ? 'but' : 'and'} getting better`
     : `${word}, ${level === 'bad' ? 'and' : 'but'} getting worse`;
-  const tone = better == null ? (level === 'good' ? 'green' : level === 'bad' ? 'red' : 'secondary')
+  const tone = better == null || !confirmed ? plain
     : better ? (level === 'bad' ? 'orange' : 'green')
     : (level === 'bad' ? 'red' : 'orange');
   return { read, readTone: tone, trendTone: better == null ? 'secondary' : better ? 'green' : 'red' };
@@ -383,8 +407,8 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
   };
   const yourNames = () => {
     if (!held) return null;
-    const pages: Row[] = [heatMap('Your names', names.map((n) => ({ ticker: n.t, name: n.name, move: n.move, weight: ((n.shares + n.leaps * 100) * n.S0) / 1000 })),
-      { kind: 'yourNames', weightBasis: 'weight = (shares + LEAPS × 100) × price ÷ 1000, the tile area' }, wk ? 'Week' : '')];
+    const pages: Row[] = [heatMap('Your names', names.map((n) => ({ ticker: n.t, name: n.name, move: n.move, weight: (((n.shares + n.leaps * 100) || (n.opts ?? 0) * 100) * n.S0) / 1000 })),
+      { kind: 'yourNames', weightBasis: 'weight = (shares + LEAPS × 100) × price ÷ 1000, the tile area; a name held only in options, its contracts × 100' }, wk ? 'Week' : '')];
     const ws = x.watch.map((w) => {
       const m = mk(String(w.ticker)); const cap = num(m?.market_cap);
       const mv = wk ? weekPct(m) : moment === 'pre' && num(m?.pre_change_pct) != null && String(m?.market_state).startsWith('PRE') ? num(m?.pre_change_pct) : num(w.ranges?.d);
@@ -710,32 +734,45 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const follow = fu >= 0 ? nUp >= nDown : nDown >= nUp;
     const word2 = follow === (fu >= 0) ? 'up' : 'down', cnt = word2 === 'up' ? nUp : nDown;
     // No orders line (11 Nov 2026: To do removed).
-    both(() => [sp('Futures are '), sp(fu >= 0 ? 'up' : 'down', true, col(fu)), sp(held ? `, your names ${follow ? 'are' : 'aren’t'}: ${cnt} of ${names.length} are ${word2} before the bell.` : '.')]);
+    const fz = sizeOf(fu);
+    both(() => fz === 'flat'
+      ? [sp('Futures are '), sp('flat', true), sp(held ? `; ${nUp} of ${names.length} of your names are up before the bell.` : '.')]
+      : [sp('Futures are '), sp(fz === 'little' ? `a little ${higher(fu)}` : fz === 'sharp' ? `sharply ${higher(fu)}` : higher(fu), true, col(fu)),
+        sp(held ? `, your names ${follow ? 'are' : 'aren’t'}: ${cnt} of ${names.length} are ${word2} before the bell.` : '.')]);
     if (held) owner.push({ key: 'lede' });
   } else if (moment === 'futures') {
     const asia = ['^N225', '^HSI', '000001.SS'].map((s) => num(mk(s)?.regular_change_pct)).filter((v) => v != null) as number[];
     const a = asia.length ? asia.reduce((u, v) => u + v, 0) / asia.length : null, dax = mk('^GDAXI');
     const daxOpen = dax && !closedState(String(dax.market_state));
-    both(() => [sp('Futures point '), sp((esPct ?? 0) >= 0 ? 'higher' : 'lower', true, col(esPct ?? 0)), sp(' overnight'),
+    const es = esPct ?? 0, ez = sizeOf(es);
+    both(() => [...(ez === 'flat' ? [sp('Futures are '), sp('flat', true)]
+      : [sp('Futures point '), sp(ez === 'little' ? `a little ${higher(es)}` : ez === 'sharp' ? `sharply ${higher(es)}` : higher(es), true, col(es))]), sp(' overnight'),
       ...(a != null ? [sp(`: Asia ${asia.length && ['^N225', '^HSI', '000001.SS'].every((s) => closedState(String(mk(s)?.market_state))) ? 'closed' : 'is'} ${a >= 0 ? 'higher' : 'lower'}`)] : []),
       ...(daxOpen ? [sp(`, Europe opened ${(num(dax.regular_change_pct) ?? 0) >= 0 ? 'firm' : 'soft'}`)] : []), sp('.'),
       ...(held ? [sp(' Your names trade again at 4:00 AM.')] : [])]);
   } else if (session) {
     const lead = sec(false).sort((u, v) => v.move - u.move)[0], bt = bookToday, m = bt ? mostOf(Math.sign(bt.made) || -1) : null;
-    both((p) => [sp('Stocks are '), sp(upDown(spyDay)), sp(` ${p1(spyDay)}`, true, col(spyDay)), sp(lead ? `, ${short(lead.sector)} leading.` : '.'),
+    const dz = sizeOf(spyDay), leads = lead ? `, ${short(lead.sector)} leading.` : '.';
+    both((p) => [...(dz === 'flat' ? [sp('Stocks are '), sp('flat', true), sp(leads)]
+      : [sp(`Stocks are ${dz === 'little' ? `a little ${higher(spyDay)}, ` : dz === 'sharp' ? `sharply ${higher(spyDay)}, ` : ''}${upDown(spyDay)}`),
+        sp(` ${p1(spyDay)}`, true, col(spyDay)), sp(leads)]),
       ...(bt && held ? [sp(` Your book is ${upDown(bt.made)} `), sp(money(bt.made, p), true, col(bt.made)), sp(m ? `, most of it ${m.name}.` : '.')] : []),
       ...(held ? [sp(` ${decLine}`)] : [])]);
   } else if (moment === 'post') {
     const bt = bookToday, m = bt ? mostOf(Math.sign(bt.made) || -1) : null;
     const ah = [...names].filter((n) => n.ext != null && Math.abs(n.ext) >= 1).sort((u, v) => Math.abs(v.ext!) - Math.abs(u.ext!))[0];
     const kind = m ? (Math.abs(m.today.sh) >= Math.abs(m.today.lp) ? 'shares' : 'LEAPS') : '';
-    both((p) => [sp(`Stocks closed ${upDown(spyDay)} `), sp(p1(spyDay), true, col(spyDay)), sp('.'),
+    const cz = sizeOf(spyDay);
+    both((p) => [...(cz === 'flat' ? [sp('Stocks closed '), sp('flat', true), sp('.')]
+      : [sp(`Stocks closed ${cz === 'little' ? `a little ${higher(spyDay)}, ` : cz === 'sharp' ? `sharply ${higher(spyDay)}, ` : ''}${upDown(spyDay)} `), sp(p1(spyDay), true, col(spyDay)), sp('.')]),
       ...(bt && held ? [sp(` Your book ${bt.made < 0 ? 'lost' : 'made'} `), sp(money(bt.made, p), true, col(bt.made)), sp(m ? `, most of it ${m.name}’s ${kind}.` : '.')] : []),
       ...(ah ? [sp(` ${ah.name} is ${upDown(ah.ext!)} ${p1(ah.ext!)} after hours.`)] : [])]);
   } else {
     const r = resultsWeek(), spw = weekPct(spy) ?? 0, sells = x.orders.filter((o) => o.kind === 'sell' || o.kind === 'put').length;
     const ss = sec(true).sort((u, v) => v.move - u.move), on = spw >= 0 ? ss[0] : ss[ss.length - 1];
-    const mkt = `Stocks ${spw >= 0 ? 'rose' : 'fell'}${on && Math.sign(on.move) === Math.sign(spw) ? ` on ${short(on.sector)}` : ''}`;
+    const wz = sizeOf(spw, true), rf = spw >= 0 ? 'rose' : 'fell';
+    const mkt = wz === 'flat' ? 'Stocks were flat on the week'
+      : `Stocks ${wz === 'little' ? `${rf} a little` : wz === 'sharp' ? `${rf} sharply` : rf}${on && Math.sign(on.move) === Math.sign(spw) ? ` on ${short(on.sector)}` : ''}`;
     both((p) => [
       ...(held && r.sold > 0 ? (r.kept >= 0
         ? [sp(`${weekOpen ? 'So far, a' : 'A'} ${py(r.yieldPct)} week: you kept `), sp(p ? `${Math.round((r.kept / r.sold) * 100)}%` : fK(r.kept), true, 'green'), sp(p ? ` of what you ${r.open ? 'closed' : 'sold'}. ` : ` of ${fK(r.sold)} ${r.open ? 'closed' : 'sold'}. `)]

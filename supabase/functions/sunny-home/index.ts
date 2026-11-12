@@ -28,7 +28,7 @@ import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-12.2';
+const BUILD = '2026-11-12.6';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -1212,6 +1212,32 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const kind = `${l.type === 'call' ? 'calls' : 'puts'} ${l.side}`;
     const k = `${l.opened.slice(0, 7)}|${l.ticker}|${kind}`;
     unrealBy.set(k, (unrealBy.get(k) ?? 0) + u);
+  }
+  /* Shares too (Nik, 12 Nov 2026: "Shares don't show anything"): IBKR's shares at its last report, at today's price,
+     less IBKR's cost basis, the Positions numbers. Filed by the month the shares still held were bought (FIFO sells
+     the oldest lots first, so what is held is the newest); shares from before the book's start go in its first month,
+     as the card clamps them. */
+  for (const [t, q] of sharesNow) {
+    const spot = spotOf.get(t) ?? 0;
+    if (!(q > 0) || !(spot > 0)) continue;
+    const U = q * spot - (shareCost.get(t) ?? 0);
+    const own = lots.filter((l) => String(l.ticker).toUpperCase() === t)
+      .sort((a, b) => String(b.acquired_date).localeCompare(String(a.acquired_date)));
+    const byM = new Map<string, number>();
+    let left = q;
+    for (const l of own) {
+      if (left <= 0) break;
+      const n = Math.min(left, Number(l.qty_original ?? 0));
+      if (n <= 0) continue;
+      left -= n;
+      const m = String(l.acquired_date).slice(0, 7);
+      byM.set(m, (byM.get(m) ?? 0) + n);
+    }
+    if (left > 0) byM.set(BOOK_START.slice(0, 7), (byM.get(BOOK_START.slice(0, 7)) ?? 0) + left);
+    for (const [m, n] of byM) {
+      const k = `${m}|${t}|shares`;
+      unrealBy.set(k, (unrealBy.get(k) ?? 0) + (U * n) / q);
+    }
   }
   const performance = {
     realized: [...perfMap].map(([k, v]) => [...k.split('|'), Math.round(v)]),
@@ -3066,9 +3092,13 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         const y = yahooName(t), st = String(y?.market_state ?? '');
         const ext = st.startsWith('PRE') && y?.pre_change_pct != null ? Number(y.pre_change_pct)
           : y?.post_change_pct != null ? Number(y.post_change_pct) : null;
+        // The last close before this week, and only if it is from the week before (a name whose closes stopped,
+        // as NVDA's on Oct 9, has none: 12 Nov 2026).
         const wb = closes.filter((c) => c.ticker === t && String(c.date) < monday).at(-1);
+        const wbOk = wb && String(wb.date) >= addDays(monday, -7) ? wb : null;
         return { t, shares: sharesHeld.get(t) ?? 0, leaps: ls.filter((l) => isLeap(l)).reduce((a, l) => a + l.n, 0),
-          S0: Number(b.S0), P0: Number(b.P0), weekBase: wb ? Number(wb.close_price) : null, ext, today: td,
+          opts: ls.reduce((a, l) => a + l.n, 0),
+          S0: Number(b.S0), P0: Number(b.P0), weekBase: wbOk ? Number(wbOk.close_price) : null, ext, today: td,
           soldCalls: ls.filter((l) => l.side === 'sold' && l.type === 'call').map((l) => ({ K: l.strike, n: l.n, ex: l.expiry })) };
       });
       /* README 9.2: the yield and payback base is the shares at cost plus what the LEAPS and OTM calls cost, as at
