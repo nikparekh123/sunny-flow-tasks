@@ -262,6 +262,74 @@ private struct AlertCard: View {
     }
 }
 
+/// The day card's two lines on the phone's own clock near each bell (Nik, 12 Nov 2026: at 9:30 it still read
+/// "Pre-market · Opens in 1m", the 9:29 Home build's words; "when it's 5 mins and less we do 4 mins and 35 secs").
+/// In the five minutes before the open or the close it counts down in minutes and seconds; once the bell has rung it
+/// says so at once, whatever build is on screen; the rest of the day it shows the build's own words. It ticks every
+/// second only in those minutes, every 15 the rest of the day.
+struct DayCaption: View {
+    let caption: String?
+    let moment: Moment
+    let warn: Bool
+    @Environment(BriefState.self) private var brief
+
+    var body: some View {
+        TimelineView(BellSchedule(cal: brief.calendar)) { _ in
+            let live = Self.live(brief.now(), cal: brief.calendar, caption: caption)
+            let session = live?.0 ?? DayCard.session(caption, moment), sub = live?.1 ?? DayCard.sub(caption, moment)
+            VStack(spacing: 1) {
+                Text(session).sFont(13, .semibold)
+                HStack(spacing: 5) {
+                    if warn || live?.2 == true { Circle().fill(Color(hex: 0xF2A93B)).frame(width: 6, height: 6) }
+                    Text(sub).sFont(12, .medium).monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+            }
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .shadow(color: DayCard.labelShade, radius: 2, y: 0.5)
+        }
+    }
+
+    /// Seconds since midnight in New York, the day and whether it trades, the open and close in seconds.
+    static func bells(_ d: Date, _ cal: [CalendarDay]) -> (s: Int, open: Int, close: Int)? {
+        var c = Calendar(identifier: .gregorian); c.timeZone = MarketClock.ny
+        let x = c.dateComponents([.hour, .minute, .second], from: d), t = MarketClock.ny(d)
+        guard MarketClock.isTradingDay(t.date, weekday: t.weekday, cal) else { return nil }
+        return ((x.hour ?? 0) * 3600 + (x.minute ?? 0) * 60 + (x.second ?? 0), 570 * 60, MarketClock.closeMinutes(t.date, cal) * 60)
+    }
+    /// "4m 35s", or "35s" in the last minute.
+    static func mmss(_ s: Int) -> String { s >= 60 ? "\(s / 60)m \(String(format: "%02d", s % 60))s" : "\(s)s" }
+
+    /// The live lines (session, sub, orange dot), or nil to show the build's words.
+    static func live(_ d: Date, cal: [CalendarDay], caption: String?) -> (String, String, Bool)? {
+        guard let b = bells(d, cal) else { return nil }
+        let cap = (caption ?? "").lowercased()
+        if b.s >= b.open - 300 && b.s < b.open { return ("Pre-market", "Opens in " + mmss(b.open - b.s), true) }
+        // The bell has rung but the words on screen are still the build from before it.
+        if b.s >= b.open && b.s < b.close && cap.hasPrefix("pre-market") { return ("Market hours", "The bell just rang", false) }
+        if b.s >= b.close - 300 && b.s < b.close { return ("Market hours", "Closes in " + mmss(b.close - b.s), true) }
+        if b.s >= b.close && cap.hasPrefix("market hours") { return ("Post-market", "After hours until 8:00 PM", false) }
+        return nil
+    }
+}
+
+/// Every second from 10 s before the last five minutes to a few seconds past each bell; every 15 s otherwise.
+struct BellSchedule: TimelineSchedule {
+    let cal: [CalendarDay]
+    func entries(from start: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        var t = start
+        return AnyIterator {
+            let now = t
+            let near = DayCaption.bells(now, cal).map { b in
+                (b.s >= b.open - 310 && b.s <= b.open + 5) || (b.s >= b.close - 310 && b.s <= b.close + 5)
+            } ?? false
+            t = now.addingTimeInterval(near && mode != .lowFrequency ? 1 : 15)
+            return now
+        }
+    }
+}
+
 struct DayCard: View {
     let moment: Moment
     let caption: String?
@@ -316,19 +384,9 @@ struct DayCard: View {
                         .fixedSize()
                         .shadow(color: Self.labelShade, radius: 2, y: 0.5)   // 4.5:1 on any hour's sky (Audit 4)
                         .position(x: min(max(sun.x, 34), g.size.width - 34), y: sun.y - 17)
-                    VStack(spacing: 1) {
-                        Text(Self.session(caption, moment)).sFont(13, .semibold)
-                        HStack(spacing: 5) {
-                            if warn { Circle().fill(Color(hex: 0xF2A93B)).frame(width: 6, height: 6) }
-                            Text(Self.sub(caption, moment)).sFont(12, .medium)
-                                .foregroundStyle(.white.opacity(0.8))
-                        }
-                    }
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .shadow(color: Self.labelShade, radius: 2, y: 0.5)
-                    .frame(width: g.size.width)
-                    .padding(.top, 18)
+                    DayCaption(caption: caption, moment: moment, warn: warn)
+                        .frame(width: g.size.width)
+                        .padding(.top, 18)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))

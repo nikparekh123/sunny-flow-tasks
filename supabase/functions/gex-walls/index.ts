@@ -554,7 +554,9 @@ Deno.serve(async (req) => {
     if (raw.trim()) { try { body = JSON.parse(raw); } catch { return json({ ok: false, error: 'body is not JSON' }, 400); } }
   }
   const days = Math.max(1, Math.min(400, Number(Array.isArray(body.days) ? 45 : body.days ?? 45)));
-  const book = async () => Object.keys((await db('home_snapshot?id=eq.1&select=s:payload->strategies'))[0]?.s ?? {}).sort();
+  // Every book's open names (Nik, 12 Nov 2026: his cousin's NVDA and SPCX had no walls, the list was book S's only).
+  const book = async () => [...new Set((await db('home_snapshot?select=s:payload->strategies') as Row[])
+    .flatMap((r) => Object.keys(r.s ?? {})))].sort();
   try {
     if (body.mode === 'tape' && body.ticker) {
       const t = body.ticker.toUpperCase(), d = body.as_of ?? nyNow().day;
