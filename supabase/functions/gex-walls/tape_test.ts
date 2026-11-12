@@ -1,5 +1,5 @@
 // The tape rules on hand-made prints. Run: deno test supabase/functions/gex-walls/tape_test.ts
-import { aggregate, csvPrints, kindOf, medianSize, side, step } from './tape.ts';
+import { aggregate, aggregateCsv, csvPrints, kindOf, medianSize, Print, side, step } from './tape.ts';
 
 function near(a: number, b: number, tol = 1e-9, msg = '') { if (!(Math.abs(a - b) <= tol)) throw new Error(`${msg} expected ${b}, got ${a}`); }
 function eq(a: unknown, b: unknown, msg = '') { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${msg} expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`); }
@@ -45,4 +45,56 @@ Deno.test('Theta CSV, a line at a time', async () => {
   const body = new Blob([csv]).stream();
   const out = []; for await (const p of csvPrints(body)) out.push(p);
   eq(out, [{ k: 362.5, cp: 'C', price: 13.8, bid: 13.75, ask: 15.2, size: 1, cond: 95 }, { k: 360, cp: 'P', price: 9.1, bid: 9.1, ask: 9.4, size: 3, cond: 18 }]);
+});
+
+// The string parser the byte reader replaced (12 Nov 2026), kept here as the reference: split on commas, quotes off,
+// the line trimmed, Number() on each field.
+function byStrings(csv: string): Print[] {
+  const uq = (x: string | undefined) => (x && x.charCodeAt(0) === 34 ? x.slice(1, -1) : x ?? '');
+  const out: Print[] = [];
+  let head: number[] | null = null;
+  for (const raw of csv.replace(/^﻿/, '').split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const f = line.split(',');
+    if (!head) { const h = f.map(uq); head = ['strike', 'right', 'price', 'bid', 'ask', 'size', 'condition'].map((x) => h.indexOf(x)); continue; }
+    const [iK, iR, iP, iB, iA, iS, iC] = head;
+    out.push({ k: Number(uq(f[iK])), cp: uq(f[iR]) === 'CALL' ? 'C' : 'P', price: Number(uq(f[iP])), bid: Number(uq(f[iB])),
+      ask: Number(uq(f[iA])), size: Number(uq(f[iS])), cond: Number(uq(f[iC])) });
+  }
+  return out;
+}
+
+/** The bytes in pieces of random size, so lines and numbers break across chunks. */
+function pieces(bytes: Uint8Array, seed: number): ReadableStream<Uint8Array> {
+  let at = 0, x = seed;
+  return new ReadableStream({ pull(c) {
+    if (at >= bytes.length) { c.close(); return; }
+    x = (x * 16807) % 2147483647;
+    const n = 1 + (x % 97);
+    c.enqueue(bytes.slice(at, at + n)); at += n;
+  } });
+}
+
+Deno.test('the byte reader reads every print as the string parser did, in any chunking', async () => {
+  const head = '﻿"symbol","expiration","strike","right","trade_timestamp","condition","size","exchange","price","bid","ask"\r\n';
+  const odd = ['', '-', '.5', '5.', '-0', '1e3', ' 7', '+2', '0x10', '1.2.3', '"', '12345678901234567', '0.1', '2.675', '"3.35"', 'abc'];
+  let x = 11;
+  const r = () => (x = (x * 48271) % 2147483647) / 2147483647;
+  const num = (d: number) => r() < 0.08 ? odd[Math.floor(r() * odd.length)] : (r() * 10 ** d).toFixed(Math.floor(r() * 4));
+  let csv = head;
+  for (let i = 0; i < 3000; i++) {
+    const cp = r() < 0.1 ? 'PUT ' : r() < 0.5 ? '"CALL"' : r() < 0.7 ? 'CALL' : '"PUT"';
+    const f = ['"NVDA"', '"2026-11-13"', num(3), cp, '2026-11-12T10:00:00.000', num(2), num(2), '7', num(1), num(1), num(1)];
+    const cut = r() < 0.03 ? f.slice(0, Math.floor(r() * f.length)) : f;
+    csv += (r() < 0.05 ? '\n' : '') + (r() < 0.05 ? '  ' : '') + cut.join(',') + (r() < 0.3 ? '\r\n' : '\n');
+  }
+  csv += '"NVDA","2026-11-13",100.000,"CALL",t,18,3,7,1.10,1.00,1.20';   // no newline at the end
+  const want = byStrings(csv), bytes = new TextEncoder().encode(csv);
+  for (const seed of [1, 2, 3]) {
+    const got: Print[] = []; for await (const p of csvPrints(pieces(bytes, seed))) got.push(p);
+    eq(got.length, want.length, 'prints');
+    for (let i = 0; i < want.length; i++) if (!Object.is(JSON.stringify(got[i]), JSON.stringify(want[i])) || !Object.is(got[i].k, want[i].k)) eq(got[i], want[i], `print ${i}`);
+    eq(await aggregateCsv(pieces(bytes, seed), [10, 900]), aggregate(want, [10, 900]), 'tally');
+  }
 });

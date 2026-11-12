@@ -103,31 +103,113 @@ export function medianSize(sizes: Record<string, number>): number | null {
 /** Parse Theta's trade_quote CSV, a chunk of lines at a time (TSLA's weekly is about 40,000 prints a day, its
     next-day expiry several times that). Only the seven fields used are read; quotes come off them alone. */
 export async function* csvPrints(body: ReadableStream<Uint8Array>): AsyncGenerator<Print> {
-  const chunks = body.pipeThrough(new TextDecoderStream());
-  const uq = (x: string | undefined) => (x && x.charCodeAt(0) === 34 ? x.slice(1, -1) : x ?? '');
-  let rest = '', head = false;
-  let iK = -1, iR = -1, iP = -1, iB = -1, iA = -1, iS = -1, iC = -1;
-  for await (const chunk of chunks) {
-    const lines = (rest + chunk).split('\n');
-    rest = lines.pop() ?? '';
-    for (const raw of lines) {
-      const line = raw.trim();
-      if (!line) continue;
-      const f = line.split(',');
-      if (!head) {
-        const h = f.map(uq); head = true;
-        iK = h.indexOf('strike'); iR = h.indexOf('right'); iP = h.indexOf('price'); iB = h.indexOf('bid');
-        iA = h.indexOf('ask'); iS = h.indexOf('size'); iC = h.indexOf('condition');
-        continue;
-      }
-      yield { k: Number(uq(f[iK])), cp: uq(f[iR]) === 'CALL' ? 'C' : 'P', price: Number(uq(f[iP])), bid: Number(uq(f[iB])),
-              ask: Number(uq(f[iA])), size: Number(uq(f[iS])), cond: Number(uq(f[iC])) };
-    }
+  const r = new CsvReader();
+  let out: Print[] = [];
+  const keep = (p: Print) => { out.push({ ...p }); };
+  for await (const chunk of body) {
+    r.push(chunk, keep);
+    if (out.length) { yield* out; out = []; }
   }
-  if (rest.trim() && head) {
-    const f = rest.trim().split(',');
-    yield { k: Number(uq(f[iK])), cp: uq(f[iR]) === 'CALL' ? 'C' : 'P', price: Number(uq(f[iP])), bid: Number(uq(f[iB])),
-            ask: Number(uq(f[iA])), size: Number(uq(f[iS])), cond: Number(uq(f[iC])) };
+  r.end(keep);
+  yield* out;
+}
+
+/** One expiry's day straight from Theta's CSV into the tally, with no print kept and no async step per print.
+    NVDA's next-day weekly on 12 Nov 2026 was 673,329 prints: the string parser spent about 1.9 s of the worker's
+    2 s CPU on it (546 WORKER_RESOURCE_LIMIT, "CPU Time exceeded"); this reads the bytes in place, about 3x less. */
+export async function aggregateCsv(body: ReadableStream<Uint8Array>, band?: [number, number]) {
+  const a = new Tally(band), r = new CsvReader(), add = (p: Print) => a.add(p);
+  for await (const chunk of body) r.push(chunk, add);
+  r.end(add);
+  return a.result();
+}
+
+const POW10 = Array.from({ length: 23 }, (_, i) => 10 ** i);
+const utf8 = new TextDecoder();
+const space = (c: number) => c === 32 || (c >= 9 && c <= 13);
+
+/** Theta's CSV read as bytes, a line at a time, each print handed to `emit` in one reused object (copy it to
+    keep it). It reads every print exactly as the string parser did (split on commas, quotes stripped, the line
+    trimmed, Number() on each field): a plain decimal is its digits over a power of ten, one rounding, which is
+    the double Number() gives; anything else goes through Number() itself. */
+export class CsvReader {
+  private rest: Uint8Array | null = null;
+  private first = true;
+  private head = false;
+  private iK = -1; private iR = -1; private iP = -1; private iB = -1; private iA = -1; private iS = -1; private iC = -1;
+  private cuts = new Int32Array(256);
+  private p: Print = { k: 0, cp: 'P', price: 0, bid: 0, ask: 0, size: 0, cond: 0 };
+
+  push(chunk: Uint8Array, emit: (p: Print) => void) {
+    let b = chunk, s = 0;
+    // The byte-order mark the text decoder used to drop.
+    if (this.first && chunk.length) { this.first = false; if (chunk.length >= 3 && chunk[0] === 0xef && chunk[1] === 0xbb && chunk[2] === 0xbf) s = 3; }
+    if (this.rest) {
+      const r = this.rest;
+      b = new Uint8Array(r.length + chunk.length - s); b.set(r); b.set(chunk.subarray(s), r.length);
+      s = 0; this.rest = null;
+    }
+    const cuts = this.cuts;
+    let n = 0, ls = s;
+    for (let i = s, len = b.length; i < len; i++) {
+      const c = b[i];
+      if (c === 44) { if (n < 256) cuts[n++] = i; } else if (c === 10) { this.line(b, ls, i, n, emit); ls = i + 1; n = 0; }
+    }
+    if (ls < b.length) this.rest = b.slice(ls);
+  }
+
+  end(emit: (p: Print) => void) {
+    const r = this.rest;
+    this.rest = null;
+    if (!r || !this.head) return;
+    let n = 0;
+    for (let i = 0; i < r.length; i++) if (r[i] === 44 && n < 256) this.cuts[n++] = i;
+    this.line(r, 0, r.length, n, emit);
+  }
+
+  /** One line, b[s, e), its commas at cuts[0, n). The first line with anything on it is the header. */
+  private line(b: Uint8Array, s: number, e: number, n: number, emit: (p: Print) => void) {
+    while (s < e && space(b[s])) s++;
+    while (e > s && space(b[e - 1])) e--;
+    if (s >= e) return;
+    if (!this.head) {
+      const h = utf8.decode(b.subarray(s, e)).split(',').map((x) => (x && x.charCodeAt(0) === 34 ? x.slice(1, -1) : x));
+      this.head = true;
+      this.iK = h.indexOf('strike'); this.iR = h.indexOf('right'); this.iP = h.indexOf('price'); this.iB = h.indexOf('bid');
+      this.iA = h.indexOf('ask'); this.iS = h.indexOf('size'); this.iC = h.indexOf('condition');
+      return;
+    }
+    const p = this.p;
+    p.k = this.num(b, s, e, n, this.iK); p.cp = this.isCall(b, s, e, n, this.iR) ? 'C' : 'P';
+    p.price = this.num(b, s, e, n, this.iP); p.bid = this.num(b, s, e, n, this.iB); p.ask = this.num(b, s, e, n, this.iA);
+    p.size = this.num(b, s, e, n, this.iS); p.cond = this.num(b, s, e, n, this.iC);
+    emit(p);
+  }
+
+  // Field i of the line is b[s, e): after comma i - 1 (or the line start) up to comma i (or the line end), quotes
+  // off. A missing field is empty.
+  private isCall(b: Uint8Array, ls: number, le: number, n: number, i: number): boolean {
+    if (i < 0 || i > n) return false;
+    let s = i === 0 ? ls : this.cuts[i - 1] + 1, e = i < n ? this.cuts[i] : le;
+    if (s < e && b[s] === 34) { s++; e--; }
+    return e - s === 4 && b[s] === 67 && b[s + 1] === 65 && b[s + 2] === 76 && b[s + 3] === 76;
+  }
+
+  private num(b: Uint8Array, ls: number, le: number, n: number, i: number): number {
+    if (i < 0 || i > n) return 0;
+    let s = i === 0 ? ls : this.cuts[i - 1] + 1, e = i < n ? this.cuts[i] : le;
+    if (s < e && b[s] === 34) { s++; e--; }
+    if (s >= e) return 0;
+    let j = s, neg = false, m = 0, d = 0, digits = 0, dot = false;
+    if (b[j] === 45) { neg = true; j++; }
+    for (; j < e; j++) {
+      const c = b[j];
+      if (c >= 48 && c <= 57) { m = m * 10 + (c - 48); digits++; if (dot) d++; } else if (c === 46 && !dot) dot = true;
+      else return Number(utf8.decode(b.subarray(s, e)));
+    }
+    if (!digits || digits > 15) return Number(utf8.decode(b.subarray(s, e)));
+    const v = d ? m / POW10[d] : m;
+    return neg ? -v : v;
   }
 }
 

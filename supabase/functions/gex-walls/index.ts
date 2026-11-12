@@ -19,11 +19,12 @@
  *   monthlies to about six months and the next January, each on its own (`expiry` set).
  * POST { mode: 'backfill', days: ['2026-10-19', ...], tickers? }  the same per-expiry rows for past
  *   sessions, from Theta's history (end-of-day quotes, that day's open interest), priced at 4 PM.
+ * POST { mode: 'prime', ticker }  one step of filling a new name's five past sessions, then today (see prime).
  * An incomplete chain fails loudly: HTTP 422 with every problem named, and nothing is logged.
  */
 import { buildStrikes, Chain, closeMs, Contract, findWalls, IncompleteChain, impliedSpot, isFresh, nearest,
   renderTable, sleeping, solveIv, summaryLine, target, yearsTo, zeroGamma } from './walls.ts';
-import { aggregate, aggregateStream, csvPrints, medianSize, Print, seedOf, step } from './tape.ts';
+import { aggregate, aggregateCsv, medianSize, seedOf, step } from './tape.ts';
 import { Bar, centre, DContract, dealerFlip, dealerStrikes, dealerWalls, DWall, Label, median, netAt, regime, track } from './gamma.ts';
 
 const THETA_URL = Deno.env.get('THETA_URL') ?? '';
@@ -332,7 +333,7 @@ async function tapeDay(ticker: string, day: string, only?: string[]) {
   for (const e of tr.all) {
     const E = e.replaceAll('-', '');
     const body = await thetaCsv(`/v3/option/history/trade_quote?symbol=${ticker}&expiration=${E}&date=${D}`);
-    const agg = body ? await aggregateStream(csvPrints(body), band) : aggregate([], band);
+    const agg = body ? await aggregateCsv(body, band) : aggregate([], band);
     const ois = await theta(`/v3/option/history/open_interest?symbol=${ticker}&expiration=${E}&date=${D}`);
     const oi = new Map<string, number>();
     for (const r of ois) {
@@ -364,26 +365,162 @@ async function tapeDay(ticker: string, day: string, only?: string[]) {
 
 /** The day's tape in parts, two expiries per call, each call its own worker: one call for every expiry ran out of
     compute on TSLA's busiest days (546 WORKER_RESOURCE_LIMIT on 3 and 17 Sep, 26 Oct 2026). Rows are keyed per
-    expiry, so the parts add up to the whole day. */
-async function tapeSplit(ticker: string, day: string) {
+    expiry, so the parts add up to the whole day. `per` expiries a part, `lanes` parts at a time (tape_gamma: one
+    and three, 12 Nov 2026: NVDA's ten expiries one after another took about 225 s of Theta's time, past the 150 s
+    a call may wait for its answer, and its next-day weekly alone is 673,329 prints). */
+async function tapeSplit(ticker: string, day: string, o: { per?: number; lanes?: number } = {}) {
+  const per = o.per ?? 2, lanes = o.lanes ?? 1;
   const listed = (await theta(`/v3/option/list/expirations?symbol=${ticker}`)).map((x) => String(x.expiration)).sort();
   const all = tracked(listed, day).all;
+  const parts: { day: string; expiries: string[] }[] = [];
+  for (let i = 0; i < all.length; i += per) parts.push({ day, expiries: all.slice(i, i + per) });
+  const done = await tapeParts(ticker, parts, lanes);
+  // Added up in expiry order, as when the parts ran one after another.
   let contracts = 0, vol = 0, cls = 0, spot: number | null = null;
-  for (let i = 0; i < all.length; i += 2) {
-    const part = all.slice(i, i + 2);
-    let j: Row = {};
-    for (let a = 0; a < 3; a++) {
-      const r = await fetch(`${SB_URL}/functions/v1/gex-walls`, { method: 'POST',
-        headers: { Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'tape', ticker, as_of: day, expiries: part }) });
-      j = await r.json().catch(() => ({ ok: false, error: `status ${r.status}` }));
-      if (j.ok) break;
-      await new Promise((res) => setTimeout(res, 5000 * (a + 1)));
-    }
-    if (!j.ok) throw new Error(`tape ${ticker} ${day} ${part.join(',')}: ${JSON.stringify(j.error ?? j).slice(0, 200)}`);
+  for (const j of done as Row[]) {
     contracts += Number(j.contracts ?? 0); vol += Number(j.vol ?? 0); cls += Number(j.vol ?? 0) * Number(j.coverage ?? 0); spot = j.spot ?? spot;
   }
-  return { ticker, day, spot, expiries: all, contracts, vol, coverage: vol ? +(cls / vol).toFixed(3) : null, parts: Math.ceil(all.length / 2) };
+  return { ticker, day, spot, expiries: all, contracts, vol, coverage: vol ? +(cls / vol).toFixed(3) : null, parts: parts.length };
+}
+
+const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+const RATE = /Rate limit exceeded for trace.*?Retry after (\d+)\s*ms/i;
+
+/** This function again, as its own request (its own worker, as a rule), up to `tries` times, 5, 10 then 15 s apart.
+    Supabase allows one request's calls to its functions 30 a minute (all nested calls share the trace, since March
+    2026); a call over that fails with "Rate limit exceeded for trace ... Retry after N ms", which is waited out and
+    not counted as a try (12 Nov 2026: priming NVDA's five sessions, 50 tape parts, hit it). */
+async function selfCall(body: Row, tries = 3): Promise<Row> {
+  let j: Row = {};
+  for (let a = 0, waits = 0; a < tries; a++) {
+    try {
+      const r = await fetch(`${SB_URL}/functions/v1/gex-walls`, { method: 'POST',
+        headers: { Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const text = await r.text();
+      try { j = JSON.parse(text); } catch { j = { ok: false, error: `status ${r.status}: ${text.slice(0, 200)}` }; }
+    } catch (e) {
+      j = { ok: false, error: String((e as Error)?.message ?? e) };
+    }
+    if (j.ok) break;
+    const m = RATE.exec(typeof j.error === 'string' ? j.error : JSON.stringify(j));
+    if (m && waits++ < 5) { await sleep(Number(m[1]) + 1000); a--; continue; }
+    await sleep(5000 * (a + 1));
+  }
+  return j;
+}
+
+/** Tape parts (a session and its expiries) through self-calls, `lanes` at a time, started at least 2.1 s apart
+    (under the 30 a minute above). No part starts after `until` (epoch ms); a part not started is left undefined.
+    The first part to fail three times fails the lot. */
+async function tapeParts(ticker: string, parts: { day: string; expiries: string[] }[], lanes: number, until = Infinity) {
+  const done: (Row | undefined)[] = new Array(parts.length);
+  let next = 0, failed = false, startAt = 0;
+  const lane = async () => {
+    while (!failed && next < parts.length && Date.now() < until) {
+      const wait = startAt - Date.now();
+      startAt = Math.max(Date.now(), startAt) + 2100;
+      if (wait > 0) { await sleep(wait); if (failed || next >= parts.length || Date.now() >= until) break; }
+      const i = next++, { day, expiries } = parts[i];
+      const j = await selfCall({ mode: 'tape', ticker, as_of: day, expiries });
+      if (!j.ok) { failed = true; throw new Error(`tape ${ticker} ${day} ${expiries.join(',')}: ${JSON.stringify(j.error ?? j).slice(0, 200)}`); }
+      done[i] = j;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(lanes, parts.length)) }, lane));
+  return done;
+}
+
+/** The last n sessions before `day` (weekdays not marked closed in market_calendar), oldest first. */
+async function sessionsBefore(day: string, n: number): Promise<string[]> {
+  const closed = new Set((await db(`market_calendar?kind=eq.closed&date=lt.${day}&date=gte.${addDays(day, -40)}&select=date`)).map((r) => String(r.date)));
+  const out: string[] = [];
+  for (let d = addDays(day, -1); out.length < n; d = addDays(d, -1)) {
+    const wd = new Date(d + 'T12:00:00Z').getUTCDay();
+    if (wd !== 0 && wd !== 6 && !closed.has(d)) out.push(d);
+  }
+  return out.reverse();
+}
+
+/* PRIME A NEW NAME (12 Nov 2026: NVDA and SPCX showed only a Flip on Positions, as each expiry's Ceiling, Floor and
+   Accelerator come from its view five sessions back, and a new name has only today's). The five sessions before
+   today, oldest first, then today again, one bounded step per call; the gamma-prime-held cron calls every 3
+   minutes after the close until the name is done. Each call does the first of these that is not done:
+     1. tape: every tracked expiry of the five sessions (in any order, three at a time; none starts after 80 s).
+     2. gamma: the sessions in order, positions first seeded from the first one's open interest. A pass resumes
+        where the views stop being in order, if the positions stand on the session before; otherwise (none yet,
+        or tonight's close run moved them to today mid-pass) they are dropped and the pass starts again. A session
+        with no tape at all is skipped.
+     3. today: tape_gamma once more, when today's views are older than the last session's (they lack the week).
+   Each step answers within about 150 s; the slow ones stream (patient). */
+async function prime(ticker: string) {
+  const t0 = Date.now(), { day: today } = nyNow(), S = await sessionsBefore(today, 5);
+  const listed = (await theta(`/v3/option/list/expirations?symbol=${ticker}`)).map((x) => String(x.expiration)).sort();
+  const have = await dbAll(`tape_expiry_day?ticker=eq.${ticker}&day=in.(${S.join(',')})&select=day,expiry&order=day,expiry`);
+  const got = new Set(have.map((r) => `${r.day}|${r.expiry}`));
+  const todo = S.flatMap((d) => tracked(listed, d).all.filter((e) => !got.has(`${d}|${e}`)).map((e) => ({ day: d, expiries: [e] })));
+  if (todo.length) {
+    const done = await tapeParts(ticker, todo, 3, t0 + 80_000);
+    const n = done.filter(Boolean).length;
+    return { ticker, sessions: S, step: 'tape', done: n, left: todo.length - n };
+  }
+  const withTape: string[] = [];
+  for (const d of S) if ((await db(`tape_contract_day?ticker=eq.${ticker}&day=eq.${d}&select=day&limit=1`)).length) withTape.push(d);
+  // When each session's views were built (0: none). One pass builds them in order, so the first session whose
+  // views are missing or older than the one before is where the pass resumes, if the positions stand on the
+  // session before it. A finished pass leaves them on the last session, or on today once today has run after it.
+  const builtAt = async (d: string) => Date.parse(String((await db(`gamma_view_day?ticker=eq.${ticker}&day=eq.${d}&view=eq.all&select=built_at`))[0]?.built_at ?? '')) || 0;
+  const built: number[] = [];
+  for (const d of withTape) built.push(await builtAt(d));
+  const todayAt = await builtAt(today), lastAt = built.at(-1) ?? 0;
+  const [p] = await db(`dealer_pos?ticker=eq.${ticker}&select=asof&order=asof.desc&limit=1`);
+  const asof = p ? String(p.asof) : null;
+  let k = built.findIndex((b, i) => !b || (i > 0 && b <= built[i - 1]));
+  if (k < 0 && withTape.length && !(asof === withTape.at(-1) || (asof === today && todayAt > lastAt))) k = 0;
+  if (k > 0 && asof !== withTape[k - 1]) k = 0;
+  if (k >= 0) {
+    if (k === 0) await db(`dealer_pos?ticker=eq.${ticker}`, { method: 'DELETE' });
+    const ran: string[] = [];
+    for (const d of withTape.slice(k)) {
+      if (ran.length && Date.now() - t0 > 60_000) break;
+      const j = await selfCall({ mode: 'gamma', ticker, as_of: d, no_track: true });
+      if (!j.ok) throw new Error(`gamma ${ticker} ${d}: ${JSON.stringify(j.error ?? j.problems ?? j).slice(0, 200)}`);
+      ran.push(d);
+    }
+    return { ticker, sessions: S, step: 'gamma', reseeded: k === 0, ran, left: withTape.length - k - ran.length };
+  }
+  const wd = new Date(today + 'T12:00:00Z').getUTCDay();
+  const session = wd !== 0 && wd !== 6 && !(await db(`market_calendar?date=eq.${today}&kind=eq.closed&select=date`)).length;
+  if (session && withTape.length) {
+    if (!todayAt || todayAt < lastAt) {
+      const j = await selfCall({ mode: 'tape_gamma', ticker }, 1);
+      if (!j.ok) throw new Error(`tape_gamma ${ticker}: ${JSON.stringify(j.error ?? j.problems ?? j).slice(0, 200)}`);
+      return { ticker, sessions: S, step: 'today', live: j.live, gamma: j.gamma };
+    }
+  }
+  return { ticker, sessions: S, step: 'done' };
+}
+
+/** An answer that may take longer than the gateway waits (150 s with nothing sent, then 504 IDLE_TIMEOUT, and the
+    worker is dropped soon after: NVDA's tape_gamma on 12 Nov 2026 never reached its views). Ready within 100 s, it
+    goes as usual. Later, the call is answered 200 at once and kept busy with a space every 20 s (JSON allows
+    leading whitespace) until the answer, an error included, is written at the end. */
+async function patient(work: Promise<Response>, ms = 100_000): Promise<Response> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const first = await Promise.race([work, new Promise<null>((ok) => { timer = setTimeout(() => ok(null), ms); })]);
+  clearTimeout(timer);
+  if (first) return first;
+  const enc = new TextEncoder();
+  let tick: ReturnType<typeof setInterval> | undefined;
+  return new Response(new ReadableStream<Uint8Array>({
+    start(c) {
+      const send = (s: string) => { try { c.enqueue(enc.encode(s)); return true; } catch { clearInterval(tick); return false; } };
+      send(' ');
+      tick = setInterval(() => send(' '), 20_000);
+      work.then((r) => r.text()).catch((e) => JSON.stringify({ ok: false, error: String((e as Error)?.message ?? e) }))
+        .then((text) => { clearInterval(tick); if (send(text)) { try { c.close(); } catch { /* the caller left */ } } });
+    },
+    cancel() { clearInterval(tick); },
+  }), { headers: { 'Content-Type': 'application/json' } });
 }
 
 const sessionsBack = (days: string[], day: string, n: number) => days.filter((d) => d < day).sort().reverse()[n - 1] ?? null;
@@ -541,6 +678,9 @@ async function callerOk(req: Request): Promise<boolean> {
   return r.ok;
 }
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'Content-Type': 'application/json' } });
+const fail = (e: unknown) => e instanceof IncompleteChain ? json({ ok: false, error: 'incomplete chain', problems: e.problems }, 422)
+  : e instanceof ThetaError ? json({ ok: false, error: e.message }, 502)
+  : json({ ok: false, error: String((e as Error).message ?? e) }, 500);
 
 Deno.serve(async (req) => {
   if (!(await callerOk(req))) return json({ ok: false, error: 'not allowed' }, 401);
@@ -570,8 +710,16 @@ Deno.serve(async (req) => {
       if (wd === 0 || wd === 6 || (await db(`market_calendar?date=eq.${day}&kind=eq.closed&select=date`)).length) return json({ ok: true, day, skipped: 'market closed' });
       // Positions move on only from 18:00 New York, once Theta's end of day is complete; earlier runs are live.
       const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' }).format(new Date()));
-      const t = body.ticker.toUpperCase(), a = await tapeSplit(t, day), b = await gammaDay(t, day, hour < 18);
-      return json({ ok: true, day, live: hour < 18, tape: { contracts: a.contracts, coverage: a.coverage }, gamma: b.views });
+      const t = body.ticker.toUpperCase();
+      return await patient((async () => {
+        const a = await tapeSplit(t, day, { per: 1, lanes: 3 }), b = await gammaDay(t, day, hour < 18);
+        return json({ ok: true, day, live: hour < 18, tape: { contracts: a.contracts, coverage: a.coverage }, gamma: b.views });
+      })().catch(fail));
+    }
+    // One step of priming a new name (see prime); the gamma-prime-held cron repeats it until the step is 'done'.
+    if (body.mode === 'prime' && body.ticker) {
+      const t = body.ticker.toUpperCase();
+      return await patient(prime(t).then((r) => json({ ok: true, ...r })).catch(fail));
     }
     // A backfill skips the track record on past days (no_track): only the last day's is read.
     if (body.mode === 'gamma' && body.ticker) return json({ ok: true, ...(await gammaDay(body.ticker.toUpperCase(), body.as_of ?? nyNow().day, !!body.live, !body.no_track, !!body.positions_only)) });
@@ -620,8 +768,6 @@ Deno.serve(async (req) => {
     if (!body.ticker) return json({ ok: false, error: 'ticker, or mode daily or backfill, is required' }, 400);
     return json(await run(body.ticker.toUpperCase(), days, body.expiries, body.target, body.save ?? true, body.as_of));
   } catch (e) {
-    if (e instanceof IncompleteChain) return json({ ok: false, error: 'incomplete chain', problems: e.problems }, 422);
-    if (e instanceof ThetaError) return json({ ok: false, error: e.message }, 502);
-    return json({ ok: false, error: String((e as Error).message ?? e) }, 500);
+    return fail(e);
   }
 });
