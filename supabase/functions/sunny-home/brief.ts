@@ -32,6 +32,9 @@ export interface BriefIn {
   /** IBKR's daily positions (account_positions_daily: report_date, asset_category, underlying, put_call, strike, expiry,
       mark_price), for the Home rail's Today: each option's mark at the base close (handoff 2026-11-12-positions-rail). */
   posDaily?: Row[];
+  /** Today's % move from the live quote (ticker_quotes_live.day_change_pct), for a name with no close from the last
+      session (a name just added, as NVDA on book N, 12 Nov 2026, whose stored closes stopped on Oct 9). */
+  dayPct?: Map<string, number>;
 }
 
 /** The moment, as the app's clock has it (BriefCore Moment.at). `close` is the day's close in minutes: 960, or 780 on
@@ -105,9 +108,13 @@ export function buildBrief(x: BriefIn) {
   // ── Prices: now and the previous close (on a day off, the last session's move) ──
   const lastSession = isTrading(today) ? today : lastTradingOnOrBefore(today);
   const closeOf = new Map<string, number>(), prevOf = new Map<string, number>();
+  // ⚠ The previous close must be the session before the last (12 Nov 2026: NVDA's closes stopped on Oct 9 when it left
+  // the quote list, and its Oct 9 close read as yesterday's, a 28% fall). Older than that: the quote's own day move,
+  // else none (flat) until the evening capture writes the close.
+  const prevSession = lastTradingOnOrBefore(addDays(lastSession, -1));
   for (const c of x.closes) {
     const t = String(c.ticker).toUpperCase(), d = String(c.date), p = Number(c.close_price);
-    if (d < lastSession) prevOf.set(t, p);
+    if (d < lastSession) { if (d >= prevSession) prevOf.set(t, p); else prevOf.delete(t); }
     if (d <= lastSession) closeOf.set(t, p);
   }
 
@@ -126,9 +133,10 @@ export function buildBrief(x: BriefIn) {
     if (r.asset_category === 'OPT') markAt.set(`${u}|${r.put_call}|${Number(r.strike)}|${String(r.expiry)}`, Number(r.mark_price));
     else if (r.asset_category === 'STK') stkAt.set(u, Number(r.mark_price));
   }
+  /** The close on that very session, or none (never an older one: a name whose closes stopped reads stale). */
   const closeAt = (t: string, d: string) => {
     let v: number | undefined;
-    for (const c of x.closes) if (String(c.ticker).toUpperCase() === t && String(c.date) <= d) v = Number(c.close_price);
+    for (const c of x.closes) if (String(c.ticker).toUpperCase() === t && String(c.date) === d) v = Number(c.close_price);
     return v;
   };
 
@@ -223,7 +231,8 @@ export function buildBrief(x: BriefIn) {
     const ls = legsOpen.filter((l) => l.ticker === t);
     const S0 = x.spot.get(t) ?? closeOf.get(t) ?? 0;
     if (!(S0 > 0)) continue;
-    const P0 = prevOf.get(t) ?? S0, ivFound = ivOf(t, S0, ls), noIv = ivFound == null, ivN = ivFound ?? 0, sh = x.shares.get(t) ?? 0;
+    const pct = x.dayPct?.get(t);
+    const P0 = prevOf.get(t) ?? (pct != null && Number.isFinite(pct) ? S0 / (1 + pct / 100) : S0), ivFound = ivOf(t, S0, ls), noIv = ivFound == null, ivN = ivFound ?? 0, sh = x.shares.get(t) ?? 0;
     const legs: Leg[] = [];
     if (sh > 0) { const avg = x.shareAvg.get(t) ?? 0; legs.push({ k: 'sh', kind: 'shares', ty: 'S', K: avg, q: sh, days: 0, iv: 0, ex: '', label: `Shares ${n0(sh)}${avg > 0 ? ` at $${avg.toFixed(2)}` : ''}` }); }
     for (const l of ls) {
@@ -234,8 +243,10 @@ export function buildBrief(x: BriefIn) {
         days: +days.toFixed(4), iv: good(l.iv) ? l.iv! : impliedOf(l, S0) ?? (noIv ? 1e-4 : ivN), ex: l.expiry, label: `${nm} ${fk(l.strike)} ×${l.n}, ${el}`,
         at: l.avg, ...(l.mark != null ? { now: l.mark } : {}),
         ...((): { prev?: number } => {
+          // A leg opened after the base close counts from its fill (R1), even in a book with no IBKR report yet
+          // (book N's first trades, 12 Nov 2026: the model had stood in, from a stale close).
+          if (l.opened > (railBase || railBase0)) return l.avg > 0 ? { prev: l.avg } : {};
           if (!railBase) return {};
-          if (l.opened > railBase) return l.avg > 0 ? { prev: l.avg } : {};
           const m = markAt.get(`${t}|${l.type === 'call' ? 'C' : 'P'}|${Number(l.strike)}|${l.expiry}`);
           return m != null ? { prev: m } : {};
         })() });
@@ -244,7 +255,7 @@ export function buildBrief(x: BriefIn) {
     const divs = divsOf(t), { stops, fri } = stopsFor(ls);
     const nb = new NameBook({ t, S0, P0, iv: ivN, legs, divs, r: RATE, noIv });
     books.push(nb);
-    const Pb = railWeek ? (closeAt(t, railBase0) ?? stkAt.get(t)) : P0;
+    const Pb = railWeek ? (closeAt(t, railBase0) ?? stkAt.get(t) ?? P0) : P0;
     inputs.push({ t, S0, P0, iv: ivN, legs, divs, stops, fridayStop: fri, otm: otmFor(S0), ...(noIv ? { noIv } : {}), ...(Pb ? { Pb } : {}) });
   }
 
