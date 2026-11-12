@@ -162,7 +162,7 @@ export function calc(c: Name, e: Expiry, _o: { c0?: number; p0?: number; atm?: b
 /** The 5-year "won" rates for one expiry length (README 1.7): every start day, a strike k SD out set with that day's
     IV, held the same number of trading days; won = it expired out of the money. `iv` holds each day's IV (saved, or
     HV20 scaled: Nik A1). */
-export function won(closes: number[], iv: (number | null)[], n: number): { n: number; call: (k: number) => number; put: (k: number) => number } {
+export function won(closes: number[], iv: (number | null)[], n: number): { n: number; q: number[]; call: (k: number) => number; put: (k: number) => number } {
   const z: number[] = [], h = Math.max(1, n);
   for (let d = 20; d + h < closes.length; d++) {
     const v = iv[d];
@@ -171,7 +171,101 @@ export function won(closes: number[], iv: (number | null)[], n: number): { n: nu
   }
   z.sort((a, b) => a - b);
   const below = (k: number) => { let lo = 0, hi = z.length; while (lo < hi) { const md = (lo + hi) >> 1; if (z[md] < k) lo = md + 1; else hi = md; } return lo; };
-  return { n: z.length, call: (k) => (z.length ? below(k) / z.length : NaN), put: (k) => (z.length ? 1 - below(-k) / z.length : NaN) };
+  // 401 quantiles of the moves (0%, 0.25% ... 100%), so a client can rebuild the distribution for the sale's chance of
+  // profit (handoff 2026-11-11-sd-whatif-totals 1.9) without the five years of closes.
+  const q = z.length ? Array.from({ length: 401 }, (_, i) => +z[Math.round((i / 400) * (z.length - 1))].toFixed(4)) : [];
+  return { n: z.length, q, call: (k) => (z.length ? below(k) / z.length : NaN), put: (k) => (z.length ? 1 - below(-k) / z.length : NaN) };
+}
+
+/** The share of moves below z, from won()'s 401 quantiles (linear between them); NaN without history. */
+export function cdfOf(q: number[]): (z: number) => number {
+  if (!q.length) return () => NaN;
+  return (z: number) => {
+    if (z <= q[0]) return 0;
+    if (z >= q[q.length - 1]) return 1;
+    let lo = 0, hi = q.length - 1;
+    while (hi - lo > 1) { const md = (lo + hi) >> 1; if (q[md] <= z) lo = md; else hi = md; }
+    const f = q[hi] > q[lo] ? (z - q[lo]) / (q[hi] - q[lo]) : 0;
+    return (lo + f) / (q.length - 1);
+  };
+}
+
+// ── The sale (handoff 2026-11-11-sd-whatif-totals 1.9, SunnySD.dc.html sale()): Held, + New and = Both ─────────────
+/** A held sold leg that ends on or after the chosen expiry: strike, contracts, what was got a share, the years it still
+    has after that expiry (0 when it ends then), and the IV of its own expiry. */
+export interface SaleLeg { put: boolean; K: number; n: number; got: number; t: number; iv: number }
+/** A new sale at the picked strike: contracts and the premium a share. */
+export interface SaleNew { K: number; n: number; pr: number }
+/** One side of a lane: the nearest strike, the breakeven on that side's own premium, and with both sides' premium. */
+export interface SaleSide { K: number; own: number | null; all: number | null }
+export interface SaleLane { cop: number; c: SaleSide | null; p: SaleSide | null; segs: { a: number; b: number; pos: boolean }[]; cr: number[]; prem: number }
+export interface Sale { A: number; B: number; n: SaleLane; h: SaleLane; b: SaleLane }
+
+/** Held, New and Both at the chosen expiry. Only what is sold counts, from what was got for it: a new leg's P&L is its
+    premium less intrinsic; a held leg that ends later is what was got less its Black-Scholes value then. Chance of
+    profit sums the 5-year move distribution (scaled to today's IV) over every price where P&L > 0, ±4.5 SD in 0.02 SD
+    steps; breakevens are every sign change on a 240-step grid, refined by bisection. `m` = IV × √(trading days ÷ 252). */
+export function sale(o: { S: number; m: number; r: number; q: number; cdf: (z: number) => number; held: SaleLeg[]; call: SaleNew | null; put: SaleNew | null }): Sale {
+  const { S, m, r, q, cdf, held } = o;
+  const val = (x: number, l: SaleLeg) => (l.t <= 1e-6 ? Math.max(0, l.put ? l.K - x : x - l.K) : bs(x, l.K, l.t, r, q, l.iv, l.put));
+  const hold = (put: boolean) => (x: number) => held.filter((l) => l.put === put).reduce((v, l) => v + l.n * 100 * (l.got - val(x, l)), 0);
+  const nC = o.call && o.call.n > 0 ? o.call : null, nP = o.put && o.put.n > 0 ? o.put : null;
+  const nCf = (x: number) => (nC ? nC.n * 100 * (nC.pr - Math.max(0, x - nC.K)) : 0);
+  const nPf = (x: number) => (nP ? nP.n * 100 * (nP.pr - Math.max(0, nP.K - x)) : 0);
+  const hCf = hold(false), hPf = hold(true);
+  const SD: Record<'n' | 'h' | 'b', [(x: number) => number, (x: number) => number]> = {
+    n: [nCf, nPf], h: [hCf, hPf], b: [(x) => nCf(x) + hCf(x), (x) => nPf(x) + hPf(x)],
+  };
+  const FN: Record<'n' | 'h' | 'b', (x: number) => number> = {
+    n: (x) => nCf(x) + nPf(x), h: (x) => hCf(x) + hPf(x), b: (x) => nCf(x) + hCf(x) + nPf(x) + hPf(x),
+  };
+  const chance = (f: (x: number) => number) => {
+    let s = (f(S * Math.exp(-4.5 * m)) > 0 ? cdf(-3.99) : 0) + (f(S * Math.exp(4.5 * m)) > 0 ? 1 - cdf(3.99) : 0);
+    for (let i = 0; i < 399; i++) { const z = -3.99 + i * 0.02; if (f(S * Math.exp((z + 0.01) * m)) > 0) s += cdf(z + 0.02) - cdf(z); }
+    return s;
+  };
+  const bis = (f: (x: number) => number, a: number, b: number): number | null => {
+    if (!(f(a) > 0)) return a;
+    if (f(b) > 0) return null;
+    let lo = a, hi = b;
+    for (let i = 0; i < 48; i++) { const md = (lo + hi) / 2; if (f(md) > 0) lo = md; else hi = md; }
+    return (lo + hi) / 2;
+  };
+  const hC = held.filter((l) => !l.put), hP = held.filter((l) => l.put);
+  const KS: Record<'n' | 'h' | 'b', [number[], number[]]> = { n: [nC ? [nC.K] : [], nP ? [nP.K] : []], h: [hC.map((l) => l.K), hP.map((l) => l.K)], b: [[], []] };
+  KS.b = [KS.n[0].concat(KS.h[0]), KS.n[1].concat(KS.h[1])];
+  const hiX = S * Math.exp(6 * m), loX = S * Math.exp(-6 * m);
+  const sides = {} as Record<'n' | 'h' | 'b', { c: SaleSide | null; p: SaleSide | null }>;
+  for (const k of ['n', 'h', 'b'] as const) {
+    const [cf, pf] = SD[k], cK = KS[k][0].length ? Math.min(...KS[k][0]) : null, pK = KS[k][1].length ? Math.max(...KS[k][1]) : null;
+    sides[k] = {
+      c: cK == null ? null : { K: cK, own: bis(cf, cK, hiX), all: pK == null ? null : bis(FN[k], cK, hiX) },
+      p: pK == null ? null : { K: pK, own: bis(pf, pK, loX), all: cK == null ? null : bis(FN[k], pK, loX) },
+    };
+  }
+  // One price scale for the three lanes: ±2 SD at least, and every strike and breakeven (held to ±4 SD), 5% padding.
+  const lim = (v: number) => Math.max(S * Math.exp(-4 * m), Math.min(S * Math.exp(4 * m), v));
+  const pts = [S * Math.exp(-2 * m), S * Math.exp(2 * m)];
+  for (const k of ['n', 'h', 'b'] as const) for (const z of [sides[k].c, sides[k].p]) if (z) for (const v of [z.K, z.own, z.all]) if (v != null) pts.push(lim(v));
+  let A = Math.min(...pts), B = Math.max(...pts);
+  const pd = (B - A) * 0.05; A -= pd; B += pd;
+  const G = 240, xs = Array.from({ length: G + 1 }, (_, i) => A + ((B - A) * i) / G);
+  const lane = (k: 'n' | 'h' | 'b', prem: number): SaleLane => {
+    const f = FN[k], y = xs.map(f), cr: number[] = [];
+    for (let i = 1; i <= G; i++) if ((y[i - 1] > 0) !== (y[i] > 0)) {
+      const rt = y[i - 1] > 0 ? bis(f, xs[i - 1], xs[i]) : bis(f, xs[i], xs[i - 1]);
+      cr.push(rt == null ? (xs[i - 1] + xs[i]) / 2 : rt);
+    }
+    // A crossing within 2 cents of a side's breakeven is that breakeven, so the two read the same.
+    const sv = [sides[k].c, sides[k].p].filter(Boolean).map((z) => (z!.all != null ? z!.all : z!.own)).filter((v): v is number => v != null);
+    cr.forEach((x, j) => { for (const v of sv) if (Math.abs(v - x) < 0.02) cr[j] = v; });
+    const qq = [A, ...cr, B];
+    const segs = qq.slice(1).map((b, i) => ({ a: qq[i], b, pos: f((qq[i] + b) / 2) > 0 }));
+    return { cop: chance(f), c: sides[k].c, p: sides[k].p, segs, cr, prem };
+  };
+  const premN = ((nC ? nC.pr * nC.n : 0) + (nP ? nP.pr * nP.n : 0)) * 100;
+  const premH = held.reduce((a, l) => a + l.n * 100 * l.got, 0);
+  return { A, B, n: lane('n', premN), h: lane('h', premH), b: lane('b', premN + premH) };
 }
 
 /** Cover (README 1.6): shares first, one per 100; then long calls (not LEAPS) that expire on or after the short call,

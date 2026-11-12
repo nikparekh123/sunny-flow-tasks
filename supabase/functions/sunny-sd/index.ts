@@ -18,7 +18,7 @@
  */
 import { calc, cover, CFG, dir, f1, f2, fk, heldPair, ITM, KS, netDelta, pc, row, won, bs as bsQ, type Expiry, type Fx, type Leg, type Name, type Quote, type Row } from '../_shared/sd-engine.ts';
 
-const BUILD = '2026-11-11.3';
+const BUILD = '2026-11-11.4';
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -340,7 +340,8 @@ Deno.serve(async (req) => {
         band: [+(S * Math.exp(-m)).toFixed(4), +(S * Math.exp(m)).toFixed(4)],
         sug: { kc: R.kc, kp: R.kp, mvC: R.mvC, mvP: R.mvP, capC: R.capC, capP: R.capP, C: out(R.C, false), P: out(R.P, true) },
         rows: { c: KS.map((k) => out(row(name, e, k, false), false)), p: KS.map((k) => out(row(name, e, k, true), true)) },
-        sig, hist: { n: H.n, est: histEst } } };
+        // q: the 5-year moves as 401 quantiles, for the sale's chance of profit (handoff sd-whatif-totals 1.9).
+        sig, hist: { n: H.n, est: histEst, q: H.q } } };
     });
     // The earnings card's implied move: the ATM straddle of the first expiry after the report, over the price.
     const first = exps.find((x) => x.e.earnB);
@@ -360,8 +361,12 @@ Deno.serve(async (req) => {
       cfg: { cLo: exps.some((x) => x.R.kc === 0) ? 0 : CFG.cLo, cHi: CFG.cHi, pLo: exps.some((x) => x.R.kp < 0) ? ITM : CFG.pLo, pHi: CFG.pHi },
       counts,
       // The chart lines: what was sold, at the values from when it was sold.
-      sold: [...name.soldCalls.map((l) => ({ put: false, K: l.K, n: l.n, ex: l.ex, be: l.at != null ? +(l.K + l.at).toFixed(4) : null })),
-             ...name.soldPuts.map((l) => ({ put: true, K: l.K, n: l.n, ex: l.ex, be: l.at != null ? +(l.K - l.at).toFixed(4) : null }))],
+      // got (what was got a share) and iv (its own IV) price a held leg that ends after the chosen expiry (sale, 1.9).
+      sold: [...name.soldCalls.map((l) => ({ put: false, K: l.K, n: l.n, ex: l.ex, be: l.at != null ? +(l.K + l.at).toFixed(4) : null, got: l.at, iv: l.iv || null })),
+             ...name.soldPuts.map((l) => ({ put: true, K: l.K, n: l.n, ex: l.ex, be: l.at != null ? +(l.K - l.at).toFixed(4) : null, got: l.at, iv: l.iv || null }))],
+      // How many calls are covered (1.4): shares, and the OTM calls bought with their expiries. r and q price held legs.
+      cover: { shares, otm: name.longCalls.map((l) => ({ ex: l.ex, n: l.n })) },
+      r: +r.toFixed(4), q: +q.toFixed(4),
       exps: exps.map((x) => x.data),
       // What you hold (Nik 11 Nov): each expiry where you have sold calls AND sold puts, as one pair, at the sale prices.
       held: [...new Set(name.soldCalls.map((l) => l.ex))].filter((ex) => name.soldPuts.some((l) => l.ex === ex)).sort().flatMap((ex) => {
