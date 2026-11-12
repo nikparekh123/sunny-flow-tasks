@@ -235,12 +235,19 @@ export function sale(o: { S: number; m: number; r: number; q: number; cdf: (z: n
   const KS: Record<'n' | 'h' | 'b', [number[], number[]]> = { n: [nC ? [nC.K] : [], nP ? [nP.K] : []], h: [hC.map((l) => l.K), hP.map((l) => l.K)], b: [[], []] };
   KS.b = [KS.n[0].concat(KS.h[0]), KS.n[1].concat(KS.h[1])];
   const hiX = S * Math.exp(6 * m), loX = S * Math.exp(-6 * m);
+  // What is sold is one hill in price (every short call and put is concave), so its profit is one stretch: find the top,
+  // then the breakeven above it (calls) and below it (puts). Not from the strike: a held leg that ends after the chosen
+  // expiry still has time value there, so it can already lose at its strike (11 Nov 2026, NKE Nov 13: 39.14, not 40.50).
+  const LX = Array.from({ length: 481 }, (_, i) => S * Math.exp((-6 + (12 * i) / 480) * m));
+  const top = (f: (x: number) => number) => { let bx = LX[0], by = f(bx); for (const x of LX) { const y = f(x); if (y > by) { by = y; bx = x; } } return by > 0 ? bx : null; };
+  const up = (f: (x: number) => number) => { const x = top(f); return x == null ? null : bis(f, x, hiX); };
+  const dn = (f: (x: number) => number) => { const x = top(f); return x == null ? null : bis(f, x, loX); };
   const sides = {} as Record<'n' | 'h' | 'b', { c: SaleSide | null; p: SaleSide | null }>;
   for (const k of ['n', 'h', 'b'] as const) {
     const [cf, pf] = SD[k], cK = KS[k][0].length ? Math.min(...KS[k][0]) : null, pK = KS[k][1].length ? Math.max(...KS[k][1]) : null;
     sides[k] = {
-      c: cK == null ? null : { K: cK, own: bis(cf, cK, hiX), all: pK == null ? null : bis(FN[k], cK, hiX) },
-      p: pK == null ? null : { K: pK, own: bis(pf, pK, loX), all: cK == null ? null : bis(FN[k], pK, loX) },
+      c: cK == null ? null : { K: cK, own: up(cf), all: pK == null ? null : up(FN[k]) },
+      p: pK == null ? null : { K: pK, own: dn(pf), all: cK == null ? null : dn(FN[k]) },
     };
   }
   // One price scale for the three lanes: ±2 SD at least, and every strike and breakeven (held to ±4 SD), 5% padding.

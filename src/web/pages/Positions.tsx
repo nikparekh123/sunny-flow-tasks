@@ -18,13 +18,13 @@ import { useWeb } from '../lib/state';
 import { PayoffChart, ZS, FIT, type Line } from '../positions/PayoffChart';
 import { SdCard } from '../positions/sd/SdCard';
 import { NO_PICK, sdView, type SdPick, type SdReply } from '../positions/sd/model';
-import { Compare, EveryLeg, Lists, PriceDateGrid, type CmpRow, type LegRow } from '../positions/Tables';
+import { Compare, EveryLeg, Lists, PriceDateGrid, type CmpRow, type LegFilter, type LegRow } from '../positions/Tables';
 import { WhatIfPanel } from '../positions/WhatIfPanel';
 import { PosModel, Pricer, expLabel, fk, updn, type GridW, type Inputs, type PLeg, type Seg } from '../positions/model';
 import { closedDays, draftLines, legLines } from '../positions/sd/legs';
 import { useWhatIf, type Draft } from '../positions/whatif';
-import { bookTotals, nameTotals } from '../positions/totals';
-import { TotalsSwitch, TotalsTable, type TView } from '../positions/TotalsTable';
+import { bookTotals, nameTotals, roleOf } from '../positions/totals';
+import { PositionBar } from '../positions/TotalsTable';
 import { DateSeg, Chip, G, HAIR, HAIR_S, K, MU, O, R, PosStyles, cl, kicker } from '../positions/ui';
 
 /** "Fri Nov 6 close" for marks taken at or after the close (or on an earlier day), else "Mon Nov 9 · 11:42 AM ET". */
@@ -60,9 +60,8 @@ export default function Positions() {
   const ahead = useMemo(() => { const i = Math.max(0, order.indexOf(t ?? '')); return [...order.slice(i + 1), ...order.slice(0, i)]; }, [order, t]);
   usePrefetchPositions(book, ahead, !!t);
   const subtitle = book ? `${BOOK_NAME[book]}’s book${payload ? ' · ' + asOf(payload.fresh?.marks) : ''}` : '';
-  // The totals (handoff 2026-11-08-web 2): every name from its own legs, the book their sum, so they always add up.
-  // The view opens on Time value, as the app's does (README state; D5 left open).
-  const [tview, setTview] = useState<TView>('tv');
+  // The position bar (handoff 2026-11-11, 145b): every name from its own legs, the book their sum, so they always add
+  // up. One view; no switch.
   const nt = useMemo(() => nameTotals(payload), [payload]);
   const bt = useMemo(() => bookTotals(nt), [nt]);
   return (
@@ -71,7 +70,6 @@ export default function Positions() {
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '12px 14px' }}>
         <h1 style={{ margin: 0, fontSize: 42, lineHeight: '48px', fontWeight: 700, letterSpacing: '-.03em' }}>Positions</h1>
         <span style={{ fontSize: 15, color: MU }}>{subtitle}</span>
-        {names.length > 0 && <TotalsSwitch view={tview} set={setTview} />}
       </div>
       {payload && !names.length && (
         // An empty book (the agreed lines, as on the phone).
@@ -80,7 +78,7 @@ export default function Positions() {
           <span style={{ fontSize: 13, color: MU }}>Each name you hold shows here once IBKR reports it.</span>
         </div>
       )}
-      {names.length > 0 && <TotalsTable view={tview} setView={setTview} book={bt} name={t ? nt.get(t) ?? null : null} t={t} mask={mask} />}
+      {names.length > 0 && <PositionBar book={bt} name={t ? nt.get(t) ?? null : null} t={t} mask={mask} />}
       {names.length > 0 && <Strip names={names} t={t} go={(x) => nav(`/positions/${x}${loc.search}`)} />}
       {t && book && <Name key={book} book={book} t={t} name={names.find((n) => n.t === t)} payload={payload} />}
     </div>
@@ -150,7 +148,7 @@ function Name({ book, t, name, payload }: { book: 'S' | 'N'; t: string; name: J;
 }
 
 // The page's own state, kept while the page is open and across names (README State: date, zoom, layer, legFilter).
-const pageState = { day: null as string | null, layer: '' as Layer, lf: 'all' as 'all' | 'sold' | 'long' };
+const pageState = { day: null as string | null, layer: '' as Layer, lf: 'all' as LegFilter };
 type Layer = '' | 'walls' | 'tech' | 'sd';
 
 function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy, closed }:
@@ -173,7 +171,7 @@ function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy, clos
   const [layer, setLayerS] = useState(pageState.layer);
   const setLayer = (l: Layer) => { pageState.layer = l; setLayerS(l); };
   const [lf, setLfS] = useState(pageState.lf);
-  const setLf = (f: 'all' | 'sold' | 'long') => { pageState.lf = f; setLfS(f); };
+  const setLf = (f: LegFilter) => { pageState.lf = f; setLfS(f); };
   // The 50-day average lives with the ticker chart's data; asked for only while Technicals is on.
   const chart = useTicker(layer === 'tech' ? t : null, book);
   // The SD calculator (handoff 2026-11-11): asked for only while its layer is on. The pick (expiry, call SD, put SD)
@@ -229,7 +227,8 @@ function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy, clos
   const cols = [segs[0], ...segs.filter((s, i) => i > 0 && s.friday)].slice(0, 7);
 
   // Every leg: today's delta and theta, so far since opened.
-  const fOk = (l: PLeg) => lf === 'all' || (lf === 'sold' ? l.group === 's' : l.group === 'l');
+  // Filtered by Nik's groups (D4): Long the shares, Hedge what was bought, Income what was sold.
+  const fOk = (l: PLeg) => lf === 'all' || roleOf(l) === lf;
   const soFar = (l: PLeg) => (l.ty === 'S' ? l.q * (S0 - l.K) : l.at != null ? (l.now - l.at) * l.q * 100 : 0);
   const legRows: LegRow[] = [
     ...base.filter(fOk).map((l) => ({ l, on: !off.has(l.k), toggle: () => wf.toggleLeg(l.k), added: false, sf: soFar(l), d: pr.dL(l, S0, m.today), th: pr.thL(l, S0, m.today), sd: sdOf(l) })),
@@ -303,7 +302,7 @@ function Detail({ book, t, company, grid, inputs, fridayIso, mask, privacy, clos
           </div>
           {layer === 'sd' && (
             <SdCard v={sdV} t={t} busy={sdQ.isPlaceholderData || (!!sdV && sdV.t !== t)} failed={sdQ.isError || (!!sdData && !sdV)} mask={mask}
-              onTry={(xs) => wf.addMany(xs)} />
+              onTry={(x) => wf.setSd(x)} sdIn={wf.trades.filter((u) => u.src === 'sd')} />
           )}
           <Compare dL={dL} rows={cmpRows} top={top} mask={mask} />
         </div>

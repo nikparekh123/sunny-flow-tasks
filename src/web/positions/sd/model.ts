@@ -1,7 +1,12 @@
-// The SD calculator's numbers on the web (handoff 2026-11-11-sd-calculator, README 1; SunnySD.dc.html `card136`).
-// The server (sunny-sd) does the engine (README 1.4 and 1.5): every expiry's 1 SD, the rows at 0 to 2 SD, the
-// suggestion and the signals. The card only picks: the expiry, a call SD and a put SD, and works out the pair from
-// the rows it was sent, exactly as card136 does.
+// The SD calculator on the web: "What to sell" (handoff 2026-11-11-sd-whatif-totals, README 1; SunnySD.dc.html, `web`).
+// The server (sunny-sd) does the engine: every expiry's 1 SD, the strike rows, the suggestion, the signals, the 5-year
+// move quantiles, what is sold (with what was got for it) and the cover. The card picks an expiry, a call and a put
+// strike and the counts, and works out Held, + New and = Both with the engine's own sale() (README 1.9), here, so the
+// three lanes, the side cards and Try in What if all read the same numbers.
+// No em dashes in any words this file writes (Nik).
+import { cdfOf, sale, type Sale, type SaleLane, type SaleLeg } from '../../../../supabase/functions/_shared/sd-engine.ts';
+import { money, price } from '../../lib/format';
+
 export interface SdRow {
   k: number; K: number; pct: number; kA: number; pr: number; be: number; itm: number;
   est: boolean; liq: boolean; won: number | null;
@@ -16,11 +21,13 @@ export interface SdExp {
   sug: { kc: number; kp: number; mvC: boolean; mvP: boolean; capC: boolean; capP: boolean; C: SdRow; P: SdRow };
   rows: { c: SdRow[]; p: SdRow[] };
   sig: SdSig[];
-  hist: { n: number; est: boolean };
+  /** The 5-year moves over the same trading days: their count, whether the past IV was estimated (HV20 scaled), and
+      401 quantiles in SD units (sd-engine won().q), the distribution the chance of profit sums. */
+  hist: { n: number; est: boolean; q?: number[] };
 }
-export interface SdSold { put: boolean; K: number; n: number; ex: string; be: number | null }
-/** What you hold (Nik 11 Nov): one expiry's sold calls and sold puts as a pair, worked out by the server at the sale
-    prices; tot is the premium taken in, in dollars. */
+/** A sold leg still open: `got` is the premium a share received, `iv` the IV of its own expiry. */
+export interface SdSold { put: boolean; K: number; n: number; ex: string; be: number | null; got?: number | null; iv?: number | null }
+/** What you hold (Nik 11 Nov): one expiry's sold calls and sold puts as a pair, from the server. */
 export interface SdHeld {
   ex: string; label: string; calls: { K: number; n: number }[]; puts: { K: number; n: number }[];
   tot: number; up: number; dn: number; sdUp: number; sdDn: number; cop: number;
@@ -32,20 +39,26 @@ export interface SdReply {
   sold: SdSold[];
   exps: SdExp[];
   held?: SdHeld[];
+  /** The calls a new sale can be covered by: the shares, and the OTM calls bought, by expiry. */
+  cover?: { shares: number; otm: { ex: string; n: number }[] };
+  /** The rate and the dividend yield the held legs are valued on. */
+  r?: number; q?: number;
 }
 
-/** The web card is always dark: pal136(true). */
+/** The web card is always dark: pal136(true), and the lanes' TH(true). */
 export const P = {
-  ink: '#F5F5F7', mu: '#98989D', muT: '#AEAEB2', cd: '#1C1C1E', G: '#65C466', RD: '#FF6961', OR: '#F2A93B',
-  CL: '#6FA0F6', PT: '#D49A5A', tile: 'rgba(118,118,128,.18)', cdMu: 'rgba(0,0,0,.6)',
-  czB: 'rgba(111,160,246,.10)', czB2: 'rgba(111,160,246,.22)', czL: 'rgba(111,160,246,.5)',
-  pzB: 'rgba(212,154,90,.10)', pzB2: 'rgba(212,154,90,.22)', pzL: 'rgba(212,154,90,.5)',
+  ink: '#F5F5F7', mu: '#98989D', muT: '#AEAEB2', cd: '#1C1C1E', bg: '#0B0B0C', G: '#65C466', RD: '#FF6961', OR: '#F2A93B',
+  CL: '#6FA0F6', PT: '#D49A5A', tile: 'rgba(118,118,128,.18)', trk: 'rgba(118,118,128,.24)', rule: 'rgba(255,255,255,.10)',
+  ring: 'rgba(235,235,245,.3)', cdMu: 'rgba(0,0,0,.6)',
+  zG: '#30D158', zR: '#FF453A', gT: '#30D158', rT: '#FF6961', gB: 'rgba(48,209,88,.14)', rB: 'rgba(255,69,58,.16)', nB: 'rgba(118,118,128,.24)',
 } as const;
+/** Stripes: where the sale turns profit into loss, or the other way round. */
+export const STRIPES = 'repeating-linear-gradient(135deg,rgba(0,0,0,.4) 0 3px,transparent 3px 7px)';
 
-/* ── The design's formats (card136) ─────────────────────────────────────── */
+/* ── The design's formats ───────────────────────────────────────────────── */
 /** One decimal, two under 0.1% (from a fraction, no sign). */
 export const pc = (x: number) => { const a = Math.abs(x) * 100; return (a > 0 && a < 0.1 ? a.toFixed(2) : a.toFixed(1)) + '%'; };
-/** ↑ or ↓ and the %: never a minus sign. */
+/** ↑ or ↓ and the %: never a minus sign; the arrow never breaks from its number. */
 export const dir = (x: number) => (x >= 0 ? '↑ ' : '↓ ') + pc(x);
 export const f2 = (x: number) => x.toFixed(2);
 /** A strike as listed: 40, 42.5, 40.85. */
@@ -60,138 +73,98 @@ export const N = (x: number) => {
 };
 const same = (a: number, b: number) => Math.abs(a - b) < 1e-9;
 const steps = (lo: number, hi: number) => { const o: number[] = []; for (let k = lo; k <= hi + 1e-9; k += 0.25) o.push(Math.round(k * 4) / 4); return o; };
-/** "0.5 to 1.25 SD", "ATM to 1 SD" (Nik, D2: the put row's label reads ATM to 1 SD). */
+/** "0.25 to 1.25 SD", "ATM to 1 SD". */
 const range = (lo: number, hi: number) => (lo < 0 ? 'ITM' : lo === 0 ? 'ATM' : String(lo)) + ' to ' + String(hi) + ' SD';
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+/** "10 calls and 5 puts", leaving out a side at 0. */
+const cnt = (c: number, p: number) => [c ? plural(c, 'call', 'calls') : '', p ? plural(p, 'put', 'puts') : ''].filter(Boolean).join(' and ');
+const days = (a: string, b: string) => Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / 864e5);
 
-/* ── What the user picked: the expiry, then a call and a put SD (default: that expiry's suggestion) ── */
-/** nc and np: how many calls and puts to sell now (Nik, 11 Nov 2026), null = the rest of the counts after what is
-    held on that expiry. A new expiry starts them over. */
+/* ── What the user picked ───────────────────────────────────────────────── */
+/** The expiry, a call and a put SD (null: that expiry's suggestion), and how many calls and puts to sell (null: 0,
+    Nik D3). A new expiry puts the strikes back to its suggestion and keeps the counts; a new name starts over. */
 export interface SdPick { t: string; ex: string | null; c: number | null; p: number | null; nc?: number | null; np?: number | null }
 export const NO_PICK: SdPick = { t: '', ex: null, c: null, p: null };
 
-/** The row for a picked SD: the suggestion's (with the strike support or resistance moved it to), else the plain row. */
+/** The row for a picked SD: the suggestion's (with the strike it was moved to), else the plain row. */
 const rowAt = (e: SdExp, k: number, put: boolean): SdRow | undefined => {
   if (same(k, put ? e.sug.kp : e.sug.kc)) return put ? e.sug.P : e.sug.C;
   return (put ? e.rows.p : e.rows.c).find((r) => same(r.k, k));
 };
 
+/** A What if row for Try in What if (the What if's Trade, less its id and switch). */
+export interface SdTrade { side: 's'; ty: 'c' | 'p'; K: number; ex: string; n: number; pr: number; src: 'sd' }
+export interface Tile { key: string; sd: string; strike: string; pr: string; won: string; sug: boolean; on: boolean; go: () => void }
+export interface Side {
+  key: 'c' | 'p'; h: string; c: string; rT: string; o: Tile[];
+  n: number; set: (n: number) => void;
+  /** The line under the count: cover for calls, the cash if assigned for puts; orange when calls are not covered. */
+  hint: string; hc: string;
+}
+/** A run of the head sentence. */
+export interface Run { t: string; w: number; c: string }
+/** A strike pill over a bar (x in % of the price scale). */
+export interface Pill { key: string; xv: number; l: string; c: string; nw: boolean }
+/** A breakeven: the price, `↓ 9.3% · 1.34 SD`, and in Both the change against Held. */
+export interface Be { key: string; xv: number; v: string; s: string; ch: { t: string; c: string } | null }
+export interface Lane {
+  key: 'h' | 'n' | 'b'; name: string; op: string; on: boolean; cop: string; sub: string;
+  ch: { t: string; c: string; bg: string } | null;
+  zones: { key: number; L: number; W: number; c: string }[];
+  diff: { key: number; L: number; W: number }[];
+  pills: Pill[];
+  /** Held's breakevens over the Both bar. */
+  held: Be[];
+  bes: Be[];
+}
+export interface CardLeg { key: string; K: string; pr: string; mv: string }
+export interface CardCol { key: 'h' | 'n'; legs: CardLeg[]; emT: string; be: string; beS: string }
+export interface SideCard {
+  key: 'c' | 'p'; h: string; col: string; cols: [CardCol, CardCol];
+  from: string | null; bV: string; bS: string; ch: { t: string; c: string; bg: string } | null;
+}
 export interface SdView {
-  t: string; S: number; pxT: string; ei: number; e: SdExp;
-  ivT: string; sdP: string; sdD: string;
+  t: string; name: string; S: number; ei: number; e: SdExp;
+  /** `NKE $38.31`, then `Fri Nov 20 · IV 55.9% · 1 SD ±$3.57`. */
+  tt: string; sub: string;
   exps: { key: string; t: string; d: string; on: boolean; isE: boolean; go: () => void }[];
   sig: { key: string; k: string; v: string; vc: string; tag: string; tagc: string; s: string; fx: { key: number; t: string; c: string }[] }[];
-  rng: { key: string; h: string; c: string; rT: string; o: { key: string; sd: string; strike: string; pr: string; won: string; sug: boolean; on: boolean; go: () => void }[] }[];
-  both: { cop: string; prT: string; tot: number; totN: string };
-  /** New's bar; null when both counts are 0. */
-  pz: SdZone | null;
-  /** How many calls and puts to sell now (Nik, 11 Nov 2026), and their setters. */
-  qty: { c: number; p: number; setC: (n: number) => void; setP: (n: number) => void };
-  /** The chance tile's three tabs (Nik 11 Nov): New (the picked call and put on the full counts), What you hold (this
-      expiry's sold calls and puts at their sale prices), Both (what you hold plus the rest of the counts at the
-      picked strikes). Null when the expiry has no held pair: the tile shows New alone. */
-  tabs: PairTab[] | null;
-  /** Try in What if (Nik, 11 Nov 2026): the picked call and put on the rest of the counts (what you hold on this
-      expiry already counts), as What if trades; null when nothing is left to sell on it. */
-  tryIt: { label: string; trades: { side: 's'; ty: 'c' | 'p'; K: number; ex: string; n: number }[] } | null;
-  ladC: LadRow[]; ladP: LadRow[];
-  /** What the payoff chart draws (README 1.9). */
-  chart: {
-    band: [number, number]; C: { K: number; label: string }; P: { K: number; label: string }; sold: { K: number; be: number | null; label: string }[];
-    /** Each held pair's two breakevens (Nik 11 Nov, option 3). */
-    pair: { K: number; label: string }[];
-  };
-}
-/** The profit zone's drawing, in % of its width. */
-export interface SdZone {
-  zL: string; zW: string; mL: string; mW: string; today: string;
-  top: { key: string; x: string; l: string; c: string }[];
-  dist: { key: string; l: string; x: string; L: string; W: string; c: string }[];
-  bot: { key: string; x: string; l: string; s: string }[];
+  /** Sell call, Sell put: the count and its hint, then the strike tiles. */
+  rng: [Side, Side];
+  /** What the sale does (README 1.6 and 1.7). */
+  head: Run[]; gT: string; legend: { key: string; t: string; bg: string; sh: string }[];
+  todayX: number; todayT: string; lanes: Lane[]; cards: SideCard[];
+  /** The raw sale, for checks. */
+  sale: Sale; both: boolean;
+  /** Legs sold that end before the chosen expiry, left out. */
+  gone: string;
+  /** Try in What if: the sale as What if rows, and the caption's words; null with both counts at 0. */
+  tryIt: { trades: SdTrade[]; what: string } | null;
+  foot: string;
 }
 
-/** The profit zone from the lower breakeven (or the put) to the upper (or the call), 12% padding each side; under the
-    bar each breakeven in two lines, `36.54 (BE)` over `4.3% (1.2 SD)` (Nik 11 Nov). */
-function zoneOf(S: number, pK: number | null, cK: number | null, dn: number | null, up: number | null, sdDn: number | null, sdUp: number | null): SdZone {
-  // Today is always on the bar, even when it has moved past a strike or a breakeven. A missing side (a calls-only
-  // or puts-only sale) gets room to match the other, and its end of the bar stays green: no breakeven there.
-  const nums = (xs: (number | null)[]) => xs.filter((x): x is number => x != null);
-  let a0 = Math.min(...nums([dn, pK, S])), b0 = Math.max(...nums([up, cK, S]));
-  if (dn == null && pK == null) a0 = S - Math.max(b0 - S, S * 0.02) * 0.6;
-  if (up == null && cK == null) b0 = S + Math.max(S - a0, S * 0.02) * 0.6;
-  const pad = (b0 - a0) * 0.12, A = a0 - pad, B = b0 + pad;
-  const X2 = (v: number) => ((v - A) / (B - A) * 100).toFixed(2) + '%', W2 = (u: number, v: number) => ((v - u) / (B - A) * 100).toFixed(2) + '%';
-  const zl = dn ?? A, zr = up ?? B, ml = pK ?? A, mr = cK ?? B;
-  return {
-    zL: X2(zl), zW: W2(zl, zr), mL: X2(ml), mW: W2(ml, mr), today: X2(S),
-    top: [...(pK != null ? [{ key: 'p', x: X2(pK), l: 'Put ' + fk(pK), c: P.PT }] : []), ...(cK != null ? [{ key: 'c', x: X2(cK), l: 'Call ' + fk(cK), c: P.CL }] : [])],
-    bot: [
-      ...(dn != null ? [{ key: 'd', x: X2(dn), l: f2(dn) + ' (BE)', s: `${pc(dn / S - 1)} (${(sdDn ?? 0).toFixed(1)} SD)` }] : []),
-      { key: 't', x: X2(S), l: '$' + f2(S), s: 'today' },
-      ...(up != null ? [{ key: 'u', x: X2(up), l: f2(up) + ' (BE)', s: `${pc(up / S - 1)} (${(sdUp ?? 0).toFixed(1)} SD)` }] : []),
-    ],
-    // A side already in the money draws no distance: its line would lie over the other side's.
-    dist: [
-      // With the other side in the money between today and this strike, the label sits between the two strikes.
-      ...(pK != null && pK < S ? [{ key: 'p', l: dir(pK / S - 1), x: X2((pK + (cK != null && cK < S && cK > pK ? cK : S)) / 2), L: X2(pK), W: W2(pK, S), c: P.PT }] : []),
-      ...(cK != null && cK > S ? [{ key: 'c', l: dir(cK / S - 1), x: X2((cK + (pK != null && pK > S && pK < cK ? pK : S)) / 2), L: X2(S), W: W2(S, cK), c: P.CL }] : []),
-    ],
-  };
-}
-const legsOf = (ls: { K: number; n: number }[], one: string, many: string) => ls.map((l) => `${l.n} ${l.n === 1 ? one : many} ${fk(l.K)}`).join(', ');
-
-export interface PairTab { key: 'new' | 'hold' | 'both'; label: string; cop: string; tot: number; lead: string; tail: string; pz: SdZone }
-type PL = { K: number; n: number; at: number };
-/** A pair of sold calls and sold puts on one expiry, any number of strikes (Nik 11 Nov): only one side can end in the
-    money, so all the premium cushions it. The same sums as heldPair in _shared/sd-engine.ts. Null when a side is
-    empty, it never makes money, or the puts' premium covers a fall to zero. */
-export function pairOf(calls: PL[], puts: PL[], S: number, m: number) {
-  if ((!calls.length && !puts.length) || !(S > 0) || !(m > 0)) return null;
-  const all = [...calls, ...puts], T = all.reduce((a, l) => a + l.n * l.at, 0);
-  const pl = (X: number) => T - calls.reduce((a, l) => a + l.n * Math.max(0, X - l.K), 0) - puts.reduce((a, l) => a + l.n * Math.max(0, l.K - X), 0);
-  const top = all.map((l) => l.K).reduce((b, K) => (pl(K) > pl(b) ? K : b));
-  if (!(pl(top) > 0)) return null;
-  const root = (lo: number, hi: number, up: boolean) => {
-    for (let i = 0; i < 200; i++) { const md = (lo + hi) / 2; if ((pl(md) > 0) === up) lo = md; else hi = md; }
-    return (lo + hi) / 2;
-  };
-  let up: number | null = null, dn: number | null = null;
-  if (calls.length) { let hi = top * 2; while (pl(hi) > 0) hi *= 2; up = root(top, hi, true); }
-  if (puts.length) { if (pl(0) > 0) return null; dn = root(0, top, false); }
-  return {
-    up, dn, tot: T * 100,
-    sdUp: up != null ? Math.log(up / S) / m : null, sdDn: dn != null ? Math.log(S / dn) / m : null,
-    cop: (up != null ? N(Math.log(up / S) / m) : 1) - (dn != null ? N(Math.log(dn / S) / m) : 0),
-  };
-}
-export interface LadRow { key: string; sdL: string; K: string; pct: string; prT: string; be: string; itm: string; bg: string; ring: string; rad: string; fw: number; sug: boolean; dc: string }
-
-/** card136, web mode, on the server's reply. */
+/** card136 and SunnySD's sale() and lanes(), web, on the server's reply. */
 export function sdView(d: SdReply, pick: SdPick, set: (p: SdPick) => void): SdView | null {
   if (!d?.ok || !d.exps?.length) return null;
   const mine = pick.t === d.t;
   const ei = Math.max(0, mine && pick.ex ? d.exps.findIndex((x) => x.ex === pick.ex) : 0);
-  const e = d.exps[ei], S = d.S, m = e.m, cfg = d.cfg;
+  const e = d.exps[ei], S = d.S, m = e.m, cfg = d.cfg, exS = e.label;
+  const exL = (iso: string) => d.exps.find((x) => x.ex === iso)?.label ?? (() => { const [, mo, dd] = iso.split('-').map(Number); return `${MON[mo - 1]} ${dd}`; })();
   // A pick outside the rules' range (the reply changed under it) goes back to the suggestion.
   const okC = (k: number | null) => k != null && k >= cfg.cLo - 1e-9 && k <= cfg.cHi + 1e-9;
   const okP = (k: number | null) => k != null && k >= cfg.pLo - 1e-9 && k <= cfg.pHi + 1e-9;
   const samePick = mine && pick.ex === e.ex;
   const selC = samePick && okC(pick.c) ? pick.c! : e.sug.kc, selP = samePick && okP(pick.p) ? pick.p! : e.sug.kp;
   const rc = rowAt(e, selC, false) ?? e.sug.C, rp = rowAt(e, selP, true) ?? e.sug.P;
-  // What you hold on this expiry, from the sold legs (premium = the breakeven's distance from the strike).
-  const sideOf = (put: boolean) => (d.sold ?? []).filter((x) => x.put === put && x.ex === e.ex && x.be != null).map((x) => ({ K: x.K, n: x.n, at: Math.abs(x.be! - x.K) }));
-  const hc = sideOf(false), hp = sideOf(true);
-  const { calls: nC, puts: nP } = d.counts ?? { calls: 0, puts: 0 };
-  const restC = Math.max(0, nC - hc.reduce((a, l) => a + l.n, 0)), restP = Math.max(0, nP - hp.reduce((a, l) => a + l.n, 0));
-  // How many to sell now (Nik, 11 Nov 2026): his count, else the rest of the counts. Only one side can end in the
-  // money, so all the premium cushions it, spread over that side's count.
-  const qC = Math.max(0, Math.round(samePick && pick.nc != null ? pick.nc : restC)), qP = Math.max(0, Math.round(samePick && pick.np != null ? pick.np : restP));
-  const nw = pairOf(qC ? [{ K: rc.K, n: qC, at: rc.pr }] : [], qP ? [{ K: rp.K, n: qP, at: rp.pr }] : [], S, m);
-  const tot = (qC ? rc.pr : 0) + (qP ? rp.pr : 0), cop = nw?.cop ?? 0;
-  const go = (q: Partial<SdPick>) => set({ t: d.t, ex: e.ex, c: selC, p: selP, nc: samePick ? pick.nc : null, np: samePick ? pick.np : null, ...q });
+  // The counts start at 0 (Nik D3) and stay with the name across expiries.
+  const nC = Math.max(0, Math.min(999, Math.round(mine ? pick.nc ?? 0 : 0))), nP = Math.max(0, Math.min(999, Math.round(mine ? pick.np ?? 0 : 0)));
+  const base = { t: d.t, ex: e.ex, c: selC, p: selP, nc: nC, np: nP };
+  const go = (q: Partial<SdPick>) => set({ ...base, ...q });
 
   const exps = d.exps.map((x, i) => ({
     key: x.ex, t: x.label, d: x.cd === 1 ? '1 day' : x.cd + ' days', on: i === ei, isE: !!x.earn,
-    go: () => set({ t: d.t, ex: x.ex, c: null, p: null }),
+    go: () => set({ t: d.t, ex: x.ex, c: null, p: null, nc: nC, np: nP }),
   }));
 
   const FX: Record<string, string> = { c: P.CL, p: P.PT, b: P.ink, x: P.OR, n: P.mu };
@@ -201,83 +174,181 @@ export function sdView(d: SdReply, pick: SdPick, set: (p: SdPick) => void): SdVi
     fx: (g.fx ?? []).map(([k, t], i) => ({ key: i, t, c: FX[k] ?? P.mu })),
   }));
 
-  // A1: the won rates read as estimated (≈) when the history behind them was scaled from HV20.
-  const wonT = (r: SdRow) => (r.won == null ? '' : (e.hist?.est ? '≈ ' : '') + pc(r.won) + ' won');
-  const opts = (put: boolean) => steps(put ? cfg.pLo : cfg.cLo, put ? cfg.pHi : cfg.cHi).map((k) => {
+  // The 5-year moves (README 1.9), scaled to today's IV; a normal curve when the name has no history.
+  const q = e.hist?.q ?? [], cdf = q.length ? cdfOf(q) : N;
+  // "won" (A1): ≈ when the past IV behind it was HV20 scaled.
+  const wonOf = (w: number | null) => (w == null ? '' : (e.hist?.est ? '≈ ' : '') + pc(w) + ' won');
+  const wonK = (K: number, put: boolean) => { const z = Math.log(K / S) / m; return wonOf(put ? 1 - cdf(z) : cdf(z)); };
+
+  // What is sold: Held = sold legs that end on or after the expiry (from what was got for them); earlier ones are left out.
+  const sold = d.sold ?? [];
+  const hl = sold.filter((l) => l.ex >= e.ex && l.got != null && l.n > 0);
+  const held: SaleLeg[] = hl.map((l) => ({ put: l.put, K: l.K, n: l.n, got: l.got!, t: Math.max(0, days(e.ex, l.ex)) / 365, iv: l.iv ?? e.iv }));
+  const R = sale({ S, m, r: d.r ?? 0, q: d.q ?? 0, cdf, held, call: nC ? { K: rc.K, n: nC, pr: rc.pr } : null, put: nP ? { K: rp.K, n: nP, pr: rp.pr } : null });
+  const hCl = hl.filter((l) => !l.put), hPl = hl.filter((l) => l.put);
+  const hC = hCl.reduce((a, l) => a + l.n, 0), hP = hPl.reduce((a, l) => a + l.n, 0);
+  const hasN = nC + nP > 0, hasH = hC + hP > 0, both = hasN && hasH;
+  const gC = sold.filter((l) => !l.put && l.ex < e.ex), gP = sold.filter((l) => l.put && l.ex < e.ex);
+  const gone = gC.length || gP.length
+    ? `${cnt(gC.reduce((a, l) => a + l.n, 0), gP.reduce((a, l) => a + l.n, 0))} end ${[...new Set([...gC, ...gP].map((l) => l.ex))].sort().map(exL).join(' and ')}, before ${exS}, so they are left out.`
+    : '';
+
+  // How many (README 1.4): the cover hint (Nik 11 Nov) and the cash if the puts are assigned.
+  const sh = Math.floor((d.cover?.shares ?? 0) / 100);
+  const heldC = sold.filter((l) => !l.put && l.ex >= e.ex).reduce((a, l) => a + l.n, 0);
+  const otm = (d.cover?.otm ?? []).filter((o) => o.ex >= e.ex).reduce((a, o) => a + o.n, 0);
+  const byS = Math.max(0, sh - heldC), byO = Math.max(0, otm - Math.max(0, heldC - sh)), cov = byS + byO;
+  const parts = (a: number, b: number) => [a ? `${a} by shares` : '', b ? `${b} by OTM calls` : ''].filter(Boolean).join(', ');
+  const callHint = (n: number): [string, string] => {
+    if (!d.cover) return ['', P.mu];
+    if (!n) return [cov ? `Up to ${cov} covered: ${parts(byS, byO)}` : 'Nothing left to cover', P.mu];
+    if (n <= byS) return ['Covered by your shares', P.mu];
+    if (n <= cov) return [`Covered: ${parts(Math.min(n, byS), n - Math.min(n, byS))}`, P.mu];
+    return [`${n - cov} not covered · you can cover ${cov}`, P.OR];
+  };
+  const tiles = (put: boolean): Tile[] => steps(put ? cfg.pLo : cfg.cLo, put ? cfg.pHi : cfg.cHi).map((k) => {
     const r = rowAt(e, k, put), sug = same(k, put ? e.sug.kp : e.sug.kc), on = same(k, put ? selP : selC);
-    return {
-      key: (put ? 'p' : 'c') + k, sd: sdl(k), strike: r ? fk(r.K) : '', pr: r ? '$' + f2(r.pr) : '', won: r ? wonT(r) : '', sug, on,
-      go: () => go(put ? { p: k } : { c: k }),
-    };
+    return { key: (put ? 'p' : 'c') + k, sd: sdl(k), strike: r ? fk(r.K) : '', pr: r ? price(r.pr) : '', won: r ? wonOf(r.won) : '', sug, on, go: () => go(put ? { p: k } : { c: k }) };
   }).filter((o) => o.strike);
-  const rng = [
-    { key: 'c', h: 'Sell call', c: P.CL, rT: range(cfg.cLo, cfg.cHi), o: opts(false) },
-    { key: 'p', h: 'Sell put', c: P.PT, rT: range(cfg.pLo, cfg.pHi), o: opts(true) },
+  const [ch, chc] = callHint(nC);
+  const rng: [Side, Side] = [
+    { key: 'c', h: 'Sell call', c: P.CL, rT: range(cfg.cLo, cfg.cHi), o: tiles(false), n: nC, set: (n) => go({ nc: clampN(n) }), hint: ch, hc: chc },
+    { key: 'p', h: 'Sell put', c: P.PT, rT: range(cfg.pLo, cfg.pHi), o: tiles(true), n: nP, set: (n) => go({ np: clampN(n) }),
+      hint: nP ? `${money(rp.K * 100 * nP)} if assigned at ${fk(rp.K)}` : `${money(rp.K * 100)} a put if assigned`, hc: P.mu },
   ];
 
-  const pz = nw ? zoneOf(S, qP ? rp.K : null, qC ? rc.K : null, nw.dn, nw.up, nw.sdDn, nw.sdUp) : null;
-  // The tabs: What you hold, and Both = what you hold plus the count at the picked strikes.
-  const hold = pairOf(hc, hp, S, m);
-  const mix = hold ? pairOf([...hc, ...(qC ? [{ K: rc.K, n: qC, at: rc.pr }] : [])], [...hp, ...(qP ? [{ K: rp.K, n: qP, at: rp.pr }] : [])], S, m) : null;
-  const restT = [qC ? legsOf([{ K: rc.K, n: qC }], 'call', 'calls') : '', qP ? legsOf([{ K: rp.K, n: qP }], 'put', 'puts') : ''].filter(Boolean).join(' and ');
-  const lowK = (ls: { K: number }[]) => (ls.length ? Math.min(...ls.map((l) => l.K)) : null), highK = (ls: { K: number }[]) => (ls.length ? Math.max(...ls.map((l) => l.K)) : null);
-  const tryTrades = [
-    ...(qC > 0 ? [{ side: 's' as const, ty: 'c' as const, K: rc.K, ex: e.ex, n: qC }] : []),
-    ...(qP > 0 ? [{ side: 's' as const, ty: 'p' as const, K: rp.K, ex: e.ex, n: qP }] : []),
-  ];
-  const newN = [qC ? `${qC} ${qC === 1 ? 'call' : 'calls'}` : '', qP ? `${qP} ${qP === 1 ? 'put' : 'puts'}` : ''].filter(Boolean).join(' and ');
-  const tryIt = tryTrades.length ? {
-    label: 'Sell ' + tryTrades.map((x) => `${x.n} ${e.label} ${fk(x.K)} ${x.ty === 'c' ? (x.n === 1 ? 'call' : 'calls') : (x.n === 1 ? 'put' : 'puts')}`).join(' and '),
-    trades: tryTrades,
-  } : null;
-  const tabs: PairTab[] | null = hold && mix && nw && pz ? [
-    { key: 'new', label: 'New', cop: pc(cop), tot: nw.tot, lead: 'Total', tail: `for ${newN} · $${f2(tot)} a share`, pz },
-    { key: 'hold', label: 'What you hold', cop: pc(hold.cop), tot: hold.tot, lead: 'Taken in', tail: `for ${legsOf(hc, 'call', 'calls')} and ${legsOf(hp, 'put', 'puts')}`,
-      pz: zoneOf(S, highK(hp), lowK(hc), hold.dn, hold.up, hold.sdDn, hold.sdUp) },
-    { key: 'both', label: 'Both', cop: pc(mix.cop), tot: mix.tot, lead: 'In all', tail: restT ? `for what you hold plus ${restT}` : 'for what you hold, nothing new',
-      pz: zoneOf(S, highK(qP ? [...hp, { K: rp.K }] : hp), lowK(qC ? [...hc, { K: rc.K }] : hc), mix.dn, mix.up, mix.sdDn, mix.sdUp) },
-  ] : null;
+  /* ── The lanes (143a): Held, + New, = Both on one price scale ── */
+  const A = R.A, B = R.B, xp = (v: number) => ((v - A) / (B - A)) * 100;
+  const sdv = (x: number) => Math.abs(Math.log(x / S) / m), mvS = (x: number | null) => (x == null ? '' : `${dir(x / S - 1)} · ${f2(sdv(x))} SD`);
+  const sgd = (v: number, put: boolean) => ((put ? -1 : 1) * Math.log(v / S)) / m;
+  const L: Record<'h' | 'n' | 'b', SaleLane> = { h: R.h, n: R.n, b: R.b };
+  // Each side's breakeven is the engine's: with both sides' premium when the lane has both, else that side's own. The
+  // engine searches out from the top of the P&L (11 Nov 2026), so a held leg that ends after the chosen expiry is right.
+  const be = (k: 'h' | 'n' | 'b', put: boolean): number | null => {
+    const z = L[k][put ? 'p' : 'c'];
+    return z ? z.all ?? z.own : null;
+  };
+  // Each crossing tagged by side: profit into loss going up is the call side, loss into profit the put side.
+  const tagged = (k: 'h' | 'n' | 'b') => L[k].cr.map((x, j) => ({ x, put: !(L[k].segs[j]?.pos && !L[k].segs[j + 1]?.pos) }));
+  const dP = R.b.cop - R.h.cop, flat = Math.abs(dP) < 0.0005, ptsT = (Math.abs(dP) * 100).toFixed(1) + ' pts';
+  type Ch = { k: number; t: string; sh?: string; from?: number };
+  const sideCh = (put: boolean): Ch | null => {
+    const bB = be('b', put), bH = be('h', put), bN = be('n', put);
+    if (bB == null) return null;
+    if (!hasN) return { k: 0, t: 'Same as Held until you add calls or puts' };
+    if (!hasH) return { k: 0, t: `Same as New: nothing held for ${exS} or later` };
+    const ref = bH ?? bN, refT = bH != null ? 'Held' : 'New alone';
+    if (ref == null) return { k: 0, t: 'Same as New' };
+    const dd = sgd(bB, put) - sgd(ref, put);
+    if (Math.abs(dd) < 0.005) return { k: 0, t: `Same as ${refT}, ${f2(ref)}`, from: ref };
+    return dd > 0 ? { k: 1, sh: f2(dd) + ' SD further out', t: `${f2(dd)} SD further out than ${refT}`, from: ref }
+      : { k: -1, sh: f2(-dd) + ' SD closer', t: `${f2(-dd)} SD closer than ${refT}`, from: ref };
+  };
+  const chC = sideCh(false), chP = sideCh(true);
+  const tone = (k: number) => (k > 0 ? P.gT : k < 0 ? P.rT : P.muT), toneBg = (k: number) => (k > 0 ? P.gB : k < 0 ? P.rB : P.nB);
 
-  // Every SD: the boxed range the rules allow, the picked row ringed, the suggestion's dot.
-  const zone = (k: number, lo: number, hi: number, on: boolean, put: boolean, flip: boolean) => {
-    const inZ = k >= lo - 1e-9 && k <= hi + 1e-9, zl = put ? P.pzL : P.czL;
-    const sh = (t: boolean, b: boolean) => ['inset 1px 0 0 ' + zl, 'inset -1px 0 0 ' + zl].concat(t ? ['inset 0 1px 0 ' + zl] : [], b ? ['inset 0 -1px 0 ' + zl] : []).join(',');
-    const rd = (a: boolean, b: boolean) => (a && b ? '10px' : a ? '10px 10px 0 0' : b ? '0 0 10px 10px' : '0');
-    const isLo = same(k, lo), isHi = same(k, hi), t = flip ? isHi : isLo, b = flip ? isLo : isHi;
+  const head: Run[] = [];
+  const add = (t: string, w: number, c: string) => head.push({ t, w, c });
+  if (both) {
+    add(`${money(R.n.prem)} more in, chance of profit `, 600, P.ink);
+    add(flat ? 'the same' : `${dP >= 0 ? 'up' : 'down'} ${ptsT}`, 600, flat ? P.ink : dP >= 0 ? P.gT : P.rT);
+    add('. ', 600, P.ink);
+    const xs = ([[false, chC], [true, chP]] as const).filter(([, c]) => c && c.k);
+    if (xs.length) {
+      add('Breakeven: ', 400, P.muT);
+      xs.forEach(([put, c], i) => { add(`${put ? 'puts' : 'calls'} ${/Held$/.test(c!.t) ? c!.sh : c!.t}`, 600, tone(c!.k)); add(i < xs.length - 1 ? ', ' : '.', 400, P.muT); });
+    } else add('The breakevens stay where they are.', 400, P.muT);
+  } else if (hasN) add(`${money(R.n.prem)} in, ${pc(R.n.cop)} chance of profit.`, 600, P.ink);
+  else if (hasH) { add(`What you hold: ${pc(R.h.cop)} chance of profit. `, 600, P.ink); add('Add calls or puts above to see what they change.', 400, P.muT); }
+  else { add(`Nothing sold ends on or after ${exS}. `, 600, P.ink); add('Add calls or puts above.', 400, P.muT); }
+
+  const legend = [
+    { key: 'p', t: 'Profit', bg: P.zG, sh: 'none' }, { key: 'l', t: 'Loss', bg: P.zR, sh: 'none' },
+    ...(both ? [{ key: 'd', t: 'Changed by the sale', bg: `${STRIPES},${P.mu}`, sh: 'none' }] : []),
+    { key: 'h', t: 'Held', bg: P.bg, sh: 'inset 0 0 0 1.5px ' + P.muT }, { key: 'n', t: 'New', bg: P.ink, sh: 'none' },
+  ];
+
+  // Where the sale changes the sign: Held's and Both's crossings split the scale; a piece is striped when the two differ.
+  const posAt = (k: 'h' | 'b', x: number) => L[k].segs.find((s) => x >= s.a && x <= s.b)?.pos ?? false;
+  const diff: Lane['diff'] = [];
+  if (both) {
+    const cuts = [A, ...R.h.cr, ...R.b.cr, B].sort((a, b) => a - b);
+    for (let i = 1; i < cuts.length; i++) {
+      const a = cuts[i - 1], b = cuts[i];
+      if (b - a > 1e-6 && posAt('h', (a + b) / 2) !== posAt('b', (a + b) / 2)) diff.push({ key: diff.length, L: xp(a), W: Math.max(0, xp(b) - xp(a)) });
+    }
+  }
+  // Held's strikes as outlined pills, one per strike and side; New's filled.
+  const merge = (ls: { put: boolean; K: number; n: number }[]) => {
+    const o = new Map<string, { put: boolean; K: number; n: number }>();
+    for (const l of ls) { const k = (l.put ? 'p' : 'c') + l.K, x = o.get(k); if (x) x.n += l.n; else o.set(k, { ...l }); }
+    return [...o.values()];
+  };
+  const pill = (key: string, K: number, n: number, put: boolean, nw: boolean): Pill => ({ key, xv: xp(K), l: `${fk(K)} ×${n}`, c: put ? P.PT : P.CL, nw });
+  const inAx = (K: number) => K > A && K < B;
+  const pillsH = merge(hl).filter((l) => inAx(l.K)).map((l, i) => pill('h' + i, l.K, l.n, l.put, false));
+  const pillsN = [...(nC && inAx(rc.K) ? [pill('nc', rc.K, nC, false, true)] : []), ...(nP && inAx(rp.K) ? [pill('np', rp.K, nP, true, true)] : [])];
+  const beOf = (k: 'h' | 'n' | 'b') => tagged(k).map(({ x, put }, i): Be => {
+    // The change against Held sits under the crossing that is that side's breakeven.
+    const c = put ? chP : chC, show = k === 'b' && both && c && c.k !== 0 && x === be('b', put);
+    return { key: k + i, xv: xp(x), v: f2(x), s: mvS(x), ch: show ? { t: c!.sh!, c: tone(c!.k) } : null };
+  });
+  const lane = (k: 'h' | 'n' | 'b'): Lane => {
+    const isB = k === 'b', on = k === 'h' ? hasH : k === 'n' ? hasN : hasH || hasN;
     return {
-      bg: inZ ? (on ? (put ? P.pzB2 : P.czB2) : (put ? P.pzB : P.czB)) : 'transparent',
-      ring: on ? 'inset 0 0 0 1.5px ' + (put ? P.PT : P.CL) : inZ ? sh(t, b) : 'none',
-      rad: inZ ? rd(t, b) : '10px',
+      key: k, name: isB ? 'Both' : k === 'h' ? 'Held' : 'New', op: k === 'n' ? '+' : isB ? '=' : '', on, cop: pc(L[k].cop),
+      sub: k === 'h' ? (hasH ? `${money(R.h.prem)} got · ${cnt(hC, hP)}` : `Nothing sold ends on or after ${exS}`)
+        : k === 'n' ? (hasN ? `${money(R.n.prem)} · ${cnt(nC, nP)}` : 'Add calls or puts above')
+          : both ? `${money(R.b.prem)} in all` : hasN ? 'Same as New' : hasH ? 'Same as Held' : 'Nothing yet',
+      ch: isB && both ? { t: flat ? 'Same as Held' : `${dP >= 0 ? '↑' : '↓'} ${ptsT} vs Held`, c: flat ? P.muT : dP >= 0 ? P.gT : P.rT, bg: flat ? P.nB : dP >= 0 ? P.gB : P.rB } : null,
+      zones: on ? L[k].segs.map((z, i) => ({ key: i, L: xp(z.a), W: Math.max(0, xp(z.b) - xp(z.a)), c: z.pos ? P.zG : P.zR })) : [],
+      diff: isB ? diff : [],
+      pills: !on || isB ? [] : k === 'h' ? pillsH : pillsN,
+      held: isB && both ? beOf('h') : [],
+      bes: on ? beOf(k) : [],
     };
   };
-  const lad = (put: boolean): LadRow[] => {
-    // The table's rows start at ATM: one strike in the money (k below 0) is a tile only.
-    const lo = Math.max(0, put ? cfg.pLo : cfg.cLo), hi = put ? cfg.pHi : cfg.cHi, Kf = put ? e.sug.P.K : e.sug.C.K;
-    const rows = (put ? e.rows.p : e.rows.c).map((r) => {
-      const sug = same(r.k, put ? e.sug.kp : e.sug.kc), on = same(r.k, put ? selP : selC);
-      return {
-        key: (put ? 'p' : 'c') + r.k, sdL: sdl(r.k), K: fk(r.K) + (sug && Kf !== r.K ? ' → ' + fk(Kf) : ''), pct: dir(r.pct),
-        prT: (r.est ? '≈ ' : '') + f2(r.pr) + (r.liq && !r.est ? ' !' : ''), be: f2(r.be), itm: pc(r.itm),
-        ...zone(r.k, lo, hi, on, put, !put), fw: on ? 700 : 500, sug, dc: put ? P.PT : P.CL,
-      };
-    });
-    // Calls run from 2.0 SD down to ATM, so the price runs top to bottom through the TODAY line.
-    return put ? rows : rows.slice().reverse();
-  };
+
+  // The Calls and Puts cards (README 1.7): Held | New, then = Both · breakeven.
+  const cards: SideCard[] = ([false, true] as const).flatMap((put): SideCard[] => {
+    const nq = put ? nP : nC, r = put ? rp : rc, hs = put ? hPl : hCl, side = put ? 'puts' : 'calls';
+    if (!nq && !hs.length) return [];
+    const c = put ? chP : chC, bB = be('b', put), hb = be('h', put), nb = be('n', put);
+    // No breakeven: past 6 SD, or (a lane that never profits) none at all.
+    const beT = (b: number | null, k: 'h' | 'n' | 'b') => (b != null ? f2(b) : L[k].segs.some((z) => z.pos) ? 'Beyond 6 SD' : 'None');
+    return [{
+      key: put ? 'p' : 'c', h: put ? 'Puts' : 'Calls', col: put ? P.PT : P.CL,
+      cols: [
+        { key: 'h', emT: `No ${side} held for ${exS} or later`, be: beT(hb, 'h'), beS: mvS(hb),
+          legs: hs.map((l, i) => ({ key: 'h' + i, K: `${fk(l.K)} ×${l.n}`, pr: `Got ${price(l.got!)} · ${money(l.got! * l.n * 100)}${l.ex !== e.ex ? ' · ' + exL(l.ex) : ''}`, mv: `${dir(l.K / S - 1)} · ${wonK(l.K, put)}` })) },
+        { key: 'n', emT: `No new ${side} yet`, be: beT(nb, 'n'), beS: mvS(nb),
+          legs: nq ? [{ key: 'n', K: `${fk(r.K)} ×${nq}`, pr: `${price(r.pr)} · ${money(r.pr * nq * 100)}`, mv: `${dir(r.K / S - 1)} · ${wonOf(r.won)}` }] : [] },
+      ],
+      from: c && c.k !== 0 && c.from != null ? f2(c.from) : null, bV: beT(bB, 'b'), bS: mvS(bB),
+      ch: c?.t ? { t: c.t, c: tone(c.k), bg: toneBg(c.k) } : null,
+    }];
+  });
+
+  // Try in What if (README 1.8 and 1.10): the sale as What if rows, at the premium it was priced at.
+  const trades: SdTrade[] = [
+    ...(nC ? [{ side: 's' as const, ty: 'c' as const, K: rc.K, ex: e.ex, n: nC, pr: rc.pr, src: 'sd' as const }] : []),
+    ...(nP ? [{ side: 's' as const, ty: 'p' as const, K: rp.K, ex: e.ex, n: nP, pr: rp.pr, src: 'sd' as const }] : []),
+  ];
+  const what = [nC ? `${plural(nC, 'call', 'calls')} at ${fk(rc.K)}` : '', nP ? `${plural(nP, 'put', 'puts')} at ${fk(rp.K)}` : ''].filter(Boolean).join(' and ');
+  const td = e.td > 0 ? e.td : 1;
 
   return {
-    t: d.t, S, pxT: '$' + f2(S), ei, e,
-    ivT: pc(e.iv), sdP: '±' + pc(m), sdD: '±$' + f2(S * m),
+    t: d.t, name: d.name || d.t, S, ei, e,
+    tt: `${d.t} $${f2(S)}`, sub: `${e.long} · IV ${pc(e.iv)} · 1 SD ±$${f2(S * m)}`,
     exps, sig, rng,
-    both: { cop: nw ? pc(cop) : 'None', prT: '$' + f2(tot), tot: nw?.tot ?? 0, totN: newN || 'nothing to sell' },
-    qty: { c: qC, p: qP, setC: (n: number) => go({ nc: Math.max(0, Math.round(n || 0)) }), setP: (n: number) => go({ np: Math.max(0, Math.round(n || 0)) }) },
-    pz, tabs, tryIt, ladC: lad(false), ladP: lad(true),
-    chart: {
-      band: e.band,
-      C: { K: rc.K, label: `${fk(rc.K)} call · ${e.label}` },
-      P: { K: rp.K, label: `${fk(rp.K)} put · ${e.label}` },
-      sold: (d.sold ?? []).map((s) => ({ K: s.K, be: s.be, label: `Sold ${fk(s.K)} ${s.put ? 'put' : 'call'}` + (s.be != null ? ` · BE ${f2(s.be)}` : '') })),
-      pair: (d.held ?? []).flatMap((h) => [h.dn, h.up].map((K) => ({ K, label: `${h.label} pair · BE ${f2(K)}` }))),
-    },
+    head, gT: `Chance of profit and breakeven by ${exS}`, legend,
+    todayX: xp(S), todayT: `$${f2(S)} today`, lanes: [lane('h'), lane('n'), lane('b')], cards,
+    sale: R, both, gone,
+    tryIt: trades.length ? { trades, what: `${what}, ${exS}` } : null,
+    foot: (q.length
+      ? `Chances from 5 years of ${d.t} moves over the same ${plural(td, 'trading day', 'trading days')}, scaled to today’s IV${e.hist?.est ? ' (the past IV estimated from HV20, so the won rates read ≈)' : ''}.`
+      : `Chances from a normal curve at today’s IV: ${d.t} has no 5-year history yet.`)
+      + ` Held, New and Both count only what is sold, from what you got for it; legs that end before ${exS} are left out.`,
   };
 }
+const clampN = (n: number) => Math.max(0, Math.min(999, Math.round(+n || 0)));

@@ -30,8 +30,10 @@ export interface GridW {
 export interface InputName { t: string; S0: number; P0: number; iv: number; legs: Leg[]; divs: Div[]; otm?: { K: number; ex: string; days: number; label: string } | null; noIv?: boolean }
 export interface Inputs { built_at: string; r: number; names: InputName[] }
 
-/** A What if trade (README State: side, type, strike, expiry, count, on). `ex` is the ISO expiry. */
-export interface Trade { id: number; side: 's' | 'b'; ty: 'c' | 'p'; K: number; ex: string; n: number; on: boolean }
+/** A What if trade (README State: side, type, strike, expiry, count, on). `ex` is the ISO expiry. `src` 'sd': the SD
+    calculator's sale (one at a time, handoff 2026-11-11-sd-whatif-totals 1.10); `pr`: opened at this premium a share
+    instead of the model price. */
+export interface Trade { id: number; side: 's' | 'b'; ty: 'c' | 'p'; K: number; ex: string; n: number; on: boolean; src?: 'sd'; pr?: number }
 
 /** A leg as the page lists it: the design's lb ("Sold calls"), ct ("36 calls · Oct 30"), qt ("Sold 72"). */
 export interface PLeg {
@@ -178,11 +180,17 @@ export class Pricer {
   trades: PLeg[];
   private tnb: NameBook | null = null;
   private tleg = new Map<string, Leg>();
+  /** A trade opened at its own premium (`pr`): its model value now less what it was opened at, added to its P&L. */
+  private edge = new Map<string, number>();
   constructor(m: PosModel, trades: Trade[]) {
     this.m = m;
     const legs: Leg[] = trades.map((u) => this.engineLeg(u));
     if (legs.length) this.tnb = new NameBook({ t: m.t, S0: m.S0, P0: m.P0, iv: m.tradeIv, legs, divs: m.divs, r: m.r });
-    legs.forEach((l) => this.tleg.set(l.k, l));
+    legs.forEach((l, i) => {
+      this.tleg.set(l.k, l);
+      const p = trades[i].pr;
+      if (this.tnb && p != null && p >= 0) this.edge.set(l.k, this.tnb.val(l, m.S0, 0) - l.q * 100 * p);
+    });
     this.trades = trades.map((u, i) => this.pleg(u, legs[i]));
   }
   private engineLeg(u: Trade): Leg {
@@ -191,7 +199,9 @@ export class Pricer {
     return { k: 'u' + u.id, kind, ty, K: u.K, q, days: this.m.daysTo(u.ex), iv: this.m.tradeIv, ex: u.ex, label: '' };
   }
   private pleg(u: Trade, l: Leg): PLeg {
-    const exL = expLabel(u.ex, this.m.wholeDays(u.ex)), mk = this.tnb ? this.tnb.val(l, this.m.S0, 0) / (l.q * 100) : 0;
+    const exL = expLabel(u.ex, this.m.wholeDays(u.ex));
+    // Opened at `pr` when it carries one (the SD calculator's sale, at the premium it was priced at), else the model.
+    const mk = this.edge.has(l.k) ? u.pr! : this.tnb ? this.tnb.val(l, this.m.S0, 0) / (l.q * 100) : 0;
     return { k: l.k, kind: l.kind, ty: l.ty, K: l.K, q: l.q, ex: u.ex, exL, group: l.q < 0 ? 's' : 'l', lb: tradeName(u, exL),
       ct: ctOf(l.ty, l.K, exL), qt: qtOf(l.ty, l.q), at: mk, now: mk, value: l.q * 100 * mk, trade: u.id };
   }
@@ -209,7 +219,7 @@ export class Pricer {
 
   plL(l: PLeg, x: number, d: DPt): number {
     if (l.ty === 'S') return l.q * (x - this.m.S0);
-    if (l.trade != null) { const e = this.tleg.get(l.k); return e && this.tnb ? this.tnb.lpl(e, x, d.tt) : 0; }
+    if (l.trade != null) { const e = this.tleg.get(l.k); return e && this.tnb ? this.tnb.lpl(e, x, d.tt) + (this.edge.get(l.k) ?? 0) : 0; }
     const g = this.gl(l);
     if (g && d.row != null) return this.m.at(g.pl[d.row], x);
     if (g?.pl0 && d.tt === 0) return this.m.at(g.pl0, x);

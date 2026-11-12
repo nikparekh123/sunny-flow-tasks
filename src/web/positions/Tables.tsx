@@ -6,6 +6,7 @@ import { fk, type ChainW, type DPt, type PLeg, type Pricer, type Seg } from './m
 import { HAIR, HAIR_S, K, MU, O, R, Seg as SegCtl, Switch, cl, kicker } from './ui';
 import { LegSdLines } from './sd/LegLines';
 import type { LegLines } from './sd/legs';
+import { roleOf, type Role } from './totals';
 
 const tn = { fontVariantNumeric: 'tabular-nums' } as const;
 const side = (d: number) => (d < 0 ? 'Short ' : 'Long ') + count(d);
@@ -81,14 +82,16 @@ export function PriceDateGrid({ t, pr, set, cols, picked, onPick, chg, mask }:
 /* ── Every leg (52 · 1fr · 140 · 96 · 64 · 64 · 80 · 80 · 76 · 160) ───────── */
 /** `sd`: SD on your positions (139a; Nik D1, 11 Nov 2026: a new column at the right end with the three lines). */
 export interface LegRow { l: PLeg; on: boolean; toggle: () => void; added: boolean; sf: number | null; d: number; th: number; sd?: LegLines | null }
+/** The filter (D4, Nik 11 Nov 2026): All · Long · Hedge · Income, the What if's groups (totals.ts roleOf). */
+export type LegFilter = 'all' | Role;
 export function EveryLeg({ rows, total, filter, setFilter, mask }:
-  { rows: LegRow[]; total: { sf: number; d: number; th: number }; filter: 'all' | 'sold' | 'long'; setFilter: (f: 'all' | 'sold' | 'long') => void; mask: (s: string) => string }) {
+  { rows: LegRow[]; total: { sf: number; d: number; th: number }; filter: LegFilter; setFilter: (f: LegFilter) => void; mask: (s: string) => string }) {
   const cols = '52px minmax(0,1fr) 140px 96px 64px 64px 80px 80px 76px 160px';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 28 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 10 }}>
         <span style={{ fontSize: 17, fontWeight: 600 }}>Every leg</span>
-        <SegCtl label="Legs" items={[['all', 'All'], ['sold', 'Sold'], ['long', 'Long']]} value={filter} onPick={setFilter} />
+        <SegCtl<LegFilter> label="Legs" items={[['all', 'All'], ['long', 'Long'], ['hedge', 'Hedge'], ['income', 'Income']]} value={filter} onPick={setFilter} />
       </div>
       <div style={{ ...tn, display: 'grid', gridTemplateColumns: cols, gap: 10, padding: '10px 0 8px', borderTop: HAIR_S, ...kicker }}>
         <span>On</span><span>Leg</span><span>Contract</span><span>Count</span><span>At</span><span>Now</span><span>So far</span><span>Delta</span><span>Theta a day</span><span />
@@ -127,17 +130,27 @@ export function EveryLeg({ rows, total, filter, setFilter, mask }:
 export function Lists({ t, pr, today, fridayIso }: { t: string; pr: Pricer; today: DPt; fridayIso: string }) {
   const m = pr.m, legs = m.legs;
   const dOf = (ls: PLeg[]) => ls.reduce((a, l) => a + pr.dL(l, m.S0, today), 0);
-  const long = legs.filter((l) => l.group === 'l'), sold = legs.filter((l) => l.group === 's');
-  const kinds = [['shares', 'shares'], ['leaps', 'LEAPS'], ['otm', 'OTM calls'], ['ins', 'puts']].filter(([k]) => long.some((l) => l.kind === k)).map(([, w]) => w);
-  const soldWhat = sold.some((l) => l.ty === 'C') && sold.some((l) => l.ty === 'P') ? 'calls and puts' : sold.some((l) => l.ty === 'P') ? 'puts' : sold.length ? 'calls' : 'calls and puts';
-  const exs = [...new Set(sold.map((l) => l.exL))];
-  const on = exs.length ? ' on ' + (exs.length === 1 ? exs[0] : exs.slice(0, -1).join(', ') + ' and ' + exs[exs.length - 1]) : '';
-  const dl = dOf(long), ds = dOf(sold), dn = dl + ds;
-  const book = [
-    { l: 'Long', s: kinds.join(', '), v: side(dl) + ' Δ', c: dl < 0 ? R : K },
-    { l: 'Sold', s: soldWhat + on, v: sold.length ? side(ds) + ' Δ' : 'None yet', c: sold.length ? (ds < 0 ? R : K) : MU },
-    { l: 'Net today', s: 'what moves with the price', v: side(dn) + ' Δ', c: dn < 0 ? R : K },
-  ];
+  // Whole book in Nik's groups (totals.ts roleOf, 11 Nov 2026): Long the shares; Hedge every call bought (LEAPS
+  // included), then every put bought; Income, what was sold, calls then puts. Each line is its legs'
+  // delta today, as before; a line with no legs is left out, and a group with no lines.
+  const n = (ls: PLeg[]) => ls.reduce((a, l) => a + Math.abs(l.q), 0);
+  const and = (xs: string[]) => (xs.length < 2 ? xs[0] ?? '' : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1]);
+  const exOn = (ls: PLeg[]) => { const e = [...new Set(ls.map((l) => l.exL))]; return e.length ? ' · ' + and(e) : ''; };
+  const of = (r: Role, ty: 'S' | 'C' | 'P') => legs.filter((l) => roleOf(l) === r && l.ty === ty);
+  const sh = of('long', 'S'), hc = of('hedge', 'C'), hp = of('hedge', 'P'), ic = of('income', 'C'), ip = of('income', 'P');
+  const lp = hc.filter((l) => l.kind === 'leaps'), oc = hc.filter((l) => l.kind !== 'leaps');
+  const line = (k: string, l: string, ls: PLeg[], s: string) => { const d = dOf(ls); return { k, l, ls, s, v: side(d) + ' Δ', c: d < 0 ? R : K }; };
+  const groups = [
+    { h: 'Long', items: [line('sh', 'Shares', sh, count(n(sh)) + ' shares')] },
+    { h: 'Hedge', items: [
+      line('hc', 'Calls', hc, [lp.length ? count(n(lp)) + ' LEAPS' : '', oc.length ? count(n(oc)) + ' OTM calls' : ''].filter(Boolean).join(' · ')),
+      line('hp', 'Puts', hp, count(n(hp)) + ' insurance puts' + exOn(hp)),
+    ] },
+    { h: 'Income', items: [line('ic', 'Calls', ic, count(n(ic)) + ' calls' + exOn(ic)), line('ip', 'Puts', ip, count(n(ip)) + ' puts' + exOn(ip))] },
+  ].map((g) => ({ ...g, items: g.items.filter((x) => x.ls.length > 0) })).filter((g) => g.items.length > 0);
+  const dn = dOf(legs);
+  const net = { l: 'Net today', s: 'what moves with the price', v: side(dn) + ' Δ', c: dn < 0 ? R : K };
+  const row = { ...tn, display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '11px 0' } as const;
   const wall = (c: ChainW) => {
     const w = [c.c ? 'Ceiling ' + fk(c.c.k) : '', c.f ? 'Floor ' + fk(c.f.k) : ''].filter(Boolean);
     if (w.length) return w.join(' · ');
@@ -147,12 +160,21 @@ export function Lists({ t, pr, today, fridayIso }: { t: string; pr: Pricer; toda
     <div style={{ ...tn, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(360px,1fr))', gap: '28px 48px', paddingTop: 28 }}>
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         <span style={{ fontSize: 17, fontWeight: 600, paddingBottom: 10 }}>Whole {t} book</span>
-        {book.map((r) => (
-          <div key={r.l} style={{ ...tn, display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '11px 0', borderTop: HAIR }}>
-            <span style={{ display: 'flex', flexDirection: 'column' }}><span style={{ fontSize: 15 }}>{r.l}</span><span style={{ fontSize: 12, color: MU }}>{r.s}</span></span>
-            <span style={{ fontSize: 15, fontWeight: 600, color: r.c, whiteSpace: 'nowrap' }}>{r.v}</span>
+        {groups.map((g, gi) => (
+          <div key={g.h} role="group" aria-label={g.h} style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 700, padding: `${gi ? 14 : 2}px 0 6px` }}>{g.h}</span>
+            {g.items.map((r) => (
+              <div key={r.k} style={{ ...row, borderTop: HAIR }}>
+                <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}><span style={{ fontSize: 15 }}>{r.l}</span><span style={{ fontSize: 12, color: MU }}>{r.s}</span></span>
+                <span style={{ fontSize: 15, fontWeight: 600, color: r.c, whiteSpace: 'nowrap' }}>{r.v}</span>
+              </div>
+            ))}
           </div>
         ))}
+        <div style={{ ...row, marginTop: 6, borderTop: HAIR_S }}>
+          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}><span style={{ fontSize: 15, fontWeight: 600 }}>{net.l}</span><span style={{ fontSize: 12, color: MU }}>{net.s}</span></span>
+          <span style={{ fontSize: 15, fontWeight: 600, color: net.c, whiteSpace: 'nowrap' }}>{net.v}</span>
+        </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         <span style={{ fontSize: 17, fontWeight: 600, paddingBottom: 10 }}>Walls by expiry</span>

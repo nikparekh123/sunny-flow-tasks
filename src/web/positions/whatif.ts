@@ -36,10 +36,18 @@ export function useWhatIf(book: string | null | undefined, t: string | null | un
     const t0 = Math.max(Date.now(), ...x.trades.map((u) => u.id + 1));
     return { ...x, trades: [...x.trades, ...us.map((u, i) => ({ ...u, id: t0 + i, on: true }))] };
   }), [k]);
+  /** The SD calculator's sale (handoff 2026-11-11-sd-whatif-totals 1.10): one at a time per name. Takes off every SD
+      row, then (unless null) adds the new ones, marked src 'sd'. */
+  const setSd = useCallback((us: Omit<Trade, 'id' | 'on'>[] | null) => set(k, (x) => {
+    const keep = x.trades.filter((u) => u.src !== 'sd');
+    if (!us?.length) return { ...x, trades: keep };
+    const t0 = Math.max(Date.now(), ...x.trades.map((u) => u.id + 1));
+    return { ...x, trades: [...keep, ...us.map((u, i) => ({ ...u, src: 'sd' as const, id: t0 + i, on: true }))] };
+  }), [k]);
   const toggleTrade = useCallback((id: number) => set(k, (x) => ({ ...x, trades: x.trades.map((u) => (u.id === id ? { ...u, on: !u.on } : u)) })), [k]);
   const remove = useCallback((id: number) => set(k, (x) => ({ ...x, trades: x.trades.filter((u) => u.id !== id) })), [k]);
   const setDraft = useCallback((d: Draft) => set(k, (x) => ({ ...x, draft: { ...x.draft, ...d } })), [k]);
   /** Back to the book: every leg on, every trade gone (the design's reset keeps the form). */
   const reset = useCallback(() => set(k, (x) => ({ ...x, off: [], trades: [] })), [k]);
-  return useMemo(() => ({ ...w, toggleLeg, add, addMany, toggleTrade, remove, setDraft, reset }), [w, toggleLeg, add, addMany, toggleTrade, remove, setDraft, reset]);
+  return useMemo(() => ({ ...w, toggleLeg, add, addMany, setSd, toggleTrade, remove, setDraft, reset }), [w, toggleLeg, add, addMany, setSd, toggleTrade, remove, setDraft, reset]);
 }

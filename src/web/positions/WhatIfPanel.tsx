@@ -4,9 +4,10 @@ import { useEffect, useState } from 'react';
 import { count, money, price } from '../lib/format';
 import { expLabel, fk, tradeName, type PLeg, type Pricer, type Trade } from './model';
 import type { Draft } from './whatif';
-import { HAIR, HAIR_S, K, MU, Seg, Switch, cl, kicker } from './ui';
+import { HAIR, HAIR_S, K, MU, O, Seg, Switch, cl, kicker } from './ui';
 import { LegSdLines, TradeSdLine } from './sd/LegLines';
 import type { LegLines } from './sd/legs';
+import { ROLES, isPut, roleOf } from './totals';
 
 interface Props {
   t: string;
@@ -34,6 +35,12 @@ interface Props {
 const select = { boxSizing: 'border-box', width: '100%', height: 36, border: 'none', borderRadius: 10, padding: '0 8px', background: 'rgba(118,118,128,.24)',
   color: '#F5F5F7', fontSize: 14 } as const;
 const cashWords = (c: number) => (c >= 0 ? money(c) + ' in' : 'costs ' + money(c));
+/** "long 2,083" / "short 1,840": whole shares, the side in words, never a minus sign. */
+const dTx = (v: number) => (Math.round(v) < 0 ? 'short ' : 'long ') + count(v);
+/** A net that is short reads orange. */
+const dCol = (v: number) => (Math.round(v) < 0 ? O : K);
+/** A leg's sub line: "36 · Oct 30 · ×72", or "3,000 shares". */
+const subOf = (l: PLeg) => (l.ty === 'S' ? count(l.q) + ' shares' : fk(l.K) + ' · ' + l.exL + ' · ×' + count(l.q));
 
 export function WhatIfPanel(p: Props) {
   const { t, pr, legs, off, trades, nCh, cashC, draft, strikes, expiries, mask } = p;
@@ -45,6 +52,21 @@ export function WhatIfPanel(p: Props) {
   const [nTxt, setNTxt] = useState(String(draft.n));
   useEffect(() => { setNTxt(String(draft.n)); }, [draft.n, t]);
   const tradeRows = pr.trades.map((l) => ({ l, u: trades.find((u) => u.id === l.trade)! })).filter((x) => x.u);
+
+  // Your legs (144c) in Nik's three groups (totals.ts roleOf): Long the shares, Hedge every call then every put bought,
+  // Income everything sold, calls then puts. Delta is the page's (each leg's today, at today's price); the net counts
+  // every leg switched on and every trade switched on, the SD calculator's included.
+  const dOf = (l: PLeg) => pr.dL(l, m.S0, m.today);
+  const tradesOn = pr.trades.filter((l) => trades.find((u) => u.id === l.trade)?.on);
+  const dN0 = pr.delta(legs, m.S0, m.today), dN1 = pr.delta([...legs.filter((l) => !off.has(l.k)), ...tradesOn], m.S0, m.today);
+  const moved = Math.round(dN1) !== Math.round(dN0);
+  const groups = ROLES.map((r) => {
+    const ls = legs.filter((l) => roleOf(l) === r.k).sort((a, b) => +isPut(a) - +isPut(b));
+    const allOff = ls.every((l) => off.has(l.k));
+    // Switch all off while any is on; Switch all on once every one is off.
+    const toggle = () => ls.forEach((l) => { if (off.has(l.k) === !allOff) return; p.toggleLeg(l.k); });
+    return { k: r.k, h: r.h, ls, allOff, d: ls.reduce((a, l) => a + (off.has(l.k) ? 0 : dOf(l)), 0), toggle };
+  }).filter((g) => g.ls.length > 0);
   return (
     <div className="g1" style={{ flex: '1 1 340px', minWidth: 0, borderRadius: 24, padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -55,27 +77,45 @@ export function WhatIfPanel(p: Props) {
         Switch a leg off to see the book without it, or try a trade. The chart, the numbers and the table follow. Nothing is sent to the broker.
       </span>
       <div style={{ display: 'flex', flexDirection: 'column' }}>
-        <span style={{ ...kicker, paddingBottom: 6 }}>Your {t} legs</span>
-        {legs.map((l) => {
-          const o = off.has(l.k), cc = l.value, s = p.sdOf?.(l) ?? null;
-          return (
-            <div key={l.k} className="tnum" style={{ display: 'grid', gridTemplateColumns: '48px minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '9px 0', borderTop: HAIR }}>
-              <Switch on={!o} label={(o ? 'Switch on ' : 'Switch off ') + l.lb} onToggle={() => p.toggleLeg(l.k)} />
-              <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <span style={{ fontSize: 15 }}>{l.lb}</span>
-                <span style={{ fontSize: 12, color: MU }}>{l.ct} · {l.qt}</span>
+        <div className="tnum" style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, paddingBottom: 6 }}>
+          <span style={kicker}>Your {t} legs</span>
+          <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 13, lineHeight: '18px', fontWeight: 600, whiteSpace: 'nowrap' }}>
+            <span style={{ color: moved ? MU : dCol(dN0) }}>Net Δ {dTx(dN0)}</span>
+            {moved && <><span style={{ color: MU }}>→</span><span style={{ color: dCol(dN1) }}>{dTx(dN1)}</span></>}
+          </span>
+        </div>
+        {groups.map((g, gi) => (
+          <div key={g.k} role="group" aria-label={g.h} style={{ display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: gi ? '14px 0 4px' : '8px 0 4px',
+              borderTop: '1px solid rgba(255,255,255,.16)' }}>
+              <span className="tnum" style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600 }}>{g.h}</span>
+                <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: MU }}>{g.allOff ? 'Off' : 'Δ ' + dTx(g.d)}</span>
               </span>
-              {/* The three lines sit right of the title, in the row's empty right side; a leg switched off keeps its
-                  closing cash, right-aligned under them. Shares get nothing. */}
-              {(s || o) && (
-                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-                  {s && <LegSdLines v={s} />}
-                  {o && <span style={{ fontSize: 12, fontWeight: 600, color: cl(cc), textAlign: 'right', whiteSpace: 'nowrap' }}>{mask('close · ' + cashWords(cc))}</span>}
-                </span>
-              )}
+              <button type="button" className="bare swp-all" onClick={g.toggle}
+                style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: MU, padding: '6px 0' }}>{g.allOff ? 'Switch all on' : 'Switch all off'}</button>
             </div>
-          );
-        })}
+            {g.ls.map((l) => {
+              // A leg switched off dims to 42% and says what closing it would do: a bought leg brings cash in, buying
+              // back a sold one costs. Shares get no SD lines.
+              const o = off.has(l.k), cc = l.value, s = p.sdOf?.(l) ?? null, op = o ? 0.42 : 1, sub = subOf(l);
+              return (
+                <div key={l.k} className="tnum" style={{ display: 'grid', gridTemplateColumns: '48px minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '10px 0', borderTop: HAIR }}>
+                  <Switch on={!o} label={(o ? 'Switch on ' : 'Switch off ') + l.lb.toLowerCase() + ', ' + sub} onToggle={() => p.toggleLeg(l.k)} />
+                  <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                    <span style={{ display: 'flex', flexDirection: 'column', opacity: op, transition: 'opacity .2s' }}>
+                      <span style={{ fontSize: 15, lineHeight: '20px' }}>{l.lb}</span>
+                      <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>{sub}</span>
+                      <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>Δ {dTx(dOf(l))}</span>
+                    </span>
+                    {o && <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: cl(cc), whiteSpace: 'nowrap' }}>{mask('close · ' + cashWords(cc))}</span>}
+                  </span>
+                  {s ? <LegSdLines v={s} style={{ opacity: op, transition: 'opacity .2s' }} /> : <span />}
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: HAIR_S, paddingTop: 14 }}>
         <span style={kicker}>Try a trade</span>
@@ -144,6 +184,7 @@ export function WhatIfPanel(p: Props) {
         <button type="button" className="bare" onClick={p.reset} disabled={!chg}
           style={{ padding: '7px 16px', borderRadius: 999, background: 'rgba(118,118,128,.24)', fontSize: 14, fontWeight: 500, opacity: chg ? 1 : 0.4 }}>Back to the book</button>
       </div>
+      <style>{`.sw .swp-all:hover{color:#F5F5F7!important}`}</style>
     </div>
   );
 }
