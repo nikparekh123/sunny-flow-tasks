@@ -55,7 +55,9 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
     if (dt) { dt.textContent = r.labs[j]; dt.style.transform = `translateX(${f > 0.85 ? '-100%' : f < 0.15 ? '0%' : '-50%'})`; }
     if (valEl.current) valEl.current.style.display = 'none';
     if (hvalEl.current) { hvalEl.current.textContent = mk(dollars(val)); hvalEl.current.style.display = 'inline'; }
-    if (linesEl.current) linesEl.current.style.display = 'none';
+    // The lines keep their room while the hover's line sits over them (Nik, 13 Nov 2026: hiding "$498 today"
+    // moved the chart under the pointer).
+    if (linesEl.current) linesEl.current.style.visibility = 'hidden';
     const hl = hlEl.current;
     if (hl) {
       const a = hl.firstElementChild as HTMLSpanElement | null, b2 = hl.lastElementChild as HTMLSpanElement | null;
@@ -69,7 +71,7 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
     if (dotEl.current) dotEl.current.style.opacity = '0';
     if (valEl.current) valEl.current.style.display = 'inline';
     if (hvalEl.current) hvalEl.current.style.display = 'none';
-    if (linesEl.current) linesEl.current.style.display = 'flex';
+    if (linesEl.current) linesEl.current.style.visibility = 'visible';
     if (hlEl.current) hlEl.current.style.display = 'none';
   };
   // A new range or a new book while the pointer rests: start clean.
@@ -83,15 +85,17 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
         <span ref={valEl}><CountUp v={mask(dollars(value))} /></span>
         <span ref={hvalEl} className="tnum" style={{ display: 'none' }} />
       </span>
-      <span ref={hlEl} className="tnum" style={{ display: 'none', marginTop: 4, fontSize: 15 }}>
-        <span style={{ fontWeight: 600 }} /> <span style={{ color: C.ink2 }} />
-      </span>
-      <div ref={linesEl} className="tnum" style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
-        {lines.map((x) => (
-          <span key={x.k} style={{ fontSize: 15 }}>
-            <span style={{ fontWeight: 600, color: x.c }}>{mask(x.v)}</span> <span style={{ color: C.ink2 }}>{x.l}</span>
-          </span>
-        ))}
+      <div style={{ position: 'relative', marginTop: 4 }}>
+        <span ref={hlEl} className="tnum" style={{ display: 'none', position: 'absolute', top: 0, left: 0, fontSize: 15, whiteSpace: 'nowrap' }}>
+          <span style={{ fontWeight: 600 }} /> <span style={{ color: C.ink2 }} />
+        </span>
+        <div ref={linesEl} className="tnum" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {lines.map((x) => (
+            <span key={x.k} style={{ fontSize: 15 }}>
+              <span style={{ fontWeight: 600, color: x.c }}>{mask(x.v)}</span> <span style={{ color: C.ink2 }}>{x.l}</span>
+            </span>
+          ))}
+        </div>
       </div>
 
       <div ref={box} onPointerMove={move} onPointerDown={move} onPointerLeave={leave} onPointerCancel={leave}
