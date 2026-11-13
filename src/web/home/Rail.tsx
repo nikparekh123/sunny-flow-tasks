@@ -44,9 +44,7 @@ export default function Rail({ payload, book, narrow }: { payload: J; book: Book
   const upd = (v: number) => (v < 0 ? 'down ' : 'up ') + mask(money(v));
   const byLeg = railView === 'leg';
   const note = (rt.noSold.length ? `Nothing sold this week: ${rt.noSold.join(', ')}. ` : '')
-    + (byLeg
-      ? `Shares: ${rt.week ? 'this week, from last Friday’s close' : 'today, from yesterday’s close'}. Hedges and Income: since each was opened; the bar is what was paid or collected, green gained, red lost, grey still to go.`
-      : (rt.week ? 'This week, from last Friday’s close.' : 'Today, from yesterday’s close.') + ' A sold call or put makes money when its price falls.');
+    + `Shares: ${rt.week ? 'this week, from last Friday’s close' : 'today, from yesterday’s close'}. Options: since each was opened; the bar is what was paid or collected, green gained, red lost, grey still to go.`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
@@ -72,10 +70,15 @@ export default function Rail({ payload, book, narrow }: { payload: J; book: Book
         <div className="tnum" style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 14 }}>
           <Seg value={byLeg ? 'leg' : 'ticker'} set={setRailView} />
           {!byLeg ? rt.names.map((n) => {
-            const mx = Math.max(1, ...n.rows.map((x) => Math.abs(x.v)));
+            // The same rows as By leg (Nik, 13 Nov 2026): options since opened, shares today.
+            const sh = n.rows.filter((x) => !x.since && x.l === 'Shares'), opt = n.rows.filter((x) => x.l !== 'Shares');
+            const mx = Math.max(1, ...sh.map((x) => Math.abs(x.v)));
+            const optPl = opt.reduce((a, x) => a + (x.since?.pl ?? 0), 0), shToday = sh.reduce((a, x) => a + x.v, 0);
+            const head = opt.length ? { l: 'Options since opened', v: optPl } : { l: dl, v: shToday };
             return (
               <button key={n.t} type="button" className="bare sw-rc" onClick={() => open(n.t)}
-                aria-label={`${n.t}, ${dw} ${upd(n.today)}, opens Positions`} style={{ ...GLASS, cursor: 'pointer', textAlign: 'left' }}>
+                aria-label={`${n.t}, ${head.l.toLowerCase()} ${upd(head.v)}${opt.length && sh.length ? `, shares ${dw} ${upd(shToday)}` : ''}, opens Positions`}
+                style={{ ...GLASS, cursor: 'pointer', textAlign: 'left' }}>
                 <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
                   <span style={{ fontSize: 17, fontWeight: 700 }}>{n.t}</span>
                   <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -84,10 +87,11 @@ export default function Rail({ payload, book, narrow }: { payload: J; book: Book
                   </span>
                 </span>
                 <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-                  <span style={{ fontSize: 13, color: MU }}>{dl}</span>
-                  <span style={{ fontSize: 17, fontWeight: 700, color: cl(n.today) }}>{mask(money(n.today))}</span>
+                  <span style={{ fontSize: 13, color: MU }}>{head.l}</span>
+                  <span style={{ fontSize: 17, fontWeight: 700, color: cl(head.v) }}>{mask(money(head.v))}</span>
                 </span>
-                {n.rows.map((x) => <Row key={x.k} x={x} mx={mx} mask={mask} />)}
+                {sh.map((x) => <Row key={x.k} x={{ ...x, s: `${x.s} · ${dw}` }} mx={mx} mask={mask} />)}
+                {opt.map((x) => <SinceRow key={x.k} x={{ ...x, l: x.l.replace(/ (sold|bought)$/, '') }} mask={mask} />)}
               </button>
             );
           }) : rt.kinds.map((g) => {
