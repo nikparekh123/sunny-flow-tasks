@@ -10,88 +10,106 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { CountUp } from '../components/CountUp';
 import { count, money, price } from '../lib/format';
-import { RANGES, series, spread, type Range } from '../ticker/model';
+import { ny } from '../lib/clock';
+import { PC_RANGES, priceChart, type PCPoint, type PCRange, type PCStrike } from '../../../supabase/functions/_shared/price-chart.ts';
 import type { J } from '../lib/data';
 import { fk, type DPt, type PLeg, type Pricer, type Seg } from './model';
-import { G, K, MU, O, R, Segmented, cl, kicker, tnum } from './ui';
+import { G, K, MT, MU, O, QU, R, Segmented, cl, kicker, tnum } from './ui';
 
 /* ── Price ─────────────────────────────────────────────────────────────── */
-const RNG_WORDS: Record<Range, string> = { '1W': 'Past week', '1M': 'Past month', '3M': 'Past 3 months', YTD: 'This year', '1Y': 'Past year', All: 'All time' };
-const H = 300;
+// Handoff 2026-11-13-positions 2 §3.4 (Nik, 13 Nov 2026: "Just price chart"): the SunnyPositions week chart style. The
+// maths is the shared model (supabase/functions/_shared/price-chart.ts, the phone ports it); this draws it: the line
+// with no fill ending in a ring at today, the days to the Friday kept open after it, strike lines to a tag column on
+// the right (112 px), the day, week or month labels, the ranges (opens on 1W), the note. The scrub stays (Nik).
+const TAGW = 112, MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], WD3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const strikesOf = (legs: PLeg[], trades: PLeg[]): PCStrike[] => [
+  ...legs.filter((l) => l.ty !== 'S').map((l) => ({ key: l.k, K: l.K, ty: l.ty as 'C' | 'P', q: l.q, w: false,
+    label: `${l.q < 0 ? 'Sold' : 'Bought'} ${l.ty === 'C' ? 'calls' : 'puts'} ${fk(l.K)} ×${count(Math.abs(l.q))} · ${l.exL}` })),
+  ...trades.filter((l) => l.ty !== 'S').map((l) => ({ key: l.k, K: l.K, ty: l.ty as 'C' | 'P', q: l.q, w: true, label: `What if · ${l.lb}` })),
+];
+function model(chart: J, S0: number, closed: Set<string>, rg: PCRange, strikes: PCStrike[]) {
+  const n = ny();
+  return priceChart({ dates: chart?.dates ?? [], closes: (chart?.closes ?? []).map(Number), hours: chart?.hours ?? null, S0, today: n.date, mins: n.mins, closed, rg, strikes, phone: false });
+}
+/** What the scrub reads at a point: "Wed Nov 12 · 11 AM", "Fri Nov 7 close", "Now", or the day on the longer ranges. */
+function whenWords(p: PCPoint, rg: PCRange): string {
+  if (p.now) return 'Now';
+  const [y, m, d] = p.d.split('-').map(Number), wd = WD3[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  if (p.h != null) return p.h === 9 || p.h === 16 ? `${wd} ${MON3[m - 1]} ${d} close` : `${wd} ${MON3[m - 1]} ${d} · ${p.h > 12 ? p.h - 12 : p.h} ${p.h >= 12 ? 'PM' : 'AM'}`;
+  return rg === '1Y' || rg === 'All' ? `${MON3[m - 1]} ${d}, ${y}` : `${wd} ${MON3[m - 1]} ${d}`;
+}
 
-export function PriceChart({ chart, failed, S0, today, legs, trades, rg, setRg }:
-  { chart: J; failed?: boolean; S0: number; today: string; legs: PLeg[]; trades: PLeg[]; rg: Range; setRg: (r: Range) => void }) {
-  const v = useMemo(() => {
-    const closes: number[] = (chart?.closes ?? []).map(Number), dates: string[] = chart?.dates ?? [];
-    if (closes.length < 2) return null;
-    const s = series(closes, dates, rg, { m20: [], m50: [] });
-    const pts = s.pts.slice(), ds = s.dates.slice();
-    if (S0 > 0) { if (ds[ds.length - 1] === today) pts[pts.length - 1] = S0; else { pts.push(S0); ds.push(today); } }
-    const stp = Math.max(1, Math.ceil(pts.length / 130)), keep = (_: unknown, i: number) => i % stp === 0 || i === pts.length - 1;
-    const p = pts.filter(keep), pdates = ds.filter(keep);
-    const Ks = [...legs.map((l) => l.K), ...trades.map((l) => l.K)];
-    let lo = Math.min(...p, ...Ks), hi = Math.max(...p, ...Ks);
-    const pd = (hi - lo) * 0.07 || p[0] * 0.05; lo -= pd; hi += pd;
-    const cy = (x: number) => ((hi - x) / (hi - lo)) * 100;
-    const d = p.map((x, i) => `${i ? 'L' : 'M'}${((i / (p.length - 1)) * 400).toFixed(1)} ${cy(x).toFixed(2)}`).join(' ');
-    const up = p[p.length - 1] >= p[0];
-    // One line per strike and kind; the labels pushed apart so none overlap.
-    const lines = [
-      ...legs.map((l) => ({ k: l.k, y: cy(l.K), sold: l.q < 0, wi: false,
-        l: `${fk(l.K)} ${l.ty === 'C' ? 'call' : 'put'} · ${l.exL} · ${l.q < 0 ? 'sold' : 'bought'} ${count(l.q)}` })),
-      ...trades.map((l) => ({ k: l.k, y: cy(l.K), sold: l.q < 0, wi: true, l: `What if · ${l.lb}` })),
-    ];
-    const ly = spread(lines.map((x) => (x.y / 100) * H), 18, H - 4, 19);
-    return { d, area: d + ' L400 100 L0 100 Z', up, chg: p[p.length - 1] / p[0] - 1, py: cy(S0), lines: lines.map((x, i) => ({ ...x, ly: ly[i] })), p, pdates, cy };
-  }, [chart, S0, today, legs, trades, rg]);
-  const c = v?.up ? G : R;
+export function PriceChart({ chart, failed, S0, closed, legs, trades, rg, setRg }:
+  { chart: J; failed?: boolean; S0: number; closed: Set<string>; legs: PLeg[]; trades: PLeg[]; rg: PCRange; setRg: (r: PCRange) => void }) {
+  const v = useMemo(() => model(chart, S0, closed, rg, strikesOf(legs, trades)), [chart, S0, closed, rg, legs, trades]);
+  const c = v ? (v.up ? G : R) : G;
+  const d = v ? v.pts.map((p, i) => `${i ? 'L' : 'M'}${(p.x * 400).toFixed(2)} ${((v.y(p.v) / v.CH) * 100).toFixed(2)}`).join(' ') : '';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ position: 'relative', height: H }}>
-        {v ? <>
-          <svg viewBox="0 0 400 100" preserveAspectRatio="none" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible' }}>
-            <defs><linearGradient id="swpPr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={c} stopOpacity=".26" /><stop offset="1" stopColor={c} stopOpacity="0" /></linearGradient></defs>
-            <path d={v.area} fill="url(#swpPr)" />
-            <path d={v.d} style={{ fill: 'none', stroke: c, strokeWidth: 2, strokeLinejoin: 'round', vectorEffect: 'non-scaling-stroke' }} />
-          </svg>
-          {v.lines.map((x) => (
-            <span key={x.k} aria-hidden="true" style={{ position: 'absolute', left: 0, right: 72, top: `${x.y.toFixed(2)}%`, pointerEvents: 'none',
-              borderTop: x.wi ? `1.5px dashed ${O}` : x.sold ? '1px solid rgba(245,245,247,.55)' : '1.5px dotted rgba(245,245,247,.5)' }} />
-          ))}
-          {v.lines.map((x) => (
-            <span key={'l' + x.k} style={{ position: 'absolute', top: x.ly - 18, ...(x.wi ? { right: 72 } : { left: 0 }), padding: '1px 6px', borderRadius: 6, background: 'rgba(6,8,7,.86)',
-              fontSize: 12, lineHeight: '16px', fontWeight: x.wi ? 600 : 500, color: x.wi ? O : '#AEAEB2', whiteSpace: 'nowrap', pointerEvents: 'none' }}>{x.l}</span>
-          ))}
-          <span className="tnum" style={{ position: 'absolute', right: 0, top: `${v.py.toFixed(2)}%`, transform: 'translateY(-50%)', padding: '2px 8px', borderRadius: 999,
-            background: K, color: '#000000', fontSize: 12, lineHeight: '16px', fontWeight: 700 }}>{price(S0)}</span>
-          <Scrub top={0} bottom={0} read={(f) => {
-            const n = v.p.length, i = Math.round(f * (n - 1)), x = v.p[i], d0 = v.p[0], mvp = d0 > 0 ? x / d0 - 1 : 0;
-            return { x: i / (n - 1), y: v.cy(x) / 100, dot: v.up ? G : R, rows: [
-              { t: v.pdates[i] === today ? 'Today' : dayWords(v.pdates[i], rg), c: MU },
-              { t: price(x), b: true },
-              { t: `${mvp < 0 ? '▼' : '▲'} ${(Math.abs(mvp) * 100).toFixed(1)}% since ${dayWords(v.pdates[0], rg)}`, c: mvp < 0 ? R : G },
-            ] };
-          }} />
-        </> : <span style={{ position: 'absolute', top: '45%', left: 0, fontSize: 13, color: MU }}>{chart || failed ? 'No price history for this name yet.' : 'Loading the price…'}</span>}
-      </div>
+      {v ? <>
+        <div role="img" aria-label={`${chart?.t ?? ''} price, ${v.aria}`} style={{ position: 'relative', height: v.CH }}>
+          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, right: TAGW }}>
+            <svg viewBox="0 0 400 100" preserveAspectRatio="none" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible' }}>
+              <path d={d} style={{ fill: 'none', stroke: c, strokeWidth: 2, strokeLinejoin: 'round', strokeLinecap: 'round', vectorEffect: 'non-scaling-stroke' }} />
+            </svg>
+            {v.lines.map((x) => (
+              <span key={x.key} aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: x.y, pointerEvents: 'none',
+                borderTop: x.kind === 'w' ? `1.5px dashed ${O}` : x.kind === 'sold' ? '1px dashed rgba(245,245,247,.42)' : '1.5px dotted rgba(245,245,247,.3)' }} />
+            ))}
+            <span aria-hidden="true" style={{ position: 'absolute', left: `${(v.dotX * 100).toFixed(3)}%`, top: v.dotY, width: 13, height: 13, margin: '-6.5px 0 0 -6.5px', boxSizing: 'border-box',
+              borderRadius: '50%', border: `2.5px solid ${c}`, background: '#060807', boxShadow: '0 1px 4px rgba(0,0,0,.6)' }} />
+            <Scrub top={0} bottom={0} read={(f) => {
+              // The line follows the pointer (up to today's dot); the dot slides along the price line; the read is the
+              // nearest point drawn.
+              const x = Math.min(f, v.dotX), P = v.pts;
+              let j = 0; while (j < P.length - 2 && P[j + 1].x < x) j++;
+              const a = P[j], b = P[j + 1] ?? a, w = b.x > a.x ? Math.max(0, Math.min(1, (x - a.x) / (b.x - a.x))) : 0;
+              const near = w < 0.5 ? a : b, mvp = P[0].v > 0 ? near.v / P[0].v - 1 : 0;
+              return { x, y: v.y(a.v + (b.v - a.v) * w) / v.CH, dot: c, rows: [
+                { t: whenWords(near, rg), c: MU },
+                { t: price(near.v), b: true },
+                { t: `${mvp < 0 ? '▼' : '▲'} ${(Math.abs(mvp) * 100).toFixed(1)}% since ${whenWords(P[0], rg).replace(/ close$/, '')}`, c: mvp < 0 ? R : G },
+              ] };
+            }} />
+          </div>
+          <div aria-hidden="true" style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: TAGW }}>
+            <svg width="10" height={v.CH} style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible' }}>
+              {v.conn.map((x, i) => <path key={i} d={`M0 ${x.y0.toFixed(1)} L8 ${x.y1.toFixed(1)}`} style={{ fill: 'none', stroke: 'rgba(245,245,247,.4)', strokeWidth: 1 }} />)}
+            </svg>
+            {v.tags.map((x) => {
+              const loud = x.sold || x.w;
+              return (
+                <span key={x.key} title={x.title} className="tnum" style={{ position: 'absolute', left: 10, top: x.top, height: v.TH, boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: 5,
+                  padding: x.px ? '0 8px' : x.put ? '0 7px' : 0, borderRadius: 999, whiteSpace: 'nowrap', pointerEvents: 'auto',
+                  background: x.px ? K : x.put ? (loud ? 'rgba(118,118,128,.24)' : 'rgba(118,118,128,.16)') : 'transparent' }}>
+                  <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: x.px || loud ? 700 : 500, color: x.px ? '#000000' : x.w ? O : loud ? K : MT }}>{x.n}</span>
+                  {!x.px && <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 500, color: x.put ? MT : loud ? MU : QU }}>{x.s}</span>}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+        <div aria-hidden="true" style={{ position: 'relative', height: 18, marginRight: TAGW }}>
+          {v.xl.map((x) => <span key={x.key} style={{ position: 'absolute', left: `${(x.x * 100).toFixed(2)}%`, top: 0, fontSize: 13, lineHeight: '18px', color: x.now ? K : MU, whiteSpace: 'nowrap' }}>{x.t}</span>)}
+        </div>
+      </> : <div style={{ position: 'relative', height: 280 }}><span style={{ position: 'absolute', top: '45%', left: 0, fontSize: 13, color: MU }}>{chart || failed ? 'No price history for this name yet.' : 'Loading the price…'}</span></div>}
       <div style={{ display: 'flex', gap: 4 }} role="radiogroup" aria-label="Range">
-        {RANGES.map((r) => (
+        {PC_RANGES.map((r) => (
           <button key={r} type="button" role="radio" aria-checked={r === rg} className="bare" onClick={() => setRg(r)}
             style={{ padding: '4px 10px', fontSize: 14, lineHeight: '20px', fontWeight: r === rg ? 700 : 500, color: r === rg ? K : MU, boxShadow: `inset 0 -2px 0 ${r === rg ? K : 'transparent'}` }}>{r}</button>
         ))}
       </div>
-      <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>Your strikes on the line: sold solid, bought dotted. A trade you try in What if shows dashed orange.</span>
+      <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>
+        Strikes sit on the right with how far they are from today: sold dashed, bought dotted, puts in a gray tag. After the dot, the days left to {v?.fridayWords ?? 'Friday'}. A trade you try in What if shows dashed orange.
+      </span>
     </div>
   );
 }
-/** "Past 3 months ▼ 8.6%" beside the Price | Payoff switch. */
-export function rangeWords(chart: J, S0: number, today: string, rg: Range): { l: string; v: string; c: string } | null {
-  const closes: number[] = (chart?.closes ?? []).map(Number), dates: string[] = chart?.dates ?? [];
-  if (closes.length < 2 || !(S0 > 0)) return null;
-  const s = series(closes, dates, rg, { m20: [], m50: [] });
-  const first = s.dates[0] === today && s.pts.length > 1 ? s.pts[0] : s.pts[0];
-  const r = S0 / first - 1;
-  return { l: RNG_WORDS[rg], v: `${r < 0 ? '▼' : '▲'} ${(Math.abs(r) * 100).toFixed(1)}%`, c: r < 0 ? R : G };
+/** "Past week ▼ 1.7%" beside the Price | Payoff switch: the range's first point to the price now. */
+export function rangeWords(chart: J, S0: number, closed: Set<string>, rg: PCRange): { l: string; v: string; c: string } | null {
+  const v = model(chart, S0, closed, rg, []);
+  if (!v) return null;
+  return { l: v.words, v: `${v.move < 0 ? '▼' : '▲'} ${(Math.abs(v.move) * 100).toFixed(1)}%`, c: v.move < 0 ? R : G };
 }
 
 /* ── Payoff ────────────────────────────────────────────────────────────── */
@@ -256,15 +274,6 @@ function PayTable({ t, pr, set, segs, seg, pick, mask }: { t: string; pr: Pricer
 
 
 /* ── Scrub ─────────────────────────────────────────────────────────────── */
-const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-/** A close's date as the ticker chart's scrub writes it: "Fri Nov 7" on 1W, "Nov 7" to YTD, "Nov 7, 2025" on 1Y and All. */
-function dayWords(iso: string | undefined, rg: Range): string {
-  if (!iso) return '';
-  const [y, m, d] = iso.slice(0, 10).split('-').map(Number), dt = new Date(Date.UTC(y, m - 1, d));
-  if (rg === '1W') return `${WD[dt.getUTCDay()]} ${MON[m - 1]} ${d}`;
-  return rg === '1Y' || rg === 'All' ? `${MON[m - 1]} ${d}, ${y}` : `${MON[m - 1]} ${d}`;
-}
-
 interface ScrubRow { t: string; c?: string; b?: boolean }
 /** The pointer (or a finger) on a chart: a line down the plot, a dot on the curve and a small read beside it. `read`
     takes how far across (0 to 1) and gives where the dot sits (x, y as fractions of the plot) and the read's rows.

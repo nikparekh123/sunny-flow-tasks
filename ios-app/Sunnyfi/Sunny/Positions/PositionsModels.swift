@@ -159,8 +159,8 @@ struct PosName {
         /// drops out of the Whole TICKER book row, the Price chart's strikes and the Payoff with its Greeks.
         let on: Bool
     }
-    /// A strike on the Price chart: sold solid, bought dotted.
-    struct Strike: Identifiable { let id: String; let K: Double; let sold: Bool; let label: String }
+    /// A strike on the Price chart (legs switched on only): its leg in full, "Sold calls 36 ×72 · Oct 30".
+    struct Strike: Identifiable { let id: String; let K: Double; let put: Bool; let q: Double; let label: String }
     struct Payoff {
         /// ±12% of the price, 121 points: the P&L from today's marks at this Friday's close.
         let xs: [Double]; let ys: [Double]
@@ -221,7 +221,8 @@ struct PosName {
                             qty: "\(PosFmt.count(l.q)) \(l.q < 0 ? "sold" : "bought")", soFar: sf, delta: m.legDelta(l, m.S0, 0),
                             on: !off.contains(l.id)))
             if off.contains(l.id) { continue }
-            strikes.append(Strike(id: l.id, K: l.K, sold: l.q < 0, label: "\(PE.fk(l.K)) \(kind) · \(exL) · \(l.q < 0 ? "sold" : "bought") \(PosFmt.count(l.q))"))
+            strikes.append(Strike(id: l.id, K: l.K, put: l.ty == .put, q: l.q,
+                                  label: "\(l.q < 0 ? "Sold" : "Bought") \(kind)s \(PE.fk(l.K)) ×\(PosFmt.count(abs(l.q))) · \(exL)"))
         }
         let live = legs.filter(\.on)
         return PosName(t: m.t, S0: m.S0, legs: legs, soFar: live.reduce(0) { $0 + $1.soFar }, delta: live.reduce(0) { $0 + $1.delta },
@@ -247,25 +248,169 @@ struct PosName {
     }
 }
 
-// MARK: - The Price chart (sunny-chart's daily closes)
+// MARK: - The Price chart (handoff 2026-11-13-positions 2 §3.4; Nik, 13 Nov 2026: "Just price chart")
 
+/// The shared model (supabase/functions/_shared/price-chart.ts, `priceChart`) ported for the phone: always the past week
+/// (the phone has no range control), phone sizes (plot 200 tall, tag rows 20, tags 18, labels at least 10% apart).
+///   The week draws hours, 7 a session (10:00 to 16:00 New York, sunny-chart's `hours`, our Theta quotes; an hour with
+///   no quote is read on the straight line between the day's closes), from the close before the first day; today
+///   ends at the price now; then the trading days left to the Friday (the first Friday after today, P1; holidays
+///   skipped) stay open. Labels name each day at its start.
+///   Scale: today and the sold strikes first (at least 6% of the price, centred, × 1.24), then the line; a bought
+///   strike joins when it adds under 40%, else it pins to the edge with ↑ or ↓ and no line. Pad 5%.
+///   One line per strike, side and type; a tag per line on the right: the strike with C or P after it (Nik, 13 Nov
+///   2026, option A) and how far from today; today's
+///   price a white capsule; tags spread in rows (a group holding today's price stays pinned to it), a short connector
+///   when a tag leaves its line.
 struct PosPrice {
-    /// The past 3 months of closes (63 sessions) with today's price at the end.
-    let pts: [Double]
-    /// Each point's date (ISO), today's last.
-    let dates: [String]
-    /// The change across them, a fraction.
-    let chg: Double
-    let today: String
+    struct Point { let x: Double; let v: Double; let d: String; let h: Int?; let now: Bool }
+    struct Tag: Identifiable { let id: String; let top: CGFloat; let n: String; let s: String; let px: Bool; let sold: Bool; let put: Bool; let title: String }
+    struct Line: Identifiable { let id: String; let y: CGFloat; let sold: Bool }
+    struct Conn: Identifiable { let id: Int; let y0: CGFloat; let y1: CGFloat }
+    struct Label: Identifiable { let id: Int; let x: Double; let t: String; let now: Bool }
+    static let CH: CGFloat = 200, PT: CGFloat = 20, TH: CGFloat = 18
 
-    static func build(_ w: TickerWire, S0: Double, today: String) -> PosPrice? {
-        var pairs = Array(zip(w.dates, w.closes)).filter { $0.1 > 0 }
-        if let last = pairs.last, last.0 == today { pairs.removeLast() }
-        let kept = pairs.suffix(63)
-        var pts = kept.map(\.1), dates = kept.map(\.0)
-        if S0 > 0 { pts.append(S0); dates.append(today) }
-        guard pts.count >= 2, let f = pts.first, f > 0 else { return nil }
-        return PosPrice(pts: pts, dates: dates, chg: pts[pts.count - 1] / f - 1, today: today)
+    let pts: [Point]
+    let up: Bool
+    /// The price now against the close before the week, a fraction.
+    let move: Double
+    let dotX: Double, dotY: CGFloat
+    let lines: [Line], tags: [Tag], conn: [Conn], xl: [Label]
+    /// "Fri Nov 20".
+    let fridayWords: String
+    let lo: Double, hi: Double
+    func y(_ v: Double) -> CGFloat { CGFloat((hi - v) / (hi - lo)) * Self.CH }
+
+    private static let utc: Calendar = { var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "UTC")!; return c }()
+    private static let isoF: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "yyyy-MM-dd"; return f
+    }()
+    private static func day(_ s: String) -> Date { isoF.date(from: String(s.prefix(10))) ?? Date(timeIntervalSince1970: 0) }
+    /// 1 Sunday ... 7 Saturday.
+    static func dow(_ s: String) -> Int { utc.component(.weekday, from: day(s)) }
+    static func add(_ s: String, _ n: Int) -> String { isoF.string(from: utc.date(byAdding: .day, value: n, to: day(s))!) }
+    static let WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], MN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    /// "Fri Nov 20".
+    static func dayWords(_ s: String) -> String {
+        let c = utc.dateComponents([.month, .day, .weekday], from: day(s))
+        return "\(WD[c.weekday! - 1]) \(MN[c.month! - 1]) \(c.day!)"
+    }
+    /// The first Friday after today (from a Friday on, and all weekend, next Friday: Intelligence's rule, P1).
+    static func friday(_ today: String) -> String { let w = dow(today) - 1; return add(today, (5 - w + 7) % 7 == 0 ? 7 : (5 - w + 7) % 7) }
+    private static func dpc(_ k: Double, _ S0: Double) -> String { let p = abs(k / S0 - 1) * 100; return String(format: p < 0.1 ? "%.2f%%" : "%.1f%%", p) }
+
+    static func build(_ w: TickerWire, S0: Double, today: String, mins: Int, closed: Set<String>, strikes: [PosName.Strike]) -> PosPrice? {
+        let trading = { (s: String) -> Bool in let d = dow(s); return d != 1 && d != 7 && !closed.contains(s) }
+        var pairs: [(String, Double)] = zip(w.dates, w.closes).filter { $0.1 > 0 }.map { (String($0.0.prefix(10)), $0.1) }
+        // Today: a session once the bell has rung, its close the price now; before the bell the line ends on the last
+        // close, moved to the price now so the dot sits on it.
+        let live = trading(today) && mins >= 9 * 60 + 30
+        if let last = pairs.last, last.0 == today { pairs[pairs.count - 1].1 = S0 }
+        else if live { pairs.append((today, S0)) }
+        else if !pairs.isEmpty { pairs[pairs.count - 1].1 = S0 }
+        guard pairs.count >= 2, S0 > 0 else { return nil }
+        let nR = min(5, pairs.count - 1)
+        let sl = Array(pairs.suffix(nR + 1)), last = sl[sl.count - 1].0
+        let inDay = live && last == today && mins < 16 * 60
+        let fri = friday(today)
+        var FT: [String] = []
+        var d0 = add(last, 1)
+        while d0 <= fri { if trading(d0) { FT.append(d0) }; d0 = add(d0, 1) }
+        let U = Double((nR + FT.count) * 7)
+
+        var pts: [Point] = [Point(x: 0, v: sl[0].1, d: sl[0].0, h: 9, now: false)]
+        for d in 0..<nR {
+            let dayS = sl[d + 1].0, a = sl[d].1, b = sl[d + 1].1, hr = w.hours?[dayS], isToday = inDay && d == nR - 1
+            let kNow = isToday ? max(0.5, min(7, Double(mins - 9 * 60) / 60)) : 7
+            var known: [(Double, Double)] = [(0, a)]
+            for k in 1...7 where Double(k) < kNow {
+                if let hr, hr.indices.contains(k - 1), let v = hr[k - 1], v > 0 { known.append((Double(k), v)) }
+            }
+            known.append((kNow, b))
+            let at = { (k: Double) -> Double in
+                var j = 0
+                while j < known.count - 2 && known[j + 1].0 < k { j += 1 }
+                let (k0, v0) = known[j], (k1, v1) = known[j + 1]
+                return k1 > k0 ? v0 + (v1 - v0) * (k - k0) / (k1 - k0) : v1
+            }
+            var k = 1
+            while Double(k) < kNow {
+                let q = hr.flatMap { $0.indices.contains(k - 1) ? $0[k - 1] : nil } ?? at(Double(k))
+                pts.append(Point(x: (Double(d * 7) + Double(k)) / U, v: q, d: dayS, h: 9 + k, now: false))
+                k += 1
+            }
+            pts.append(Point(x: (Double(d * 7) + kNow) / U, v: b, d: dayS, h: isToday ? nil : 16, now: isToday))
+        }
+        let end = pts[pts.count - 1]
+        pts[pts.count - 1] = Point(x: end.x, v: S0, d: end.d, h: end.h, now: end.now)
+
+        // The scale.
+        let sK = strikes.filter { $0.q < 0 }.map(\.K), hs = pts.map(\.v)
+        var a0 = min(S0, sK.min() ?? S0), b0 = max(S0, sK.max() ?? S0)
+        do {
+            let sp = max(b0 - a0, S0 * 0.06), md = (a0 + b0) / 2
+            a0 = min(md - sp * 0.62, hs.min() ?? md); b0 = max(md + sp * 0.62, hs.max() ?? md)
+        }
+        do {
+            let r0 = b0 - a0
+            for l in strikes where l.q > 0 {
+                if l.K < a0 && a0 - l.K <= r0 * 0.4 { a0 = l.K }
+                if l.K > b0 && l.K - b0 <= r0 * 0.4 { b0 = l.K }
+            }
+            let q = (b0 - a0) * 0.05; a0 -= q; b0 += q
+        }
+        let Y = { (v: Double) in CGFloat((b0 - v) / (b0 - a0)) * CH }
+
+        // One line per strike, side and type.
+        struct G { let kk: String; let sd: Bool; let put: Bool; let K: Double; var ls: [String] }
+        var gs: [G] = [], gi: [String: Int] = [:]
+        for l in strikes {
+            let kk = (l.q < 0 ? "s" : "b") + (l.put ? "P" : "C") + PE.fk(l.K)
+            if let i = gi[kk] { gs[i].ls.append(l.label) } else { gi[kk] = gs.count; gs.append(G(kk: kk, sd: l.q < 0, put: l.put, K: l.K, ls: [l.label])) }
+        }
+        final class T { let key: String; let y: CGFloat; let px: Bool; let out: Bool; let up: Bool; let g: G?; var cy: CGFloat = 0
+            init(_ key: String, _ y: CGFloat, _ px: Bool, _ out: Bool, _ up: Bool, _ g: G?) { self.key = key; self.y = y; self.px = px; self.out = out; self.up = up; self.g = g } }
+        var tg: [T] = [T("px", Y(S0), true, false, false, nil)]
+        for g in gs { let yy = Y(g.K), out = yy < 0 || yy > CH; tg.append(T(g.kk, out ? (yy < 0 ? 0 : CH) : yy, false, out, yy < 0, g)) }
+        tg.sort { $0.y < $1.y }
+        struct Cl { var xs: [T]; var top: CGFloat = 0 }
+        func place(_ c: inout Cl) {
+            let top: CGFloat
+            if let j = c.xs.firstIndex(where: \.px) { top = c.xs[j].y - PT / 2 - CGFloat(j) * PT }
+            else { top = c.xs.enumerated().reduce(0) { $0 + $1.element.y - CGFloat($1.offset) * PT } / CGFloat(c.xs.count) - PT / 2 }
+            c.top = max(0, min(CH - PT * CGFloat(c.xs.count), top))
+        }
+        var cl = tg.map { Cl(xs: [$0]) }
+        for i in cl.indices { place(&cl[i]) }
+        var merged = true, it = 0
+        while merged && it < 30 {
+            merged = false; it += 1
+            for i in 0..<max(0, cl.count - 1) where cl[i].top + CGFloat(cl[i].xs.count) * PT > cl[i + 1].top {
+                var c = Cl(xs: cl[i].xs + cl[i + 1].xs); place(&c)
+                cl.replaceSubrange(i...(i + 1), with: [c]); merged = true; break
+            }
+        }
+        for c in cl { for (i, x) in c.xs.enumerated() { x.cy = c.top + CGFloat(i) * PT + PT / 2 } }
+        let tags: [Tag] = tg.map { x in
+            guard let g = x.g else { return Tag(id: "px", top: x.cy - TH / 2, n: String(format: "%.2f", S0), s: "", px: true, sold: true, put: false, title: "Today \(String(format: "%.2f", S0))") }
+            return Tag(id: x.key, top: x.cy - TH / 2, n: PE.fk(g.K) + (g.put ? " P" : " C"), s: dpc(g.K, S0) + (x.out ? (x.up ? " ↑" : " ↓") : ""), px: false, sold: g.sd, put: g.put,
+                       title: g.ls.joined(separator: ", ") + (x.out ? ", off the chart \(x.up ? "above" : "below")" : ""))
+        }
+        let conn = tg.filter { !$0.px && !$0.out && abs($0.cy - $0.y) > 3 }.enumerated().map { Conn(id: $0.offset, y0: $0.element.y, y1: $0.element.cy) }
+        let lines = gs.compactMap { g -> Line? in let yy = Y(g.K); return yy >= 0 && yy <= CH ? Line(id: g.kk, y: yy, sold: g.sd) : nil }
+
+        // The days under the chart, each at its start; thinned from the right (10% apart); the last up to today white.
+        var xl0: [(Double, String, Bool)] = []
+        for d in 0..<nR { xl0.append((Double(d * 7) / U, WD[dow(sl[d + 1].0) - 1], false)) }
+        for (j, s) in FT.enumerated() { xl0.append((Double((nR + j) * 7) / U, WD[dow(s) - 1], true)) }
+        var xl: [(Double, String, Bool)] = []
+        for x in xl0.reversed() where xl.isEmpty || xl[xl.count - 1].0 - x.0 >= 0.10 - 1e-9 { xl.append(x) }
+        xl.reverse()
+        let li = xl.lastIndex { !$0.2 } ?? -1
+        let move = S0 / sl[0].1 - 1
+        return PosPrice(pts: pts, up: move >= 0, move: move, dotX: pts[pts.count - 1].x, dotY: Y(S0), lines: lines, tags: tags, conn: conn,
+                        xl: xl.enumerated().map { Label(id: $0.offset, x: $0.element.0, t: $0.element.1, now: $0.offset == li) },
+                        fridayWords: dayWords(FT.last ?? fri), lo: a0, hi: b0)
     }
 }
 

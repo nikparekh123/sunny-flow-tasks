@@ -30,6 +30,9 @@ nonisolated struct TickerWire: Decodable, Sendable {
     let short: String?
     let strategy: String?
     let watch: Bool?
+    /// The hourly closes 10:00 to 16:00 New York for the last six sessions and today (sunny-chart 2026-11-13.1, our
+    /// Theta quotes), nil where an hour has no quote; the Positions Price chart's week. Nil from an older server.
+    let hours: [String: [Double?]]?
 
     // The Technicals layer is drawn on the phone from the closes (TickerChart.swift TKCalc: the 20, 50 and 200-day
     // averages over time and RSI 14), as the design does; `tech` stays in the reply for older builds.

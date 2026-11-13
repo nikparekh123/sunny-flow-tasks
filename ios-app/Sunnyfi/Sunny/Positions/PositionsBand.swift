@@ -151,24 +151,24 @@ struct PosSoldRow: View {
 
 // MARK: - Price
 
-/// The past 3 months of closes with today's price at the end, the name's strikes on the line (sold solid, bought
-/// dotted), the price pill at the end of the line.
+/// Handoff 2026-11-13-positions 2 §3.4 on the phone (154a; Nik, 13 Nov 2026: "Just price chart"): the past week in
+/// hours with no fill, ending in a ring at today, the days to the Friday kept open after it, the strike lines (sold
+/// dashed, bought dotted) to an 88 pt tag column, the day names under it, then "Past week ▼ 0.2% · sold dashed, bought
+/// dotted · to Fri Nov 20". The model is PosPrice (the shared price-chart.ts, ported). The scrub stays (Nik): a
+/// sideways drag, its own layer (PosPriceScrub), so a drag redraws only the line under the finger and its dot.
 struct PosPriceChart: View {
     let price: PosPrice?
-    let strikes: [PosName.Strike]
-    let S0: Double
     let failed: Bool
-    private let H: CGFloat = 210
-    /// The close under the finger while it scrubs sideways (Nik 13 Nov 2026, "like before"); nil at rest.
-    @State private var si: Int?
+    private let H = PosPrice.CH, TAGW: CGFloat = 88
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let p = price {
                 chart(p).frame(height: H)
-                Text("Past 3 months \(Text("\(p.chg < 0 ? "▼" : "▲") \(PE.pcx(p.chg))").font(.inter(12, 600, tabular: true)).foregroundStyle(p.chg < 0 ? PC.red : PC.green)) · your strikes: sold solid, bought dotted")
+                labels(p).frame(height: 16)
+                Text("Past week \(Text("\(p.move < 0 ? "▼" : "▲") \(PE.pcx(p.move))").font(.inter(12, 600, tabular: true)).foregroundStyle(p.move < 0 ? PC.red : PC.green)) · sold dashed, bought dotted · to \(p.fridayWords)")
                     .sType(PT.t(12, 16)).foregroundStyle(PC.mu)
-                    .accessibilityLabel(PosSay.words("Past 3 months \(p.chg < 0 ? "down" : "up") \(PE.pcx(p.chg)), your strikes: sold solid, bought dotted"))
+                    .accessibilityLabel(PosSay.words("Past week \(p.move < 0 ? "down" : "up") \(PE.pcx(p.move)), sold dashed, bought dotted, to \(p.fridayWords)"))
             } else {
                 Group {
                     if failed { Text("No price history for this name yet.").sType(PT.t(13, 18), tabular: false).foregroundStyle(PC.mu) }
@@ -180,68 +180,105 @@ struct PosPriceChart: View {
     }
 
     private func chart(_ p: PosPrice) -> some View {
-        let up = p.chg >= 0, col = up ? PC.green : PC.red
-        let Ks = strikes.map(\.K)
-        var lo = min(p.pts.min() ?? S0, Ks.min() ?? .infinity), hi = max(p.pts.max() ?? S0, Ks.max() ?? -.infinity)
-        let pd = (hi - lo) * 0.07 == 0 ? S0 * 0.05 : (hi - lo) * 0.07
-        lo -= pd; hi += pd
-        let cy = { (v: Double) in CGFloat((hi - v) / (hi - lo)) }
-        // The labels sit just over their lines, pushed apart (16 pt) so none overlap.
-        let ys = strikes.map { cy($0.K) * H }
-        let order = ys.indices.sorted { ys[$0] < ys[$1] }
-        var ly = ys.map { max(16, $0 - 2) }
-        var prev: CGFloat = -100
-        for i in order { ly[i] = max(ly[i], prev + 17); prev = ly[i] }
-        if let last = order.last, ly[last] > H { let shift = ly[last] - H; for i in order { ly[i] -= shift } }
+        let col = p.up ? PC.green : PC.red
         return GeometryReader { g in
-            let w = g.size.width
-            let line = Path { path in
-                for (i, v) in p.pts.enumerated() {
-                    let pt = CGPoint(x: CGFloat(i) / CGFloat(p.pts.count - 1) * w, y: cy(v) * H)
-                    if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
-                }
-            }
+            let pw = max(1, g.size.width - TAGW)
             ZStack(alignment: .topLeading) {
-                Path { path in path.addPath(line); path.addLine(to: CGPoint(x: w, y: H)); path.addLine(to: CGPoint(x: 0, y: H)); path.closeSubpath() }
-                    .fill(LinearGradient(colors: [col.opacity(0.26), col.opacity(0)], startPoint: .top, endPoint: .bottom))
-                line.stroke(col, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
-                ForEach(Array(strikes.enumerated()), id: \.element.id) { i, s in
-                    let y = ys[i]
-                    Path { path in path.move(to: CGPoint(x: 0, y: y)); path.addLine(to: CGPoint(x: w - 62, y: y)) }
-                        .stroke(PC.ink.opacity(s.sold ? 0.55 : 0.5), style: s.sold ? StrokeStyle(lineWidth: 1) : StrokeStyle(lineWidth: 1.5, dash: [1.5, 2.5]))
-                    Text(s.label).sType(PT.t(11, 14, 500)).foregroundStyle(PC.muT).lineLimit(1)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(PC.labelBg))
-                        .fixedSize()
-                        .offset(y: ly[i] - 16)
+                ForEach(p.lines) { l in
+                    Path { $0.move(to: CGPoint(x: 0, y: l.y)); $0.addLine(to: CGPoint(x: pw, y: l.y)) }
+                        .stroke(PC.ink.opacity(l.sold ? 0.42 : 0.30), style: l.sold ? StrokeStyle(lineWidth: 1, dash: [3, 3]) : StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [0.1, 3.5]))
                 }
-                Text(PosFmt.price(S0)).sType(PT.t(11, 14, 700)).foregroundStyle(PC.onInk)
-                    .padding(.horizontal, 7).padding(.vertical, 2)
-                    .background(Capsule().fill(PC.ink))
-                    .fixedSize()
-                    .frame(width: w, alignment: .trailing)
-                    .offset(y: cy(S0) * H - 9)
-                // Under the finger: a line down the chart, a dot on the close, and its date, price and the move since
-                // the first close (the ticker chart's read), beside the line.
-                if let i = si, p.pts.indices.contains(i) {
-                    let x = CGFloat(i) / CGFloat(p.pts.count - 1) * w, v = p.pts[i], mv = v / p.pts[0] - 1
-                    Rectangle().fill(PC.mu.opacity(0.6)).frame(width: 1, height: H).offset(x: x - 0.5)
-                    Circle().fill(col).frame(width: 11, height: 11).background(Circle().fill(PC.page).padding(-2))
-                        .offset(x: x - 5.5, y: cy(v) * H - 5.5)
-                    PosScrubTip(rows: [(p.dates[i] == p.today ? "Today" : PosScrubTip.day(p.dates[i]), PC.mu, false),
-                                       (PosFmt.price(v), PC.ink, true),
-                                       ("\(mv < 0 ? "▼" : "▲") \(PE.pcx(mv)) since \(PosScrubTip.day(p.dates[0]))", mv < 0 ? PC.red : PC.green, false)],
-                                x: x, w: w)
+                Path { path in
+                    for (i, q) in p.pts.enumerated() {
+                        let pt = CGPoint(x: CGFloat(q.x) * pw, y: p.y(q.v))
+                        if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+                    }
                 }
-                Color.clear.contentShape(Rectangle())
-                    .gesture(PosScrubPan(moved: { lx in
-                        let i = Int((max(0, min(1, lx / max(1, w))) * CGFloat(p.pts.count - 1)).rounded())
-                        if i != si { var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { si = i } }
-                    }, ended: { var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { si = nil } }))
+                .stroke(col, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                Circle().strokeBorder(col, lineWidth: 2.5).background(Circle().fill(PC.page)).frame(width: 12, height: 12)
+                    .shadow(color: .black.opacity(0.6), radius: 2, y: 1)
+                    .position(x: CGFloat(p.dotX) * pw, y: p.dotY)
+                // The tag column: a short connector when a tag leaves its line, then the tags.
+                ForEach(p.conn) { c in
+                    Path { $0.move(to: CGPoint(x: pw, y: c.y0)); $0.addLine(to: CGPoint(x: pw + 8, y: c.y1)) }.stroke(PC.ink.opacity(0.4), lineWidth: 1)
+                }
+                ForEach(p.tags) { t in tag(t).offset(x: pw + 9, y: t.top) }
+                PosPriceScrub(p: p, col: col, pw: pw)
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(PosSay.words("Price chart, past 3 months, \(PosFmt.price(S0)) today. Your strikes: " + strikes.map(\.label).joined(separator: "; ")))
+        .accessibilityLabel(PosSay.words("Price chart, past week, \(PosFmt.price(p.pts.last?.v ?? 0)) today. " + p.tags.filter { !$0.px }.map { "\($0.title), \($0.s)" }.joined(separator: "; ")))
+    }
+
+    /// Sold: the strike 700 ink, the % grey; bought: the strike 500 #AEAEB2, the % #8E8E93; puts in a grey capsule;
+    /// today's price a white capsule with black text.
+    private func tag(_ t: PosPrice.Tag) -> some View {
+        HStack(spacing: 4) {
+            Text(t.n).font(.inter(13, t.px || t.sold ? 700 : 500, tabular: true)).foregroundStyle(t.px ? PC.onInk : t.sold ? PC.ink : PC.muT)
+            if !t.px { Text(t.s).font(.inter(11.5, 500, tabular: true)).foregroundStyle(t.put ? PC.muT : t.sold ? PC.mu : PC.quiet) }
+        }
+        .lineLimit(1)
+        .padding(.horizontal, t.px ? 8 : t.put ? 7 : 0)
+        .frame(height: PosPrice.TH)
+        .background(Capsule().fill(t.px ? PC.ink : t.put ? Color(red: 118 / 255, green: 118 / 255, blue: 128 / 255).opacity(t.sold ? 0.24 : 0.16) : .clear))
+        .fixedSize()
+    }
+
+    private func labels(_ p: PosPrice) -> some View {
+        GeometryReader { g in
+            let pw = max(1, g.size.width - TAGW)
+            ZStack(alignment: .topLeading) {
+                ForEach(p.xl) { x in
+                    Text(x.t).sType(PT.t(12, 16), tabular: false).foregroundStyle(x.now ? PC.ink : PC.mu).fixedSize().offset(x: CGFloat(x.x) * pw)
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// The Price chart's scrub on its own (only this redraws while the finger moves): the line follows the finger up to
+/// today's dot, the dot slides along the price line, and the read beside it is the nearest hour: "Wed Nov 12 · 11 AM",
+/// "Thu Nov 12 close" or "Now", the price, and the move since the week began.
+private struct PosPriceScrub: View {
+    let p: PosPrice
+    let col: Color
+    let pw: CGFloat
+    @State private var fx: CGFloat?
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if let fx {
+                let x = min(Double(fx / pw), p.dotX), P = p.pts
+                let j = Self.seg(P, x), a = P[j], b = P[min(j + 1, P.count - 1)]
+                let w = b.x > a.x ? max(0, min(1, (x - a.x) / (b.x - a.x))) : 0
+                let near = w < 0.5 ? a : b, mv = P[0].v > 0 ? near.v / P[0].v - 1 : 0
+                Rectangle().fill(PC.mu.opacity(0.6)).frame(width: 1, height: PosPrice.CH).offset(x: CGFloat(x) * pw - 0.5)
+                Circle().fill(col).frame(width: 11, height: 11).background(Circle().fill(PC.page).padding(-2))
+                    .position(x: CGFloat(x) * pw, y: p.y(a.v + (b.v - a.v) * w))
+                PosScrubTip(rows: [(Self.when(near), PC.mu, false), (PosFmt.price(near.v), PC.ink, true),
+                                   ("\(mv < 0 ? "▼" : "▲") \(PE.pcx(mv)) since \(Self.when(P[0]).replacingOccurrences(of: " close", with: ""))", mv < 0 ? PC.red : PC.green, false)],
+                            x: CGFloat(x) * pw, w: pw)
+            }
+            Color.clear.frame(width: pw, height: PosPrice.CH).contentShape(Rectangle())
+                .gesture(PosScrubPan(moved: { lx in
+                    var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { fx = max(0, min(pw, lx)) }
+                }, ended: { var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { fx = nil } }))
+        }
+        .frame(width: pw, height: PosPrice.CH, alignment: .topLeading)
+    }
+
+    /// The segment of the line a fraction across sits on.
+    static func seg(_ P: [PosPrice.Point], _ x: Double) -> Int {
+        var lo = 0, hi = P.count - 1
+        while hi - lo > 1 { let m = (lo + hi) / 2; if P[m].x <= x { lo = m } else { hi = m } }
+        return lo
+    }
+    static func when(_ q: PosPrice.Point) -> String {
+        if q.now { return "Now" }
+        let d = PosPrice.dayWords(q.d)
+        guard let h = q.h else { return d }
+        return h == 9 || h == 16 ? "\(d) close" : "\(d) · \(h > 12 ? h - 12 : h) \(h >= 12 ? "PM" : "AM")"
     }
 }
 
@@ -258,31 +295,17 @@ struct PosPayoffView: View {
     /// Some leg is switched off in Every leg.
     var changed = false
     private let H: CGFloat = 180
-    /// How far across the chart the finger is while it scrubs sideways (0 to 1); nil at rest, the headline reads today.
-    @State private var sx: Double?
+    /// How far across the chart the finger is while it scrubs sideways (0 to 1). Held in a reference only the headline
+    /// and the scrub layer read, so a drag redraws those two and never the shaded curve or the Greeks (Nik, 13 Nov
+    /// 2026: "Why is the scrub so jerky").
+    @State private var scrub = PosScrubAt()
 
     var body: some View {
         let peak = p.peak
         let right = peak == nil ? "Keeps making more past ↑\(p.top)% \(p.byT)" : p.peakPast ? "Already past its best \(p.byT)" : "Makes the most at \(PosFmt.price(peak!)) \(p.byT)"
-        // While the finger scrubs, the headline reads the P&L at the price under it (the old payoff's way), then goes
-        // back to today's price when it lifts.
-        let at = sx.map { f in (x: S0 * (0.88 + 0.24 * f), v: lerp(f)) }
-        let v0 = at?.v ?? p.v0, x0 = at?.x ?? S0
-        let move = at.map { a -> String in
-            let m = a.x / S0 - 1
-            return abs(m) < 0.0005 ? "" : " (\(m > 0 ? "↑" : "↓")\(String(format: "%.1f", abs(m) * 100))%)"
-        } ?? ""
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(privacy ? BriefMask.shown : PosFmt.money(v0)).sType(PT.t(26, 32, 700, tr: -0.02))
-                        .foregroundStyle(v0 > 0.5 ? PC.green : v0 < -0.5 ? PC.red : PC.ink)
-                    // Two lines kept either way, so nothing below jumps while the finger scrubs.
-                    Text("If \(t) is at \(PosFmt.price(x0))\(move) \(p.byT)\(at == nil ? ", from today’s marks" : "")").sType(PT.t(12, 16)).foregroundStyle(PC.mu)
-                        .lineLimit(2, reservesSpace: true)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(PosSay.words("\(PosSay.signed(v0, privacy)) if \(t) is at \(PosFmt.price(x0)) \(p.byT), from today’s marks"))
+                PosPayoffHead(t: t, S0: S0, p: p, privacy: privacy, scrub: scrub)
                 Spacer(minLength: 0)
                 Text(right).sType(PT.t(13, 18, 600)).foregroundStyle(peak != nil ? PC.orange : PC.ink).multilineTextAlignment(.trailing)
                     .accessibilityLabel(PosSay.words(right))
@@ -357,29 +380,13 @@ struct PosPayoffView: View {
                 }
                 Circle().fill(PC.dot).frame(width: 12, height: 12).overlay(Circle().stroke(PC.dotRing, lineWidth: 3).padding(-1.5))
                     .offset(x: w / 2 - 6, y: fy(p.v0) - 6)
-                if let f = sx {
-                    let x = CGFloat(f) * w, v = lerp(f)
-                    Rectangle().fill(PC.mu.opacity(0.6)).frame(width: 1, height: H - 16).offset(x: x - 0.5, y: 8)
-                    Circle().fill(v >= 0 ? PC.green : PC.red).frame(width: 11, height: 11).background(Circle().fill(PC.page).padding(-2))
-                        .offset(x: x - 5.5, y: fy(v) - 5.5)
-                }
-                Color.clear.contentShape(Rectangle())
-                    .gesture(PosScrubPan(moved: { lx in
-                        let f = Double(max(0, min(1, lx / max(1, w))))
-                        var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { sx = f }
-                    }, ended: { var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { sx = nil } }))
+                PosPayoffScrub(scrub: scrub, w: w, H: H, fy: fy, at: { PosPayoffHead.lerp(p.ys, $0) })
             }
         }
         .accessibilityHidden(true)
     }
 
-    /// The P&L at a fraction across the ±12% grid, read on the straight line between its two points.
-    private func lerp(_ f: Double) -> Double {
-        let ys = p.ys, n = ys.count
-        guard n > 1 else { return ys.first ?? 0 }
-        let k = max(0, min(1, f)) * Double(n - 1), i = min(n - 2, Int(k)), w = k - Double(i)
-        return ys[i] + (ys[i + 1] - ys[i]) * w
-    }
+
 
     private var axis: some View {
         GeometryReader { g in
@@ -395,6 +402,65 @@ struct PosPayoffView: View {
             }
         }
         .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Payoff scrub
+
+/// Where the finger is on the Payoff chart, 0 to 1 across, nil at rest.
+@Observable final class PosScrubAt { var f: Double? }
+
+/// The Payoff headline: the P&L at today's price, or at the price under the finger while it scrubs (the old payoff's
+/// way), back to today when it lifts. Two lines kept either way, so nothing below jumps.
+private struct PosPayoffHead: View {
+    let t: String, S0: Double, p: PosName.Payoff, privacy: Bool
+    let scrub: PosScrubAt
+    var body: some View {
+        let at = scrub.f.map { f in (x: S0 * (0.88 + 0.24 * f), v: Self.lerp(p.ys, f)) }
+        let v0 = at?.v ?? p.v0, x0 = at?.x ?? S0
+        let move = at.map { a -> String in
+            let m = a.x / S0 - 1
+            return abs(m) < 0.0005 ? "" : " (\(m > 0 ? "↑" : "↓")\(String(format: "%.1f", abs(m) * 100))%)"
+        } ?? ""
+        VStack(alignment: .leading, spacing: 2) {
+            Text(privacy ? BriefMask.shown : PosFmt.money(v0)).sType(PT.t(26, 32, 700, tr: -0.02))
+                .foregroundStyle(v0 > 0.5 ? PC.green : v0 < -0.5 ? PC.red : PC.ink)
+            Text("If \(t) is at \(PosFmt.price(x0))\(move) \(p.byT)\(at == nil ? ", from today’s marks" : "")").sType(PT.t(12, 16)).foregroundStyle(PC.mu)
+                .lineLimit(2, reservesSpace: true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(PosSay.words("\(PosSay.signed(v0, privacy)) if \(t) is at \(PosFmt.price(x0)) \(p.byT), from today’s marks"))
+    }
+    /// The P&L at a fraction across the ±12% grid, read on the straight line between its two points.
+    static func lerp(_ ys: [Double], _ f: Double) -> Double {
+        let n = ys.count
+        guard n > 1 else { return ys.first ?? 0 }
+        let k = max(0, min(1, f)) * Double(n - 1), i = min(n - 2, Int(k)), w = k - Double(i)
+        return ys[i] + (ys[i + 1] - ys[i]) * w
+    }
+}
+
+/// The Payoff chart's scrub layer: the line under the finger and a dot on the curve; it alone redraws with the finger.
+private struct PosPayoffScrub: View {
+    let scrub: PosScrubAt
+    let w: CGFloat, H: CGFloat
+    let fy: (Double) -> CGFloat
+    let at: (Double) -> Double
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if let f = scrub.f {
+                let x = CGFloat(f) * w, v = at(f)
+                Rectangle().fill(PC.mu.opacity(0.6)).frame(width: 1, height: H - 16).offset(x: x - 0.5, y: 8)
+                Circle().fill(v >= 0 ? PC.green : PC.red).frame(width: 11, height: 11).background(Circle().fill(PC.page).padding(-2))
+                    .position(x: x, y: fy(v))
+            }
+            Color.clear.frame(width: w, height: H).contentShape(Rectangle())
+                .gesture(PosScrubPan(moved: { lx in
+                    var tx = Transaction(); tx.disablesAnimations = true
+                    withTransaction(tx) { scrub.f = Double(max(0, min(1, lx / max(1, w)))) }
+                }, ended: { var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { scrub.f = nil } }))
+        }
+        .frame(width: w, height: H, alignment: .topLeading)
     }
 }
 

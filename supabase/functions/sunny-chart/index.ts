@@ -19,8 +19,14 @@
  * low, average and high from ticker_fundamentals (filled each morning by ticker-technicals for the book's names),
  * with how many analysts and the day it was read. Null when the name has no row from the last 30 days. Market data,
  * not the book's, so it is read with the service key.
+ *
+ * 13 Nov 2026 (Positions Price chart, handoff 2026-11-13-positions 2 §3.4, Nik: 1W draws hours, "we have theta
+ * data"): the reply adds `hours`, the hourly closes 10:00 to 16:00 New York for the last six sessions and today,
+ * from our own Theta quotes (hourly_closes() over ticker_quotes, every 30 s, kept 30 days): { 'YYYY-MM-DD': [7 values,
+ * null where no quote] }. A name we do not quote (or a day before it was added) has no entry; the chart then draws
+ * that day straight between its closes.
  */
-const BUILD = '2026-11-10.1';
+const BUILD = '2026-11-13.1';
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -73,6 +79,25 @@ const md = (d: string) => `${MON[Number(d.slice(5, 7)) - 1]} ${Number(d.slice(8,
 const fk = (k: number) => (k % 1 ? String(+k.toFixed(2)) : String(k));
 const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
+/** Hourly closes for the days asked, from our quotes: { day: [10:00 ... 16:00] }, null for an hour with no quote. */
+async function hours(t: string, days: string[]): Promise<Record<string, (number | null)[]>> {
+  if (!days.length) return {};
+  const r = await fetch(`${URL_}/rest/v1/rpc/hourly_closes`, {
+    method: 'POST', headers: { apikey: SK, Authorization: `Bearer ${SK}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_tickers: [t], p_days: days }), signal: AbortSignal.timeout(8000),
+  });
+  if (!r.ok) { await r.body?.cancel(); return {}; }
+  const out: Record<string, (number | null)[]> = {};
+  for (const x of (await r.json()) as Row[]) {
+    const d = String(x.day), h = Number(x.hr) - 10;
+    if (h < 0 || h > 6 || !(Number(x.spot) > 0)) continue;
+    (out[d] ??= [null, null, null, null, null, null, null])[h] = +Number(x.spot).toFixed(4);
+  }
+  return out;
+}
+/** Today in New York, YYYY-MM-DD. */
+const nyToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+
 /** The analysts' latest 12-month targets for a name, or null when none are fresh (30 days). */
 async function targets(t: string): Promise<Row | null> {
   const since = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
@@ -108,6 +133,10 @@ Deno.serve(async (req) => {
     const lastD = pts.at(-1)?.d, prevBar = pts.length > 1 ? (Math.abs(pts.at(-1)!.c - price) < 0.005 ? pts.at(-2) : pts.at(-1)) : null;
     const prev = Number(meta.previousClose ?? prevBar?.c ?? price);
     const closes = pts.map((p) => +p.c.toFixed(4)), last252 = closes.slice(-252);
+    // The last six sessions and today (when it is a weekday not in the bars yet): the Price chart's 1W hours.
+    const td = nyToday(), wd = new Date(td + 'T12:00:00Z').getUTCDay();
+    const hDays = [...new Set([...pts.slice(-6).map((p) => p.d), ...(wd > 0 && wd < 6 ? [td] : [])])];
+    const hrs = await hours(t, hDays).catch(() => ({}));
     const tech = {
       sma20: closes.length >= 20 ? +avg(closes.slice(-20)).toFixed(2) : null,
       sma50: closes.length >= 50 ? +avg(closes.slice(-50)).toFixed(2) : null,
@@ -150,7 +179,7 @@ Deno.serve(async (req) => {
       positions = [...byK.values()];
     }
     return json(200, { v: 1, build: BUILD, t, name: String(meta.shortName ?? meta.longName ?? t), price: +price.toFixed(4), prev: +prev.toFixed(4),
-      last_bar: lastD ?? null, dates: pts.map((p) => p.d), closes, positions, walls, tech, sd, short, strategy, watch, targets: tgt });
+      last_bar: lastD ?? null, dates: pts.map((p) => p.d), closes, positions, walls, tech, sd, short, strategy, watch, targets: tgt, hours: hrs });
   } catch (e) {
     return json(502, { error: String((e as Error)?.message ?? e) });
   }

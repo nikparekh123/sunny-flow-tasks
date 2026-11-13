@@ -105,8 +105,8 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
             style={{ position: 'absolute', left: 0, top: 14, width: '100%', height: 'calc(100% - 28px)', overflow: 'visible', pointerEvents: 'none' }}>
             <line x1="0" y1={v.y0.toFixed(2)} x2="400" y2={v.y0.toFixed(2)}
               style={{ stroke: 'rgba(255,255,255,.18)', strokeWidth: 1, strokeDasharray: '2 5', vectorEffect: 'non-scaling-stroke' }} />
-            <path d={v.path} style={{ fill: 'none', stroke: v.up ? 'rgba(101,196,102,.18)' : 'rgba(255,105,97,.18)', strokeWidth: 10, vectorEffect: 'non-scaling-stroke' }} />
-            <path d={v.path} style={{ fill: 'none', stroke: LC, strokeWidth: 2, strokeLinejoin: 'round', vectorEffect: 'non-scaling-stroke' }} />
+            {/* One plain 2 px line, as the Positions Price chart (Nik, 13 Nov 2026: no see-through outline under it). */}
+            <path d={v.path} style={{ fill: 'none', stroke: LC, strokeWidth: 2, strokeLinejoin: 'round', strokeLinecap: 'round', vectorEffect: 'non-scaling-stroke' }} />
           </svg>
         )}
         <span ref={lineEl} style={{ position: 'absolute', left: 0, top: 0, bottom: 0, borderLeft: '1px solid rgba(255,255,255,.35)', pointerEvents: 'none', opacity: 0 }}>

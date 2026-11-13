@@ -204,9 +204,14 @@ struct PositionsTab: View {
             .sensoryFeedback(.selection, trigger: view)
             Group {
                 if view == .price {
-                    let w = charts.chart(b, n.t)
-                    let pr = w.flatMap { w in memo.price(key: "\(b)|\(n.t)|\(w.dates.last ?? "")|\(S0)") { PosPrice.build(w, S0: S0, today: MarketClock.ny(SClock.now()).date) } }
-                    PosPriceChart(price: pr, strikes: nm?.strikes ?? [], S0: S0, failed: charts.hasFailed(b, n.t))
+                    let w = charts.chart(b, n.t), now = MarketClock.ny(SClock.now()), stk = nm?.strikes ?? []
+                    let closed = Set(brief.calendar.filter { $0.kind == "closed" }.map(\.date))
+                    let pr = w.flatMap { w in
+                        memo.price(key: "\(b)|\(n.t)|\(w.dates.last ?? "")|\(w.hours?.count ?? 0)|\(S0)|\(now.date)|\(now.minutes)|\(stk.map(\.id).joined(separator: ","))") {
+                            PosPrice.build(w, S0: S0, today: now.date, mins: now.minutes, closed: closed, strikes: stk)
+                        }
+                    }
+                    PosPriceChart(price: pr, failed: charts.hasFailed(b, n.t))
                 } else if let p = nm?.payoff {
                     PosPayoffView(t: n.t, S0: S0, p: p, privacy: privacy, changed: nm?.changed ?? false)
                 } else {

@@ -20,14 +20,14 @@ import { clock12, ny, shortDate } from '../lib/clock';
 import { useHome, usePositions, usePrefetchPositions, useSd, useSdMany, useTicker, type J } from '../lib/data';
 import { arrow, pct, price } from '../lib/format';
 import { useWeb } from '../lib/state';
-import type { Range } from '../ticker/model';
+import type { PCRange } from '../../../supabase/functions/_shared/price-chart.ts';
 import { Payoff, PriceChart, rangeWords } from '../positions/Band';
 import { BookTotals } from '../positions/BookTotals';
 import { EveryLeg, type LegFilter } from '../positions/EveryLeg';
 import { Intelligence } from '../positions/Intelligence';
 import { pickExpiry, requestIntelScroll, setIntelOpen, useIntelOpen, type SdReply } from '../positions/intel';
 import { PosModel, Pricer, expLabel, type GridW, type Inputs, type PLeg, type Seg } from '../positions/model';
-import { SoldCapsule, SoldCard, soldLegs } from '../positions/SoldInSd';
+import { SoldCapsule, SoldCard, closedDays, soldLegs } from '../positions/SoldInSd';
 import { bookTotals, nameTotals } from '../positions/totals';
 import { G, K, MU, O, PosStyles, R, Segmented } from '../positions/ui';
 import { WhatIf } from '../positions/WhatIfPanel';
@@ -163,7 +163,7 @@ function Name({ book, t, name, payload }: { book: 'S' | 'N'; t: string; name: J;
 
 // The page's own state, kept across names and rebuilds: the date, Price or Payoff, Chart or Table, the range, the
 // Every leg filter.
-const pageState = { day: null as string | null, view: 'price' as 'price' | 'pay', tab: 'chart' as 'chart' | 'table', rg: '3M' as Range, lf: 'all' as LegFilter };
+const pageState = { day: null as string | null, view: 'price' as 'price' | 'pay', tab: 'chart' as 'chart' | 'table', rg: '1W' as PCRange, lf: 'all' as LegFilter };
 function usePageState<K extends keyof typeof pageState>(k: K): [(typeof pageState)[K], (v: (typeof pageState)[K]) => void] {
   const [v, setV] = useState(pageState[k]);
   return [v, (x) => { pageState[k] = x; setV(x); }];
@@ -174,7 +174,7 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
   const m = useMemo(() => new PosModel(grid, inputs), [grid, inputs]);
   const wf = useWhatIf(book, t);
   const pr = useMemo(() => new Pricer(m, wf.trades), [m, wf.trades]);
-  const S0 = m.S0, today = ny().date;
+  const S0 = m.S0;
   const [view, setView] = usePageState('view');
   const [tab, setTab] = usePageState('tab');
   const [rg, setRg] = usePageState('rg');
@@ -212,7 +212,8 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
   if (!expiries.includes(draft.ex) && expiries.length) draft.ex = expiries.find((x) => x > fri) ?? expiries[0];
   const strikeList = strikes.includes(draft.K) ? strikes : [...strikes, draft.K].sort((a, b) => a - b);
   const expL = (iso: string) => expLabel(iso, m.wholeDays(iso));
-  const rw = view === 'price' ? rangeWords(chart.data, S0, today, rg) : null;
+  const closed = useMemo(() => closedDays(payload?.calendar), [payload?.calendar]);
+  const rw = view === 'price' ? rangeWords(chart.data, S0, closed, rg) : null;
   const optLegs = wi.filter((l) => l.ty !== 'S' && l.trade == null);
 
   return (
@@ -225,7 +226,7 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
               : <Segmented label="Chart or table" items={[['chart', 'Chart'], ['table', 'Table']]} value={tab} onPick={setTab} width={170} size={13} />}
           </div>
           {view === 'price'
-            ? <PriceChart chart={chart.data} failed={chart.isError} S0={S0} today={today} legs={optLegs} trades={tradesOn} rg={rg} setRg={setRg} />
+            ? <PriceChart chart={chart.data} failed={chart.isError} S0={S0} closed={closed} legs={optLegs} trades={tradesOn} rg={rg} setRg={setRg} />
             : <Payoff t={t} pr={pr} base={base} wi={wi} chg={nCh > 0} segs={segs} seg={seg} dLong={dLong} pick={pick} tab={tab} mask={mask} iv={m.iv} />}
         </div>
         <WhatIf pr={pr} base={base} off={off} trades={wf.trades} draft={draft} strikes={strikeList} expiries={expiries} expL={expL} nCh={nCh} cashC={cashC} mask={mask}
