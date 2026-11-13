@@ -10,6 +10,27 @@
  * counts (Nik D1: calls one per 100 shares plus one per OTM hedge call; puts the ones sold, else 5) and the sold
  * strikes with their breakevens for the chart lines.
  *
+ * POSITIONS PAGE (handoff 2026-11-13-positions, Nik's answers 13 Nov 2026). Optional, so older clients still decode:
+ *   tech    the latest ticker_technicals row: 20/50/100/200-day, RSI 14, HV20; IV rank with the year's low and high of
+ *           the saved 30-day IV (ticker_iv_daily, the same numbers the rules use); support and resistance zones.
+ *   day     the session's range for touched and closed through (§3.9.3, A1): d = the session (today from 9:30 on a
+ *           trading day, else the last one), prev = the stored close before it (daily_closes, the base of the app's
+ *           day move), high and low (Yahoo's day high and low, else its daily bar; always holding the price; Polygon's
+ *           stock snapshot is not on our plan),
+ *           last = the price, closedToday = that session has closed, close = its stored close (daily_closes, 4:30 PM),
+ *           the price itself from the bell until it is stored. src says where high and low came from.
+ *   closes  the last 30 sessions' closes (daily_closes, Yahoo's bars where a day is missing); today only once stored.
+ *   events  the next earnings date (earnTime, earnEst) and the next declared ex-dividend date with its amount;
+ *           exDivEst is the estimate (last ex date plus a period) when none is declared, never put in exDiv.
+ *   exps[i].ivK    [K, iv] per strike, put IV below the price and call IV above (the other side where one is
+ *                  missing), within 4 SD or 15%: option_chain_next's mid IV, else this reply's own chain (ivKsrc).
+ *   exps[i].gamma  the latest gamma_view_day view for that expiry (the dealer-gamma walls labelled Ceiling, Floor,
+ *                  Accelerator or Unclear, gex in dollars per 1% move, conf 1 to 3 dots as gex-walls gamma.ts
+ *                  dots() grades them) with its Flip and regime; else that expiry's gex_walls open-interest walls
+ *                  (Ceiling above, Floor below, conf 1, src 'oi').
+ *   sold[i].z0, sold[i].fill   where the strike sat when sold (option_fill_context, one row per opening sale, written
+ *                  by option-fill-context): contract-weighted over the open lots of that leg in this book.
+ *
  * ⚠ WHO MAY CALL: a signed-in user (their token) or the scheduler's key (x-cron-key / x-admin-key, for checks). The
  * book's legs are read AS THE CALLER (RLS: members of the book only); market data with the service key.
  * Chains: Theta Data's real-time NBBO when MARKS_SOURCE is `theta` (as chain-next), else Polygon's snapshot. After the
@@ -18,7 +39,7 @@
  */
 import { calc, cover, CFG, dir, f1, f2, fk, heldPair, ITM, KS, netDelta, pc, row, won, bs as bsQ, type Expiry, type Fx, type Leg, type Name, type Quote, type Row } from '../_shared/sd-engine.ts';
 
-const BUILD = '2026-11-11.4';
+const BUILD = '2026-11-13.1';
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -45,6 +66,17 @@ async function caller(req: Request): Promise<{ auth: string; key: string } | nul
 const db = async (path: string, who?: { auth: string; key: string }): Promise<Row_[]> => {
   const r = await fetch(`${URL_}/rest/v1/${path}`, { headers: { apikey: who?.key ?? SK, Authorization: who?.auth ?? `Bearer ${SK}` } });
   return r.ok ? await r.json() : [];
+};
+/** Every row: PostgREST stops at 1,000 rows, so read in Range pages (the path must carry an order). */
+const dbPage = async (path: string, who?: { auth: string; key: string }): Promise<Row_[]> => {
+  const out: Row_[] = [];
+  for (let from = 0; ; from += 1000) {
+    const r = await fetch(`${URL_}/rest/v1/${path}`, { headers: { apikey: who?.key ?? SK, Authorization: who?.auth ?? `Bearer ${SK}`, Range: `${from}-${from + 999}` } });
+    if (!r.ok) { await r.body?.cancel(); return out; }
+    const rows = await r.json() as Row_[];
+    out.push(...rows);
+    if (rows.length < 1000) return out;
+  }
 };
 
 // ── New York's clock ──
@@ -197,17 +229,26 @@ Deno.serve(async (req) => {
   const t0 = Date.now(), { day: today, mins } = nyParts();
 
   try {
-    const [hist, ivRows, earn, divs, cal, snap, quote, allEx, gex] = await Promise.all([
+    const [hist, ivRows, earn, divs, cal, snap, quote, allEx, gex, techRows, dcl, chainNext, gvRows, myTrades, mlive, calToday] = await Promise.all([
       bars(t),
       db(`ticker_iv_daily?ticker=eq.${t}&select=snapshot_date,atm_iv&atm_iv=gt.0&order=snapshot_date.asc&limit=2000`),
-      db(`earnings_events?ticker=eq.${t}&report_date=gte.${today}&select=report_date,report_time&order=report_date.asc&limit=1`),
+      db(`earnings_events?ticker=eq.${t}&report_date=gte.${today}&select=report_date,report_time,date_estimated&order=report_date.asc&limit=1`),
       db(`dividends?ticker=eq.${t}&ex_date=gte.${addDays(today, -400)}&select=ex_date,cash_amount,frequency&order=ex_date.asc`),
       db(`market_calendar?date=gte.${today}&date=lte.${addDays(today, 120)}&kind=eq.closed&select=date`),
       db(`home_snapshot?book_id=eq.${book}&select=inputs:payload->brief_inputs,strategies:payload->strategies,names:payload->brief->names`, who),
       db(`ticker_quotes_latest?ticker=eq.${t}&select=spot,day_change_pct`),
       expirations(t, useTheta),
       // The walls card (Nik 11 Nov: walls are a nudge, never the rule): each expiry's last logged walls.
-      db(`gex_walls?ticker=eq.${t}&expiry=not.is.null&day=gte.${addDays(today, -7)}&select=day,expiry,call_wall,call_wall2,put_wall,put_wall2&order=day.desc,id.asc`),
+      db(`gex_walls?ticker=eq.${t}&expiry=not.is.null&day=gte.${addDays(today, -7)}&select=day,expiry,flip,call_wall,call_wall2,put_wall,put_wall2,call_wall_gex,call_wall2_gex,put_wall_gex,put_wall2_gex&order=day.desc,id.asc`),
+      // Positions page (2026-11-13): technicals and zones, stored closes, the chain's mid IV per strike, dealer gamma
+      // by expiry, this book's trades in the name (as the caller), the quote feed's previous close, today's bell.
+      db(`ticker_technicals?ticker=eq.${t}&order=day.desc&limit=1&select=day,sma20,sma50,sma100,sma200,rsi14,hv20,zones`),
+      db(`daily_closes?ticker=eq.${t}&date=gte.${addDays(today, -70)}&date=lte.${today}&order=date.asc&select=date,close_price`),
+      dbPage(`option_chain_next?ticker=eq.${t}&iv=gt.0&order=expiry.asc,side.asc,strike.asc&select=expiry,side,strike,iv`),
+      dbPage(`gamma_view_day?ticker=eq.${t}&day=gte.${addDays(today, -5)}&view=like.20*&order=day.desc,view.asc&select=day,view,flip:data->flip,regime:data->regime,walls:data->walls`),
+      dbPage(`option_trades?book_id=eq.${book}&ticker=eq.${t}&voided_at=is.null&expiry=gte.${today}&order=id.asc&select=id,action,option_type,direction,contracts,strike,expiry,trade_date`, who),
+      db(`market_live?symbol=eq.${t}&select=prev_close,captured_at`),
+      db(`market_calendar?date=eq.${today}&select=kind,closes`),
     ]);
 
     // ── Expiries: the first five, then the next monthly after them; today's only while it still trades ──
@@ -287,6 +328,41 @@ Deno.serve(async (req) => {
     const before = (ex: string) => !!er && (er.d < ex || (er.d === ex && er.time !== 'amc'));
     const exDiv = divs.find((d) => String(d.ex_date) >= today);
 
+    // ── Positions page inputs by expiry: the chain's mid IV per strike, and dealer gamma (latest view per expiry) ──
+    const cnBy = new Map<string, Row_[]>();
+    for (const r of chainNext) { const e = String(r.expiry); (cnBy.get(e) ?? cnBy.set(e, []).get(e)!).push(r); }
+    const gvBy = new Map<string, Row_>();
+    for (const r of gvRows) if (!gvBy.has(String(r.view))) gvBy.set(String(r.view), r);   // newest day first
+    const r4 = (v: number) => +v.toFixed(4);
+    const ivKOf = (ex: string, cs: Ct[], m: number): { ivK: [number, number][]; src: string } | null => {
+      const rows = cnBy.get(ex) ?? [];
+      const src = rows.length ? 'chain_next' : useTheta ? 'theta' : 'polygon';
+      const pts = rows.length ? rows.map((r) => ({ side: String(r.side), K: Number(r.strike), iv: Number(r.iv) })) : cs.map((x) => ({ side: x.side, K: x.K, iv: x.iv ?? 0 }));
+      const by = new Map<number, { call?: number; put?: number }>();
+      for (const x of pts) if (x.iv > 0 && x.K > 0) { const e = by.get(x.K) ?? {}; e[x.side === 'put' ? 'put' : 'call'] = x.iv; by.set(x.K, e); }
+      const lim = Math.max(4 * m, 0.15);
+      const ivK = [...by.keys()].filter((K) => Math.abs(Math.log(K / S)) <= lim).sort((a, b) => a - b).map((K): [number, number] => {
+        const e = by.get(K)!, v = K < S ? (e.put ?? e.call)! : (e.call ?? e.put)!;
+        return [K, r4(v)];
+      });
+      return ivK.length ? { ivK, src } : null;
+    };
+    const gammaOf = (ex: string) => {
+      const g = gvBy.get(ex);
+      if (g && Array.isArray(g.walls)) {
+        const walls = (g.walls as Row_[]).filter((w) => Number(w.k) > 0).map((w) => ({
+          K: Number(w.k), kind: (['ceiling', 'floor', 'accelerator'].includes(String(w.label)) ? String(w.label) : 'unclear') as 'ceiling' | 'floor' | 'accelerator' | 'unclear',
+          gex: Math.round(Number(w.gex) || 0), conf: Math.min(3, Math.max(1, Math.round(Number(w.conf) || 1))) as 1 | 2 | 3 })).sort((a, b) => a.K - b.K);
+        return { day: String(g.day), flip: Number(g.flip) > 0 ? Number(g.flip) : null, walls, regime: g.regime ? String(g.regime) : null, src: 'tape' };
+      }
+      const wl = wallBy.get(ex);
+      if (!wl) return null;
+      const walls = ([[wl.call_wall, wl.call_wall_gex], [wl.call_wall2, wl.call_wall2_gex], [wl.put_wall, wl.put_wall_gex], [wl.put_wall2, wl.put_wall2_gex]] as unknown[][])
+        .filter(([k]) => Number(k) > 0).map(([k, gx]) => ({ K: Number(k), kind: (Number(k) > S ? 'ceiling' : 'floor') as 'ceiling' | 'floor', gex: Math.round(Number(gx) || 0), conf: 1 as const }))
+        .filter((w, i, a) => a.findIndex((x) => x.K === w.K) === i).sort((a, b) => a.K - b.K);
+      return { day: String(wl.day), flip: Number(wl.flip) > 0 ? Number(wl.flip) : null, walls, regime: null, src: 'oi' };
+    };
+
     // ── Each expiry ──
     const exps = pick.map((ex, i) => {
       const { cs } = chains[i], T = yrs(ex);
@@ -335,8 +411,10 @@ Deno.serve(async (req) => {
       if (R.ernB && er) sg({ key: 'er', k: 'Earnings', v: md(er.d), tag: 'before expiry', tagTone: 'or', s: '', fx: R.fx.er, erExp: true });
       if (exDiv && String(exDiv.ex_date) < ex && name.soldCalls.some((x) => x.K < S)) sg({ key: 'ex', k: 'Ex-dividend', v: md(String(exDiv.ex_date)), tag: 'call in the money', tagTone: 'or', s: 'Early assignment risk' });
       if (cv.naked || nd < 0) sg({ key: 'cv', k: 'Your calls', v: cv.naked ? cv.naked + ' naked' : 'Net short', vTone: 'or', s: 'Net delta ' + (nd < 0 ? 'short ' : 'long ') + Math.round(Math.abs(nd)).toLocaleString('en-US') });
+      const ik = ivKOf(ex, cs, m), gm = gammaOf(ex);
       return { e, R, H, sig, data: {
         ex, label: e.label, long: e.long, td: e.td, cd: e.cd, T: +T.toFixed(6), iv: +iv.toFixed(4), m: +m.toFixed(5), earn: e.earnB,
+        ...(ik ? { ivK: ik.ivK, ivKsrc: ik.src } : {}), ...(gm ? { gamma: gm } : {}),
         band: [+(S * Math.exp(-m)).toFixed(4), +(S * Math.exp(m)).toFixed(4)],
         sug: { kc: R.kc, kp: R.kp, mvC: R.mvC, mvP: R.mvP, capC: R.capC, capP: R.capP, C: out(R.C, false), P: out(R.P, true) },
         rows: { c: KS.map((k) => out(row(name, e, k, false), false)), p: KS.map((k) => out(row(name, e, k, true), true)) },
@@ -353,6 +431,91 @@ Deno.serve(async (req) => {
 
     const strategy = snap[0]?.strategies?.[t] ?? (snap[0]?.names ?? []).find((x: Row_) => x?.t === t)?.strategy ?? null;
     const shortName = (snap[0]?.names ?? []).find((x: Row_) => x?.t === t)?.name ?? hist.meta.shortName ?? t;
+
+    // ── Sold, in SD: where each sold leg sat when sold. This book's open lots (pooled FIFO per contract, opens by id,
+    //    as sunny-home), then their option_fill_context rows, weighted by the contracts still open. ──
+    const lotsBy = new Map<string, { id: string; n: number; d: string }[]>();
+    {
+      const groups = new Map<string, Row_[]>();
+      for (const x of myTrades) { const k = `${x.option_type}|${x.direction}|${Number(x.strike)}|${x.expiry}`; (groups.get(k) ?? groups.set(k, []).get(k)!).push(x); }
+      for (const [k, rows] of groups) {
+        if (!k.split('|')[1].startsWith('short')) continue;
+        let closeQty = rows.filter((x) => x.action === 'close').reduce((a, x) => a + Number(x.contracts), 0);
+        const live: { id: string; n: number; d: string }[] = [];
+        for (const o of rows.filter((x) => x.action === 'open').sort((a, b) => (a.id < b.id ? -1 : 1))) {
+          const take = Math.min(closeQty, Number(o.contracts)); closeQty -= take;
+          if (Number(o.contracts) - take > 0) live.push({ id: String(o.id), n: Number(o.contracts) - take, d: String(o.trade_date) });
+        }
+        const [ty, , K, ex] = k.split('|');
+        if (live.length) lotsBy.set(`${ty}|${Number(K)}|${ex}`, live);
+      }
+    }
+    const lotIds = [...lotsBy.values()].flat().map((x) => x.id);
+    const fcRows: Row_[] = [];
+    for (let i = 0; i < lotIds.length; i += 80) fcRows.push(...await db(`option_fill_context?option_trade_id=in.(${lotIds.slice(i, i + 80).join(',')})&select=option_trade_id,underlying,iv,td,z0,approx`, who));
+    const fcBy = new Map(fcRows.map((x) => [String(x.option_trade_id), x]));
+    const fillOf = (put: boolean, K: number, ex: string): { z0: number | null; fill?: Row_ } => {
+      const lots = lotsBy.get(`${put ? 'put' : 'call'}|${K}|${ex}`) ?? [];
+      const got = lots.map((l) => ({ l, f: fcBy.get(l.id) })).filter((x) => x.f && x.f.z0 != null);
+      const w = got.reduce((a, x) => a + x.l.n, 0);
+      if (!w) return { z0: null };
+      const avg = (f: (x: typeof got[number]) => number) => got.reduce((a, x) => a + x.l.n * f(x), 0) / w;
+      return { z0: r4(avg((x) => Number(x.f!.z0))), fill: { S: r4(avg((x) => Number(x.f!.underlying))), iv: r4(avg((x) => Number(x.f!.iv))),
+        td: Math.round(avg((x) => Number(x.f!.td))), approx: got.length < lots.length || got.some((x) => x.f!.approx !== false),
+        d: got.map((x) => x.l.d).sort()[0] } };
+    };
+
+    // ── The session's range (§3.9.3, A1) and the last 30 closes ──
+    const dc = new Map(dcl.map((x) => [String(x.date), Number(x.close_price)]));
+    const isSess = (d: string) => { const w = new Date(d + 'T12:00:00Z').getUTCDay(); return w !== 0 && w !== 6 && !closed.has(d); };
+    const bell = calToday[0]?.kind === 'early_close' && calToday[0]?.closes ? Number(String(calToday[0].closes).slice(0, 2)) * 60 + Number(String(calToday[0].closes).slice(3, 5)) : 16 * 60;
+    const liveSess = isSess(today) && mins >= 9 * 60 + 30;
+    const barAt = (d: string) => { const i = hist.d.lastIndexOf(d); return i >= 0 ? { c: hist.c[i], h: hist.h[i], l: hist.l[i] } : null; };
+    const sessBefore = (d: string) => { const xs = [...new Set([...hist.d, ...dc.keys()])].filter((x) => x < d && isSess(x)).sort(); return xs.at(-1) ?? null; };
+    const sd0 = liveSess ? today : (sessBefore(today) ?? today);
+    const pd0 = sessBefore(sd0);
+    const prevC = (pd0 && dc.get(pd0)) || (liveSess && Number(mlive[0]?.prev_close) > 0 ? Number(mlive[0].prev_close) : null) || (pd0 ? barAt(pd0)?.c : null) || prev;
+    let day: Row_;
+    if (liveSess) {
+      const m = hist.meta, ymt = Number(m.regularMarketTime) > 0 ? new Date(Number(m.regularMarketTime) * 1000).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) : null;
+      const bt = barAt(today);
+      // Yahoo's day high and low (Polygon's stock snapshot is not on our plan: 403 NOT_AUTHORIZED, 13 Nov 2026).
+      const src = ymt === today && Number(m.regularMarketDayHigh) > 0 && Number(m.regularMarketDayLow) > 0 ? 'yahoo' : bt ? 'bars' : 'price';
+      const hi0 = src === 'yahoo' ? Number(m.regularMarketDayHigh) : bt ? bt.h : S;
+      const lo0 = src === 'yahoo' ? Number(m.regularMarketDayLow) : bt ? bt.l : S;
+      const done = mins >= bell;
+      day = { d: today, prev: r4(prevC), high: r4(Math.max(hi0, S)), low: r4(Math.min(lo0, S)), last: r4(S), closedToday: done,
+        ...(done ? { close: r4(dc.get(today) ?? S), closeStored: dc.has(today) } : {}), src };
+    } else {
+      const bt = barAt(sd0), c = dc.get(sd0) ?? bt?.c ?? S;
+      day = { d: sd0, prev: r4(prevC), high: r4(Math.max(bt?.h ?? c, c)), low: r4(Math.min(bt?.l ?? c, c)), last: r4(c), closedToday: true,
+        close: r4(c), closeStored: dc.has(sd0), src: bt ? 'bars' : 'price' };
+    }
+    const cmap = new Map<string, number>();
+    hist.d.forEach((d, i) => { if (d < today && isSess(d)) cmap.set(d, hist.c[i]); });
+    for (const [d, c] of dc) if (c > 0 && isSess(d)) cmap.set(d, c);
+    const closes30 = [...cmap.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-30).map(([d, c]) => ({ d, c: r4(c) }));
+
+    // ── Technicals (the latest ticker_technicals row) with IV rank on the year of saved 30-day IV ──
+    const tr = techRows[0] ?? null;
+    const nn = (v: unknown) => (v == null || !Number.isFinite(Number(v)) ? null : r4(Number(v)));
+    const tech = {
+      day: tr ? String(tr.day) : null,
+      sma20: nn(tr?.sma20), sma50: nn(tr?.sma50 ?? ma50), sma100: nn(tr?.sma100), sma200: nn(tr?.sma200 ?? ma200),
+      rsi14: nn(tr?.rsi14 ?? rsi), hv20: nn(tr?.hv20 ?? hv20),
+      ivRank: yr.length >= 2 && ivHi > ivLo ? r4(rank) : null, ivLow52: yr.length ? r4(ivLo) : null, ivHigh52: yr.length ? r4(ivHi) : null,
+      ivDays: yr.length,
+      zones: (Array.isArray(tr?.zones) ? tr.zones as Row_[] : []).map((z) => ({ kind: z.kind === 'support' ? 'support' : 'resistance', lo: Number(z.lo), hi: Number(z.hi), mid: Number(z.mid), strength: Number(z.strength), last: z.last ?? null })),
+    };
+
+    // ── Events: next earnings, next declared ex-dividend (the estimate apart) ──
+    let exDivEst: string | null = null;
+    if (!exDiv) {
+      const lastDv = [...divs].filter((d) => String(d.ex_date) < today).at(-1);
+      if (lastDv) { let d = String(lastDv.ex_date); const step = Math.round(365 / (Number(lastDv.frequency) || 4)); while (d < today) d = addDays(d, step); exDivEst = d; }
+    }
+    const events = { earnings: er?.d ?? null, earnTime: er?.time ?? null, earnEst: earn[0] ? earn[0].date_estimated === true : null,
+      exDiv: exDiv ? String(exDiv.ex_date) : null, divAmt: exDiv ? Number(exDiv.cash_amount) : null, exDivEst };
     return json(200, {
       ok: true, v: 1, build: BUILD, source: useTheta ? 'theta' : 'polygon', ms: Date.now() - t0,
       t, name: shortName, strategy, S: +S.toFixed(4), prev: +prev.toFixed(4), move: prev > 0 ? +(S / prev - 1).toFixed(5) : 0,
@@ -362,11 +525,14 @@ Deno.serve(async (req) => {
       counts,
       // The chart lines: what was sold, at the values from when it was sold.
       // got (what was got a share) and iv (its own IV) price a held leg that ends after the chosen expiry (sale, 1.9).
-      sold: [...name.soldCalls.map((l) => ({ put: false, K: l.K, n: l.n, ex: l.ex, be: l.at != null ? +(l.K + l.at).toFixed(4) : null, got: l.at, iv: l.iv || null })),
-             ...name.soldPuts.map((l) => ({ put: true, K: l.K, n: l.n, ex: l.ex, be: l.at != null ? +(l.K - l.at).toFixed(4) : null, got: l.at, iv: l.iv || null }))],
+      // z0 and fill (Positions page): the strike's SD when sold, from option_fill_context.
+      sold: [...name.soldCalls.map((l) => ({ put: false, K: l.K, n: l.n, ex: l.ex, be: l.at != null ? +(l.K + l.at).toFixed(4) : null, got: l.at, iv: l.iv || null, ...fillOf(false, l.K, l.ex) })),
+             ...name.soldPuts.map((l) => ({ put: true, K: l.K, n: l.n, ex: l.ex, be: l.at != null ? +(l.K - l.at).toFixed(4) : null, got: l.at, iv: l.iv || null, ...fillOf(true, l.K, l.ex) }))],
       // How many calls are covered (1.4): shares, and the OTM calls bought with their expiries. r and q price held legs.
       cover: { shares, otm: name.longCalls.map((l) => ({ ex: l.ex, n: l.n })) },
       r: +r.toFixed(4), q: +q.toFixed(4),
+      // Positions page (2026-11-13): see the header.
+      tech, day, closes: closes30, events,
       exps: exps.map((x) => x.data),
       // What you hold (Nik 11 Nov): each expiry where you have sold calls AND sold puts, as one pair, at the sale prices.
       held: [...new Set(name.soldCalls.map((l) => l.ex))].filter((ex) => name.soldPuts.some((l) => l.ex === ex)).sort().flatMap((ex) => {

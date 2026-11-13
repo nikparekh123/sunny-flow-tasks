@@ -11,8 +11,8 @@
 //
 // DEV ONLY: `?fx` reads saved replies from /__fx/ (vite.config.ts serves SUNNY_FX_DIR there in dev, never in a
 // build), so pages can be checked on real numbers without signing in, as the phone's -fixture does.
-import { useEffect, useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useRef } from 'react';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { liveHours, regularHours } from './clock';
 
@@ -236,15 +236,33 @@ export function usePrefetchTicker(book: BookId | null | undefined) {
 /** One name's SD calculator (sunny-sd, handoff 2026-11-11): the expiries, the rows at 0 to 2 SD, the suggestion and
     the signals. Asked for only while the SD layer is on (`t` null otherwise); read again every 60 s while the market
     is open (the reply's `open`). The last name's reply stays on screen while the next one comes. */
+const sdKey = (book: BookId | null | undefined, t: string | null | undefined) => ['sw', 'sd', book, t];
+const fetchSd = (book: BookId, t: string) => (FX ? fx(`sd/${book}-${t}.json`) : callFn('sunny-sd', { book, t }));
 export function useSd(book: BookId | null | undefined, t: string | null | undefined) {
   return useQuery({
-    queryKey: ['sw', 'sd', book, t],
+    queryKey: sdKey(book, t),
     enabled: !!book && !!t,
     staleTime: 60_000,
     gcTime: 30 * 60_000,
     refetchInterval: (q) => ((q.state.data as J)?.open ? 60_000 : false),
     placeholderData: (prev) => prev,
-    queryFn: () => (FX ? fx(`sd/${book}-${t}.json`) : callFn('sunny-sd', { book, t })),
+    queryFn: () => fetchSd(book!, t!),
+  });
+}
+
+/** Several names' sunny-sd replies at once (Positions' Sold in SD reads each sold leg's SD when sold from them), only
+    while `on`; the same cache as useSd, so the name on screen is never asked twice. No refresh on a timer. */
+export function useSdMany(book: BookId | null | undefined, ts: string[], on: boolean): Map<string, J> {
+  const key = ts.join(',');
+  // A stable combine: react-query reruns it only when a reply changes, so the page's sums only rerun then.
+  const combine = useCallback((rs: { data?: J }[]) => {
+    const out = new Map<string, J>();
+    key.split(',').forEach((t, i) => { if (t && rs[i]?.data) out.set(t, rs[i].data); });
+    return out;
+  }, [key]);
+  return useQueries({
+    queries: ts.map((t) => ({ queryKey: sdKey(book, t), enabled: on && !!book, staleTime: 5 * 60_000, gcTime: 30 * 60_000, retry: 0, queryFn: () => fetchSd(book!, t) })),
+    combine,
   });
 }
 

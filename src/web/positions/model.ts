@@ -32,10 +32,11 @@ export interface Inputs { built_at: string; r: number; names: InputName[] }
 
 /** A What if trade (README State: side, type, strike, expiry, count, on). `ex` is the ISO expiry. `src` 'sd': the SD
     calculator's sale (one at a time, handoff 2026-11-11-sd-whatif-totals 1.10); `pr`: opened at this premium a share
-    instead of the model price. */
-export interface Trade { id: number; side: 's' | 'b'; ty: 'c' | 'p'; K: number; ex: string; n: number; on: boolean; src?: 'sd'; pr?: number }
+    instead of the model price; `iv`: priced on this IV (the calculator's sale: the chain's IV at that strike and
+    expiry) instead of the name's. */
+export interface Trade { id: number; side: 's' | 'b'; ty: 'c' | 'p'; K: number; ex: string; n: number; on: boolean; src?: 'sd'; pr?: number; iv?: number }
 
-/** A leg as the page lists it: the design's lb ("Sold calls"), ct ("36 calls · Oct 30"), qt ("Sold 72"). */
+/** A leg as the page lists it: lb and ct strike first ("36 call · Oct 30"; a trade's lb "Sell 10 × 36.5 calls · Nov 6"), qt ("Sold 72"). */
 export interface PLeg {
   k: string; kind: Kind; ty: Ty; K: number; q: number; ex: string; exL: string; group: 's' | 'l';
   lb: string; ct: string; qt: string;
@@ -65,12 +66,12 @@ export const nyClose = (iso: string) => {
   if (h === 17) t -= 3_600_000;                  // EDT
   return t;
 };
-const KIND_LB: Record<Kind, string> = { shares: 'Shares', sc: 'Sold calls', sp: 'Sold puts', ins: 'Insurance puts', otm: 'OTM calls', leaps: 'LEAPS' };
-const ctOf = (ty: Ty, K: number, exL: string) => (ty === 'S' ? 'Shares' : `${fk(K)} ${ty === 'C' ? 'calls' : 'puts'} · ${exL}`);
+/** Strike first (Nik 12 Nov 2026: never "OTM calls", "Insurance puts" or "LEAPS"): "36 call · Oct 30". */
+const ctOf = (ty: Ty, K: number, exL: string) => (ty === 'S' ? 'Shares' : `${fk(K)}\u00a0${ty === 'C' ? 'call' : 'put'} · ${exL.replace(/ /g, '\u00a0')}`);
 const qtOf = (ty: Ty, q: number) => (ty === 'S' ? count(q) : (q < 0 ? 'Sold ' : 'Bought ') + count(q));
-/** "Sell 10 Nov 6 35.5 calls" (the design's tName). */
+/** "Sell 10 × 36.5 calls · Nov 6" (handoff 2026-11-13 §3.6). */
 export const tradeName = (u: { side: 's' | 'b'; ty: 'c' | 'p'; K: number; n: number }, exL: string) =>
-  (u.side === 's' ? 'Sell ' : 'Buy ') + count(u.n) + ' ' + exL + ' ' + fk(u.K) + ' ' + (u.ty === 'c' ? 'calls' : 'puts');
+  `${u.side === 's' ? 'Sell' : 'Buy'} ${count(u.n)} × ${fk(u.K)} ${u.ty === 'c' ? 'calls' : 'puts'} · ${exL}`;
 export const updn = (v: number) => (v >= 0 ? 'Up ' : 'Down ') + money(v);
 
 /** Sold first after the shares, as the design lists them: shares, then sold (by expiry, calls before puts, strike),
@@ -120,7 +121,7 @@ export class PosModel {
       const at = l.ty === 'S' ? l.K : src?.at ?? null;
       return {
         k: l.k, kind: l.kind, ty: l.ty, K: l.K, q: l.q, ex: l.ex, exL, group: l.q < 0 && l.ty !== 'S' ? 's' : 'l',
-        lb: KIND_LB[l.kind] ?? l.label, ct: ctOf(l.ty, l.K, exL), qt: qtOf(l.ty, l.q), at, now, value: l.value,
+        lb: ctOf(l.ty, l.K, exL), ct: ctOf(l.ty, l.K, exL), qt: qtOf(l.ty, l.q), at, now, value: l.value,
       } as PLeg;
     }).sort(order);
     this.today = w.stops[0] && Math.abs(w.stops[0].tt) < 1e-6 ? { tt: 0, row: 0 } : { tt: 0, row: null };
@@ -196,7 +197,7 @@ export class Pricer {
   private engineLeg(u: Trade): Leg {
     const q = u.side === 's' ? -u.n : u.n, ty: Ty = u.ty === 'c' ? 'C' : 'P';
     const kind: Kind = u.side === 's' ? (u.ty === 'c' ? 'sc' : 'sp') : u.ty === 'p' ? 'ins' : 'otm';
-    return { k: 'u' + u.id, kind, ty, K: u.K, q, days: this.m.daysTo(u.ex), iv: this.m.tradeIv, ex: u.ex, label: '' };
+    return { k: 'u' + u.id, kind, ty, K: u.K, q, days: this.m.daysTo(u.ex), iv: u.iv && u.iv > 0.03 ? u.iv : this.m.tradeIv, ex: u.ex, label: '' };
   }
   private pleg(u: Trade, l: Leg): PLeg {
     const exL = expLabel(u.ex, this.m.wholeDays(u.ex));

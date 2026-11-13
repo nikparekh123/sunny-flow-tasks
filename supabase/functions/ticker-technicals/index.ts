@@ -6,10 +6,12 @@
  * how much room is there. This job answers the first, second and fourth from
  * data we already have, for ONE name until Nik has looked at it (TICKERS).
  *
- *   ticker_technicals  one row a trading day: SMA 20/50/200, EMA 20/50, RSI 14
+ *   ticker_technicals  one row a trading day: SMA 20/50/100/200, EMA 20/50, RSI 14
  *                      (Wilder), 5- and 21-day change, realised volatility 20/30,
  *                      the ~30-day ATM IV (ticker_iv_daily), IV rank and
  *                      percentile over the last year, richness = IV / HV20.
+ *                      The latest row also carries `zones`: support and
+ *                      resistance from swing pivots (see zonesOf).
  *   ticker_walls       replaced each run: turning points (daily highs and lows
  *                      that held 5 sessions either side, last 6 months, merged
  *                      within 1.5%, strength = touches), the moving-average
@@ -30,7 +32,7 @@
  *                        weekly model number carried until he gives a new one.
  */
 
-const BUILD = '2026-10-19.5';
+const BUILD = '2026-11-13.1';
 /* ⚠ EVERY NAME HELD (Nik, 19 Oct 2026: "extend the reads to all names"): any
    ticker with an open option leg in any book. Was NKE only (16 Oct). A name is
    read only once a position exists (Nik: "No TSLA for now, only after position is
@@ -41,6 +43,10 @@ const KEEP_DAYS = 260;          // rows written each run (a year of trading days
 const PIVOT = 5;                // a turning point beats 5 sessions either side
 const SWING_LOOKBACK = 126;     // about 6 months of sessions
 const MERGE_PCT = 1.5;          // turning points within 1.5% are one wall
+/* Support and resistance zones (handoff 2026-11-13-positions, Nik A3, 13 Nov 2026). */
+const Z_PIVOT = 3;              // a pivot beats 3 sessions either side
+const Z_LOOKBACK = 63;          // about 3 months of sessions
+const Z_KEEP = 4;               // up to 4 supports and 4 resistances
 /* Nasdaq refuses requests without a browser's headers. This goes to Nasdaq
    only, never to Supabase (a browser UA on a secret key is refused there). */
 const UA = {
@@ -146,6 +152,51 @@ function turningPoints(hi: number[], lo: number[], days: string[]) {
   }));
 }
 
+/* ── support and resistance zones (Nik A3, 13 Nov 2026) from the completed sessions only:
+   a pivot is a daily high (low) above (below) the Z_PIVOT sessions on each side, over the last Z_LOOKBACK
+   sessions. Band half-width h = ATR(14) x 0.5 (Wilder's ATR on true ranges). Pivots merge when they fit in one
+   band: sorted by price, a group takes pivots while they sit within 2h of its lowest one. A zone is the group's
+   mean +- h, widened to hold every pivot in it; where two zones would overlap they meet halfway between their
+   pivots. strength = how many pivots merged (touches); last = the latest pivot's date. Support below the last
+   completed close, resistance above it (the side is fixed for the session, so a zone does not flip while the price
+   trades through it); the nearest Z_KEEP of each, low to high. ── */
+type Zone = { kind: 'support' | 'resistance'; lo: number; hi: number; mid: number; strength: number; last: string };
+function atr14(hi: number[], lo: number[], c: number[]): number | null {
+  if (c.length < 15) return null;
+  const tr = c.map((_, i) => (i === 0 ? hi[0] - lo[0] : Math.max(hi[i] - lo[i], Math.abs(hi[i] - c[i - 1]), Math.abs(lo[i] - c[i - 1]))));
+  let a = tr.slice(1, 15).reduce((s, x) => s + x, 0) / 14;
+  for (let i = 15; i < tr.length; i++) a = (a * 13 + tr[i]) / 14;
+  return a;
+}
+function zonesOf(hi: number[], lo: number[], c: number[], days: string[]): { atr: number | null; zones: Zone[] } {
+  const atr = atr14(hi, lo, c), n = c.length;
+  if (atr == null || !(atr > 0) || n < Z_PIVOT * 2 + 2) return { atr, zones: [] };
+  const h = atr * 0.5, last = c[n - 1];
+  const pts: { p: number; d: string }[] = [];
+  for (let i = Math.max(Z_PIVOT, n - Z_LOOKBACK); i <= n - 1 - Z_PIVOT; i++) {
+    let top = true, bot = true;
+    for (let j = i - Z_PIVOT; j <= i + Z_PIVOT; j++) {
+      if (j === i) continue;
+      if (!(hi[i] > hi[j])) top = false;
+      if (!(lo[i] < lo[j])) bot = false;
+    }
+    if (top) pts.push({ p: hi[i], d: days[i] });
+    if (bot) pts.push({ p: lo[i], d: days[i] });
+  }
+  pts.sort((a, b) => a.p - b.p);
+  const groups: (typeof pts)[] = [];
+  for (const x of pts) { const g = groups.at(-1); if (g && x.p - g[0].p <= 2 * h) g.push(x); else groups.push([x]); }
+  const zs = groups.map((g) => {
+    const mid = g.reduce((s, x) => s + x.p, 0) / g.length, pMin = g[0].p, pMax = g.at(-1)!.p;
+    return { mid, pMin, pMax, lo: Math.min(mid - h, pMin), hi: Math.max(mid + h, pMax), strength: g.length, last: g.map((x) => x.d).sort().at(-1)! };
+  });
+  for (let i = 1; i < zs.length; i++) if (zs[i - 1].hi > zs[i].lo) { const cut = (zs[i - 1].pMax + zs[i].pMin) / 2; zs[i - 1].hi = cut; zs[i].lo = cut; }
+  const all: Zone[] = zs.map((z) => ({ kind: z.mid < last ? 'support' : 'resistance', lo: r4(z.lo)!, hi: r4(z.hi)!, mid: r4(z.mid)!, strength: z.strength, last: z.last }));
+  const sup = all.filter((z) => z.kind === 'support').sort((a, b) => b.mid - a.mid).slice(0, Z_KEEP);
+  const res = all.filter((z) => z.kind === 'resistance').sort((a, b) => a.mid - b.mid).slice(0, Z_KEEP);
+  return { atr, zones: [...sup, ...res].sort((a, b) => a.mid - b.mid) };
+}
+
 /* ── fundamentals: the Nasdaq analyst target once a day; Nik's model number is
    carried from the last row that has one. Today's row is written only when
    Nasdaq answered, so a failed call retries on the next run. ── */
@@ -222,6 +273,9 @@ Deno.serve(async (req) => {
       if (bars.length < 210) throw new Error(`only ${bars.length} bars`);
       const days = bars.map((b) => nyDate(new Date(b.t)));
       const close = bars.map((b) => b.c), high = bars.map((b) => b.h), low = bars.map((b) => b.l);
+      /* Zones from the completed sessions (before today's live row is added below). */
+      const done = days.filter((d) => d < today).length;
+      const zn = zonesOf(high.slice(0, done), low.slice(0, done), close.slice(0, done), days.slice(0, done));
       /* In the session, today's row reads the live price (ticker_quotes_live). */
       const live = (await get(`ticker_quotes_live?ticker=eq.${t}&select=spot,captured_at`))[0];
       const spot = live?.spot != null ? Number(live.spot) : null;
@@ -229,7 +283,7 @@ Deno.serve(async (req) => {
         if (days.at(-1) === today) { close[close.length - 1] = spot; high[high.length - 1] = Math.max(high.at(-1)!, spot); low[low.length - 1] = Math.min(low.at(-1)!, spot); }
         else if (days.at(-1)! < today) { days.push(today); close.push(spot); high.push(spot); low.push(spot); }
       }
-      const s20 = sma(close, 20), s50 = sma(close, 50), s200 = sma(close, 200), e20 = ema(close, 20), e50 = ema(close, 50);
+      const s20 = sma(close, 20), s50 = sma(close, 50), s100 = sma(close, 100), s200 = sma(close, 200), e20 = ema(close, 20), e50 = ema(close, 50);
       const rs = rsi(close), h20 = hv(close, 20), h30 = hv(close, 30), c5 = chg(close, 5), c21 = chg(close, 21);
       /* Earnings sessions left out of hv20_ex: Nasdaq's reported dates (last four
          quarters). The stored dates are the fallback only: they keep stale guesses
@@ -258,13 +312,14 @@ Deno.serve(async (req) => {
         const rank = iv != null && yr.length >= 120 && Math.max(...yr) > Math.min(...yr)
           ? (iv - Math.min(...yr)) / (Math.max(...yr) - Math.min(...yr)) * 100 : null;
         const pct = iv != null && yr.length >= 120 ? yr.filter((x) => x < iv).length / yr.length * 100 : null;
-        rows.push({ ticker: t, day: days[i], close: r4(close[i]), sma20: r4(s20[i]), sma50: r4(s50[i]), sma200: r4(s200[i]),
+        rows.push({ ticker: t, day: days[i], close: r4(close[i]), sma20: r4(s20[i]), sma50: r4(s50[i]), sma100: r4(s100[i]), sma200: r4(s200[i]),
           ema20: r4(e20[i]), ema50: r4(e50[i]), rsi14: r4(rs[i]), chg5_pct: r4(c5[i]), chg21_pct: r4(c21[i]),
           hv20: r4(h20[i]), hv30: r4(h30[i]), atm_iv: r4(iv), iv_rank: r4(rank), iv_pctile: r4(pct),
           richness: r4(iv != null && h20[i] ? iv / h20[i]! : null), hv20_ex: r4(hx[i]),
           high5: r4(Math.max(...high.slice(Math.max(0, i - 4), i + 1))), updated_at: new Date().toISOString() });
       }
       await send('POST', 'ticker_technicals?on_conflict=ticker,day', rows, 'resolution=merge-duplicates,return=minimal');
+      await send('PATCH', `ticker_technicals?ticker=eq.${t}&day=eq.${days.at(-1)}`, { zones: zn.zones });
 
       /* ── THE READS on the latest day (docs/STRATEGIES.md, NKE weekly rule) ── */
       let reads: Row | null = null;
@@ -382,6 +437,7 @@ Deno.serve(async (req) => {
       if (walls.length) await send('POST', 'ticker_walls', walls.map((w) => ({ strength: null, expiry: null, note: null, ...w })));
       const last = rows.at(-1)!;
       out.push({ ticker: t, day: last.day, close: last.close, rsi14: last.rsi14, iv_rank: last.iv_rank, walls: walls.length,
+        sma100: last.sma100, atr14: r4(zn.atr), zones: zn.zones.map((z) => `${z.kind[0]} ${z.lo}-${z.hi} x${z.strength}`),
         reads: reads?.error ? reads : Object.fromEntries(['fundamentals', 'technicals', 'iv', 'history', 'momentum', 'events', 'breakout']
           .map((k) => [k, `${(reads?.[k] as Row)?.read}: ${(reads?.[k] as Row)?.fact}`])) });
     } catch (e) {
