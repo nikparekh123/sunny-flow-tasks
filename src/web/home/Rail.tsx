@@ -44,7 +44,9 @@ export default function Rail({ payload, book, narrow }: { payload: J; book: Book
   const upd = (v: number) => (v < 0 ? 'down ' : 'up ') + mask(money(v));
   const byLeg = railView === 'leg';
   const note = (rt.noSold.length ? `Nothing sold this week: ${rt.noSold.join(', ')}. ` : '')
-    + (rt.week ? 'This week, from last Friday’s close.' : 'Today, from yesterday’s close.') + ' A sold call or put makes money when its price falls.';
+    + (byLeg
+      ? `Shares: ${rt.week ? 'this week, from last Friday’s close' : 'today, from yesterday’s close'}. Hedges and Income: since each was opened; the bar is what was paid or collected, green gained, red lost, grey still to go.`
+      : (rt.week ? 'This week, from last Friday’s close.' : 'Today, from yesterday’s close.') + ' A sold call or put makes money when its price falls.');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
@@ -96,7 +98,7 @@ export default function Rail({ payload, book, narrow }: { payload: J; book: Book
                   <span style={{ fontSize: 17, fontWeight: 700 }}>{g.h}</span>
                   <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                     <span style={{ fontSize: 18, fontWeight: 700, color: cl(g.total) }}>{mask(money(g.total))}</span>
-                    <span style={{ fontSize: 13, color: MU }}>{dw}</span>
+                    <span style={{ fontSize: 13, color: MU }}>{g.since ? 'since opened' : dw}</span>
                   </span>
                 </div>
                 {g.parts.map((u) => (
@@ -109,8 +111,10 @@ export default function Rail({ payload, book, narrow }: { payload: J; book: Book
                     )}
                     {u.rows.map((x) => (
                       <button key={x.k} type="button" className="bare sw-rr" onClick={() => open(x.t)} style={{ cursor: 'pointer', textAlign: 'left' }}
-                        aria-label={`${g.h} ${u.h.toLowerCase()}, ${x.l}, ${x.s}, ${dw} ${upd(x.v)}, opens Positions`}>
-                        <Row x={x} mx={mx} mask={mask} />
+                        aria-label={g.since && x.since
+                          ? `${g.h} ${u.h.toLowerCase()}, ${x.l}, ${x.since.s}, ${x.since.pl < 0 ? 'lost' : g.h === 'Income' ? 'kept' : 'gained'} ${mask(money(x.since.pl))}, ${pctOf(x.since)}, opens Positions`
+                          : `${g.h} ${u.h.toLowerCase()}, ${x.l}, ${x.s}, ${dw} ${upd(x.v)}, opens Positions`}>
+                        {g.since ? <SinceRow x={x} mask={mask} /> : <Row x={x} mx={mx} mask={mask} />}
                       </button>
                     ))}
                   </div>
@@ -141,6 +145,32 @@ function Row({ x, mx, mask }: { x: RailRow; mx: number; mask: (s: string) => str
         <span style={{ position: 'absolute', top: 3, bottom: 3, left: (x.v >= 0 ? 50 : 50 - wz) + '%', width: Math.max(wz, 0.8) + '%', borderRadius: 2, background: x.v >= 0 ? G : R }} />
       </span>
       <span style={{ textAlign: 'right', fontSize: 15, fontWeight: 600, color: cl(x.v) }}>{mask(money(x.v))}</span>
+    </span>
+  );
+}
+
+const pctOf = (x: { base: number; pl: number }) => {
+  const a = x.base > 0 ? Math.abs(x.pl / x.base) * 100 : 0;
+  return (a > 0 && a < 0.1 ? a.toFixed(2) : a.toFixed(1)) + '%';
+};
+/** An option leg since it was opened (Nik, 13 Nov 2026): the bar is what was collected (sold) or paid (bought), full
+    width; green from the left for what it has gained or kept, red for what it has lost, the grey track the rest, still
+    to go. On the right the dollars gained or lost (green or red, no minus) and their % of the bar. */
+function SinceRow({ x, mask }: { x: RailRow; mask: (s: string) => string }) {
+  const p = x.since, f = p && p.base > 0 ? Math.max(-1, Math.min(1, p.pl / p.base)) : 0;
+  return (
+    <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 80px 60px', alignItems: 'center', gap: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,.08)' }}>
+      <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <span className="sw-rr-l" style={{ fontSize: 15, lineHeight: '19px', fontWeight: 600, textWrap: 'pretty' } as CSSProperties}>{x.l}</span>
+        <span style={{ fontSize: 12, lineHeight: '16px', color: MU, textWrap: 'pretty' } as CSSProperties}>{p ? mask(p.s) : x.s}</span>
+      </span>
+      <span aria-hidden="true" style={{ position: 'relative', height: 8, borderRadius: 4, background: 'rgba(255,255,255,.14)', overflow: 'hidden' }}>
+        {p && <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.max(Math.abs(f) * 100, 2)}%`, borderRadius: 4, background: f >= 0 ? G : R }} />}
+      </span>
+      <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+        <span style={{ fontSize: 15, fontWeight: 600, color: p ? cl(p.pl) : MU }}>{p ? mask(money(p.pl)) : '-'}</span>
+        {p && <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>{pctOf(p)}</span>}
+      </span>
     </span>
   );
 }

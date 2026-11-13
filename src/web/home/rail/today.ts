@@ -10,7 +10,7 @@
 // Hedges every call bought (LEAPS and OTM calls alike), then every put bought; Income everything sold.
 import { NameBook, type Div, type Leg } from '../../../../supabase/functions/_shared/book-engine.ts';
 import type { J } from '../../lib/data';
-import { count } from '../../lib/format';
+import { count, money } from '../../lib/format';
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** "Nov 20", or "Jan ’28" past six months (the house expiry label). */
@@ -20,11 +20,13 @@ const exLabel = (iso: string, days: number) => {
 };
 const kStr = (k: number) => (k % 1 ? String(+k.toFixed(2)) : String(k));
 
-/** One row: what it is, the line under it, today's dollars. */
-export interface RailRow { k: string; t: string; l: string; s: string; v: number; ex: string }
+/** One row: what it is, the line under it, today's dollars. An option leg also carries `since`: what it was opened for
+    (premium collected, or paid) and what it has made since (kept, or gained), for By leg's Hedges and Income cards
+    (Nik, 13 Nov 2026: "green for gains, red for losses and a grey bar to show how much is remaining"). */
+export interface RailRow { k: string; t: string; l: string; s: string; v: number; ex: string; since?: { base: number; pl: number; s: string } | null }
 export interface RailNameCard { t: string; px: number; mv: number; today: number; rows: RailRow[] }
 export interface RailPart { k: string; h: string; total: number; rows: RailRow[] }
-export interface RailKind { k: string; h: string; total: number; parts: RailPart[]; heads: boolean }
+export interface RailKind { k: string; h: string; total: number; parts: RailPart[]; heads: boolean; since: boolean }
 export interface RailToday { week: boolean; names: RailNameCard[]; kinds: RailKind[]; noSold: string[] }
 
 type Part = 'sh' | 'hc' | 'hp' | 'ic' | 'ip';
@@ -59,7 +61,12 @@ export function railToday(p: J, order: string[]): RailToday {
         const kp = 1 - now / l.at;
         s += ' · ' + (kp >= 0 ? `${Math.round(kp * 100)}% kept` : `costs ${Math.round(-kp * 100)}% more`);
       }
-      return { k: t + l.k, t, part, l: `${kStr(l.K)} ${cp} ${sold ? 'sold' : 'bought'}`, s, v: l.q * 100 * (now - prev(l)), ex: l.ex };
+      // Since opened: a sold leg's premium collected and what is kept of it; a bought leg's cost and its gain.
+      const n = Math.abs(l.q) * 100;
+      const since = l.at != null && l.at > 0
+        ? { base: n * l.at, pl: sold ? n * (l.at - now) : n * (now - l.at), s: `${n0} ${sold ? 'sold' : 'bought'} · ${exL} · ${money(n * l.at)} ${sold ? 'in' : 'paid'}` }
+        : null;
+      return { k: t + l.k, t, part, l: `${kStr(l.K)} ${cp} ${sold ? 'sold' : 'bought'}`, s, v: l.q * 100 * (now - prev(l)), ex: l.ex, since };
     });
     // Inside a part, the soonest expiry first (Nik 12 Nov 2026, as the What if), then by strike.
     rows.sort((a, b) => ORDER[a.part] - ORDER[b.part] || (a.ex < b.ex ? -1 : a.ex > b.ex ? 1 : 0));
@@ -78,9 +85,11 @@ export function railToday(p: J, order: string[]): RailToday {
     for (const [pk, ph] of subs) {
       // Book order of names, then the soonest expiry first inside each name.
       const rows = (byPart.get(pk) ?? []).sort((a, b) => a.tk - b.tk || (a.row.ex < b.row.ex ? -1 : a.row.ex > b.row.ex ? 1 : 0)).map((x) => x.row);
-      if (rows.length) parts.push({ k: h + pk, h: ph, total: rows.reduce((a, x) => a + x.v, 0), rows });
+      // Hedges and Income add up since opened; Shares adds up today.
+      const since = h !== 'Shares';
+      if (rows.length) parts.push({ k: h + pk, h: ph, total: rows.reduce((a, x) => a + (since ? x.since?.pl ?? 0 : x.v), 0), rows });
     }
-    if (parts.length) kinds.push({ k: h, h, total: parts.reduce((a, x) => a + x.total, 0), parts, heads: parts.length > 1 || h !== 'Shares' });
+    if (parts.length) kinds.push({ k: h, h, total: parts.reduce((a, x) => a + x.total, 0), parts, heads: parts.length > 1 || h !== 'Shares', since: h !== 'Shares' });
   }
   const noSold = names.filter((n) => !n.rows.some((x) => x.l.endsWith(' sold'))).map((n) => n.t);
   return { week, names, kinds, noSold };
