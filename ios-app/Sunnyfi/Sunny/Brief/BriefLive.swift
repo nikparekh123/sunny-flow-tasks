@@ -19,6 +19,8 @@ struct BriefLive {
     /// The economy sheet: the twelve FRED indicators (econ-sync), watch first.
     let economy: JSONValue
     let names: [JSONValue]
+    /// This Friday ("2026-11-13"): Positions' Intelligence opens on its expiry.
+    let friday: String?
     let error: String?
 
     init(_ j: JSONValue) {
@@ -30,6 +32,7 @@ struct BriefLive {
         timeValue = j["timeValue"]
         economy = d["economy"]
         names = j["names"].array
+        friday = j["friday"].string
         error = j["error"].string ?? d["error"].string
     }
 }

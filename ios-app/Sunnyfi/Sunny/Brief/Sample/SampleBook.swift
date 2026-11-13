@@ -67,10 +67,6 @@ enum SampleBook {
 
     /// Calendar days from Tue Oct 27 to each long expiry.
     static let longDays: [String: Int] = ["Jan 15": 80, "Mar 19": 143, "Jun ’27": 234, "Sep ’27": 325, "Jan ’28": 451]
-    /// Every chain on screen: label, calendar days left, weekly or monthly, trading days left.
-    static let expiries: [(label: String, days: Int, kind: String, trading: Int)] = [
-        ("Oct 30", 3, "Weekly", 5), ("Nov 6", 10, "Weekly", 10), ("Nov 13", 17, "Weekly", 15), ("Nov 20", 24, "Monthly", 20),
-        ("Dec 18", 52, "Monthly", 40), ("Jan 15", 80, "Monthly", 59), ("Mar 19", 143, "Monthly", 102)]
     /// This week's sold legs expire Friday Oct 30, 3 calendar days on (and 3 trading days: Wed, Thu, Fri).
     static let fridayDays = 3
     static let fridayLabel = "Fri Oct 30"
@@ -79,30 +75,6 @@ enum SampleBook {
     static let dividends: [String: (ps: Double, per: String, ex: String, days: Int, pay: String)] = [
         "NKE": (0.41, "quarter", "Tue Dec 1", 35, "Mon Jan 4"), "PEP": (1.4225, "quarter", "Fri Dec 4", 38, "Wed Jan 6"),
         "FIS": (0.40, "quarter", "Tue Dec 8", 42, "Tue Dec 22"), "BABA": (1.05, "year", "Jun ’27", 225, "Jul ’27")]
-
-    /// Walls per chain (expiry index): flip, ceiling, floor, accelerator, each (strike, confidence 1-3, gamma $M).
-    typealias Wall = (k: Double, conf: Int, gamma: Double)
-    static let chainWalls: [String: [(flip: Double, c: Wall?, f: Wall?, a: Wall?)]] = [
-        "BABA": [(99.40, (104, 3, 12.4), nil, (99, 2, 9.8)), (99.1, (105, 2, 6.0), (96, 1, 3.1), (99, 2, 4.2)), (98.8, (105, 1, 3.8), (95, 1, 2.4), (98, 1, 2.0)),
-                 (100.2, (110, 3, 15.2), (95, 2, 11.0), (99, 2, 6.4)), (98.5, (110, 2, 9.1), (90, 2, 7.7), (97, 1, 3.3)), (99.0, (110, 3, 18.6), (95, 3, 14.2), (97, 2, 8.8)),
-                 (97.6, (115, 2, 8.4), (90, 2, 6.9), (95, 1, 2.6))],
-        "LULU": [(91.5, (100, 3, 8.9), (95, 2, 6.1), nil), (92.0, (105, 2, 4.6), (95, 1, 3.0), nil), (92.5, (105, 1, 2.7), (92, 1, 1.9), nil),
-                 (93.0, (110, 3, 12.0), (90, 2, 8.2), (92.5, 1, 3.5)), (94.0, (110, 2, 7.4), (85, 2, 6.0), (92.5, 2, 4.8)), (93.5, (110, 3, 13.5), (90, 3, 10.1), (92.5, 2, 5.2)),
-                 (92.0, (120, 2, 6.8), (80, 1, 4.4), (90, 1, 2.2))],
-        "NKE": [(33.8, (36, 3, 6.3), (34, 2, 5.4), (33.5, 1, 3.2)), (33.9, (37, 2, 3.4), (34, 1, 2.2), (33.5, 1, 1.6)), (33.6, (37.5, 1, 2.1), (33, 1, 1.5), nil),
-                (34.2, (38, 3, 9.8), (33, 2, 6.6), (34, 2, 4.0)), (33.5, (40, 2, 5.9), (32, 2, 4.8), (33, 1, 2.0)), (33.7, (40, 3, 11.2), (32, 3, 8.5), (33, 1, 3.1)),
-                (33.0, (42, 2, 6.1), (30, 2, 5.0), nil)]]
-
-    /// A name's chain walls; names without hand-drawn walls scale Nike's to their price (as the design does).
-    static func walls(_ t: String, _ e: Int) -> (flip: Double, c: Wall?, f: Wall?, a: Wall?) {
-        if let w = chainWalls[t]?[e] { return w }
-        let px = q[t]?.0 ?? 35.28, r = px / 35.28, z = px < 50 ? 0.5 : px < 200 ? 1 : 5
-        let sc: (Wall?) -> Wall? = { w in w.map { ((($0.k * r / z).rounded() * z * 100).rounded() / 100, $0.conf, ($0.gamma * r * 10).rounded() / 10) } }
-        let n = chainWalls["NKE"]![e]
-        var a = sc(n.a); let f = sc(n.f)
-        if let aa = a, let ff = f, aa.k == ff.k { a = nil }
-        return ((n.flip * r * 100).rounded() / 100, sc(n.c), f, a)
-    }
 
     /// To do orders (Tomorrow's orders, Overview To do): name, what, expiry, the picked way, credit or cost.
     struct Order: Hashable { let t: String; let what: String; let ex: String; let why: String; let wall: String; let act: String; let amount: Double; let cost: Bool }

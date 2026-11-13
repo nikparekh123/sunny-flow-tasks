@@ -56,10 +56,6 @@ struct GalleryHost: View {
             SunnyToday(home: home)
         case "portfolio":
             SunnyPortfolio(home: home, words: words).padding(.horizontal, S.margin)
-        case "positions":
-            SunnyPositionCards(home: home, names: PNames.build(home, orderFrom: nil)).padding(.horizontal, S.margin)
-        case "inventory":
-            SunnyInventory(home: home, words: words).padding(.horizontal, S.margin)
         case "theta":
             SunnyMountain(kind: .theta, home: home) { _ in }.frame(width: 341).padding(.horizontal, S.margin)
         case "delta":

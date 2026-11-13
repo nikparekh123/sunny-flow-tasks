@@ -391,6 +391,9 @@ export const expiryKind = (ex: string, earnings: boolean): string => {
   const d = new Date(ex + 'T12:00:00Z'), wd = d.getUTCDay(), dd = d.getUTCDate();
   return (wd === 5 && dd >= 15 && dd <= 21) || (wd === 4 && dd >= 14 && dd <= 20) ? 'monthly' : 'weekly';
 };
-/** D1: Intelligence opens on this Friday's expiry, or the first one after it. */
-export const openExpiry = (exps: { ex: string }[], friday: string): string | null =>
-  (exps.find((e) => e.ex === friday) ?? exps.find((e) => e.ex >= friday) ?? exps[0])?.ex ?? null;
+/** D1: Intelligence opens on this Friday's expiry, or the first one after it. From the Friday itself it opens on the
+    next Friday's (Nik, 13 Nov 2026: on the day it expires, "this week" is hours long and its sales are already done). */
+export const openExpiry = (exps: { ex: string }[], friday: string, today = ''): string | null => {
+  const f = today && friday && friday <= today ? new Date(Date.parse(friday + 'T12:00:00Z') + 7 * 864e5).toISOString().slice(0, 10) : friday;
+  return (exps.find((e) => e.ex === f) ?? exps.find((e) => e.ex >= f) ?? exps[0])?.ex ?? null;
+};

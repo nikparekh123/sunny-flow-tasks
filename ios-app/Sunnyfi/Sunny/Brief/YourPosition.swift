@@ -52,7 +52,7 @@ struct YourPositionCard: View {
             Text("Your position").sType(BK.title, tabular: false).foregroundStyle(S.ink).accessibilityAddTraits(.isHeader)
             Text(m.subtitle).sType(Self.sub, tabular: false).foregroundStyle(S.secondary).padding(.top, 4)
             if let t = asOf {
-                Text("As of \(BriefPositionsScreen.asOfWords(t)) · IBKR data is late").sType(BK.sub, tabular: false).foregroundStyle(S.act).padding(.top, 4)
+                Text("As of \(PositionsTab.asOfWords(t)) · IBKR data is late").sType(BK.sub, tabular: false).foregroundStyle(S.act).padding(.top, 4)
             }
             BriefSentence(m.sentence, base: SType(size: 17, weight: 500, line: 24, tracking: 0), privacy: privacy)
                 .fixedSize(horizontal: false, vertical: true)
@@ -172,10 +172,9 @@ struct YourPositionCard: View {
         return BriefWords.speech((lost ? "lost " : "") + shown + " " + s.label)
     }
 
-    /// A row opens Positions on that name at the Friday close stop; the button on the last name, at today.
+    /// A row opens Positions on that name; the button on the last name viewed.
     private func open(_ t: String?) {
         brief.positionsName = t ?? brief.positionsName
-        brief.positionsAtFriday = t != nil
         router.tab = .positions
     }
 }

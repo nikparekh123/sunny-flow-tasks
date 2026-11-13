@@ -166,7 +166,7 @@ export interface IntelModel {
 }
 export function intelModel(d: SdReply, p: Pick, friday: string, chains: ChainW[]): IntelModel | null {
   if (!d?.ok || !d.exps?.length) return null;
-  const ex = p.ex && d.exps.some((x) => x.ex === p.ex) ? p.ex : openExpiry(d.exps, friday);
+  const ex = p.ex && d.exps.some((x) => x.ex === p.ex) ? p.ex : openExpiry(d.exps, friday, String(d.today ?? '').slice(0, 10));
   const ei = Math.max(0, d.exps.findIndex((x) => x.ex === ex)), e = d.exps[ei], S = d.S, m = e.m;
   const inC = (k: number | null) => k != null && ladder(d, e, false).some((x) => same(x, k));
   const inP = (k: number | null) => k != null && ladder(d, e, true).some((x) => same(x, k));

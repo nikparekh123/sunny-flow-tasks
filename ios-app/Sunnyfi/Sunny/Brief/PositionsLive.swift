@@ -4,34 +4,26 @@
 //
 //  Positions on the real book (handoff 6 Nov 2026, Pass 2). When the tab opens a name, the phone asks
 //  sunny-positions for it with the signed-in user's token (RLS: members of the book only) and gets every leg's
-//  P&L, delta, theta and vega on a price-by-date grid (±12%, and out to ±50% for the chart's zoom), the OTM call a fix would buy, the walls by chain, the
-//  Technicals lines and, on the weekend, the legs that ended Friday. PositionsSource decodes each reply once,
-//  off the main thread, and keeps one model per name and build (never built in a view's body).
+//  P&L, delta, theta and vega on a price-by-date grid (±12%, and out to ±50%). PositionsSource decodes each reply
+//  once, off the main thread, and keeps one model per name and build (never built in a view's body).
 //
 
 import Foundation
 import Observation
 import Supabase
 
-/// What sunny-positions sends (book-engine.ts positionsGrid, plus sunny-home's positions.ts reads).
+/// What sunny-positions sends (book-engine.ts positionsGrid), as far as the Positions tab reads it: the grid's prices
+/// and date stops, each leg's P&L, delta, theta and vega on them, and the turns-short price per stop. The rest of the
+/// reply (the fix's OTM call, the walls by chain, the Technicals lines, the legs that ended) is left undecoded.
 nonisolated struct PositionsWire: Decodable, Sendable {
     nonisolated struct StopW: Decodable, Sendable { let tt: Double; let short: String; let phrase: String; let long: String }
     nonisolated struct LegW: Decodable, Sendable {
         let k: String; let kind: String; let ty: String; let K: Double; let q: Double; let ex: String; let days: Double; let label: String
         let earned: Double; let value: Double; let pl: [[Double]]; let d: [[Double]]; let th: [[Double]]; let vg: [[Double]]; let pl0: [Double]?
     }
-    nonisolated struct OtmW: Decodable, Sendable { let K: Double; let ex: String; let days: Double; let label: String; let cost: Double; let pl: [[Double]]; let d: [[Double]] }
-    nonisolated struct FixW: Decodable, Sendable { let otm: OtmW? }
-    nonisolated struct WallW: Decodable, Sendable { let k: Double; let gex: Double }
-    nonisolated struct ChainW: Decodable, Sendable {
-        let ex: String; let label: String; let kind: String; let days: Int; let trading: Int; let flip: Double?; let c: WallW?; let f: WallW?; let a: WallW?
-    }
-    nonisolated struct TechW: Decodable, Sendable { let sma20: Double?; let hi: Double?; let lo: Double? }
-    nonisolated struct EndedW: Decodable, Sendable { let k: String; let label: String; let K: Double; let put: Bool; let q: Double; let note: String; let pl: Double }
 
-    let t: String; let S0: Double; let P0: Double; let iv: Double; let X0: Double; let X1: Double
-    let S: [Double]; let stops: [StopW]; let legs: [LegW]; let fix: FixW; let turnsShort: [Double?]; let fridayStop: Int
-    let walls: [ChainW]; let tech: TechW?; let ended: [EndedW]; let endedDay: String?
+    let t: String; let S0: Double; let P0: Double; let iv: Double
+    let S: [Double]; let stops: [StopW]; let legs: [LegW]; let turnsShort: [Double?]; let fridayStop: Int
 }
 
 @MainActor @Observable
@@ -56,7 +48,7 @@ final class PositionsSource {
                 models[key] = (built, PositionsModel(wire: w, name: name))
                 errors[key] = nil
             } catch {
-                if models[key] == nil { errors[key] = "Could not load \(t). Pull to try again." }
+                if models[key] == nil { errors[key] = "Could not load \(t) just now. It tries again with the next update." }
             }
         }
     }
@@ -78,8 +70,7 @@ final class PositionsSource {
         r.setValue(Secrets.supabasePublishableKey, forHTTPHeaderField: "apikey")
         let token = try await SupabaseService.client.auth.session.accessToken
         r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        // `wide` (Nov 8, the chart's pinch zoom): prices out to ±50% as well; a server without it sends ±12%, and the
-        // chart then zooms no wider than its grid (PositionsModel.widestZoom).
+        // `wide` (Nov 8): prices out to ±50% as well, so the payoff's "Makes the most" reaches past ±12%.
         r.httpBody = try JSONSerialization.data(withJSONObject: ["book": book, "t": t, "wide": true] as [String: Any])
         let (d, resp) = try await URLSession.shared.data(for: r)
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }

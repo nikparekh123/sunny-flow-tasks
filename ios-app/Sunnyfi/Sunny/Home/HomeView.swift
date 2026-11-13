@@ -89,18 +89,6 @@ struct HomeView: View {
                     .zIndex(10.5)
             }
         }
-        // This week's insights (14c): a sheet from every Position card.
-        .sheet(isPresented: Binding(get: { router.insights != nil }, set: { if !$0 { router.insights = nil } })) {
-            if let t = router.insights {
-                SunnyInsightsSheet(t: t, insights: store.home?.writes.names.first { $0.ticker == t }?.insights?.value) {
-                    router.insights = nil
-                }
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-                .presentationCornerRadius(34)
-                .environment(router)
-            }
-        }
         .environment(router)
         .onAppear(perform: debugOpen)
         // A tapped push: Aftershock opens its page once Home has its data.
@@ -138,13 +126,10 @@ struct HomeView: View {
                     .modifier(OwnTabBar())
                 }
                 Tab("Positions", systemImage: "rectangle.stack.fill", value: HomeRouter.Tab.positions) {
-                    // Pass 1 (6 Nov handoff): one name at a time on the sample book; the old stacked cards stay for real
-                    // data until Pass 2 feeds the new screen.
+                    // App Explorations 154a (13 Nov 2026), view only. It handles its own loading, empty and error states.
+                    // Equatable (always equal): Positions redraws from its own state and data, not when Home's parent does.
                     NavigationStack {
-                        // Pass 2: the new screen on the real book once the server's brief is in; the old cards until then.
-                        // Equatable (always equal): Positions redraws from its own state and data, not when Home's parent does.
-                        if BriefDebug.sample || (brief.live != nil && brief.live?.error == nil) { BriefPositionsScreen().equatable().toolbar(.hidden, for: .navigationBar) }
-                        else { SunnyPositionsTab(store: store) }
+                        PositionsTab().equatable().toolbar(.hidden, for: .navigationBar)
                     }
                     .modifier(OwnTabBar())
                 }
@@ -190,16 +175,13 @@ struct HomeView: View {
             // because reading router.tab here rebuilt Home and Positions together, about 250 ms each time).
             TabBarHost(router: router, brief: brief, barDown: barDown, barGone: barGone, reduce: reduce, pick: pickTab, search: openSearch)
         }
-        // The SD calculator (11 Nov 2026), from the SD chip on Positions: a sheet over the page and the tab bar.
-        .overlay { SDSheetHost() }
         .environment(brief)
         .onAppear(perform: briefSetup)
         // The server's brief, decoded once per build (memoized; HomeStore ticks every 15 to 30 s).
         .onChange(of: home.builtAt, initial: true) { _, _ in
             brief.fresh = (SXClient.parseDate(home.fresh.marks ?? ""), SXClient.parseDate(home.fresh.trades ?? ""))
-            brief.ingest(home.brief, key: home.builtAt, book: store.bookIDNow, overview: home.overview, books: store.books)
+            brief.ingest(home.brief, key: home.builtAt, book: store.bookIDNow, overview: home.overview, books: store.books, inputs: home.briefInputs)
             brief.calendar = home.calendar   // early closes move the moments (Audit 7)
-            SDStore.shared.setLegs(home.legs)   // each leg's own IV, for SD on your positions (11 Nov 2026)
         }
         // The strip picked a book: read its Home (Overview stays on S's last build).
         .onChange(of: brief.account) { _, a in
@@ -381,7 +363,6 @@ struct HomeView: View {
                 let p = v.dropFirst(5).split(separator: ":").map(String.init)
                 router.openCard(p[0], face: p.count > 1 ? p[1] : "sold")
             }
-            else if v.hasPrefix("insights:") { router.insights = String(v.dropFirst(9)) }
             else if v == "aftershock" { router.openAftershock(animated: false) }
             else if v.hasPrefix("at:") { router.scrollID = String(v.dropFirst(3)) }
             else if v.hasPrefix("tab:") {
@@ -390,16 +371,6 @@ struct HomeView: View {
             }
             else if v.hasPrefix("gamma:") { let p = v.dropFirst(6).split(separator: ":").map(String.init); router.openGamma(p[0], view: p.count > 1 ? p[1] : nil, wall: nil) }
             else if v.hasPrefix("itab:") { let t = String(v.dropFirst(5)); router.tab = .insights; if t != "All" { router.insightsAll = false; router.focus = t } }
-            else if v.hasPrefix("walls:") {
-                router.tab = .positions
-                try? await Task.sleep(for: .milliseconds(500))
-                router.walls = String(v.dropFirst(6))
-            }
-            else if v.hasPrefix("filter:") {
-                let f = String(v.dropFirst(7))
-                router.tab = .positions
-                router.filter = f == "todo" ? .todo : f == "up" ? .up : f == "down" ? .down : Int(f).map { .kept($0) } ?? .all
-            }
         }
         #endif
     }

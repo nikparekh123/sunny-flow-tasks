@@ -131,9 +131,8 @@ final class BriefState {
     var lastBook: BriefAccount = .sunny
     /// The direction of the last switch, for the 28 pt slide (block 33).
     var switchDir: CGFloat = 0
-    /// Positions: the name on screen, and whether it opened at the Friday close stop (from Your position).
+    /// Positions: the name to open on (from Your position).
     var positionsName: String?
-    var positionsAtFriday = false
     /// Overlays (block 33): the Time value sheet, the economy sheet, a ticker chart pushed from a name tile.
     var sheet: BriefSheetKind?
     var ticker: String?
@@ -141,6 +140,8 @@ final class BriefState {
     /// The server's brief for the book on screen, decoded once per update (memoized: never built in a body).
     private(set) var live: BriefLive?
     private var liveKey: String?
+    /// The legs the brief was priced on (payload.brief_inputs), for Positions: set with each new build.
+    private(set) var inputs: JSONValue?
     /// The book the brief is for ("S", "N") and its build: Positions asks sunny-positions for that book.
     private(set) var book: String?
     var built: String? { liveKey }
@@ -186,10 +187,11 @@ final class BriefState {
 
     private var debugAccountApplied = false
 
-    func ingest(_ brief: JSONValue?, key: String?, book: String? = nil, overview: JSONValue? = nil, books: [String] = []) {
+    func ingest(_ brief: JSONValue?, key: String?, book: String? = nil, overview: JSONValue? = nil, books: [String] = [], inputs: JSONValue? = nil) {
         guard key != liveKey || book != self.book else { return }
         liveKey = key
         self.book = book
+        self.inputs = inputs
         if !BriefDebug.sample {
             // The strip on the real books: Overview (when S's build carried one), then each book this login is in.
             if let o = overview, case .object = o, o["error"].isNull { liveOverview = o }
