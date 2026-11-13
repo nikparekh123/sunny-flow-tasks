@@ -63,7 +63,7 @@ struct PosSoldRow: View {
     let r: PE.SoldRow
     let tap: () -> Void
     var body: some View {
-        let c = PC.tone(r.tone), lc = r.tone == .quiet ? PC.muT.opacity(0.55) : c
+        let c = PC.tone(r.tone), lc = r.tone == .quiet ? PC.muT.opacity(0.55) : c, mc = move
         let what = "\(PE.fk(r.l.K)) \(r.l.put ? "puts" : "calls") · \(r.l.exLabel) · \(Int(r.l.n))"
         let sdNow = String(format: "%.2f", r.a) + " SD" + (r.itm ? " in" : "")
         let kept = r.kept.map { $0 >= 0 ? "\(Int(PE.jsRound($0 * 100)))% kept" : "\(Int(PE.jsRound(-$0 * 100)))% lost" }
@@ -78,9 +78,9 @@ struct PosSoldRow: View {
                     HStack(spacing: 4) {
                         if let a0 = r.a0 {
                             Text(String(format: "%.2f", a0)).sType(PT.t(13, 18, 500)).foregroundStyle(PC.quiet)
-                            Text("→").sType(PT.t(13, 18, 600)).foregroundStyle(r.closer == true ? PC.red : PC.green)
+                            Text("→").sType(PT.t(13, 18, 600)).foregroundStyle(mc ?? PC.quiet)
                         }
-                        Text(sdNow).sType(PT.t(13, 18, 600)).foregroundStyle(c)
+                        Text(sdNow).sType(PT.t(13, 18, 600)).foregroundStyle(mc ?? PC.ink)
                     }
                     .fixedSize()
                 }
@@ -89,7 +89,10 @@ struct PosSoldRow: View {
                     Text("\(r.l.entry.map(PosFmt.price) ?? "-") → \(r.l.mark.map(PosFmt.price) ?? "-")").foregroundStyle(PC.muT)
                     if let kept { Text(kept).foregroundStyle((r.kept ?? 0) >= 0 ? PC.green : PC.red) }
                     if r.showBE, let be = r.be {
-                        Text("BE \(String(format: "%.2f", be)) · \(r.past ? "past it" : String(format: "%.2f", abs(r.zb ?? 0)) + " SD away")").foregroundStyle(PC.red)
+                        HStack(spacing: 0) {
+                            Text("BE \(String(format: "%.2f", be))").foregroundStyle(PC.ink)
+                            Text(" · \(r.past ? "past it" : String(format: "%.2f", abs(r.zb ?? 0)) + " SD away")").foregroundStyle(PC.mu)
+                        }
                     }
                 }
                 .sType(PT.t(12, 16))
@@ -107,6 +110,14 @@ struct PosSoldRow: View {
                                          + (kept.map { ", \($0)" } ?? "")
                                          + (r.showBE && r.be != nil ? ", breakeven \(String(format: "%.2f", r.be!))\(r.past ? ", past it" : "")" : "")))
         .accessibilityHint("Opens \(r.l.t) and its Intelligence")
+    }
+
+    /// SD now against SD when sold (Nik 13 Nov 2026): further is good for a seller, green; closer red; nil (ink) with no
+    /// SD when sold or no change. The red, orange and quiet distance tones stay on the track's dots only.
+    private var move: Color? {
+        guard let a0 = r.a0 else { return nil }
+        if r.closer == true { return PC.red }
+        return (r.itm ? -r.a : r.a) > a0 + 0.005 ? PC.green : nil
     }
 
     /// 2.2 SD each side of today's line with the 0.5, 1, 1.5 and 2 SD bands; the dot is the strike now, the hollow dot

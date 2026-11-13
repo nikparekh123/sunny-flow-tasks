@@ -8,9 +8,16 @@ import { ny } from '../lib/clock';
 import { tradingDays, type SoldIn, type SoldRow, type Tone } from '../../../supabase/functions/_shared/positions-engine.ts';
 import { expLabel, fk } from './model';
 import type { SdReply } from './intel';
-import { Chevron, Fold, GLASS, MT, MU, QU, R, O, K, SOFT, tnum } from './ui';
+import { Chevron, Fold, G, GLASS, MT, MU, QU, R, O, K, SOFT, tnum } from './ui';
 
 const TONE: Record<Tone, string> = { red: R, orange: O, quiet: MT };
+/** SD now against SD when sold (Nik 13 Nov 2026): further is good for a seller, green; closer red; no SD when sold
+    (or no change) ink. The red, orange and quiet distance tones stay on the track's dots only. */
+const moveColour = (r: SoldRow) => {
+  if (r.a0 == null) return K;
+  if (r.closer) return R;
+  return (r.itm ? -r.a : r.a) > r.a0 + 0.005 ? G : K;
+};
 /** The days the market is shut, from Home's calendar. */
 export const closedDays = (calendar: J): Set<string> =>
   new Set(((Array.isArray(calendar) ? calendar : []) as J[]).filter((d) => d?.kind === 'closed' && d?.date).map((d) => String(d.date)));
@@ -98,7 +105,7 @@ export function SoldCard({ rows, within, inTheMoney, open, close, onPick }:
           {rows.map((r) => <SoldRowView key={r.key} r={r} onPick={onPick} />)}
         </div>
         <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>
-          Red under 0.5 SD, orange 0.5 to 1 SD, quiet past 1 SD, filled red in the money · the hollow dot is where the strike sat when sold · breakeven shows under 0.5 SD or in the money · a tap opens the name
+          SD now green when further than when sold, red when closer · dots red under 0.5 SD, orange 0.5 to 1 SD, grey past 1 SD, filled red in the money · the hollow dot is where the strike sat when sold · breakeven shows under 0.5 SD or in the money · a tap opens the name
         </span>
       </div>
     </Fold>
@@ -106,7 +113,7 @@ export function SoldCard({ rows, within, inTheMoney, open, close, onPick }:
 }
 
 function SoldRowView({ r, onPick }: { r: SoldRow; onPick: (t: string, ex: string) => void }) {
-  const c = TONE[r.tone], lc = r.tone === 'quiet' ? 'rgba(174,174,178,.55)' : c;
+  const c = TONE[r.tone], lc = r.tone === 'quiet' ? 'rgba(174,174,178,.55)' : c, mc = moveColour(r);
   const what = `${fk(r.K)} ${r.put ? 'puts' : 'calls'} · ${r.exLabel} · ${r.n}`;
   const sdNow = `${r.a.toFixed(2)} SD${r.itm ? ' in' : ''}`;
   const kept = r.kept == null ? null : r.kept >= 0 ? `${Math.round(r.kept * 100)}% kept` : `${Math.round(-r.kept * 100)}% lost`;
@@ -131,8 +138,8 @@ function SoldRowView({ r, onPick }: { r: SoldRow; onPick: (t: string, ex: string
       </span>
       <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         <span style={{ fontSize: 14, lineHeight: '20px', fontWeight: 600, whiteSpace: 'nowrap' }}>
-          {r.a0 != null && <><span style={{ color: QU, fontWeight: 500 }}>{r.a0.toFixed(2)}</span> <span style={{ color: r.closer ? R : '#65C466' }}>→</span> </>}
-          <span style={{ color: c }}>{sdNow}</span>
+          {r.a0 != null && <><span style={{ color: QU, fontWeight: 500 }}>{r.a0.toFixed(2)}</span> <span style={{ color: mc === K ? QU : mc }}>→</span> </>}
+          <span style={{ color: mc }}>{sdNow}</span>
         </span>
         <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>Δ {r.delta.toFixed(2).replace(/^0/, '')}</span>
       </span>
@@ -146,8 +153,8 @@ function SoldRowView({ r, onPick }: { r: SoldRow; onPick: (t: string, ex: string
       </span>
       <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         {r.showBE && r.be != null ? <>
-          <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600, color: R }}>BE {r.be.toFixed(2)}</span>
-          <span style={{ fontSize: 12, lineHeight: '16px', color: R }}>{r.past ? 'past it' : `${Math.abs(r.zb ?? 0).toFixed(2)} SD away`}</span>
+          <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600, color: K }}>BE {r.be.toFixed(2)}</span>
+          <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>{r.past ? 'past it' : `${Math.abs(r.zb ?? 0).toFixed(2)} SD away`}</span>
         </> : <span style={{ fontSize: 15, lineHeight: '20px', color: QU }}>-</span>}
       </span>
     </button>
