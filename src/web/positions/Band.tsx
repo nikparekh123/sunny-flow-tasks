@@ -4,7 +4,10 @@
 //   Payoff: P&L by price at a date from today's marks, summed from the server's grid (Pricer), ±12% of the price, the
 //           priced move shaded, where the P&L peaks (Nik 7 Nov: never "short above", it reads as a loss), the Greeks
 //           at that date, and a table of prices against dates.
-import { useMemo } from 'react';
+//   Both scrub (Nik 13 Nov 2026, "like before"): a pointer or finger on the chart shows a line, a dot on the curve and a
+//   small read: Price the close's date, the close and the move since the range's first close; Payoff the price, how far
+//   from today, and the P&L there (with your changes, and the book as it is).
+import { useMemo, useState, type ReactNode } from 'react';
 import { CountUp } from '../components/CountUp';
 import { count, money, price } from '../lib/format';
 import { RANGES, series, spread, type Range } from '../ticker/model';
@@ -24,7 +27,8 @@ export function PriceChart({ chart, failed, S0, today, legs, trades, rg, setRg }
     const s = series(closes, dates, rg, { m20: [], m50: [] });
     const pts = s.pts.slice(), ds = s.dates.slice();
     if (S0 > 0) { if (ds[ds.length - 1] === today) pts[pts.length - 1] = S0; else { pts.push(S0); ds.push(today); } }
-    const stp = Math.max(1, Math.ceil(pts.length / 130)), p = pts.filter((_, i) => i % stp === 0 || i === pts.length - 1);
+    const stp = Math.max(1, Math.ceil(pts.length / 130)), keep = (_: unknown, i: number) => i % stp === 0 || i === pts.length - 1;
+    const p = pts.filter(keep), pdates = ds.filter(keep);
     const Ks = [...legs.map((l) => l.K), ...trades.map((l) => l.K)];
     let lo = Math.min(...p, ...Ks), hi = Math.max(...p, ...Ks);
     const pd = (hi - lo) * 0.07 || p[0] * 0.05; lo -= pd; hi += pd;
@@ -38,7 +42,7 @@ export function PriceChart({ chart, failed, S0, today, legs, trades, rg, setRg }
       ...trades.map((l) => ({ k: l.k, y: cy(l.K), sold: l.q < 0, wi: true, l: `What if · ${l.lb}` })),
     ];
     const ly = spread(lines.map((x) => (x.y / 100) * H), 18, H - 4, 19);
-    return { d, area: d + ' L400 100 L0 100 Z', up, chg: p[p.length - 1] / p[0] - 1, py: cy(S0), lines: lines.map((x, i) => ({ ...x, ly: ly[i] })) };
+    return { d, area: d + ' L400 100 L0 100 Z', up, chg: p[p.length - 1] / p[0] - 1, py: cy(S0), lines: lines.map((x, i) => ({ ...x, ly: ly[i] })), p, pdates, cy };
   }, [chart, S0, today, legs, trades, rg]);
   const c = v?.up ? G : R;
   return (
@@ -60,6 +64,14 @@ export function PriceChart({ chart, failed, S0, today, legs, trades, rg, setRg }
           ))}
           <span className="tnum" style={{ position: 'absolute', right: 0, top: `${v.py.toFixed(2)}%`, transform: 'translateY(-50%)', padding: '2px 8px', borderRadius: 999,
             background: K, color: '#000000', fontSize: 12, lineHeight: '16px', fontWeight: 700 }}>{price(S0)}</span>
+          <Scrub top={0} bottom={0} read={(f) => {
+            const n = v.p.length, i = Math.round(f * (n - 1)), x = v.p[i], d0 = v.p[0], mvp = d0 > 0 ? x / d0 - 1 : 0;
+            return { x: i / (n - 1), y: v.cy(x) / 100, dot: v.up ? G : R, rows: [
+              { t: v.pdates[i] === today ? 'Today' : dayWords(v.pdates[i], rg), c: MU },
+              { t: price(x), b: true },
+              { t: `${mvp < 0 ? '▼' : '▲'} ${(Math.abs(mvp) * 100).toFixed(1)}% since ${dayWords(v.pdates[0], rg)}`, c: mvp < 0 ? R : G },
+            ] };
+          }} />
         </> : <span style={{ position: 'absolute', top: '45%', left: 0, fontSize: 13, color: MU }}>{chart || failed ? 'No price history for this name yet.' : 'Loading the price…'}</span>}
       </div>
       <div style={{ display: 'flex', gap: 4 }} role="radiogroup" aria-label="Range">
@@ -98,7 +110,7 @@ export function Payoff({ t, pr, base, wi, chg, segs, seg, dLong, pick, tab, mask
     const yp = (yhi - ylo) * 0.12 || 1; ylo -= yp; yhi += yp;
     const fy = (y: number) => ((yhi - y) / (yhi - ylo)) * 100;
     const pth = (a: number[]) => a.map((y, i) => `${i ? 'L' : 'M'}${((i / (NP - 1)) * 400).toFixed(1)} ${fy(y).toFixed(2)}`).join(' ');
-    return { fy, dW: pth(vW), dB: chg ? pth(vB) : '', zy: fy(0) };
+    return { fy, dW: pth(vW), dB: chg ? pth(vB) : '', zy: fy(0), vW, vB };
   }, [pr, base, wi, chg, S0, D.tt, D.row]); // eslint-disable-line react-hooks/exhaustive-deps
   const xp = (x: number) => ((x / S0 - (1 - XR)) / (2 * XR)) * 100;
   const v0 = pr.pl(wi, S0, D), vb0 = pr.pl(base, S0, D);
@@ -165,6 +177,17 @@ export function Payoff({ t, pr, base, wi, chg, segs, seg, dLong, pick, tab, mask
               <span style={{ position: 'absolute', left: '50%', top: `${v.fy(v0).toFixed(2)}%`, width: 14, height: 14, margin: '-7px 0 0 -7px', borderRadius: '50%',
                 background: '#FFFFFF', boxShadow: '0 0 0 3px rgba(0,0,0,.6),0 0 14px rgba(255,255,255,.45)' }} />
             </div>
+            <Scrub top={10} bottom={10} read={(f) => {
+              const k = f * (NP - 1), i = Math.min(NP - 2, Math.floor(k)), w = k - i;
+              const at = (a: number[]) => a[i] + (a[i + 1] - a[i]) * w;
+              const x = S0 * (1 - XR + 2 * XR * f), vw = at(v.vW), mvp = x / S0 - 1;
+              const rows: ScrubRow[] = [
+                { t: `${price(x)} · ${Math.abs(mvp) < 0.0005 ? 'today' : `${mvp > 0 ? '↑' : '↓'}${(Math.abs(mvp) * 100).toFixed(1)}%`}`, c: MU },
+                { t: (chg ? 'With changes · ' : '') + mask(money(vw)), c: cl(vw), b: true },
+              ];
+              if (chg) { const vb = at(v.vB); rows.push({ t: 'The book · ' + mask(money(vb)), c: cl(vb) }); }
+              return { x: f, y: v.fy(vw) / 100, dot: cl(vw), rows };
+            }} />
           </div>
           <div className="tnum" style={{ position: 'relative', height: 18, borderTop: '1px solid rgba(255,255,255,.08)' }}>
             {[-12, -6, 0, 6, 12].map((p) => (
@@ -231,3 +254,50 @@ function PayTable({ t, pr, set, segs, seg, pick, mask }: { t: string; pr: Pricer
   );
 }
 
+
+/* ── Scrub ─────────────────────────────────────────────────────────────── */
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+/** A close's date as the ticker chart's scrub writes it: "Fri Nov 7" on 1W, "Nov 7" to YTD, "Nov 7, 2025" on 1Y and All. */
+function dayWords(iso: string | undefined, rg: Range): string {
+  if (!iso) return '';
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number), dt = new Date(Date.UTC(y, m - 1, d));
+  if (rg === '1W') return `${WD[dt.getUTCDay()]} ${MON[m - 1]} ${d}`;
+  return rg === '1Y' || rg === 'All' ? `${MON[m - 1]} ${d}, ${y}` : `${MON[m - 1]} ${d}`;
+}
+
+interface ScrubRow { t: string; c?: string; b?: boolean }
+/** The pointer (or a finger) on a chart: a line down the plot, a dot on the curve and a small read beside it. `read`
+    takes how far across (0 to 1) and gives where the dot sits (x, y as fractions of the plot) and the read's rows.
+    The plot sits `top` and `bottom` px in from the box. Only this layer renders as the pointer moves. A vertical
+    drag still scrolls the page on a phone. */
+function Scrub({ top, bottom, read }: { top: number; bottom: number; read: (f: number) => { x: number; y: number; dot: string; rows: ScrubRow[] } }) {
+  const [f, setF] = useState<number | null>(null);
+  const at = (e: React.PointerEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    if (r.width) setF(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)));
+  };
+  const q = f == null ? null : read(f);
+  let tip: ReactNode = null;
+  if (q) {
+    const right = q.x > 0.6;
+    tip = (
+      <span style={{ position: 'absolute', top: 0, left: `${(q.x * 100).toFixed(3)}%`, transform: right ? 'translateX(calc(-100% - 10px))' : 'translateX(10px)',
+        display: 'flex', flexDirection: 'column', gap: 1, padding: '6px 9px', borderRadius: 10, background: 'rgba(16,18,17,.94)', boxShadow: '0 0 0 1px rgba(255,255,255,.12)',
+        whiteSpace: 'nowrap', pointerEvents: 'none', ...tnum }}>
+        {q.rows.map((x, i) => <span key={i} style={{ fontSize: x.b ? 15 : 12, lineHeight: x.b ? '20px' : '16px', fontWeight: x.b ? 700 : 500, color: x.c ?? K }}>{x.t}</span>)}
+      </span>
+    );
+  }
+  return (
+    <div onPointerMove={at} onPointerDown={at} onPointerLeave={() => setF(null)} onPointerCancel={() => setF(null)}
+      onPointerUp={(e) => { if (e.pointerType === 'touch') setF(null); }} aria-hidden="true"
+      style={{ position: 'absolute', left: 0, right: 0, top, bottom, cursor: 'crosshair', touchAction: 'pan-y', userSelect: 'none' }}>
+      {q && <>
+        <span style={{ position: 'absolute', top: 0, bottom: 0, left: `${(q.x * 100).toFixed(3)}%`, borderLeft: '1px solid rgba(245,245,247,.55)', pointerEvents: 'none' }} />
+        <span style={{ position: 'absolute', left: `${(q.x * 100).toFixed(3)}%`, top: `${(q.y * 100).toFixed(3)}%`, width: 11, height: 11, margin: '-5.5px 0 0 -5.5px',
+          borderRadius: '50%', background: q.dot, boxShadow: '0 0 0 2px #0B0D0C', pointerEvents: 'none' }} />
+        {tip}
+      </>}
+    </div>
+  );
+}

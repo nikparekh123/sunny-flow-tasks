@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 // MARK: - Sold, in SD
 
@@ -158,6 +159,8 @@ struct PosPriceChart: View {
     let S0: Double
     let failed: Bool
     private let H: CGFloat = 210
+    /// The close under the finger while it scrubs sideways (Nik 13 Nov 2026, "like before"); nil at rest.
+    @State private var si: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -218,6 +221,23 @@ struct PosPriceChart: View {
                     .fixedSize()
                     .frame(width: w, alignment: .trailing)
                     .offset(y: cy(S0) * H - 9)
+                // Under the finger: a line down the chart, a dot on the close, and its date, price and the move since
+                // the first close (the ticker chart's read), beside the line.
+                if let i = si, p.pts.indices.contains(i) {
+                    let x = CGFloat(i) / CGFloat(p.pts.count - 1) * w, v = p.pts[i], mv = v / p.pts[0] - 1
+                    Rectangle().fill(PC.mu.opacity(0.6)).frame(width: 1, height: H).offset(x: x - 0.5)
+                    Circle().fill(col).frame(width: 11, height: 11).background(Circle().fill(PC.page).padding(-2))
+                        .offset(x: x - 5.5, y: cy(v) * H - 5.5)
+                    PosScrubTip(rows: [(p.dates[i] == p.today ? "Today" : PosScrubTip.day(p.dates[i]), PC.mu, false),
+                                       (PosFmt.price(v), PC.ink, true),
+                                       ("\(mv < 0 ? "▼" : "▲") \(PE.pcx(mv)) since \(PosScrubTip.day(p.dates[0]))", mv < 0 ? PC.red : PC.green, false)],
+                                x: x, w: w)
+                }
+                Color.clear.contentShape(Rectangle())
+                    .gesture(PosScrubPan(moved: { lx in
+                        let i = Int((max(0, min(1, lx / max(1, w))) * CGFloat(p.pts.count - 1)).rounded())
+                        if i != si { var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { si = i } }
+                    }, ended: { var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { si = nil } }))
             }
         }
         .accessibilityElement(children: .ignore)
@@ -238,19 +258,31 @@ struct PosPayoffView: View {
     /// Some leg is switched off in Every leg.
     var changed = false
     private let H: CGFloat = 180
+    /// How far across the chart the finger is while it scrubs sideways (0 to 1); nil at rest, the headline reads today.
+    @State private var sx: Double?
 
     var body: some View {
         let peak = p.peak
         let right = peak == nil ? "Keeps making more past ↑\(p.top)% \(p.byT)" : p.peakPast ? "Already past its best \(p.byT)" : "Makes the most at \(PosFmt.price(peak!)) \(p.byT)"
+        // While the finger scrubs, the headline reads the P&L at the price under it (the old payoff's way), then goes
+        // back to today's price when it lifts.
+        let at = sx.map { f in (x: S0 * (0.88 + 0.24 * f), v: lerp(f)) }
+        let v0 = at?.v ?? p.v0, x0 = at?.x ?? S0
+        let move = at.map { a -> String in
+            let m = a.x / S0 - 1
+            return abs(m) < 0.0005 ? "" : " (\(m > 0 ? "↑" : "↓")\(String(format: "%.1f", abs(m) * 100))%)"
+        } ?? ""
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(privacy ? BriefMask.shown : PosFmt.money(p.v0)).sType(PT.t(26, 32, 700, tr: -0.02))
-                        .foregroundStyle(p.v0 > 0.5 ? PC.green : p.v0 < -0.5 ? PC.red : PC.ink)
-                    Text("If \(t) is at \(PosFmt.price(S0)) \(p.byT), from today’s marks").sType(PT.t(12, 16)).foregroundStyle(PC.mu)
+                    Text(privacy ? BriefMask.shown : PosFmt.money(v0)).sType(PT.t(26, 32, 700, tr: -0.02))
+                        .foregroundStyle(v0 > 0.5 ? PC.green : v0 < -0.5 ? PC.red : PC.ink)
+                    // Two lines kept either way, so nothing below jumps while the finger scrubs.
+                    Text("If \(t) is at \(PosFmt.price(x0))\(move) \(p.byT)\(at == nil ? ", from today’s marks" : "")").sType(PT.t(12, 16)).foregroundStyle(PC.mu)
+                        .lineLimit(2, reservesSpace: true)
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(PosSay.words("\(PosSay.signed(p.v0, privacy)) if \(t) is at \(PosFmt.price(S0)) \(p.byT), from today’s marks"))
+                .accessibilityLabel(PosSay.words("\(PosSay.signed(v0, privacy)) if \(t) is at \(PosFmt.price(x0)) \(p.byT), from today’s marks"))
                 Spacer(minLength: 0)
                 Text(right).sType(PT.t(13, 18, 600)).foregroundStyle(peak != nil ? PC.orange : PC.ink).multilineTextAlignment(.trailing)
                     .accessibilityLabel(PosSay.words(right))
@@ -325,9 +357,28 @@ struct PosPayoffView: View {
                 }
                 Circle().fill(PC.dot).frame(width: 12, height: 12).overlay(Circle().stroke(PC.dotRing, lineWidth: 3).padding(-1.5))
                     .offset(x: w / 2 - 6, y: fy(p.v0) - 6)
+                if let f = sx {
+                    let x = CGFloat(f) * w, v = lerp(f)
+                    Rectangle().fill(PC.mu.opacity(0.6)).frame(width: 1, height: H - 16).offset(x: x - 0.5, y: 8)
+                    Circle().fill(v >= 0 ? PC.green : PC.red).frame(width: 11, height: 11).background(Circle().fill(PC.page).padding(-2))
+                        .offset(x: x - 5.5, y: fy(v) - 5.5)
+                }
+                Color.clear.contentShape(Rectangle())
+                    .gesture(PosScrubPan(moved: { lx in
+                        let f = Double(max(0, min(1, lx / max(1, w))))
+                        var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { sx = f }
+                    }, ended: { var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { sx = nil } }))
             }
         }
         .accessibilityHidden(true)
+    }
+
+    /// The P&L at a fraction across the ±12% grid, read on the straight line between its two points.
+    private func lerp(_ f: Double) -> Double {
+        let ys = p.ys, n = ys.count
+        guard n > 1 else { return ys.first ?? 0 }
+        let k = max(0, min(1, f)) * Double(n - 1), i = min(n - 2, Int(k)), w = k - Double(i)
+        return ys[i] + (ys[i + 1] - ys[i]) * w
     }
 
     private var axis: some View {
@@ -345,4 +396,68 @@ struct PosPayoffView: View {
         }
         .accessibilityHidden(true)
     }
+}
+
+// MARK: - Scrub
+
+/// A sideways drag on a chart (Nik 13 Nov 2026: scrub Price and Payoff "like before"). It begins only when the finger
+/// moves more across than up or down, and the page's scroll waits for it to fail, so a drag up or down still scrolls the
+/// page. `moved` gets the finger's x in the chart; `ended` when it lifts. No haptic (a continuous drag, Pass 5).
+struct PosScrubPan: UIGestureRecognizerRepresentable {
+    var moved: (CGFloat) -> Void
+    var ended: () -> Void
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+            guard let p = g as? UIPanGestureRecognizer else { return true }
+            let v = p.velocity(in: p.view)
+            return abs(v.x) > abs(v.y)
+        }
+        /// The scroll view's pan waits for this one to fail.
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldBeRequiredToFailBy o: UIGestureRecognizer) -> Bool {
+            o.view is UIScrollView && o is UIPanGestureRecognizer
+        }
+    }
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let g = UIPanGestureRecognizer()
+        g.maximumNumberOfTouches = 1
+        g.delegate = context.coordinator
+        return g
+    }
+    func handleUIGestureRecognizerAction(_ g: UIPanGestureRecognizer, context: Context) {
+        switch g.state {
+        case .began, .changed: moved(context.converter.localLocation.x)
+        default: ended()
+        }
+    }
+}
+
+/// The read beside the scrub line: small rows on the chart chip, to the right of the line, or to its left past 60%.
+struct PosScrubTip: View {
+    let rows: [(String, Color, Bool)]
+    let x: CGFloat
+    let w: CGFloat
+    var body: some View {
+        let right = x > w * 0.6
+        VStack(alignment: right ? .trailing : .leading, spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
+                Text(r.0).sType(r.2 ? PT.t(15, 20, 700) : PT.t(11, 14, 500), tabular: true).foregroundStyle(r.1).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(PC.labelBg))
+        .fixedSize()
+        .frame(width: w, alignment: right ? .trailing : .leading)
+        .offset(x: right ? x - w - 8 : x + 8, y: 2)
+        .allowsHitTesting(false)
+    }
+
+    private static let iso: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "yyyy-MM-dd"; return f
+    }()
+    private static let out: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "MMM d"; return f
+    }()
+    /// "Sep 11".
+    static func day(_ s: String) -> String { iso.date(from: String(s.prefix(10))).map { out.string(from: $0) } ?? s }
 }

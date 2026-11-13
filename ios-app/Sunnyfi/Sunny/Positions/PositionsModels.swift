@@ -252,16 +252,20 @@ struct PosName {
 struct PosPrice {
     /// The past 3 months of closes (63 sessions) with today's price at the end.
     let pts: [Double]
+    /// Each point's date (ISO), today's last.
+    let dates: [String]
     /// The change across them, a fraction.
     let chg: Double
+    let today: String
 
     static func build(_ w: TickerWire, S0: Double, today: String) -> PosPrice? {
         var pairs = Array(zip(w.dates, w.closes)).filter { $0.1 > 0 }
         if let last = pairs.last, last.0 == today { pairs.removeLast() }
-        var pts = pairs.suffix(63).map(\.1)
-        if S0 > 0 { pts.append(S0) }
+        let kept = pairs.suffix(63)
+        var pts = kept.map(\.1), dates = kept.map(\.0)
+        if S0 > 0 { pts.append(S0); dates.append(today) }
         guard pts.count >= 2, let f = pts.first, f > 0 else { return nil }
-        return PosPrice(pts: pts, chg: pts[pts.count - 1] / f - 1)
+        return PosPrice(pts: pts, dates: dates, chg: pts[pts.count - 1] / f - 1, today: today)
     }
 }
 
