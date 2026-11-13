@@ -155,6 +155,9 @@ struct PosName {
         let soFar: Double
         /// q × 100 × Δ (shares q), from the grid at today's price.
         let delta: Double
+        /// Switched on in Every leg (Nik 13 Nov 2026: "we should be able to switch on and switch off"). An off leg
+        /// drops out of the Whole TICKER book row, the Price chart's strikes and the Payoff with its Greeks.
+        let on: Bool
     }
     /// A strike on the Price chart: sold solid, bought dotted.
     struct Strike: Identifiable { let id: String; let K: Double; let sold: Bool; let label: String }
@@ -183,8 +186,10 @@ struct PosName {
     let delta: Double
     let strikes: [Strike]
     let payoff: Payoff?
+    /// Some leg is switched off.
+    let changed: Bool
 
-    static func build(_ m: PositionsModel, inputs: JSONValue?) -> PosName {
+    static func build(_ m: PositionsModel, inputs: JSONValue?, off: Set<String> = []) -> PosName {
         let src = inputs?["names"].array.first { $0["t"].string == m.t }
         var at: [String: Double] = [:], mark: [String: Double] = [:]
         for l in src?["legs"].array ?? [] {
@@ -205,29 +210,34 @@ struct PosName {
         for l in ordered {
             let exL = l.title.components(separatedBy: ", ").last ?? l.ex
             if l.ty == .shares {
-                legs.append(Leg(id: l.id, group: "Long", contract: "\(m.t) shares", qty: PosFmt.count(l.q), soFar: l.q * (m.S0 - l.K), delta: l.q))
+                legs.append(Leg(id: l.id, group: "Long", contract: "\(m.t) shares", qty: PosFmt.count(l.q), soFar: l.q * (m.S0 - l.K), delta: l.q,
+                                on: !off.contains(l.id)))
                 continue
             }
             let kind = l.ty == .put ? "put" : "call"
             let now = mark[l.id], entry = at[l.id]
             let sf = entry != nil && now != nil ? (now! - entry!) * l.q * 100 : 0
             legs.append(Leg(id: l.id, group: l.q < 0 ? "Income" : "Hedge", contract: "\(PE.fk(l.K)) \(kind) · \(exL)",
-                            qty: "\(PosFmt.count(l.q)) \(l.q < 0 ? "sold" : "bought")", soFar: sf, delta: m.legDelta(l, m.S0, 0)))
+                            qty: "\(PosFmt.count(l.q)) \(l.q < 0 ? "sold" : "bought")", soFar: sf, delta: m.legDelta(l, m.S0, 0),
+                            on: !off.contains(l.id)))
+            if off.contains(l.id) { continue }
             strikes.append(Strike(id: l.id, K: l.K, sold: l.q < 0, label: "\(PE.fk(l.K)) \(kind) · \(exL) · \(l.q < 0 ? "sold" : "bought") \(PosFmt.count(l.q))"))
         }
-        return PosName(t: m.t, S0: m.S0, legs: legs, soFar: legs.reduce(0) { $0 + $1.soFar }, delta: legs.reduce(0) { $0 + $1.delta },
-                       strikes: strikes, payoff: payoff(m))
+        let live = legs.filter(\.on)
+        return PosName(t: m.t, S0: m.S0, legs: legs, soFar: live.reduce(0) { $0 + $1.soFar }, delta: live.reduce(0) { $0 + $1.delta },
+                       strikes: strikes, payoff: payoff(m, off: off), changed: live.count < legs.count)
     }
 
     /// README §3.5 at this Friday's close: Σ q × mul × (value then − mark now) from the server's grid (no premium already
     /// earned: the web's Pricer), ±12% of the price, the priced move, where it peaks, the Greeks then.
-    private static func payoff(_ m: PositionsModel) -> Payoff? {
+    /// Legs switched off drop out (the web's What if set).
+    private static func payoff(_ m: PositionsModel, off: Set<String>) -> Payoff? {
         guard m.stops.indices.contains(m.fridayStop), m.S0 > 0 else { return nil }
         let st = m.stops[m.fridayStop], tt = st.tt, S0 = m.S0
-        let pl = { (x: Double) in m.legs.reduce(0) { $0 + m.legPL($1, x, tt) } }
+        let pl = { (x: Double) in m.legs.reduce(0) { off.contains($1.id) ? $0 : $0 + m.legPL($1, x, tt) } }
         let xs = (0...120).map { S0 * (1 - 0.12 + 0.24 * Double($0) / 120) }
-        let peak = m.turnsShort(at: m.fridayStop).flatMap { $0 <= S0 * 1.5 + 1e-9 ? $0 : nil }
-        let g = m.greeks(S0, tt)
+        let peak = m.shortAt(m.fridayStop, off: off)
+        let g = m.greeks(S0, tt, off: off)
         let today = m.fridayStop == 0 && tt < 0.01
         let byT = today ? "today" : "by " + st.long.replacingOccurrences(of: " close", with: "")
         let top = Int(PE.jsRound(min(50, ((m.gridTop ?? S0 * 1.5) / S0 - 1) * 100)))

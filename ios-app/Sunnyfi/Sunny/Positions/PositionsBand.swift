@@ -224,6 +224,8 @@ struct PosPayoffView: View {
     let S0: Double
     let p: PosName.Payoff
     let privacy: Bool
+    /// Some leg is switched off in Every leg.
+    var changed = false
     private let H: CGFloat = 180
 
     var body: some View {
@@ -258,7 +260,7 @@ struct PosPayoffView: View {
                 }
                 .padding(.top, 8)
             }
-            Text("At the Friday close, read only. Shaded: the priced move.").sType(PT.t(12, 16), tabular: false).foregroundStyle(PC.mu)
+            Text(changed ? "At the Friday close, only the legs switched on. Shaded: the priced move." : "At the Friday close. Shaded: the priced move.").sType(PT.t(12, 16), tabular: false).foregroundStyle(PC.mu)
         }
     }
 

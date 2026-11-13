@@ -130,14 +130,17 @@ struct PositionsModel {
         if let a = g.pl0[l.id] { return (g.at(a, S * 1.002) - g.at(a, S * 0.998)) / (S * 0.004) }
         return 0
     }
-    func delta(_ S: Double, _ tt: Double) -> Double { legs.reduce(0) { $0 + legDelta($1, S, tt) } }
-    /// Delta, gamma (±0.2%), theta ($ a day) and vega ($ a vol point), every leg.
-    func greeks(_ S: Double, _ tt: Double) -> (d: Double, g: Double, th: Double, vg: Double) {
-        let d = delta(S, tt)
-        let gm = (delta(S * 1.002, tt) - delta(S * 0.998, tt)) / (S * 0.004)
+    /// Net delta in shares; `off` = legs switched off on the Positions tab's Every leg (they drop out).
+    func delta(_ S: Double, _ tt: Double, off: Set<String> = []) -> Double {
+        legs.reduce(0) { off.contains($1.id) ? $0 : $0 + legDelta($1, S, tt) }
+    }
+    /// Delta, gamma (±0.2%), theta ($ a day) and vega ($ a vol point), every leg that is on.
+    func greeks(_ S: Double, _ tt: Double, off: Set<String> = []) -> (d: Double, g: Double, th: Double, vg: Double) {
+        let d = delta(S, tt, off: off)
+        let gm = (delta(S * 1.002, tt, off: off) - delta(S * 0.998, tt, off: off)) / (S * 0.004)
         guard let r = g.row(tt) else { return (d, gm, 0, 0) }
         var th = 0.0, vg = 0.0
-        for l in legs {
+        for l in legs where !off.contains(l.id) {
             if let a = g.th[l.id], r < a.count { th += g.at(a[r], S) }
             if let a = g.vg[l.id], r < a.count { vg += g.at(a[r], S) }
         }
@@ -145,6 +148,22 @@ struct PositionsModel {
     }
     /// The server's turns-short price at a stop (every leg on), nil when none.
     func turnsShort(at i: Int) -> Double? { g.turnsShort.indices.contains(i) ? g.turnsShort[i] : nil }
+    /// TURNS SHORT with legs off (the web's Pricer.shortAt): the first price above today where net delta drops below
+    /// zero at that date, read off the grid to the cent as far as it reaches (at most +50%); today's price when it
+    /// already has. Every leg on: the server's price, the one Home says.
+    func shortAt(_ i: Int, off: Set<String>) -> Double? {
+        if off.isEmpty { return turnsShort(at: i).flatMap { $0 <= S0 * 1.5 + 1e-9 ? $0 : nil } }
+        guard g.tts.indices.contains(i) else { return nil }
+        let tt = g.tts[i], top = min(S0 * 1.5, g.S.last ?? S0 * 1.5)
+        var px = S0, pd = delta(px, tt, off: off)
+        if pd < 0 { return S0 }
+        for x in g.S where x > S0 && x <= top + 1e-9 {
+            let dx = delta(x, tt, off: off)
+            if dx < 0 { return ((px + (x - px) * pd / (pd - dx)) * 100 - 1e-9).rounded(.up) / 100 }
+            px = x; pd = dx
+        }
+        return nil
+    }
     /// The top of the server's price grid (±50% on the wide grid).
     var gridTop: Double? { g.S.last }
 }

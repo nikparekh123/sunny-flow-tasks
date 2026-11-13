@@ -7,9 +7,11 @@
 //    Book totals (three cards sideways: Long, Hedge, Income; Nik's five pieces, D7) · Sold, in SD (a full-width glass
 //    row; a tap opens every sold leg on one SD axis, a row tap selects that name and scrolls to Intelligence, D2) ·
 //    the name strip (a dot: red short at the priced move by Friday, orange a sold leg within 0.5 SD, A7) · the name
-//    header · Price | Payoff (Payoff read only at this Friday's close) · Every leg (no switches) and the Whole TICKER
-//    book row · Intelligence for this week, always open (PositionsIntelView).
-//  Not on the phone: the SD calculator, What if, Try a trade, leg switches, New and Both, the cover check, dates, table.
+//    header · Price | Payoff (Payoff at this Friday's close) · Every leg, a native switch on each row (Nik 13 Nov 2026),
+//    and the Whole TICKER book row · Intelligence for this week, always open (PositionsIntelView).
+//    A leg switched off drops out of the Whole TICKER book row, the Price chart's strikes and the Payoff with its
+//    Greeks, per book and name, for as long as the app is open. Book totals, Sold in SD and Intelligence stay whole.
+//  Not on the phone: the SD calculator, What if, Try a trade, New and Both, the cover check, dates, table.
 //
 //  Every model is worked out once per input (PositionsMemo), never in a body. The screen handles its own loading,
 //  empty and error states, and both books (S and N: whichever the account strip has on screen).
@@ -32,6 +34,8 @@ struct PositionsTab: View {
     @State private var name: String = BriefDebug.name ?? ""
     @State private var view: Band = .price
     @State private var soldOpen = false
+    /// Legs switched off in Every leg, per "book|TICKER".
+    @State private var off: [String: Set<String>] = [:]
     /// The open box ("lane|box"): one at a time across the lanes.
     @State private var box: String?
     @State private var scrolled: CGFloat = 0
@@ -182,7 +186,12 @@ struct PositionsTab: View {
     @ViewBuilder private func nameSection(_ n: PosBook.Name, book b: String) -> some View {
         let m = brief.positions.model(b, n.t)
         let built = brief.positions.models["\(b)|\(n.t)"]?.built ?? ""
-        let nm = m.map { mm in memo.name(key: "\(b)|\(n.t)|\(built)|\(brief.built ?? "")") { PosName.build(mm, inputs: brief.inputs) } }
+        let offK = "\(b)|\(n.t)", offs = off[offK] ?? []
+        let nm = m.map { mm in
+            memo.name(key: "\(b)|\(n.t)|\(built)|\(brief.built ?? "")|\(offs.sorted().joined(separator: ","))") {
+                PosName.build(mm, inputs: brief.inputs, off: offs)
+            }
+        }
         let S0 = nm?.S0 ?? n.S0
         PosHeader(n: n, S0: S0).padding(.horizontal, Self.margin)
         VStack(alignment: .leading, spacing: 12) {
@@ -199,7 +208,7 @@ struct PositionsTab: View {
                     let pr = w.flatMap { w in memo.price(key: "\(b)|\(n.t)|\(w.dates.last ?? "")|\(S0)") { PosPrice.build(w, S0: S0, today: MarketClock.ny(SClock.now()).date) } }
                     PosPriceChart(price: pr, strikes: nm?.strikes ?? [], S0: S0, failed: charts.hasFailed(b, n.t))
                 } else if let p = nm?.payoff {
-                    PosPayoffView(t: n.t, S0: S0, p: p, privacy: privacy)
+                    PosPayoffView(t: n.t, S0: S0, p: p, privacy: privacy, changed: nm?.changed ?? false)
                 } else {
                     loadingBox(error: brief.positions.error(b, n.t), height: 300)
                 }
@@ -209,7 +218,15 @@ struct PositionsTab: View {
         .animation(S.fade, value: view)
         .padding(.horizontal, Self.margin)
         Group {
-            if let nm { PosEveryLeg(t: n.t, m: nm, privacy: privacy) }
+            if let nm {
+                PosEveryLeg(t: n.t, m: nm, privacy: privacy) { id, on in
+                    withAnimation(S.fade) {
+                        var s = off[offK] ?? []
+                        if on { s.remove(id) } else { s.insert(id) }
+                        off[offK] = s
+                    }
+                }
+            }
             else { loadingBox(error: brief.positions.error(b, n.t), height: 160) }
         }
         .padding(.horizontal, Self.margin)
@@ -456,29 +473,45 @@ struct PosHeader: View {
     }
 }
 
-// MARK: - Every leg (no switches)
+// MARK: - Every leg
 
-/// README §3.7 on the phone: each row the leg (Long, Hedge or Income), contract · count, so far and delta, then the
-/// Whole TICKER book row. So far = (mark − entry) × q × mul; delta = q × 100 × Δ from the grid (shares q).
+/// README §3.7 on the phone: each row a native switch on the left (Nik 13 Nov 2026), the contract strike first as the
+/// title ("110 call · Mar 19", "LULU shares"; never "Hedge", as agreed 12 Nov), the group (Long, Hedge or Income) ·
+/// count under it, so far and delta, then the Whole TICKER book row for the legs switched on. So far = (mark − entry) × q × mul;
+/// delta = q × 100 × Δ from the grid (shares q). An off row fades to .4, as the web's.
 struct PosEveryLeg: View {
     let t: String
     let m: PosName
     let privacy: Bool
+    let toggle: (String, Bool) -> Void
     var body: some View {
+        let offN = m.legs.filter { !$0.on }.count
         VStack(alignment: .leading, spacing: 0) {
             Text("Every leg").sType(PT.section, tabular: false).foregroundStyle(PC.ink).padding(.bottom, 6)
                 .accessibilityAddTraits(.isHeader)
             ForEach(m.legs) { l in
-                row(l.group, sub: "\(l.contract) · \(l.qty)", soFar: l.soFar, delta: l.delta, bold: false)
-                    .overlay(alignment: .top) { Rectangle().fill(PC.rule).frame(height: 1) }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(PosSay.words("\(l.group), \(l.contract), \(l.qty), so far \(PosSay.signed(l.soFar, privacy)), delta \(PosFmt.side(l.delta))"))
+                HStack(spacing: 12) {
+                    Toggle(isOn: Binding(get: { l.on }, set: { toggle(l.id, $0) })) {
+                        Text(PosSay.words("\(l.contract), \(l.qty)"))
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    row(l.contract, sub: "\(l.group) · \(l.qty)", soFar: l.soFar, delta: l.delta, bold: false)
+                        .opacity(l.on ? 1 : 0.4)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(PosSay.words("\(l.contract), \(l.group), \(l.qty), so far \(PosSay.signed(l.soFar, privacy)), delta \(PosFmt.side(l.delta))"))
+                }
+                .overlay(alignment: .top) { Rectangle().fill(PC.rule).frame(height: 1) }
             }
-            row("Whole \(t) book", sub: nil, soFar: m.soFar, delta: m.delta, bold: true)
-                .padding(.top, 4)
-                .overlay(alignment: .top) { Rectangle().fill(PC.ruleStrong).frame(height: 1) }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(PosSay.words("Whole \(t) book, so far \(PosSay.signed(m.soFar, privacy)), delta \(PosFmt.side(m.delta))"))
+            HStack(spacing: 12) {
+                // Keeps the words in line with the rows' above.
+                Toggle("", isOn: .constant(true)).labelsHidden().fixedSize().hidden().accessibilityHidden(true)
+                row("Whole \(t) book", sub: offN == 0 ? nil : offN == 1 ? "1 leg off" : "\(offN) legs off", soFar: m.soFar, delta: m.delta, bold: true)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(PosSay.words("Whole \(t) book\(offN == 0 ? "" : ", \(offN) off"), so far \(PosSay.signed(m.soFar, privacy)), delta \(PosFmt.side(m.delta))"))
+            }
+            .padding(.top, 4)
+            .overlay(alignment: .top) { Rectangle().fill(PC.ruleStrong).frame(height: 1) }
         }
     }
 
@@ -495,7 +528,7 @@ struct PosEveryLeg: View {
                 Text(PosFmt.side(delta)).sType(PT.t(12, 16)).foregroundStyle(bold ? (delta < 0 ? PC.orange : PC.ink) : PC.mu)
             }
         }
-        .padding(.vertical, bold ? 6 : 6)
+        .padding(.vertical, 6)
         .frame(minHeight: 44)
     }
 }
