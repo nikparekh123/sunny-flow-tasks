@@ -16,6 +16,9 @@ enum PC {
     static let mu = S.secondary                          // #98989D: labels, sub lines
     static let muT = S.secondaryOnTint                   // #AEAEB2: muted on tints
     static let quiet = S.dyn(0x6E6E73, 0x8E8E93)         // #8E8E93: quiet words, the empty dash
+    static let bright = S.dyn(0x3A3A3C, 0xD1D1D6)        // #D1D1D6: Price chart tag text that is not white (Nik 14 Nov)
+    static let pillSold = S.dyn(0xE5E5EA, 0x242426)      // the Price chart's put tags, solid (Nik 14 Nov: readable)
+    static let pillBought = S.dyn(0xF2F2F7, 0x18181A)
     static let green = S.green
     static let red = S.red
     static let orange = S.act                            // #FF9F0A

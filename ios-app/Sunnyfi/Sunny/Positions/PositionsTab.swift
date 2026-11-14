@@ -179,12 +179,12 @@ struct PositionsTab: View {
         }
         .sensoryFeedback(.selection, trigger: picks)
         if let n {
-            nameSection(n, book: b)
+            nameSection(n, book: b, sold: book.sold)
         }
     }
 
     /// The header, Price | Payoff, Every leg and Intelligence for the name on screen.
-    @ViewBuilder private func nameSection(_ n: PosBook.Name, book b: String) -> some View {
+    @ViewBuilder private func nameSection(_ n: PosBook.Name, book b: String, sold: [PE.SoldRow]) -> some View {
         let m = brief.positions.model(b, n.t)
         let built = brief.positions.models["\(b)|\(n.t)"]?.built ?? ""
         let offK = "\(b)|\(n.t)", offs = flip[offK] ?? []
@@ -205,10 +205,11 @@ struct PositionsTab: View {
             .sensoryFeedback(.selection, trigger: view)
             Group {
                 if view == .price {
-                    let w = charts.chart(b, n.t), now = MarketClock.ny(SClock.now()), stk = nm?.strikes ?? []
+                    // A sold strike wears its Sold in SD closeness (Nik, 14 Nov 2026, "4 + 2").
+                    let w = charts.chart(b, n.t), now = MarketClock.ny(SClock.now()), stk = PosPrice.toned(nm?.strikes ?? [], sold.filter { $0.l.t == n.t })
                     let closed = Set(brief.calendar.filter { $0.kind == "closed" }.map(\.date))
                     let pr = w.flatMap { w in
-                        memo.price(key: "\(b)|\(n.t)|\(w.dates.last ?? "")|\(w.hours?.count ?? 0)|\(S0)|\(now.date)|\(now.minutes)|\(stk.map(\.id).joined(separator: ","))") {
+                        memo.price(key: "\(b)|\(n.t)|\(w.dates.last ?? "")|\(w.hours?.count ?? 0)|\(S0)|\(now.date)|\(now.minutes)|\(stk.map { $0.id + ($0.tone?.rawValue ?? "") }.joined(separator: ","))") {
                             PosPrice.build(w, S0: S0, today: now.date, mins: now.minutes, closed: closed, strikes: stk)
                         }
                     }

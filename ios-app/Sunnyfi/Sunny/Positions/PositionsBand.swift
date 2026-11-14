@@ -166,9 +166,9 @@ struct PosPriceChart: View {
             if let p = price {
                 chart(p).frame(height: H)
                 labels(p).frame(height: 16)
-                Text("Past week \(Text("\(p.move < 0 ? "▼" : "▲") \(PE.pcx(p.move))").font(.inter(12, 600, tabular: true)).foregroundStyle(p.move < 0 ? PC.red : PC.green)) · sold dashed, bought dotted · to \(p.fridayWords)")
+                Text("Past week \(Text("\(p.move < 0 ? "▼" : "▲") \(PE.pcx(p.move))").font(.inter(12, 600, tabular: true)).foregroundStyle(p.move < 0 ? PC.red : PC.green)) · sold dashed, bought dotted · to \(p.fridayWords) · a sold strike's % red within 0.5 SD, orange within 1 SD")
                     .sType(PT.t(12, 16)).foregroundStyle(PC.mu)
-                    .accessibilityLabel(PosSay.words("Past week \(p.move < 0 ? "down" : "up") \(PE.pcx(p.move)), sold dashed, bought dotted, to \(p.fridayWords)"))
+                    .accessibilityLabel(PosSay.words("Past week \(p.move < 0 ? "down" : "up") \(PE.pcx(p.move)), sold dashed, bought dotted, to \(p.fridayWords), a sold strike's percent red within half an SD, orange within 1 SD"))
             } else {
                 Group {
                     if failed { Text("No price history for this name yet.").sType(PT.t(13, 18), tabular: false).foregroundStyle(PC.mu) }
@@ -207,20 +207,22 @@ struct PosPriceChart: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(PosSay.words("Price chart, past week, \(PosFmt.price(p.pts.last?.v ?? 0)) today. " + p.tags.filter { !$0.px }.map { "\($0.title), \($0.s)" }.joined(separator: "; ")))
+        .accessibilityLabel(PosSay.words("Price chart, past week, \(PosFmt.price(p.pts.last?.v ?? 0)) today. " + p.tags.filter { !$0.px }.map { "\($0.title), \($0.s)" + ($0.tone == .red ? ", close" : $0.tone == .orange ? ", near" : "") }.joined(separator: "; ")))
     }
 
-    /// Sold: the strike 700 ink, the % grey; bought: the strike 500 #AEAEB2, the % #8E8E93; puts in a grey capsule;
-    /// today's price a white capsule with black text.
+    /// Nik, 14 Nov 2026 ("4 + 2"): bright text on a solid pill so the numbers read. Sold: the strike 700 ink, the %
+    /// in how close it is (red under 0.5 SD or in the money, orange to 1 SD, bright grey past; Sold in SD's rings);
+    /// bought: the strike 600 bright grey, the % #AEAEB2; puts in a grey capsule; today's price a white capsule.
     private func tag(_ t: PosPrice.Tag) -> some View {
-        HStack(spacing: 4) {
-            Text(t.n).font(.inter(13, t.px || t.sold ? 700 : 500, tabular: true)).foregroundStyle(t.px ? PC.onInk : t.sold ? PC.ink : PC.muT)
-            if !t.px { Text(t.s).font(.inter(11.5, 500, tabular: true)).foregroundStyle(t.put ? PC.muT : t.sold ? PC.mu : PC.quiet) }
+        let pc = t.tone == .red ? PC.red : t.tone == .orange ? PC.orange : t.sold ? PC.bright : PC.muT
+        return HStack(spacing: 4) {
+            Text(t.n).font(.inter(13, t.px || t.sold ? 700 : 600, tabular: true)).foregroundStyle(t.px ? PC.onInk : t.sold ? PC.ink : PC.bright)
+            if !t.px { Text(t.s).font(.inter(12, t.sold ? 600 : 500, tabular: true)).foregroundStyle(pc) }
         }
         .lineLimit(1)
         .padding(.horizontal, t.px ? 8 : t.put ? 7 : 0)
         .frame(height: PosPrice.TH)
-        .background(Capsule().fill(t.px ? PC.ink : t.put ? Color(red: 118 / 255, green: 118 / 255, blue: 128 / 255).opacity(t.sold ? 0.24 : 0.16) : .clear))
+        .background(Capsule().fill(t.px ? PC.ink : t.put ? (t.sold ? PC.pillSold : PC.pillBought) : .clear))
         .fixedSize()
     }
 

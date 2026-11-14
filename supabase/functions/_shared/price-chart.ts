@@ -16,6 +16,8 @@
 //     is call?"), then how far from today; puts in a grey capsule; today's price a white capsule. Tags sort
 //     by price and spread in rows; a group holding today's price stays pinned to it; a tag off its line gets a short
 //     connector.
+//   Tag colours (Nik, 14 Nov 2026, "4 + 2"): the text is bright on a solid pill so the numbers read; a sold strike's %
+//     wears how close it is (PCTone, the Sold in SD rings: red under 0.5 SD or in the money, orange to 1 SD, quiet past).
 // No em dashes in any words here (Nik).
 
 export type PCRange = '1W' | '1M' | '3M' | 'YTD' | '1Y' | 'All';
@@ -23,7 +25,10 @@ export const PC_RANGES: PCRange[] = ['1W', '1M', '3M', 'YTD', '1Y', 'All'];
 export const PC_WORDS: Record<PCRange, string> = { '1W': 'Past week', '1M': 'Past month', '3M': 'Past 3 months', YTD: 'This year', '1Y': 'Past year', All: 'All time' };
 
 /** A strike to draw: a held option leg (on), or a What if trade (`w`). `label` reads the legs in full for the hover. */
-export interface PCStrike { key: string; K: number; ty: 'C' | 'P'; q: number; w: boolean; label: string }
+/** How close a sold strike is, the Sold in SD rings' colours: red under 0.5 SD or in the money, orange 0.5 to 1 SD,
+    quiet past 1 SD (Nik, 14 Nov 2026, "4 + 2": the tag's % wears it). */
+export type PCTone = 'red' | 'orange' | 'quiet';
+export interface PCStrike { key: string; K: number; ty: 'C' | 'P'; q: number; w: boolean; label: string; tone?: PCTone | null }
 export interface PCIn {
   dates: string[]; closes: number[];
   /** sunny-chart's hours: { day: [10:00 ... 16:00] }, null where no quote. */
@@ -41,6 +46,8 @@ export interface PCIn {
 export interface PCPoint { x: number; v: number; d: string; h: number | null; now: boolean }
 export interface PCTag {
   key: string; top: number; n: string; s: string; px: boolean; sold: boolean; put: boolean; w: boolean; out: boolean; title: string;
+  /** A sold strike's closeness (the nearest of its legs); null for bought, What if, today or a sold leg without an SD. */
+  tone: PCTone | null;
 }
 export interface PCOut {
   pts: PCPoint[]; up: boolean; move: number; words: string;
@@ -62,6 +69,7 @@ const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'
 const dt = (iso: string) => new Date(iso.slice(0, 10) + 'T12:00:00Z');
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const dow = (s: string) => dt(s).getUTCDay();
+const TONE_RANK: Record<PCTone, number> = { quiet: 0, orange: 1, red: 2 };
 export const pcFk = (k: number) => (k % 1 ? String(+k.toFixed(2)) : String(k));
 const dpc = (k: number, S0: number) => { const p = Math.abs(k / S0 - 1) * 100; return (p < 0.1 ? p.toFixed(2) : p.toFixed(1)) + '%'; };
 const trading = (s: string, closed: Set<string>) => { const w = dow(s); return w > 0 && w < 6 && !closed.has(s); };
@@ -140,12 +148,14 @@ export function priceChart(I: PCIn): PCOut | null {
   const y = (v: number) => ((b0 - v) / (b0 - a0)) * CH;
 
   // One line per strike, side and type; What if trades their own.
-  interface G { kk: string; sd: boolean; ty: 'C' | 'P'; K: number; w: boolean; ls: string[] }
+  interface G { kk: string; sd: boolean; ty: 'C' | 'P'; K: number; w: boolean; ls: string[]; tone: PCTone | null }
   const gp = new Map<string, G>();
   for (const l of opt) {
     const kk = l.w ? 'w' + l.key : (l.q < 0 ? 's' : 'b') + l.ty + l.K;
-    const g = gp.get(kk) ?? { kk, sd: l.q < 0, ty: l.ty, K: l.K, w: l.w, ls: [] };
+    const g = gp.get(kk) ?? { kk, sd: l.q < 0, ty: l.ty, K: l.K, w: l.w, ls: [], tone: null };
     g.ls.push(l.label); gp.set(kk, g);
+    // Legs on one strike in different expiries share a tag: it wears the closest one's colour.
+    if (g.sd && !g.w && l.tone && (!g.tone || TONE_RANK[l.tone] > TONE_RANK[g.tone])) g.tone = l.tone;
   }
   const GS = [...gp.values()];
   interface T { key: string; y: number; px: boolean; out: boolean; up: boolean; g?: G; cy: number }
@@ -167,9 +177,9 @@ export function priceChart(I: PCIn): PCOut | null {
   }
   cl.forEach((c) => c.forEach((x, i) => { x.cy = c.top! + i * PT + PT / 2; }));
   const tags: PCTag[] = tg.map((x) => {
-    if (x.px) return { key: 'px', top: x.cy - TH / 2, n: S0.toFixed(2), s: '', px: true, sold: true, put: false, w: false, out: false, title: `Today ${S0.toFixed(2)}` };
+    if (x.px) return { key: 'px', top: x.cy - TH / 2, n: S0.toFixed(2), s: '', px: true, sold: true, put: false, w: false, out: false, title: `Today ${S0.toFixed(2)}`, tone: null };
     const g = x.g!;
-    return { key: x.key, top: x.cy - TH / 2, n: `${pcFk(g.K)} ${g.ty}`, s: dpc(g.K, S0) + (x.out ? (x.up ? ' ↑' : ' ↓') : ''), px: false, sold: g.sd, put: g.ty === 'P', w: g.w, out: x.out,
+    return { key: x.key, top: x.cy - TH / 2, n: `${pcFk(g.K)} ${g.ty}`, s: dpc(g.K, S0) + (x.out ? (x.up ? ' ↑' : ' ↓') : ''), px: false, sold: g.sd, put: g.ty === 'P', w: g.w, out: x.out, tone: g.sd && !g.w ? g.tone : null,
       title: g.ls.join(', ') + (x.out ? `, off the chart ${x.up ? 'above' : 'below'}` : '') };
   });
   const conn = tg.filter((x) => !x.px && !x.out && Math.abs(x.cy - x.y) > 3).map((x) => ({ y0: x.y, y1: x.cy }));

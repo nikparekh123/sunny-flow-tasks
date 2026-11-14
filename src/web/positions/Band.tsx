@@ -11,19 +11,25 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { CountUp } from '../components/CountUp';
 import { count, money, price } from '../lib/format';
 import { ny } from '../lib/clock';
-import { PC_RANGES, priceChart, type PCPoint, type PCRange, type PCStrike } from '../../../supabase/functions/_shared/price-chart.ts';
+import { PC_RANGES, priceChart, type PCPoint, type PCRange, type PCStrike, type PCTone } from '../../../supabase/functions/_shared/price-chart.ts';
+import type { SoldRow } from '../../../supabase/functions/_shared/positions-engine.ts';
 import type { J } from '../lib/data';
 import { fk, type DPt, type PLeg, type Pricer, type Seg } from './model';
-import { G, K, MT, MU, O, QU, R, Segmented, cl, kicker, tnum } from './ui';
+import { G, K, MT, MU, O, R, Segmented, cl, kicker, tnum } from './ui';
 
 /* ── Price ─────────────────────────────────────────────────────────────── */
 // Handoff 2026-11-13-positions 2 §3.4 (Nik, 13 Nov 2026: "Just price chart"): the SunnyPositions week chart style. The
 // maths is the shared model (supabase/functions/_shared/price-chart.ts, the phone ports it); this draws it: the line
 // with no fill ending in a ring at today, the days to the Friday kept open after it, strike lines to a tag column on
 // the right (112 px), the day, week or month labels, the ranges (opens on 1W), the note. The scrub stays (Nik).
+/** Bright gray: the text on the tags that is not white (Nik 14 Nov: the gray % was hard to read). */
+const LT = '#D1D1D6';
 const TAGW = 112, MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], WD3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const strikesOf = (legs: PLeg[], trades: PLeg[]): PCStrike[] => [
-  ...legs.filter((l) => l.ty !== 'S').map((l) => ({ key: l.k, K: l.K, ty: l.ty as 'C' | 'P', q: l.q, w: false,
+/** A sold leg's closeness from its Sold in SD row (same strike, side and expiry); none without a row. */
+const toneOf = (l: PLeg, sold: SoldRow[]): PCTone | null =>
+  l.q < 0 ? sold.find((r) => r.put === (l.ty === 'P') && Math.abs(r.K - l.K) < 1e-6 && r.ex === l.ex)?.tone ?? null : null;
+const strikesOf = (legs: PLeg[], trades: PLeg[], sold: SoldRow[]): PCStrike[] => [
+  ...legs.filter((l) => l.ty !== 'S').map((l) => ({ key: l.k, K: l.K, ty: l.ty as 'C' | 'P', q: l.q, w: false, tone: toneOf(l, sold),
     label: `${l.q < 0 ? 'Sold' : 'Bought'} ${l.ty === 'C' ? 'calls' : 'puts'} ${fk(l.K)} ×${count(Math.abs(l.q))} · ${l.exL}` })),
   ...trades.filter((l) => l.ty !== 'S').map((l) => ({ key: l.k, K: l.K, ty: l.ty as 'C' | 'P', q: l.q, w: true, label: `What if · ${l.lb}` })),
 ];
@@ -39,9 +45,9 @@ function whenWords(p: PCPoint, rg: PCRange): string {
   return rg === '1Y' || rg === 'All' ? `${MON3[m - 1]} ${d}, ${y}` : `${wd} ${MON3[m - 1]} ${d}`;
 }
 
-export function PriceChart({ chart, failed, S0, closed, legs, trades, rg, setRg }:
-  { chart: J; failed?: boolean; S0: number; closed: Set<string>; legs: PLeg[]; trades: PLeg[]; rg: PCRange; setRg: (r: PCRange) => void }) {
-  const v = useMemo(() => model(chart, S0, closed, rg, strikesOf(legs, trades)), [chart, S0, closed, rg, legs, trades]);
+export function PriceChart({ chart, failed, S0, closed, legs, trades, sold, rg, setRg }:
+  { chart: J; failed?: boolean; S0: number; closed: Set<string>; legs: PLeg[]; trades: PLeg[]; sold: SoldRow[]; rg: PCRange; setRg: (r: PCRange) => void }) {
+  const v = useMemo(() => model(chart, S0, closed, rg, strikesOf(legs, trades, sold)), [chart, S0, closed, rg, legs, trades, sold]);
   const c = v ? (v.up ? G : R) : G;
   const d = v ? v.pts.map((p, i) => `${i ? 'L' : 'M'}${(p.x * 400).toFixed(2)} ${((v.y(p.v) / v.CH) * 100).toFixed(2)}`).join(' ') : '';
   return (
@@ -77,13 +83,14 @@ export function PriceChart({ chart, failed, S0, closed, legs, trades, rg, setRg 
               {v.conn.map((x, i) => <path key={i} d={`M0 ${x.y0.toFixed(1)} L8 ${x.y1.toFixed(1)}`} style={{ fill: 'none', stroke: 'rgba(245,245,247,.4)', strokeWidth: 1 }} />)}
             </svg>
             {v.tags.map((x) => {
-              const loud = x.sold || x.w;
+              // Nik, 14 Nov 2026 ("4 + 2"): bright text on a solid pill; a sold strike's % in its closeness colour.
+              const loud = x.sold || x.w, pc = x.tone === 'red' ? R : x.tone === 'orange' ? O : loud ? LT : MT;
               return (
                 <span key={x.key} title={x.title} className="tnum" style={{ position: 'absolute', left: 10, top: x.top, height: v.TH, boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: 5,
                   padding: x.px ? '0 8px' : x.put ? '0 7px' : 0, borderRadius: 999, whiteSpace: 'nowrap', pointerEvents: 'auto',
-                  background: x.px ? K : x.put ? (loud ? 'rgba(118,118,128,.24)' : 'rgba(118,118,128,.16)') : 'transparent' }}>
-                  <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: x.px || loud ? 700 : 500, color: x.px ? '#000000' : x.w ? O : loud ? K : MT }}>{x.n}</span>
-                  {!x.px && <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 500, color: x.put ? MT : loud ? MU : QU }}>{x.s}</span>}
+                  background: x.px ? K : x.put ? (loud ? '#242426' : '#18181A') : 'transparent' }}>
+                  <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: x.px || loud ? 700 : 600, color: x.px ? '#000000' : x.w ? O : loud ? K : LT }}>{x.n}</span>
+                  {!x.px && <span style={{ fontSize: 14, lineHeight: '20px', fontWeight: loud ? 600 : 500, color: pc }}>{x.s}</span>}
                 </span>
               );
             })}
@@ -100,7 +107,7 @@ export function PriceChart({ chart, failed, S0, closed, legs, trades, rg, setRg 
         ))}
       </div>
       <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>
-        Strikes sit on the right with how far they are from today: sold dashed, bought dotted, puts in a gray tag. After the dot, the days left to {v?.fridayWords ?? 'Friday'}. A trade you try in What if shows dashed orange.
+        Strikes sit on the right with how far they are from today: sold dashed, bought dotted, puts in a gray tag. A sold strike’s % is red within 0.5 SD or in the money, orange within 1 SD, gray past 1 SD. After the dot, the days left to {v?.fridayWords ?? 'Friday'}. A trade you try in What if shows dashed orange.
       </span>
     </div>
   );

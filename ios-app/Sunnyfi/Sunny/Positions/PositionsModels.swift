@@ -161,7 +161,9 @@ struct PosName {
         let on: Bool
     }
     /// A strike on the Price chart (legs switched on only): its leg in full, "Sold calls 36 ×72 · Oct 30".
-    struct Strike: Identifiable { let id: String; let K: Double; let put: Bool; let q: Double; let label: String }
+    struct Strike: Identifiable { let id: String; let K: Double; let put: Bool; let q: Double; let label: String
+        /// The expiry ("2026-11-20") and, for a sold leg, how close it is (its Sold in SD row's tone; set by PosPrice.toned).
+        var iso = ""; var tone: PE.Tone? = nil }
     struct Payoff {
         /// ±12% of the price, 121 points: the P&L from today's marks at this Friday's close.
         let xs: [Double]; let ys: [Double]
@@ -224,7 +226,7 @@ struct PosName {
                             qty: "\(PosFmt.count(l.q)) \(l.q < 0 ? "sold" : "bought")", soFar: sf, delta: m.legDelta(l, m.S0, 0),
                             on: !off.contains(l.id)))
             strikes.append(Strike(id: l.id, K: l.K, put: l.ty == .put, q: l.q,
-                                  label: "\(l.q < 0 ? "Sold" : "Bought") \(kind)s \(PE.fk(l.K)) ×\(PosFmt.count(abs(l.q))) · \(exL)"))
+                                  label: "\(l.q < 0 ? "Sold" : "Bought") \(kind)s \(PE.fk(l.K)) ×\(PosFmt.count(abs(l.q))) · \(exL)", iso: l.iso))
         }
         let live = legs.filter(\.on)
         return PosName(t: m.t, S0: m.S0, legs: legs, soFar: live.reduce(0) { $0 + $1.soFar }, delta: live.reduce(0) { $0 + $1.delta },
@@ -266,7 +268,9 @@ struct PosName {
 ///   when a tag leaves its line.
 struct PosPrice {
     struct Point { let x: Double; let v: Double; let d: String; let h: Int?; let now: Bool }
-    struct Tag: Identifiable { let id: String; let top: CGFloat; let n: String; let s: String; let px: Bool; let sold: Bool; let put: Bool; let title: String }
+    struct Tag: Identifiable { let id: String; let top: CGFloat; let n: String; let s: String; let px: Bool; let sold: Bool; let put: Bool; let title: String
+        /// A sold strike's closeness (the nearest of its legs); nil for bought, today or a sold leg without an SD.
+        var tone: PE.Tone? = nil }
     struct Line: Identifiable { let id: String; let y: CGFloat; let sold: Bool }
     struct Conn: Identifiable { let id: Int; let y0: CGFloat; let y1: CGFloat }
     struct Label: Identifiable { let id: Int; let x: Double; let t: String; let now: Bool }
@@ -301,6 +305,14 @@ struct PosPrice {
     static func friday(_ today: String) -> String { let w = dow(today) - 1; return add(today, (5 - w + 7) % 7 == 0 ? 7 : (5 - w + 7) % 7) }
     private static func dpc(_ k: Double, _ S0: Double) -> String { let p = abs(k / S0 - 1) * 100; return String(format: p < 0.1 ? "%.2f%%" : "%.1f%%", p) }
 
+    /// Each sold strike with its Sold in SD row's tone (same side, strike and expiry; the web's toneOf in Band.tsx).
+    static func toned(_ strikes: [PosName.Strike], _ sold: [PE.SoldRow]) -> [PosName.Strike] {
+        strikes.map { st in
+            var x = st
+            if st.q < 0 { x.tone = sold.first { $0.l.put == st.put && abs($0.l.K - st.K) < 1e-6 && $0.l.ex == st.iso }?.tone }
+            return x
+        }
+    }
     static func build(_ w: TickerWire, S0: Double, today: String, mins: Int, closed: Set<String>, strikes: [PosName.Strike]) -> PosPrice? {
         let trading = { (s: String) -> Bool in let d = dow(s); return d != 1 && d != 7 && !closed.contains(s) }
         var pairs: [(String, Double)] = zip(w.dates, w.closes).filter { $0.1 > 0 }.map { (String($0.0.prefix(10)), $0.1) }
@@ -364,11 +376,14 @@ struct PosPrice {
         let Y = { (v: Double) in CGFloat((b0 - v) / (b0 - a0)) * CH }
 
         // One line per strike, side and type.
-        struct G { let kk: String; let sd: Bool; let put: Bool; let K: Double; var ls: [String] }
+        struct G { let kk: String; let sd: Bool; let put: Bool; let K: Double; var ls: [String]; var tone: PE.Tone? }
         var gs: [G] = [], gi: [String: Int] = [:]
+        let rank = { (t: PE.Tone?) -> Int in t == .red ? 3 : t == .orange ? 2 : t == .quiet ? 1 : 0 }
         for l in strikes {
-            let kk = (l.q < 0 ? "s" : "b") + (l.put ? "P" : "C") + PE.fk(l.K)
-            if let i = gi[kk] { gs[i].ls.append(l.label) } else { gi[kk] = gs.count; gs.append(G(kk: kk, sd: l.q < 0, put: l.put, K: l.K, ls: [l.label])) }
+            let kk = (l.q < 0 ? "s" : "b") + (l.put ? "P" : "C") + PE.fk(l.K), tn = l.q < 0 ? l.tone : nil
+            // Legs on one strike in different expiries share a tag: it wears the closest one's colour.
+            if let i = gi[kk] { gs[i].ls.append(l.label); if rank(tn) > rank(gs[i].tone) { gs[i].tone = tn } }
+            else { gi[kk] = gs.count; gs.append(G(kk: kk, sd: l.q < 0, put: l.put, K: l.K, ls: [l.label], tone: tn)) }
         }
         final class T { let key: String; let y: CGFloat; let px: Bool; let out: Bool; let up: Bool; let g: G?; var cy: CGFloat = 0
             init(_ key: String, _ y: CGFloat, _ px: Bool, _ out: Bool, _ up: Bool, _ g: G?) { self.key = key; self.y = y; self.px = px; self.out = out; self.up = up; self.g = g } }
@@ -396,7 +411,7 @@ struct PosPrice {
         let tags: [Tag] = tg.map { x in
             guard let g = x.g else { return Tag(id: "px", top: x.cy - TH / 2, n: String(format: "%.2f", S0), s: "", px: true, sold: true, put: false, title: "Today \(String(format: "%.2f", S0))") }
             return Tag(id: x.key, top: x.cy - TH / 2, n: PE.fk(g.K) + (g.put ? " P" : " C"), s: dpc(g.K, S0) + (x.out ? (x.up ? " ↑" : " ↓") : ""), px: false, sold: g.sd, put: g.put,
-                       title: g.ls.joined(separator: ", ") + (x.out ? ", off the chart \(x.up ? "above" : "below")" : ""))
+                       title: g.ls.joined(separator: ", ") + (x.out ? ", off the chart \(x.up ? "above" : "below")" : ""), tone: g.tone)
         }
         let conn = tg.filter { !$0.px && !$0.out && abs($0.cy - $0.y) > 3 }.enumerated().map { Conn(id: $0.offset, y0: $0.element.y, y1: $0.element.cy) }
         let lines = gs.compactMap { g -> Line? in let yy = Y(g.K); return yy >= 0 && yy <= CH ? Line(id: g.kk, y: yy, sold: g.sd) : nil }

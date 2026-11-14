@@ -223,6 +223,9 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
   const rw = view === 'price' ? rangeWords(chart.data, S0, closed, rg) : null;
   // The Price chart keeps every strike held, whatever the switches (Nik, 13 Nov 2026).
   const optLegs = base.filter((l) => l.ty !== 'S');
+  // This name's Sold in SD rows: the Price chart's sold tags wear their closeness (Nik, 14 Nov 2026).
+  // (Closeness needs only the SD now, so no sunny-sd replies here.)
+  const soldHere = useMemo(() => soldInSd(soldLegs(payload, new Map())).rows.filter((r) => r.t === t), [payload, t]);
 
   return (
     <>
@@ -234,7 +237,7 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
               : <Segmented label="Chart or table" items={[['chart', 'Chart'], ['table', 'Table']]} value={tab} onPick={setTab} width={170} size={13} />}
           </div>
           {view === 'price'
-            ? <PriceChart chart={chart.data} failed={chart.isError} S0={S0} closed={closed} legs={optLegs} trades={tradesOn} rg={rg} setRg={setRg} />
+            ? <PriceChart chart={chart.data} failed={chart.isError} S0={S0} closed={closed} legs={optLegs} trades={tradesOn} sold={soldHere} rg={rg} setRg={setRg} />
             : <Payoff t={t} pr={pr} base={start} wi={wi} chg={viewChg} segs={segs} seg={seg} dLong={dLong} pick={pick} tab={tab} mask={mask} iv={m.iv} />}
         </div>
         <WhatIf pr={pr} base={base} off={shut} trades={wf.trades} draft={draft} strikes={strikeList} expiries={expiries} expL={expL} nCh={nCh} cashC={cashC} mask={mask}
