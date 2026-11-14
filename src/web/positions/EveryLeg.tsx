@@ -3,7 +3,8 @@
 //   Leg is the group (Nik's rule, totals.ts: Long = shares, Hedge = every leg bought, Income = every leg sold) and the
 //   contract is strike first ("36 call · Oct 30"), never "OTM calls", "Insurance puts" or "LEAPS".
 //   So far = (mark − entry) × q × mul; Delta = q × 100 × Δ (shares q); Theta a day = q × 100 × θ (the server's grid).
-//   A leg that is off drops out of Payoff, the Greeks, Net Δ and What if; its row fades to .4.
+//   A leg that is off drops out of Payoff, the Greeks and the Whole row; its row fades to .4. Legs sold start on, shares
+//   and legs bought start off (Nik, 13 Nov 2026; the page works it out, whatif.ts).
 // Soonest expiry first inside each group, calls before puts on the same day, then the strike.
 import { count, money, price } from '../lib/format';
 import type { PLeg, Pricer, Trade } from './model';
@@ -18,8 +19,8 @@ const ord = (a: PLeg, b: PLeg) => {
   return ri(a) - ri(b) || a.ex.localeCompare(b.ex) || (a.ty === 'P' ? 1 : 0) - (b.ty === 'P' ? 1 : 0) || a.K - b.K;
 };
 
-export function EveryLeg({ t, pr, base, off, trades, toggleLeg, toggleTrade, filter, setFilter, mask }: {
-  t: string; pr: Pricer; base: PLeg[]; off: Set<string>; trades: Trade[]; toggleLeg: (k: string) => void; toggleTrade: (id: number) => void;
+export function EveryLeg({ t, pr, base, off, note, trades, toggleLeg, toggleTrade, filter, setFilter, mask }: {
+  t: string; pr: Pricer; base: PLeg[]; off: Set<string>; note?: string; trades: Trade[]; toggleLeg: (k: string) => void; toggleTrade: (id: number) => void;
   filter: LegFilter; setFilter: (f: LegFilter) => void; mask: (s: string) => string;
 }) {
   const m = pr.m, S0 = m.S0, D = m.today;
@@ -73,7 +74,7 @@ export function EveryLeg({ t, pr, base, off, trades, toggleLeg, toggleTrade, fil
             <span />
             <span style={{ gridColumn: 'span 5', display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 700 }}>Whole {t} book</span>
-              <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>{chg ? 'with your changes' : 'every leg on'}</span>
+              <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>{note ?? (chg ? 'with your changes' : 'every leg on')}</span>
             </span>
             <span style={{ fontSize: 14, fontWeight: 700, color: cl(sfT) }}>{mask(money(sfT))}</span>
             <span style={{ fontSize: 14, fontWeight: 700, color: dT < 0 ? O : K }}>{dTx(dT)}</span>

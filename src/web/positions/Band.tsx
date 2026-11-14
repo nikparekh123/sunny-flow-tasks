@@ -150,7 +150,7 @@ export function Payoff({ t, pr, base, wi, chg, segs, seg, dLong, pick, tab, mask
         <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
           <CountUp v={mask(money(v0))} style={{ fontSize: 30, lineHeight: '36px', fontWeight: 700, letterSpacing: '-.02em', color: cl(v0) }} />
           <span style={{ fontSize: 13, color: MU }}>If {t} is at {price(S0)} {byT}, from today’s marks</span>
-          {chg && <span style={{ fontSize: 13, color: '#AEAEB2' }}>The book as it is: <span style={{ fontWeight: 600, color: cl(vb0) }}>{mask(money(vb0))}</span></span>}
+          {chg && <span style={{ fontSize: 13, color: '#AEAEB2' }}>Without your changes: <span style={{ fontWeight: 600, color: cl(vb0) }}>{mask(money(vb0))}</span></span>}
         </span>
         <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', textAlign: 'right', gap: 2 }}>
           <span style={{ fontSize: 15, fontWeight: 600, color: sh != null ? O : K }}>
@@ -214,7 +214,7 @@ export function Payoff({ t, pr, base, wi, chg, segs, seg, dLong, pick, tab, mask
             ))}
           </div>
           <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>
-            {chg ? 'Solid: with your changes. Dashed: the book as it is.' : `Your ${t} book, P&L from today’s marks.`} Shaded: the priced move. The dot is today’s price.
+            {chg ? 'Solid: with your changes. Dashed: without them (income only).' : `The ${t} legs switched on in Every leg (income to start), P&L from today’s marks.`} Shaded: the priced move. The dot is today’s price.
           </span>
         </div>
       ) : <PayTable t={t} pr={pr} set={wi} segs={segs} seg={seg} pick={pick} mask={mask} />}

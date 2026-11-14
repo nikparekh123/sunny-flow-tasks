@@ -191,13 +191,20 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
   const pick = (s: Seg) => setDay(s.key);
   const dLong = (s: Seg) => m.stops[s.i]?.long.replace(/ close$/, '') ?? s.label;
 
-  // The book as it is, and with the What if (legs off, trades on).
-  const off = useMemo(() => new Set(wf.off.filter((k) => m.legs.some((l) => l.k === k))), [wf.off, m]);
+  // The switches (Nik, 13 Nov 2026: "by default only keep income on and rest off", every name): a leg sold starts on,
+  // shares and legs bought start off; `flip` holds the legs switched away from that. Payoff, its Greeks and Every leg
+  // follow the switches. What if and Intelligence count only real changes (Nik: "Only what I flip"): an income leg
+  // switched off is closed there (bought back); a leg bought or the shares switched on is already held, no change.
   const base = m.legs;
+  const flip = useMemo(() => new Set(wf.flip.filter((k) => base.some((l) => l.k === k))), [wf.flip, base]);
+  const startsOn = (l: PLeg) => l.q < 0;
+  const viewOff = useMemo(() => new Set(base.filter((l) => startsOn(l) === flip.has(l.k)).map((l) => l.k)), [base, flip]);
+  const shut = useMemo(() => new Set(base.filter((l) => startsOn(l) && flip.has(l.k)).map((l) => l.k)), [base, flip]);
   const tradesOn = useMemo(() => pr.trades.filter((l) => wf.trades.find((u) => u.id === l.trade)?.on), [pr, wf.trades]);
-  const wi: PLeg[] = useMemo(() => [...base.filter((l) => !off.has(l.k)), ...tradesOn], [base, off, tradesOn]);
-  const nCh = off.size + tradesOn.length;
-  const cashC = base.filter((l) => off.has(l.k)).reduce((a, l) => a + l.value, 0) + tradesOn.reduce((a, l) => a - l.value, 0);
+  const wi: PLeg[] = useMemo(() => [...base.filter((l) => !viewOff.has(l.k)), ...tradesOn], [base, viewOff, tradesOn]);
+  const start: PLeg[] = useMemo(() => base.filter(startsOn), [base]);
+  const nCh = shut.size + tradesOn.length, viewChg = flip.size + tradesOn.length > 0;
+  const cashC = base.filter((l) => shut.has(l.k)).reduce((a, l) => a + l.value, 0) + tradesOn.reduce((a, l) => a - l.value, 0);
 
   // Try a trade: strikes 85% to 120% of the price on the chain's step, the name's expiries, 10 (3 on Nicolay's book).
   const stp = stepOf(S0);
@@ -214,7 +221,8 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
   const expL = (iso: string) => expLabel(iso, m.wholeDays(iso));
   const closed = useMemo(() => closedDays(payload?.calendar), [payload?.calendar]);
   const rw = view === 'price' ? rangeWords(chart.data, S0, closed, rg) : null;
-  const optLegs = wi.filter((l) => l.ty !== 'S' && l.trade == null);
+  // The Price chart keeps every strike held, whatever the switches (Nik, 13 Nov 2026).
+  const optLegs = base.filter((l) => l.ty !== 'S');
 
   return (
     <>
@@ -227,14 +235,14 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
           </div>
           {view === 'price'
             ? <PriceChart chart={chart.data} failed={chart.isError} S0={S0} closed={closed} legs={optLegs} trades={tradesOn} rg={rg} setRg={setRg} />
-            : <Payoff t={t} pr={pr} base={base} wi={wi} chg={nCh > 0} segs={segs} seg={seg} dLong={dLong} pick={pick} tab={tab} mask={mask} iv={m.iv} />}
+            : <Payoff t={t} pr={pr} base={start} wi={wi} chg={viewChg} segs={segs} seg={seg} dLong={dLong} pick={pick} tab={tab} mask={mask} iv={m.iv} />}
         </div>
-        <WhatIf pr={pr} base={base} off={off} trades={wf.trades} draft={draft} strikes={strikeList} expiries={expiries} expL={expL} nCh={nCh} cashC={cashC} mask={mask}
+        <WhatIf pr={pr} base={base} off={shut} trades={wf.trades} draft={draft} strikes={strikeList} expiries={expiries} expL={expL} nCh={nCh} cashC={cashC} mask={mask}
           setDraft={wf.setDraft} add={wf.add} remove={wf.remove} reset={wf.reset} />
       </div>
-      <EveryLeg t={t} pr={pr} base={base} off={off} trades={wf.trades} toggleLeg={wf.toggleLeg} toggleTrade={wf.toggleTrade} filter={lf} setFilter={setLf} mask={mask} />
+      <EveryLeg t={t} pr={pr} base={base} off={viewOff} note={viewChg ? 'with your changes' : 'income only'} trades={wf.trades} toggleLeg={wf.toggleLeg} toggleTrade={wf.toggleTrade} filter={lf} setFilter={setLf} mask={mask} />
       <Intelligence book={book} t={t} d={sd?.t === t ? sd : undefined} busy={sdQ.isFetching} failed={sdQ.isError} friday={payload?.brief?.friday ?? fri} chains={m.walls}
-        pr={pr} base={base} off={off} trades={wf.trades} setSd={wf.setSd} open={intelOpen} setOpen={setIntelOpen} mask={mask} />
+        pr={pr} base={base} off={shut} trades={wf.trades} setSd={wf.setSd} open={intelOpen} setOpen={setIntelOpen} mask={mask} />
     </>
   );
 }

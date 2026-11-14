@@ -155,8 +155,9 @@ struct PosName {
         let soFar: Double
         /// q × 100 × Δ (shares q), from the grid at today's price.
         let delta: Double
-        /// Switched on in Every leg (Nik 13 Nov 2026: "we should be able to switch on and switch off"). An off leg
-        /// drops out of the Whole TICKER book row, the Price chart's strikes and the Payoff with its Greeks.
+        /// Switched on in Every leg (Nik 13 Nov 2026: "we should be able to switch on and switch off"; "by default only
+        /// keep income on and rest off"). Legs sold start on, shares and legs bought start off. An off leg drops out of
+        /// the Whole TICKER book row and the Payoff with its Greeks; the Price chart keeps every strike held.
         let on: Bool
     }
     /// A strike on the Price chart (legs switched on only): its leg in full, "Sold calls 36 ×72 · Oct 30".
@@ -186,10 +187,12 @@ struct PosName {
     let delta: Double
     let strikes: [Strike]
     let payoff: Payoff?
-    /// Some leg is switched off.
+    /// Some leg is switched away from how they start (Income on, the rest off).
     let changed: Bool
 
-    static func build(_ m: PositionsModel, inputs: JSONValue?, off: Set<String> = []) -> PosName {
+    /// `flip`: the legs switched away from the start.
+    static func build(_ m: PositionsModel, inputs: JSONValue?, flip: Set<String> = []) -> PosName {
+        let off = Set(m.legs.filter { ($0.q < 0) == flip.contains($0.id) }.map(\.id))
         let src = inputs?["names"].array.first { $0["t"].string == m.t }
         var at: [String: Double] = [:], mark: [String: Double] = [:]
         for l in src?["legs"].array ?? [] {
@@ -220,13 +223,12 @@ struct PosName {
             legs.append(Leg(id: l.id, group: l.q < 0 ? "Income" : "Hedge", contract: "\(PE.fk(l.K)) \(kind) · \(exL)",
                             qty: "\(PosFmt.count(l.q)) \(l.q < 0 ? "sold" : "bought")", soFar: sf, delta: m.legDelta(l, m.S0, 0),
                             on: !off.contains(l.id)))
-            if off.contains(l.id) { continue }
             strikes.append(Strike(id: l.id, K: l.K, put: l.ty == .put, q: l.q,
                                   label: "\(l.q < 0 ? "Sold" : "Bought") \(kind)s \(PE.fk(l.K)) ×\(PosFmt.count(abs(l.q))) · \(exL)"))
         }
         let live = legs.filter(\.on)
         return PosName(t: m.t, S0: m.S0, legs: legs, soFar: live.reduce(0) { $0 + $1.soFar }, delta: live.reduce(0) { $0 + $1.delta },
-                       strikes: strikes, payoff: payoff(m, off: off), changed: live.count < legs.count)
+                       strikes: strikes, payoff: payoff(m, off: off), changed: !flip.isEmpty)
     }
 
     /// README §3.5 at this Friday's close: Σ q × mul × (value then − mark now) from the server's grid (no premium already

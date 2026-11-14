@@ -9,8 +9,9 @@
 //    the name strip (a dot: red short at the priced move by Friday, orange a sold leg within 0.5 SD, A7) · the name
 //    header · Price | Payoff (Payoff at this Friday's close) · Every leg, a native switch on each row (Nik 13 Nov 2026),
 //    and the Whole TICKER book row · Intelligence for this week, always open (PositionsIntelView).
-//    A leg switched off drops out of the Whole TICKER book row, the Price chart's strikes and the Payoff with its
-//    Greeks, per book and name, for as long as the app is open. Book totals, Sold in SD and Intelligence stay whole.
+//    Legs sold start on, shares and legs bought start off (Nik, 13 Nov 2026, every name). A leg switched off drops out
+//    of the Whole TICKER book row and the Payoff with its Greeks, per book and name, for as long as the app is open.
+//    The Price chart keeps every strike held; Book totals, Sold in SD and Intelligence stay whole.
 //  Not on the phone: the SD calculator, What if, Try a trade, New and Both, the cover check, dates, table.
 //
 //  Every model is worked out once per input (PositionsMemo), never in a body. The screen handles its own loading,
@@ -34,8 +35,8 @@ struct PositionsTab: View {
     @State private var name: String = BriefDebug.name ?? ""
     @State private var view: Band = .price
     @State private var soldOpen = false
-    /// Legs switched off in Every leg, per "book|TICKER".
-    @State private var off: [String: Set<String>] = [:]
+    /// Legs switched away from how they start in Every leg (Income on, the rest off), per "book|TICKER".
+    @State private var flip: [String: Set<String>] = [:]
     /// The open box ("lane|box"): one at a time across the lanes.
     @State private var box: String?
     @State private var scrolled: CGFloat = 0
@@ -186,10 +187,10 @@ struct PositionsTab: View {
     @ViewBuilder private func nameSection(_ n: PosBook.Name, book b: String) -> some View {
         let m = brief.positions.model(b, n.t)
         let built = brief.positions.models["\(b)|\(n.t)"]?.built ?? ""
-        let offK = "\(b)|\(n.t)", offs = off[offK] ?? []
+        let offK = "\(b)|\(n.t)", offs = flip[offK] ?? []
         let nm = m.map { mm in
             memo.name(key: "\(b)|\(n.t)|\(built)|\(brief.built ?? "")|\(offs.sorted().joined(separator: ","))") {
-                PosName.build(mm, inputs: brief.inputs, off: offs)
+                PosName.build(mm, inputs: brief.inputs, flip: offs)
             }
         }
         let S0 = nm?.S0 ?? n.S0
@@ -224,11 +225,11 @@ struct PositionsTab: View {
         .padding(.horizontal, Self.margin)
         Group {
             if let nm {
-                PosEveryLeg(t: n.t, m: nm, privacy: privacy) { id, on in
+                PosEveryLeg(t: n.t, m: nm, privacy: privacy) { id, _ in
                     withAnimation(S.fade) {
-                        var s = off[offK] ?? []
-                        if on { s.remove(id) } else { s.insert(id) }
-                        off[offK] = s
+                        var s = flip[offK] ?? []
+                        if s.contains(id) { s.remove(id) } else { s.insert(id) }
+                        flip[offK] = s
                     }
                 }
             }
@@ -490,7 +491,6 @@ struct PosEveryLeg: View {
     let privacy: Bool
     let toggle: (String, Bool) -> Void
     var body: some View {
-        let offN = m.legs.filter { !$0.on }.count
         VStack(alignment: .leading, spacing: 0) {
             Text("Every leg").sType(PT.section, tabular: false).foregroundStyle(PC.ink).padding(.bottom, 6)
                 .accessibilityAddTraits(.isHeader)
@@ -511,9 +511,9 @@ struct PosEveryLeg: View {
             HStack(spacing: 12) {
                 // Keeps the words in line with the rows' above.
                 Toggle("", isOn: .constant(true)).labelsHidden().fixedSize().hidden().accessibilityHidden(true)
-                row("Whole \(t) book", sub: offN == 0 ? nil : offN == 1 ? "1 leg off" : "\(offN) legs off", soFar: m.soFar, delta: m.delta, bold: true)
+                row("Whole \(t) book", sub: m.changed ? "with your changes" : "income only", soFar: m.soFar, delta: m.delta, bold: true)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(PosSay.words("Whole \(t) book\(offN == 0 ? "" : ", \(offN) off"), so far \(PosSay.signed(m.soFar, privacy)), delta \(PosFmt.side(m.delta))"))
+                    .accessibilityLabel(PosSay.words("Whole \(t) book, \(m.changed ? "with your changes" : "income only"), so far \(PosSay.signed(m.soFar, privacy)), delta \(PosFmt.side(m.delta))"))
             }
             .padding(.top, 4)
             .overlay(alignment: .top) { Rectangle().fill(PC.ruleStrong).frame(height: 1) }

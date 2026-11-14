@@ -326,7 +326,7 @@ struct PosPayoffView: View {
                 }
                 .padding(.top, 8)
             }
-            Text(changed ? "At the Friday close, only the legs switched on. Shaded: the priced move." : "At the Friday close. Shaded: the priced move.").sType(PT.t(12, 16), tabular: false).foregroundStyle(PC.mu)
+            Text("At the Friday close, the legs switched on in Every leg\(changed ? "" : " (income to start)"). Shaded: the priced move.").sType(PT.t(12, 16), tabular: false).foregroundStyle(PC.mu)
         }
     }
 
