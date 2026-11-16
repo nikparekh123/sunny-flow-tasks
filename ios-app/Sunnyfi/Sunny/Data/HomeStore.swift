@@ -177,6 +177,9 @@ final class HomeStore {
             if let t = DebugPreset.string("store.toast") { showToast(t.replacingOccurrences(of: "_", with: " "), hold: 600) }
             #endif
         } catch {
+            #if DEBUG && targetEnvironment(simulator)
+            print("SUNNY-LOAD \(error)")
+            #endif
             loadError = String(describing: error)
             lastAttemptFailedOffline = (error as? URLError)?.code == .notConnectedToInternet
             health = lastAttemptFailedOffline ? .offline : .cantReach

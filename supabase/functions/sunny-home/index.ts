@@ -28,7 +28,7 @@ import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-12.8';
+const BUILD = '2026-11-16.1';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -941,7 +941,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     return Math.round((v(now) - v(paySeries[i0])) / weeks);
   };
   const payback = paySeries.length ? {
-    now: paySeries.at(-1), pace_tv: paceOf('tvPaid'), pace_intr: paceOf('inPaid'), pace_all: paceOf('all'),
+    // 0, not null, on a book's first LEAP day (one point, no pace yet): phones up to 3.0 (26) read these two as
+    // numbers and the whole Home failed to load (book N, 16 Nov 2026: "Can't reach Sunny").
+    now: paySeries.at(-1), pace_tv: paceOf('tvPaid') ?? 0, pace_intr: paceOf('inPaid') ?? 0, pace_all: paceOf('all'),
     pace_made: paceOf('made'),
     series: paySeries.map((p) => [p.d, p.tvT, p.tvPaid, p.inT, p.inPaid, p.allReal, p.held]),
     new_leap_days: [...new Set(leapLots.map((x) => x.d))].sort(),

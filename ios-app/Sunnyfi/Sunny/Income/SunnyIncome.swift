@@ -191,7 +191,7 @@ struct SunnyPayback: View {
         let made = p.made ?? ((p.now.allReal ?? p.now.tvPaid) + (p.now.held ?? 0))
         return All(base: p.base ?? (p.now.tvT + p.now.inT), made: made, settled: p.settled ?? made - (p.now.held ?? 0),
                    open: p.open ?? (p.now.held ?? 0), closing: p.closing ?? 0, hedges: p.hedges ?? 0,
-                   start: p.paceStart ?? p.paceMade ?? p.paceTv, last4: p.paceRecent, value: p.leapsValue ?? 0)
+                   start: p.paceStart ?? p.paceMade ?? p.paceTv ?? 0, last4: p.paceRecent, value: p.leapsValue ?? 0)
     }
     /// Shown only when both payloads have one (HomeView).
     private var pb: Payback { home.payback! }

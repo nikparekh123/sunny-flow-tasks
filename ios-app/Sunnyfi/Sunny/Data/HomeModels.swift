@@ -581,8 +581,10 @@ struct Payback: Decodable {
     /// [day, time value target, time value paid back, intrinsic target, intrinsic paid back,
     /// all realized since the first LEAP]
     let series: [[Scalar]]
-    let paceTv: Double
-    let paceIntr: Double
+    /// Optional (16 Nov 2026): a book's first LEAP day has one point and no pace, and a non-optional field made the
+    /// whole Home fail to decode for book N ("Can't reach Sunny"). sunny-home now also sends 0 for these two.
+    let paceTv: Double?
+    let paceIntr: Double?
     /// The combined pace (all realized plus the intrinsic change), a week.
     let paceAll: Double?
     /// Made (realized plus premium in hand), a week, over the last five weeks.
