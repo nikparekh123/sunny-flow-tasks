@@ -304,14 +304,16 @@ struct SunnyPerformance: View {
 
     var body: some View {
         let ms = months, D = data
-        let per = period.flatMap { ms[safe: $0] }
+        // Only a month this book has (17 Nov 2026): the picked month is kept by index, and switching from Nik's book
+        // (Sep, Oct, Nov: index 2) to book N (Nov only) read series[1] of one and crashed the app, every time.
+        let pIdx = period.flatMap { ms.indices.contains($0) ? $0 : nil }
+        let per = pIdx.map { ms[$0] }
         let pv: (String, String) -> Double = { t, k in Self.value(D, t, k, per) }
         let net: (String, String) -> Double = { t, m in self.monthNet(D, t, m) }
         let list = rank(D, per)
         let none = !realized && !unrealized
         let tot: Double = list.reduce(0.0) { $0 + $1.up - $1.dn }
         let series: [Double] = ms.map { m in D.keys.reduce(0.0) { $0 + monthNet(D, $1, m) } }
-        let pIdx = period
         // Months with something in them for this selection. Best month, per month
         // and the "vs" line only count those; before the first, it is the first
         // month on record.
@@ -372,6 +374,11 @@ struct SunnyPerformance: View {
             started = true
             let p = DebugPreset.string("perf.period")
             period = p == "ytd" ? nil : p.flatMap(Int.init) ?? month.flatMap { months.firstIndex(of: $0) } ?? months.count - 1
+        }
+        // Another book's months (the account switch): open on this month again, and drop a name that book lacks.
+        .onChange(of: months) { _, ms in
+            period = month.flatMap { ms.firstIndex(of: $0) } ?? ms.count - 1
+            if let f = focus, data[f] == nil { focus = nil }
         }
     }
 
