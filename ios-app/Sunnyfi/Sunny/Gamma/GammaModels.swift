@@ -65,7 +65,7 @@ nonisolated struct GammaRow: Decodable, Hashable {
 }
 
 /// The week's plan for one name (sunny-home `plan`).
-struct NamePlan: Decodable, Hashable {
+nonisolated struct NamePlan: Decodable, Hashable {
     let week: String
     let by: String
     let sd: Double?
@@ -84,27 +84,27 @@ struct NamePlan: Decodable, Hashable {
     let walls: [PlanWall]?
     /// This week (13f): the premium on what the week's expiry sold, and a week of decay on everything bought.
     let wk: Wk?
-    struct Wk: Decodable, Hashable { let prem: Double; let dec: Double }
+    nonisolated struct Wk: Decodable, Hashable { let prem: Double; let dec: Double }
     /// LEAPS under 0.70 delta: the roll down, same expiry, to about 0.75 (Nik, 26 Oct 2026, option B).
     let leaps: [LeapsRoll]?
-    struct LeapsRoll: Decodable, Hashable {
+    nonisolated struct LeapsRoll: Decodable, Hashable {
         let exp: String; let n: Int; let from: From; let to: To; let debit: Double; let tv: TV; let spot: Double?
-        struct From: Decodable, Hashable { let k: Double; let mark: Double; let delta: Double }
-        struct To: Decodable, Hashable { let k: Double; let mid: Double; let delta: Double }
-        struct TV: Decodable, Hashable { let old: Double; let new: Double }
+        nonisolated struct From: Decodable, Hashable { let k: Double; let mark: Double; let delta: Double }
+        nonisolated struct To: Decodable, Hashable { let k: Double; let mid: Double; let delta: Double }
+        nonisolated struct TV: Decodable, Hashable { let old: Double; let new: Double }
     }
-    struct PlanWall: Decodable, Hashable { let k: Double; let side: String; let label: String; let rank: Int }
-    struct Sell: Decodable, Hashable {
+    nonisolated struct PlanWall: Decodable, Hashable { let k: Double; let side: String; let label: String; let rank: Int }
+    nonisolated struct Sell: Decodable, Hashable {
         let n: Int; let sold: Int; let left: Int; let pick: String; let ways: [Way]; let wall: GWall?; let accel: Accel?
         /// Done for this week (sale_done): nothing more is sold this week, the hedge is sized on what is sold.
         let done: Bool?
     }
-    struct Way: Decodable, Hashable, Identifiable {
+    nonisolated struct Way: Decodable, Hashable, Identifiable {
         let id: String; let legs: [Leg]; let pct: Double; let premium: Double; let hedge: Int?
-        struct Leg: Decodable, Hashable { let k: Double; let n: Int }
+        nonisolated struct Leg: Decodable, Hashable { let k: Double; let n: Int }
     }
-    struct Accel: Decodable, Hashable { let k: Double; let conf: Int? }
-    struct Hedge: Decodable, Hashable {
+    nonisolated struct Accel: Decodable, Hashable { let k: Double; let conf: Int? }
+    nonisolated struct Hedge: Decodable, Hashable {
         let exp: String; let k: Double; let mid: Double; let delta: Double?; let label: String?; let conf: Int?; let oiOnly: Bool
         let held: Int; let add: Int; let covered: Bool; let target: Target; let low: Low?; let lowAfter: Double?
         let curve: [[Double]]?; let cost: Double; let weeks: Double?
@@ -113,27 +113,27 @@ struct NamePlan: Decodable, Hashable {
         /// "sd" when the 1st wall (wallK) sat past twice the move, so the strike is the one nearest the target price.
         let pick: String?; let wallK: Double?
     }
-    struct Target: Decodable, Hashable { let sd: Double; let px: Double?; let pct: Double? }
-    struct Low: Decodable, Hashable { let px: Double; let d: Double }
-    struct Insurance: Decodable, Hashable {
+    nonisolated struct Target: Decodable, Hashable { let sd: Double; let px: Double?; let pct: Double? }
+    nonisolated struct Low: Decodable, Hashable { let px: Double; let d: Double }
+    nonisolated struct Insurance: Decodable, Hashable {
         let exp: String; let k: Double; let mid: Double; let delta: Double?; let label: String?; let conf: Int?; let oiOnly: Bool
         let ratio: Double; let target: Int; let held: Int; let add: Int; let cost: Double?; let weeks: Double?; let warn: Bool
         /// "sd" when the 1st put wall (wallK) sat past twice the 1.5 SD move down, so the strike is the one nearest it.
         let pick: String?; let wallK: Double?
     }
-    struct Puts: Decodable, Hashable {
+    nonisolated struct Puts: Decodable, Hashable {
         let n: Int; let k: Double?; let mid: Double?; let half: Bool; let why: [String]; let cap: Int
         let wall: WallRef?; let s50: Double?
     }
-    struct WallRef: Decodable, Hashable { let k: Double; let label: String; let conf: Int? }
-    struct Budget: Decodable, Hashable { let pct: Double; let over: Bool; let perWeek: Double; let premium: Double }
-    struct Recheck: Decodable, Hashable { let above: Double?; let below: Double? }
+    nonisolated struct WallRef: Decodable, Hashable { let k: Double; let label: String; let conf: Int? }
+    nonisolated struct Budget: Decodable, Hashable { let pct: Double; let over: Bool; let perWeek: Double; let premium: Double }
+    nonisolated struct Recheck: Decodable, Hashable { let above: Double?; let below: Double? }
 
     /// The Risk face (block 13i, 3 Nov 2026), on the hedge rule's own terms: net delta at the week's Thursday close
     /// from today's price to the target, the low, the need and where it goes short; the walls on the next three
     /// weeklies and four monthlies with the calls at each that cover the need; the hedge's pick first.
     let risk: Risk?
-    struct Risk: Decodable, Hashable {
+    nonisolated struct Risk: Decodable, Hashable {
         let week: String; let by: String; let spot: Double; let target: Target; let accel: Accel?
         /// The week's sale while it is not placed, counted in the line.
         let sale: Way.Leg?
@@ -141,11 +141,11 @@ struct NamePlan: Decodable, Hashable {
         let px: [Double]; let d: [Double]
         let low: Low; let need: Int; let short: Double?
         let cols: [Col]; let pick: Pick?; let shares: Shares?
-        struct Col: Decodable, Hashable, Identifiable {
+        nonisolated struct Col: Decodable, Hashable, Identifiable {
             var id: String { e }
             let e: String; let days: Int; let weekly: Bool; let oi: Bool; let walls: [Wall]; let yours: [Yours]
         }
-        struct Wall: Decodable, Hashable, Identifiable {
+        nonisolated struct Wall: Decodable, Hashable, Identifiable {
             var id: String { "\(side)\(k)" }
             let k: Double; let side: String; let label: String; let conf: Int?; let quoted: Bool?
             let mid: Double?; let dLow: Double?; let n: Int; let far: Bool; let cost: Double?
@@ -154,9 +154,9 @@ struct NamePlan: Decodable, Hashable {
             /// Calls already held at this strike on this chain ("5 more calls").
             let held: Int
         }
-        struct Yours: Decodable, Hashable { let k: Double; let n: Int; let side: String; let type: String }
-        struct Pick: Decodable, Hashable { let e: String; let k: Double }
-        struct Shares: Decodable, Hashable { let n: Int; let cost: Double }
+        nonisolated struct Yours: Decodable, Hashable { let k: Double; let n: Int; let side: String; let type: String }
+        nonisolated struct Pick: Decodable, Hashable { let e: String; let k: Double }
+        nonisolated struct Shares: Decodable, Hashable { let n: Int; let cost: Double }
     }
 }
 

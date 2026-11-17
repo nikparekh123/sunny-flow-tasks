@@ -10,7 +10,7 @@
 
 import Foundation
 
-struct HomePayload: Decodable {
+nonisolated struct HomePayload: Decodable {
     let build: String
     let builtAt: String
     let today: String
@@ -81,15 +81,15 @@ extension HomePayload {
 
 /// One name's To do as two blocks (block 13c): Sell (next Friday's calls and puts) and Buy (the delta
 /// still needed; the quarterly's put walls as data). Every count is the server's, net of what IBKR shows.
-struct DailyCloses: Decodable, Hashable {
+nonisolated struct DailyCloses: Decodable, Hashable {
     let d: [String]
     let c: [Double]
 }
 
-struct NameWays: Decodable, Hashable {
+nonisolated struct NameWays: Decodable, Hashable {
     let sell: Sell
     let buy: Buy
-    struct Sell: Decodable, Hashable {
+    nonisolated struct Sell: Decodable, Hashable {
         let exp: String
         /// The Thursday before the expiry, and the prices 1.5 weekly SD up and down by then.
         let by: String
@@ -98,13 +98,13 @@ struct NameWays: Decodable, Hashable {
         let calls: Trade?
         let puts: Trade?
     }
-    struct Buy: Decodable, Hashable {
+    nonisolated struct Buy: Decodable, Hashable {
         let calls: Need?
         let puts: PutWalls?
     }
     /// A sale: `n` left to sell, `sold` already sold for that Friday. Puts below the 50-day carry
     /// `paused` and the average instead.
-    struct Trade: Decodable, Hashable {
+    nonisolated struct Trade: Decodable, Hashable {
         let n: Int?
         let sold: Int?
         let rule: String?
@@ -116,7 +116,7 @@ struct NameWays: Decodable, Hashable {
     }
     /// The delta still needed (shares of delta): `need` = `inn` (hedge calls and shares held) + `left`.
     /// `basis` thu: measured at +1.5 SD by Thursday; now: today's delta under the floor.
-    struct Need: Decodable, Hashable {
+    nonisolated struct Need: Decodable, Hashable {
         let exp: String
         let need: Double
         let inn: Double
@@ -126,7 +126,7 @@ struct NameWays: Decodable, Hashable {
         let tiles: [Tile]
     }
     /// The quarterly's put walls, priced; no count, no pick (Nik, 23 Oct 2026: "I can decide").
-    struct PutWalls: Decodable, Hashable {
+    nonisolated struct PutWalls: Decodable, Hashable {
         let exp: String
         let held: Int
         let tiles: [Tile]
@@ -135,7 +135,7 @@ struct NameWays: Decodable, Hashable {
     /// `d` the option's own delta (puts below 0), `d15` it at the move price by Thursday, `de` the delta
     /// a buy is sized on; `n` and `cost` on buys; `g` the gamma at the wall, dollars; `was` the same wall a
     /// week ago.
-    struct Tile: Decodable, Hashable {
+    nonisolated struct Tile: Decodable, Hashable {
         let id: String
         let k: Double
         let mid: Double?
@@ -155,7 +155,7 @@ struct NameWays: Decodable, Hashable {
 }
 
 /// One To do row (block 12b rules, block 13 face): the CALL RULE's roll, buy and sales for a name.
-struct WeekTask: Decodable, Identifiable, Hashable {
+nonisolated struct WeekTask: Decodable, Identifiable, Hashable {
     let id: String
     let t: String
     /// roll · buy · sell · put
@@ -179,7 +179,7 @@ struct WeekTask: Decodable, Identifiable, Hashable {
 
 /// Calls sold against room (one per LEAP) and puts sold against the put cap, for the week being worked.
 /// `pp`: put sales paused, the last close under the 50-day average `s50` (Nik, 23 Oct 2026).
-struct TodoBars: Decodable, Hashable {
+nonisolated struct TodoBars: Decodable, Hashable {
     let cc: Int, cs: Int, pc: Int, ps: Int
     let pp: Bool?
     let s50: Double?
@@ -187,7 +187,7 @@ struct TodoBars: Decodable, Hashable {
 }
 
 /// Delta and Gamma for one name (blocks 13 and 16): an instant jump from today's price.
-struct DGBook: Decodable, Hashable {
+nonisolated struct DGBook: Decodable, Hashable {
     let px: Double
     /// One weekly SD in %.
     let sd: Double?
@@ -210,13 +210,13 @@ struct DGBook: Decodable, Hashable {
     let long0: Double?
     let thin25: Double?
 
-    struct Point { let m: Double; let b: Double; let s: Double; let n: Double; let gb: Double }
+    nonisolated struct Point { let m: Double; let b: Double; let s: Double; let n: Double; let gb: Double }
     func at(_ m: Double) -> Point {
         let r = ser[safe: max(0, min(ser.count - 1, Int((m * 2).rounded())))] ?? []
         return Point(m: m, b: r[safe: 1] ?? 0, s: r[safe: 2] ?? 0, n: r[safe: 3] ?? 0, gb: r[safe: 4] ?? 0)
     }
     /// Stays long · thin · short at move m.
-    enum State { case long, thin, short }
+    nonisolated enum State { case long, thin, short }
     func state(_ m: Double) -> State {
         let n = at(m).n
         return n < 0 ? .short : n < d0Usd / 2 * (1 + m / 100) ? .thin : .long
@@ -227,61 +227,61 @@ struct DGBook: Decodable, Hashable {
 }
 
 /// Six plain points about one name this week (14c), written on the server.
-struct NameInsights: Decodable, Hashable {
+nonisolated struct NameInsights: Decodable, Hashable {
     let name: String
     let day: String?
     let strategy: String?
     let points: [Point]
-    struct Point: Decodable, Hashable { let lead: String; let body: String }
+    nonisolated struct Point: Decodable, Hashable { let lead: String; let body: String }
     /// Handoff 32 (14d): the verdict, its chips, six tagged points in the design's order, and the long term.
     let v2: V2?
-    struct V2: Decodable, Hashable {
+    nonisolated struct V2: Decodable, Hashable {
         /// The verdict, its chips and the order count say what to trade: an owner's only (home_todo).
         let verdict: String?
         let chips: [Chip]?
         let points: [P]
         let longTerm: String?
         let orders: Int?
-        struct Chip: Decodable, Hashable { let k: String; let v: String; let tone: String }
-        struct P: Decodable, Hashable { let key: String; let kind: String; let tag: String; let lead: String; let body: String; let isNew: Bool? }
+        nonisolated struct Chip: Decodable, Hashable { let k: String; let v: String; let tone: String }
+        nonisolated struct P: Decodable, Hashable { let key: String; let kind: String; let tag: String; let lead: String; let body: String; let isNew: Bool? }
     }
 }
 
 /// A name's flow profile (rule 5): five inputs over 20 sessions, each with its percentile toward retail; Retail-heavy
 /// when at least 3 rank beyond the 70th.
-struct FlowProfile: Decodable, Hashable {
+nonisolated struct FlowProfile: Decodable, Hashable {
     let asof: String
     let sessions: Int
     let universe: Int
     let retail: Int
     let profile: String
     let inputs: [Input]
-    struct Input: Decodable, Hashable { let key: String; let name: String; let value: Double?; let pct: Double?; let retail: Bool }
+    nonisolated struct Input: Decodable, Hashable { let key: String; let name: String; let value: Double?; let pct: Double?; let retail: Bool }
     var label: String { profile == "retail-heavy" ? "Retail-heavy" : "Institution-heavy" }
 }
 
 /// Insights, the All page (14d): the verdict, the counts, what changed per name (most pressing first), the rest folded.
 /// The verdict, the To do count and each row's `todo` are an owner's (home_todo, 31 Oct 2026).
-struct InsightsAll: Decodable, Hashable {
+nonisolated struct InsightsAll: Decodable, Hashable {
     let verdict: String?
     let todo: Int?
     let watch: Int
     let quiet: Int
     let rows: [Row]
     let folded: [String]
-    struct Row: Decodable, Hashable { let t: String; let key: String; let tag: String; let lead: String; let body: String; let todo: Bool? }
+    nonisolated struct Row: Decodable, Hashable { let t: String; let key: String; let tag: String; let lead: String; let body: String; let todo: Bool? }
 }
 
 /// Aftershock: the universe, the last scans and the last two weeks of crashes,
 /// biggest drop first within a day (crash-scan, read by sunny-home).
-struct Aftershock: Decodable, Equatable {
+nonisolated struct Aftershock: Decodable, Equatable {
     let universe: Int
     let scans: [Scan]
     let events: [Event]
     let nextScanDay: String?
 
-    struct Scan: Decodable, Equatable { let day: String; let crashes: Int; let scannedAt: String? }
-    struct Event: Decodable, Equatable, Identifiable {
+    nonisolated struct Scan: Decodable, Equatable { let day: String; let crashes: Int; let scannedAt: String? }
+    nonisolated struct Event: Decodable, Equatable, Identifiable {
         var id: String { ticker + day }
         let ticker: String
         let day: String
@@ -298,20 +298,20 @@ struct Aftershock: Decodable, Equatable {
 /// The last five sessions that have opened, 10:00 to 16:00 New York, seven
 /// closes a session per ticker (nil where no quote), and the sessions still to
 /// come in the next week (a sold card runs its empty hours into the expiry).
-struct Hours: Decodable {
+nonisolated struct Hours: Decodable {
     let days: [String]
     let ahead: [String]
     let px: [String: [Double?]]
 }
 
-struct CalendarDay: Decodable, Hashable {
+nonisolated struct CalendarDay: Decodable, Hashable {
     let date: String
     let kind: String          // closed | early_close
     let closes: String?       // "13:00:00" on an early close
     let name: String
 }
 
-struct Fresh: Decodable {
+nonisolated struct Fresh: Decodable {
     let marks: String?
     let quotes: String?
     let market: String?
@@ -319,7 +319,7 @@ struct Fresh: Decodable {
     let accountClose: String?
 }
 
-struct Account: Decodable {
+nonisolated struct Account: Decodable {
     let ok: Bool
     let value: Double?
     let today: Today?
@@ -332,12 +332,12 @@ struct Account: Decodable {
     let book: Period?
     let ibkrClose: IbkrClose?
 
-    struct Today: Decodable { let amount: Double; let pct: Double?; let vs: String; let staleAnchor: Bool }
-    struct Period: Decodable { let from: String; let realized: Double?; let commission: Double; let interest: Double }
-    struct IbkrClose: Decodable { let date: String; let value: Double; let accounts: Int }
+    nonisolated struct Today: Decodable { let amount: Double; let pct: Double?; let vs: String; let staleAnchor: Bool }
+    nonisolated struct Period: Decodable { let from: String; let realized: Double?; let commission: Double; let interest: Double }
+    nonisolated struct IbkrClose: Decodable { let date: String; let value: Double; let accounts: Int }
 }
 
-struct Tape: Decodable, Identifiable {
+nonisolated struct Tape: Decodable, Identifiable {
     var id: String { symbol }
     let symbol: String
     let label: String
@@ -358,7 +358,7 @@ struct Tape: Decodable, Identifiable {
 
 /// A front-month future for an index card: its price now (`at`, Yahoo ~10 min
 /// behind) and its 16:00 price on `baseDate`, the base the card divides by.
-struct Future: Decodable {
+nonisolated struct Future: Decodable {
     let card: String
     let symbol: String
     let pill: String
@@ -368,24 +368,24 @@ struct Future: Decodable {
     let baseDate: String?
 }
 
-struct LastWeek: Decodable {
+nonisolated struct LastWeek: Decodable {
     let weekStart: String
     let from: String
     let to: String
     let rows: [Row]
     let vix: Vix?
-    struct Row: Decodable, Identifiable { var id: String { symbol }; let symbol: String; let changePct: Double?; let pricedMovePct: Double?; let close: Double? }
-    struct Vix: Decodable { let close: Double; let changePct: Double? }
+    nonisolated struct Row: Decodable, Identifiable { var id: String { symbol }; let symbol: String; let changePct: Double?; let pricedMovePct: Double?; let close: Double? }
+    nonisolated struct Vix: Decodable { let close: Double; let changePct: Double? }
 }
 
 // MARK: - Portfolio and Watchlist (blocks 10, 11)
 
 /// % moves per range: today, 1 to 4 weeks.
-struct Moves: Decodable {
+nonisolated struct Moves: Decodable {
     let d: Double?, w1: Double?, w2: Double?, w3: Double?, w4: Double?
     func at(_ r: Int) -> Double? { [d, w1, w2, w3, w4][max(0, min(4, r))] }
 }
-struct Holding: Decodable, Identifiable {
+nonisolated struct Holding: Decodable, Identifiable {
     var id: String { ticker }
     let ticker: String
     let spot: Double?
@@ -394,7 +394,7 @@ struct Holding: Decodable, Identifiable {
     let optionValue: Double?
     let ranges: Moves
 }
-struct Watch: Decodable, Identifiable {
+nonisolated struct Watch: Decodable, Identifiable {
     var id: String { ticker }
     let ticker: String
     let price: Double?
@@ -403,7 +403,7 @@ struct Watch: Decodable, Identifiable {
 
 // MARK: - Inventory and the Writes sheet (block 14)
 
-struct Inventory: Decodable {
+nonisolated struct Inventory: Decodable {
     let by: [By]
     let weeks: [Week]
     let callsMax: Int
@@ -411,7 +411,7 @@ struct Inventory: Decodable {
     let callsSold: Int
     let putsSold: Int
     let creditOpen: Double
-    struct By: Decodable, Identifiable {
+    nonisolated struct By: Decodable, Identifiable {
         var id: String { ticker }
         let ticker: String
         let callsMax: Int, callsSold: Int, putsMax: Int, putsSold: Int
@@ -421,19 +421,19 @@ struct Inventory: Decodable {
     }
     /// A week's bar: the most contracts on at once, of which `*Rolled` were
     /// closed early and reopened later (they stay here, hatched).
-    struct Week: Decodable {
+    nonisolated struct Week: Decodable {
         let week: String; let fri: String; let calls: Int; let puts: Int
         let callsRolled: Int?; let putsRolled: Int?
         let rolledTo: String?; let rolledNames: [String]?
     }
 }
 
-struct Writes: Decodable {
+nonisolated struct Writes: Decodable {
     let expiry: String?
     let names: [Name]
     /// Names with no chain cached for that Friday (left out of `names`).
     let missing: [String]?
-    struct Name: Decodable, Identifiable {
+    nonisolated struct Name: Decodable, Identifiable {
         var id: String { ticker }
         let ticker: String
         let expiry: String
@@ -467,7 +467,7 @@ struct Writes: Decodable {
         let insights: Lenient<NameInsights>?
         /// Every other name's Thesis page (handoff 27): the 0.6 SD Planner rule with the name's reads.
         let thesis: Lenient<ReadRule>?
-        struct Pkg: Decodable {
+        nonisolated struct Pkg: Decodable {
             /// LEAP shares (contracts × 100): the denominator of every %.
             let base: Double?
             /// 10 the week the name reports (every band edge moves up), else 0.
@@ -490,43 +490,43 @@ struct Writes: Decodable {
             let safe: Safe?
             /// The quarterly call: 1.5 SD to its expiry.
             let q: Quarterly?
-            struct Safe: Decodable, Hashable { let sd: Double; let px: Double; let by: String; let d15: Double; let pct: Double }
-            struct Quarterly: Decodable, Hashable { let k: Double; let exp: String; let mid: Double; let sd: Double }
+            nonisolated struct Safe: Decodable, Hashable { let sd: Double; let px: Double; let by: String; let d15: Double; let pct: Double }
+            nonisolated struct Quarterly: Decodable, Hashable { let k: Double; let exp: String; let mid: Double; let sd: Double }
             /// ty: lc LEAP · sc call sold · lp hedge put · sp put sold · oc upside call.
             /// `stays`: still on at the plan's Friday. `d`: signed delta, shares.
-            struct Held: Decodable, Hashable {
+            nonisolated struct Held: Decodable, Hashable {
                 let ty: String; let n: Int; let k: Double; let exp: String; let d: Double; let stays: Bool
                 let tenor: String?; let roll: String?
                 /// Signed delta at +1.5 SD on the Thursday before the expiry, shares.
                 let d15: Double?
             }
-            struct Sug: Decodable, Identifiable, Hashable {
+            nonisolated struct Sug: Decodable, Identifiable, Hashable {
                 let id: String; let ty: String; let act: String; let tenor: String?
                 let n: Int; let k: Double; let exp: String; let mid: Double; let d: Double
                 let d15: Double?
             }
         }
-        struct Plan: Decodable { let type: String; let n: Int; let strike: Double; let mid: Double?; let delta: Double?; let note: String; let credit: Double }
-        struct Already: Decodable { let type: String; let n: Int; let strike: Double; let credit: Double }
-        struct Count: Decodable { let sold: Int; let of: Int }
-        struct PutCount: Decodable { let sold: Int; let of: Int; let bought: Int }
-        struct Delta: Decodable { let now: Double; let after: Double }
-        struct Bar: Decodable {
+        nonisolated struct Plan: Decodable { let type: String; let n: Int; let strike: Double; let mid: Double?; let delta: Double?; let note: String; let credit: Double }
+        nonisolated struct Already: Decodable { let type: String; let n: Int; let strike: Double; let credit: Double }
+        nonisolated struct Count: Decodable { let sold: Int; let of: Int }
+        nonisolated struct PutCount: Decodable { let sold: Int; let of: Int; let bought: Int }
+        nonisolated struct Delta: Decodable { let now: Double; let after: Double }
+        nonisolated struct Bar: Decodable {
             let put: Double?, spot: Double?, call: Double?, sd1: Double?, breakeven: Double?
             let toPutPct: Double?, toSd1Pct: Double?
         }
-        struct Earn: Decodable { let date: String; let time: String? }
+        nonisolated struct Earn: Decodable { let date: String; let time: String? }
     }
 }
 
 // MARK: - Theta and Delta (blocks 15, 16)
 
-struct History: Decodable {
+nonisolated struct History: Decodable {
     let from: String?
     let days: [String]
     let theta: Series
     let delta: Series
-    struct Series: Decodable {
+    nonisolated struct Series: Decodable {
         /// Nil on a day with nothing to average (a book with no options).
         let avg2w: [Double?]
         let now: Double?
@@ -540,20 +540,20 @@ struct History: Decodable {
     }
 }
 
-struct Risk: Decodable {
+nonisolated struct Risk: Decodable {
     let theta: Theta
     let delta: Delta
-    struct Theta: Decodable {
+    nonisolated struct Theta: Decodable {
         let long: Double
         let short: Double
         let by: [By]
-        struct By: Decodable { let ticker: String; let net: Double; let collect: Double; let lose: Double }
+        nonisolated struct By: Decodable { let ticker: String; let net: Double; let collect: Double; let lose: Double }
     }
     /// Short = everything sold, calls and puts, as sizes; long = every call
     /// bought (LEAPs and upside calls); hedge = the puts bought (Nik, 16 Oct 2026).
     /// Net delta left = calls bought - calls sold + puts sold - hedge puts, as
     /// a % of the shares the LEAPs control (`pct`, `pctNow`).
-    struct Delta: Decodable {
+    nonisolated struct Delta: Decodable {
         let long: Double
         let sold: Double
         let hedge: Double?
@@ -561,7 +561,7 @@ struct Risk: Decodable {
         let shares: Double?
         let pctNow: Double?
         let by: [By]
-        struct By: Decodable, Identifiable {
+        nonisolated struct By: Decodable, Identifiable {
             var id: String { ticker }
             let ticker: String; let pct: Double; let long: Double; let sold: Double; let hedge: Double?
             let net: Double?; let shares: Double?
@@ -576,7 +576,7 @@ struct Risk: Decodable {
 
 // MARK: - Payback (block 18)
 
-struct Payback: Decodable {
+nonisolated struct Payback: Decodable {
     let now: Now
     /// [day, time value target, time value paid back, intrinsic target, intrinsic paid back,
     /// all realized since the first LEAP]
@@ -604,33 +604,33 @@ struct Payback: Decodable {
     let leapsValue: Double?
     /// [day, capital in LEAPs, made]
     let series2: [[Scalar]]?
-    struct Now: Decodable { let d: String; let inT: Double; let tvT: Double; let inPaid: Double; let tvPaid: Double
+    nonisolated struct Now: Decodable { let d: String; let inT: Double; let tvT: Double; let inPaid: Double; let tvPaid: Double
                             let allReal: Double?; let held: Double? }
 }
 
 // MARK: - Sold vs Bought, Performance, Allocation (blocks 19-21)
 
-struct SoldVsBought: Decodable {
+nonisolated struct SoldVsBought: Decodable {
     /// [day, longs' change in value (unrealized), shorts realized]
     let days: [[Scalar]]
     let openCredit: Double
 }
 
-struct Performance: Decodable {
+nonisolated struct Performance: Decodable {
     /// [yyyy-MM, ticker, type, $]
     let realized: [[Scalar]]
     let unrealized: [[Scalar]]
 }
 
-struct Allocation: Decodable {
+nonisolated struct Allocation: Decodable {
     let cash: Double?
     let holdings: [Holding]
-    struct Holding: Decodable, Identifiable { var id: String { ticker }; let ticker: String; let now: Double; let invested: Double }
+    nonisolated struct Holding: Decodable, Identifiable { var id: String { ticker }; let ticker: String; let now: Double; let invested: Double }
 }
 
 // MARK: - Yield (block 17)
 
-struct YieldWeek: Decodable {
+nonisolated struct YieldWeek: Decodable {
     let week: String
     let fri: String
     let month: String
@@ -644,7 +644,7 @@ struct YieldWeek: Decodable {
 
 // MARK: - Account chart (block 02b)
 
-struct Chart: Decodable {
+nonisolated struct Chart: Decodable {
     let from: String
     let to: String
     let lastClose: String?
@@ -667,26 +667,26 @@ struct Chart: Decodable {
     let closed: [[Scalar]]
     let dividends: Dividends
 
-    struct Group: Decodable { let line: [Double]; let real: [Double]; let unreal: [Double]; let tv: [Double] }
-    struct Dividends: Decodable {
+    nonisolated struct Group: Decodable { let line: [Double]; let real: [Double]; let unreal: [Double]; let tv: [Double] }
+    nonisolated struct Dividends: Decodable {
         let paid: [[Scalar]]
         /// [pay date, ticker] for each name that paid (02b "Payers").
         let payers: [[String]]?
         let yieldPct: Double?
         let next: Next?
-        struct Next: Decodable { let ticker: String; let exDate: String; let payDate: String?; let amount: Double? }
+        nonisolated struct Next: Decodable { let ticker: String; let exDate: String; let payDate: String?; let amount: Double? }
     }
 }
 
 // MARK: - Deck (blocks 03-07)
 
-struct Deck: Decodable {
+nonisolated struct Deck: Decodable {
     let earnings: [Earning]
     let season: Season?
     let reports: [Report]?
     let thetaChecks: [ThetaCheck]?
 
-    struct Earning: Decodable, Identifiable {
+    nonisolated struct Earning: Decodable, Identifiable {
         var id: String { ticker + date }
         let ticker: String
         let date: String
@@ -698,7 +698,7 @@ struct Deck: Decodable {
         let exposure: Double
         let pricedMovePct: Double?
     }
-    struct Season: Decodable {
+    nonisolated struct Season: Decodable {
         let quarter: String
         let starts: String
         let ends: String
@@ -706,11 +706,11 @@ struct Deck: Decodable {
         let names: Int
         let last: String?
         let only: Only?
-        struct Only: Decodable { let ticker: String; let date: String }
+        nonisolated struct Only: Decodable { let ticker: String; let date: String }
     }
 
     /// A weekly or monthly report (block 06), as saved on its day.
-    struct Report: Decodable {
+    nonisolated struct Report: Decodable {
         let kind: String                 // weekly | monthly
         let label: String
         let mark: String
@@ -728,25 +728,25 @@ struct Deck: Decodable {
         let best: Best?
         let comingUp: ComingUp?
 
-        struct Period: Decodable { let from: String; let to: String }
-        struct Line: Decodable { let leg: String; let how: String; let exp: String?; let amount: Double; let kind: String }
-        struct Best: Decodable { let leg: String; let amount: Double; let how: String; let exp: String?; let keptPct: Double? }
-        struct ComingUp: Decodable {
+        nonisolated struct Period: Decodable { let from: String; let to: String }
+        nonisolated struct Line: Decodable { let leg: String; let how: String; let exp: String?; let amount: Double; let kind: String }
+        nonisolated struct Best: Decodable { let leg: String; let amount: Double; let how: String; let exp: String?; let keptPct: Double? }
+        nonisolated struct ComingUp: Decodable {
             let earnings: [Earn]?
             let market: [Market]?
             let macro: [Macro]?
             let exDividend: [ExDiv]?
             let longs: [Long]?
-            struct Earn: Decodable { let date: String; let ticker: String; let time: String? }
-            struct Market: Decodable { let date: String; let kind: String; let name: String; let closes: String? }
-            struct Macro: Decodable { let date: String; let time: String?; let name: String }
-            struct ExDiv: Decodable { let date: String; let ticker: String; let amount: Double?; let callsSold: Int? }
-            struct Long: Decodable { let leg: String; let expiry: String; let months: Int; let sinceBoughtPct: Double? }
+            nonisolated struct Earn: Decodable { let date: String; let ticker: String; let time: String? }
+            nonisolated struct Market: Decodable { let date: String; let kind: String; let name: String; let closes: String? }
+            nonisolated struct Macro: Decodable { let date: String; let time: String?; let name: String }
+            nonisolated struct ExDiv: Decodable { let date: String; let ticker: String; let amount: Double?; let callsSold: Int? }
+            nonisolated struct Long: Decodable { let leg: String; let expiry: String; let months: Int; let sinceBoughtPct: Double? }
         }
     }
 
     /// A LEAP whose theta drags (block 07), with the roll that fixes it.
-    struct ThetaCheck: Decodable, Identifiable {
+    nonisolated struct ThetaCheck: Decodable, Identifiable {
         var id: String { leg }
         let ticker: String
         let leg: String
@@ -760,7 +760,7 @@ struct Deck: Decodable {
         let ratioWithout: Double?
         let roll: Roll?
 
-        struct Roll: Decodable {
+        nonisolated struct Roll: Decodable {
             let error: String?
             let close: Side?
             let open: Side?
@@ -772,16 +772,16 @@ struct Deck: Decodable {
             let delta: Pair?
             let openInterest: Pair?
             let bookRatio: Ratio?
-            struct Side: Decodable { let expiry: String; let strike: Double; let contracts: Int; let price: Double? }
-            struct Pair: Decodable { let old: Double?; let new: Double? }
-            struct Ratio: Decodable { let now: Double?; let after: Double? }
+            nonisolated struct Side: Decodable { let expiry: String; let strike: Double; let contracts: Int; let price: Double? }
+            nonisolated struct Pair: Decodable { let old: Double?; let new: Double? }
+            nonisolated struct Ratio: Decodable { let now: Double?; let after: Double? }
         }
     }
 }
 
 // MARK: - Mixed arrays ([date, group, flag, amount])
 
-enum Scalar: Decodable {
+nonisolated enum Scalar: Decodable {
     case s(String), n(Double), null
     init(from d: Decoder) throws {
         let c = try d.singleValueContainer()
@@ -794,7 +794,7 @@ enum Scalar: Decodable {
 }
 
 /// Decodes to nil instead of failing the payload.
-struct Lenient<T: Decodable>: Decodable {
+nonisolated struct Lenient<T: Decodable>: Decodable {
     let value: T?
     init(from d: Decoder) throws { value = try? T(from: d) }
 }
@@ -802,7 +802,7 @@ struct Lenient<T: Decodable>: Decodable {
 /// A name's weekly read rule (sunny-home `read_rule`; docs/STRATEGIES.md, NKE
 /// weekly rule): the seven reads, the steps off the 0.6 SD baseline, the
 /// pick and the one call strike every card uses.
-struct ReadRule: Decodable {
+nonisolated struct ReadRule: Decodable {
     let of: Int
     let calls: Int
     let spot: Double
@@ -820,16 +820,16 @@ struct ReadRule: Decodable {
     /// The receipt, when the server writes it (the CALL RULE, 20 Oct 2026): label, value, tone ("red"/"ink").
     let lines: [Line]?
 
-    struct Step: Decodable { let read: String; let label: String; let step: String }
-    struct Line: Decodable { let label: String; let value: String; let tone: String? }
-    struct Read: Decodable {
+    nonisolated struct Step: Decodable { let read: String; let label: String; let step: String }
+    nonisolated struct Line: Decodable { let label: String; let value: String; let tone: String? }
+    nonisolated struct Read: Decodable {
         let read: String
         let fact: String
         let value: Double?
         let analyst: Double?
         let model: Double?
     }
-    struct Reads: Decodable {
+    nonisolated struct Reads: Decodable {
         let fundamentals: Read?
         let technicals: Read?
         let iv: Read?
@@ -840,7 +840,7 @@ struct ReadRule: Decodable {
         let inputs: Inputs?
         let thesis: Facts?
     }
-    struct Inputs: Decodable {
+    nonisolated struct Inputs: Decodable {
         let iv: Double?
         let rich: Double?
         let hv20Ex: Double?
@@ -851,7 +851,7 @@ struct ReadRule: Decodable {
     }
     /// The prices behind the reads: moving averages, the 5-day-ago close, the
     /// month's range, the 12-month move, the usual IV.
-    struct Facts: Decodable {
+    nonisolated struct Facts: Decodable {
         let sma10: Double?
         let sma50: Double?
         let sma100: Double?
@@ -863,7 +863,7 @@ struct ReadRule: Decodable {
         let chg252: Double?
         let ivUsual: Double?
         // .convertFromSnakeCase turns sma200_21 into sma20021.
-        enum CodingKeys: String, CodingKey {
+        nonisolated enum CodingKeys: String, CodingKey {
             case sma10, sma50, sma100, sma200, close5, mLo, mHi, chg252, ivUsual
             case sma200Ago = "sma20021"
         }

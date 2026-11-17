@@ -8,7 +8,7 @@
 
 import Foundation
 
-struct Leg: Decodable, Identifiable, Hashable {
+nonisolated struct Leg: Decodable, Identifiable, Hashable {
     var id: String { "\(ticker)|\(type)|\(side)|\(strike)|\(expiry)" }
     let ticker: String
     let type: String          // call | put

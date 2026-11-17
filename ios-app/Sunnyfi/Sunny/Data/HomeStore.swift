@@ -71,12 +71,47 @@ final class HomeStore {
         #endif
         return book?.id
     }
-    /// The account strip switched books: read that book's Home (the last one stays on screen until it lands).
+    /// Each book's last good Home, and when it was read (17 Nov 2026, Nik: "switch between account is very rough").
+    /// The other books are read quietly after the one on screen, so the strip shows a book at once instead of
+    /// holding the page dimmed while the network answers.
+    private var cached: [String: HomePayload] = [:]
+    private var cachedAt: [String: Date] = [:]
+    private var prefetching: Task<Void, Never>?
+    /// The book the strip just showed from `cached`: its first fresh read is not "positions updated".
+    private var switchedTo: String?
+
+    /// The account strip switched books: that book's kept Home at once, then a fresh read behind it.
     func show(book id: String) async {
         guard books.contains(id), id != bookIDNow else { return }
         picked = id
         if let b = book { book = (b.user, id) }
+        switchedTo = id
+        if let c = cached[id] {
+            changedLegs = []
+            home = c
+            words = c
+            homeBook = id
+            tick += 1
+        }
+        // A read already running is the old book's: it lands in `cached` only, then this book is read.
+        while let t = inFlight { await t.value; if inFlight == t { inFlight = nil } }
         await refresh(.pull)
+    }
+
+    /// Reads the books not on screen into `cached`, off the main thread, when their copy is over a minute old.
+    private func prefetchOthers() {
+        guard prefetching == nil, let shown = homeBook else { return }
+        let now = Date()
+        let others = books.filter { $0 != shown && (cachedAt[$0].map { now.timeIntervalSince($0) > 60 } ?? true) }
+        guard !others.isEmpty else { return }
+        prefetching = Task {
+            for id in others {
+                guard let data = try? await Self.source(book: id), let p = try? await Self.decode(data) else { continue }
+                cached[id] = p
+                cachedAt[id] = Date()
+            }
+            prefetching = nil
+        }
     }
     private var lastAttemptFailedOffline = false
     private let path = NWPathMonitor()
@@ -123,7 +158,7 @@ final class HomeStore {
         let t = Task { await self.fetch(reason) }
         inFlight = t
         await t.value
-        inFlight = nil
+        if inFlight == t { inFlight = nil }   // a switch may already have started the next read
         if reason == .pull { readTick += 1 }
     }
 
@@ -134,28 +169,41 @@ final class HomeStore {
             #if DEBUG && targetEnvironment(simulator)
             let t0 = CFAbsoluteTimeGetCurrent()
             #endif
-            let payload = try Self.decoder.decode(Row.self, from: data).payload
+            let payload = try await Self.decode(data)
             #if DEBUG && targetEnvironment(simulator)
             print("SUNNY-PERF decode \(Int((CFAbsoluteTimeGetCurrent() - t0) * 1000)) ms, \(data.count / 1024) KB")
             #endif
+            cached[bookNow] = payload
+            cachedAt[bookNow] = Date()
+            // The strip moved on while this book was loading: keep it for later, leave the screen alone.
+            guard bookNow == bookIDNow ?? bookNow else { return }
             // Only the same book's legs are compared: switching Sunny ⇄ Nicolay is not "positions updated"
-            // (Nik, 8 Nov 2026: it said "26 changed" on every switch).
-            if homeBook != bookNow { changedLegs = [] }
-            if let old = home, homeBook == bookNow, reason == .tick || reason == .pull {
-                let before = Dictionary(old.legs.map { ($0.id, $0.n) }, uniquingKeysWith: +)
-                let after = Dictionary(payload.legs.map { ($0.id, $0.n) }, uniquingKeysWith: +)
-                let changed = Set(after.keys.filter { before[$0] != after[$0] })
-                    .union(before.keys.filter { after[$0] == nil })
-                changedLegs = changed
-                if !changed.isEmpty { showToast("Positions updated · \(changed.count) changed") }
-            }
-            home = payload
-            homeBook = bookNow
-            if reason != .tick || words == nil || !MarketClock.isRegular(SClock.now(), calendar: payload.calendar) {
-                words = payload
+            // (Nik, 8 Nov 2026: it said "26 changed" on every switch), nor is the first read after the strip
+            // showed a book's kept copy.
+            let switched = homeBook != bookNow || switchedTo == bookNow
+            switchedTo = nil
+            // The same build of the book on screen (a switch whose kept copy was current, a pull between builds):
+            // nothing new, so nothing is redrawn.
+            if homeBook != bookNow || home?.builtAt != payload.builtAt {
+                if switched { changedLegs = [] }
+                if let old = home, !switched, reason == .tick || reason == .pull {
+                    let before = Dictionary(old.legs.map { ($0.id, $0.n) }, uniquingKeysWith: +)
+                    let after = Dictionary(payload.legs.map { ($0.id, $0.n) }, uniquingKeysWith: +)
+                    let changed = Set(after.keys.filter { before[$0] != after[$0] })
+                        .union(before.keys.filter { after[$0] == nil })
+                    changedLegs = changed
+                    if !changed.isEmpty { showToast("Positions updated · \(changed.count) changed") }
+                }
+                home = payload
+                homeBook = bookNow
+                if reason != .tick || words == nil || switched || !MarketClock.isRegular(SClock.now(), calendar: payload.calendar) {
+                    words = payload
+                }
+                tick += 1
+            } else if reason != .tick, words?.builtAt != payload.builtAt {
+                words = payload   // a pull moves the words up to the build on screen, as before
             }
             lastGood = SClock.now()
-            tick += 1
             // The glow keeps its 30 s rhythm when updates come every 15 s (Nik).
             if MarketClock.inSession(SClock.now(), calendar: payload.calendar),
                lastPulse.map({ SClock.now().timeIntervalSince($0) >= 28 }) ?? true {
@@ -166,6 +214,7 @@ final class HomeStore {
             health = .fresh
             loadError = nil
             lastAttemptFailedOffline = false
+            prefetchOthers()
             #if DEBUG && targetEnvironment(simulator)
             if let ago = DebugPreset.double("store.ago") { lastGood = SClock.now().addingTimeInterval(-ago) }
             switch DebugPreset.string("store.health") {
@@ -197,6 +246,8 @@ final class HomeStore {
         if a.contains("-fixture") { books = a.contains("-fixtureN") ? ["S", "N"] : [bookIDNow ?? "S"]; return bookIDNow ?? "S" }
         #endif
         let user = try await SupabaseService.client.auth.session.user.id
+        // Another login on this phone: the kept books were the last one's.
+        if let b = book, b.user != user { cached = [:]; cachedAt = [:] }
         // Memberships are read again every few minutes, so a book added to this login (Nik joining his cousin's
         // book, 8 Nov 2026) reaches the strip without quitting the app; the book on screen stays as it is.
         if let b = book, b.user == user, Date().timeIntervalSince(booksReadAt) < 180 { return b.id }
@@ -263,12 +314,16 @@ final class HomeStore {
         return x
     }
 
-    private struct Row: Decodable { let payload: HomePayload }
-    private static let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.keyDecodingStrategy = .convertFromSnakeCase
-        return d
-    }()
+    private nonisolated struct Row: Decodable { let payload: HomePayload }
+    /// Off the main thread (17 Nov 2026): Nik's book is about 240 KB, and decoding it on the main thread froze
+    /// every 15 s update and every account switch. The models are `nonisolated` so this is safe.
+    private static func decode(_ data: Data) async throws -> HomePayload {
+        try await Task.detached(priority: .userInitiated) {
+            let d = JSONDecoder()
+            d.keyDecodingStrategy = .convertFromSnakeCase
+            return try d.decode(Row.self, from: data).payload
+        }.value
+    }
 
     private func showToast(_ t: String, hold: Double = 2) {
         toastTask?.cancel()

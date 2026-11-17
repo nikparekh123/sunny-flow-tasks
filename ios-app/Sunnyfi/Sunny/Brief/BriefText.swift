@@ -14,7 +14,7 @@ import SwiftUI
 
 // MARK: - A loose JSON value (cards carry whatever their design shows)
 
-enum JSONValue: Decodable, Hashable {
+nonisolated enum JSONValue: Decodable, Hashable {
     case string(String), number(Double), bool(Bool), array([JSONValue]), object([String: JSONValue]), null
 
     init(from decoder: Decoder) throws {
