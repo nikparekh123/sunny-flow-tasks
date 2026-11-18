@@ -146,17 +146,20 @@ struct TimeValueSheet: View {
     @State private var open: Set<String> = []
 
     struct Row: Identifiable { let id: String; let t: String; let name: String; let leg: String; let left: Double; let collected: Double; let intrinsic: Double; let perShare: Double
-        var k: Double = 0; var put = false; var q: Double = 0 }
+        var k: Double = 0; var put = false; var q: Double = 0
+        /// Its expiry (ISO) and whether it ends by this Friday (the server's `wk`).
+        var ex = ""; var wk = true }
 
     /// The sold legs: the server's real ones (answer 2), or the sample book's in a -sample run.
     private var rows: [Row] {
         if !BriefDebug.sample {
-            // This week's sold strikes (ends by Friday); an older server sends no `wk`: every leg.
-            return live["legs"].array.filter { $0["wk"].isNull || $0["wk"].bool }.enumerated().map { i, l in
+            // Every sold leg (Nik, 18 Nov 2026, option A: the same legs as Your book), with its expiry and whether it ends
+            // by Friday; an older server sends no `wk`: every leg counts as this week's.
+            return live["legs"].array.enumerated().map { i, l in
                 let t = l["t"].string ?? "", k = l["K"].double ?? 0, q = l["q"].double ?? 0
                 return Row(id: "\(t)\(i)", t: t, name: l["name"].string ?? t, leg: "\(String(format: "%g", k)) \(l["put"].bool ? "puts" : "calls") ×\(Int(q))",
                            left: l["tvLeft"].double ?? 0, collected: l["col"].double ?? 0, intrinsic: l["intr"].double ?? 0, perShare: l["tvPer"].double ?? 0,
-                           k: k, put: l["put"].bool, q: q)
+                           k: k, put: l["put"].bool, q: q, ex: l["ex"].string ?? "", wk: l["wk"].isNull || l["wk"].bool)
             }
         }
         let book = SampleBook.book(acct)
@@ -195,22 +198,32 @@ struct TimeValueSheet: View {
     @State private var needsOpen = false
 
     private func k(_ v: Double) -> String { BriefWords.plain(SampleEngine.fK(v), privacy: privacy) }
-    private static func pcT(_ left: Double, _ col: Double) -> String {
-        guard col > 0 else { return "0%" }
-        let x = max(0, (1 - left / col) * 100)
-        return x < 0.05 ? "0%" : x < 0.1 ? String(format: "%.2f%%", x) : String(format: "%.1f%%", x)
+    /// Captured, signed (Nik, 18 Nov 2026: "show negatives"): "52.0% captured", or "2.1% lost" (red) when the legs carry
+    /// more time value than they were sold for, as LULU's 110 calls after a 7% day.
+    private static func capT(_ left: Double, _ col: Double) -> (t: String, lost: Bool) {
+        guard col > 0 else { return ("0% captured", false) }
+        let x = (1 - left / col) * 100, a = abs(x)
+        let n = a < 0.05 ? "0%" : a < 0.1 ? String(format: "%.2f%%", a) : String(format: "%.1f%%", a)
+        return x <= -0.05 ? ("\(n) lost", true) : ("\(n) captured", false)
+    }
+    /// "Ends Fri Nov 20" from an ISO expiry.
+    private static func endsT(_ ex: String) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "UTC")
+        guard let d = f.date(from: ex) else { return ex }
+        f.dateFormat = "EEE MMM d"
+        return "Ends " + f.string(from: d)
     }
     private static let callTone = S.dyn(0x327133, 0x65C466), putTone = S.dyn(0x2E5ECA, 0x73B6F9)
 
     var body: some View {
-        let rows = rows, hs = hedges
+        let all = rows, rows = all.filter(\.wk), hs = hedges
         let ready = rows.filter { $0.perShare < 0.05 || ($0.collected > 0 && 1 - $0.left / $0.collected >= 0.9) || $0.intrinsic > 0 }
             .sorted { ($0.intrinsic > 0) != ($1.intrinsic > 0) ? $0.intrinsic > 0 : Self.captured($0) > Self.captured($1) }
         let okRows = rows.filter { r in !ready.contains { $0.id == r.id } }
         let tvAll = rows.reduce(0) { $0 + $1.left }, hw = hs.reduce(0) { $0 + $1.week }
-        let itm = rows.filter { $0.intrinsic > 0 }
-        BriefSheetChrome(title: "Time value", sub: friday.map { "This week · ends \($0)" }, close: close) {
-            if rows.isEmpty && hs.isEmpty {
+        let itm = all.filter { $0.intrinsic > 0 }
+        BriefSheetChrome(title: "Time value", sub: friday.map { "By expiry · this week ends \($0)" }, close: close) {
+            if all.isEmpty && hs.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Nothing sold yet").sType(SType(size: 20, weight: 700, line: 24, tracking: 0), tabular: false).foregroundStyle(S.ink)
                     Text("Time value shows here once calls or puts are sold.").sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
@@ -220,11 +233,15 @@ struct TimeValueSheet: View {
                 VStack(alignment: .leading, spacing: 20) {
                     sentence(ready: ready, ok: okRows, all: rows, tvAll: tvAll)
                     VStack(alignment: .leading, spacing: 0) {
-                        if !rows.isEmpty {
+                        if !all.isEmpty {
                             head("Coming in · from what you sold")
-                            let cs = rows.filter { !$0.put }, ps = rows.filter(\.put)
-                            if !cs.isEmpty { soldLine("cs", "Calls sold", Self.callTone, cs) }
-                            if !ps.isEmpty { soldLine("ps", "Puts sold", Self.putTone, ps) }
+                            ForEach(Array(Set(all.map(\.ex))).sorted(), id: \.self) { ex in
+                                let cs = all.filter { $0.ex == ex && !$0.put }, ps = all.filter { $0.ex == ex && $0.put }
+                                Text(Self.endsT(ex)).sType(SType(size: 12, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+                                    .padding(.top, 8).accessibilityAddTraits(.isHeader)
+                                if !cs.isEmpty { soldLine("cs|\(ex)", "Calls sold", Self.callTone, cs) }
+                                if !ps.isEmpty { soldLine("ps|\(ex)", "Puts sold", Self.putTone, ps) }
+                            }
                         }
                         if !hs.isEmpty {
                             head("Going out · a week of your hedges").padding(.top, 14)
@@ -307,15 +324,15 @@ struct TimeValueSheet: View {
 
     /// A Coming in line: a 4 pt bar in the group's colour, "Calls sold", "52% captured of $4.1K", "$1.9K left", a chevron.
     @ViewBuilder private func soldLine(_ key: String, _ label: String, _ color: Color, _ rs: [Row]) -> some View {
-        let left = rs.reduce(0) { $0 + $1.left }, col = rs.reduce(0) { $0 + $1.collected }, on = openLine == key
-        lineButton(key: key, color: color, label: label, sub: "\(Self.pcT(left, col)) captured of \(k(col))", value: k(left), valueTone: S.ink, tail: "left",
-                   aria: "\(label), \(SampleEngine.fK(left)) left to earn, \(Self.pcT(left, col)) captured of \(SampleEngine.fK(col)) sold", on: on)
+        let left = rs.reduce(0) { $0 + $1.left }, col = rs.reduce(0) { $0 + $1.collected }, on = openLine == key, c = Self.capT(left, col)
+        lineButton(key: key, color: color, label: label, sub: "\(c.t) of \(k(col))", subRed: c.lost, value: k(left), valueTone: S.ink, tail: "left",
+                   aria: "\(label), \(SampleEngine.fK(left)) left, \(c.t) of \(SampleEngine.fK(col)) sold", on: on)
         if on {
             let byName = Dictionary(grouping: rs, by: \.t).map { ($0.key, $0.value) }.sorted { $0.1.reduce(0) { $0 + $1.left } > $1.1.reduce(0) { $0 + $1.left } }
             VStack(spacing: 0) {
                 ForEach(byName, id: \.0) { t, xs in
                     let l = xs.reduce(0) { $0 + $1.left }, c = xs.reduce(0) { $0 + $1.collected }
-                    itemRow(t: t, name: xs[0].name, sub: xs.map { String(format: "%g", $0.k) }.joined(separator: " · ") + (xs[0].put ? " puts" : " calls") + " · \(Self.pcT(l, c)) captured",
+                    itemRow(t: t, name: xs[0].name, sub: xs.map { String(format: "%g", $0.k) }.joined(separator: " · ") + (xs[0].put ? " puts" : " calls") + " · \(Self.capT(l, c).t)",
                             value: k(l), red: false)
                 }
             }
@@ -351,7 +368,7 @@ struct TimeValueSheet: View {
         }
     }
 
-    private func lineButton(key: String, color: Color, label: String, sub: String?, value: String, valueTone: Color, tail: String, aria: String, on: Bool) -> some View {
+    private func lineButton(key: String, color: Color, label: String, sub: String?, subRed: Bool = false, value: String, valueTone: Color, tail: String, aria: String, on: Bool) -> some View {
         Button {
             withAnimation(S.moving(.easeInOut(duration: 0.25), reduce) ?? .linear(duration: 0)) { openLine = on ? nil : key }
         } label: {
@@ -359,7 +376,7 @@ struct TimeValueSheet: View {
                 RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 4, height: 32)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(label).sType(SType(size: 16, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                    if let sub { Text(sub).sType(SType(size: 12, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.secondary) }
+                    if let sub { Text(sub).sType(SType(size: 12, weight: 500, line: 16, tracking: 0)).foregroundStyle(subRed ? S.red : S.secondary) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 (Text(value).font(.inter(16, 600, tabular: true)).foregroundStyle(valueTone)

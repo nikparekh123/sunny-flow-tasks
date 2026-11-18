@@ -21,11 +21,20 @@ const MU = C.ink2, LN = '1px solid rgba(255,255,255,.08)', OR = '#F2A93B';
 /** The pills (dark): grey for time value still to come, red for what goes out or sits in the money. */
 const GREY = ['rgba(118,118,128,.32)', C.ink], RED = [C.red, '#000000'];
 const sum = <T,>(xs: T[], f: (x: T) => number) => xs.reduce((a, x) => a + f(x), 0);
-/** Time value captured: 0% when nothing is (or the legs are worth more than they were sold for). */
-const captured = (left: number, col: number) => {
-  if (!(col > 0)) return '0%';
-  const x = Math.max(0, (1 - left / col) * 100);
-  return x < 0.05 ? '0%' : pct(x);
+/** Time value captured, signed (Nik, 18 Nov 2026: "show negatives"): "52% captured", or "2.1% lost" when the legs
+    carry more time value than they were sold for (LULU's 110 calls after a 7% day). Red when lost. */
+const capOf = (left: number, col: number): { t: string; neg: boolean } => {
+  if (!(col > 0)) return { t: '0% captured', neg: false };
+  const x = (1 - left / col) * 100, a = Math.abs(x);
+  const n = a < 0.05 ? '0%' : pct(a);
+  return x <= -0.05 ? { t: `${n} lost`, neg: true } : { t: `${n} captured`, neg: false };
+};
+/** "Ends Fri Nov 20" from an ISO expiry. */
+const endsWords = (ex: string) => {
+  const [y, m, d] = ex.split('-').map(Number);
+  if (!y || !m || !d) return ex;
+  const e = new Date(Date.UTC(y, m - 1, d));
+  return `Ends ${DOW[e.getUTCDay()]} ${MON[e.getUTCMonth()]} ${e.getUTCDate()}`;
 };
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -67,9 +76,9 @@ function soldLine(k: string, l: string, bar: string, legs: TvLeg[]): Line | null
   const items = [...m.values()].map((g) => {
     const ks = [...new Set(g.map((x) => x.K))].sort((a, b) => a - b).map(strike);
     const gl = sum(g, (x) => x.tvLeft), gc = sum(g, (x) => x.col);
-    return { k: g[0].t, t: g[0].t, nm: g[0].name, sub: `${ks.join(' · ')}${word} · ${captured(gl, gc)} captured`, v: gl, pill: GREY };
+    return { k: g[0].t, t: g[0].t, nm: g[0].name, sub: `${ks.join(' · ')}${word} · ${capOf(gl, gc).t}`, v: gl, pill: GREY };
   }).sort((a, b) => b.v - a.v);
-  return { k, l, bar, v, vc: C.ink, col, items, aria: `${l}, ${money(v)} left to earn, ${captured(v, col)} captured of ${money(col)} sold` };
+  return { k, l, bar, v, vc: C.ink, col, items, aria: `${l}, ${money(v)} left, ${capOf(v, col).t} of ${money(col)} sold` };
 }
 
 /** The Going out lines: a week of decay on the hedges. */
@@ -118,21 +127,25 @@ export default function TimeValueSheet() {
   useEffect(() => { setRollOpen(false); setOpen(null); }, [book]);
 
   const r = useMemo(() => {
-    const legs = tvLegs(p).filter((l) => l.wk), hedges = tvHedges(p);   // this week's sold strikes only
+    // Every sold leg, grouped by expiry (Nik, 18 Nov 2026, option A: the same legs as Your book's Calls sold and Puts
+    // sold); what needs you, what is left to earn by Friday and Net by Friday stay this week's.
+    const all = tvLegs(p), legs = all.filter((l) => l.wk), hedges = tvHedges(p);
     const left = tvLeftTotal(p) ?? 0;
     const hedgeWeek = p?.brief?.timeValue?.hedgeWeek != null ? Number(p.brief.timeValue.hedgeWeek) : sum(hedges, (h) => h.week);
     const ready = readyToRoll(legs), ok = legs.filter((l) => !l.ready);
-    const inn = [soldLine('c', 'Calls sold', '#327133', legs.filter((l) => !l.put)), soldLine('p', 'Puts sold', '#2E5ECA', legs.filter((l) => l.put))]
-      .filter((x): x is Line => !!x);
+    const inn = [...new Set(all.map((l) => l.ex))].sort().map((ex) => ({ ex, words: endsWords(ex), lines: [
+      soldLine(`c|${ex}`, 'Calls sold', '#327133', all.filter((l) => l.ex === ex && !l.put)),
+      soldLine(`p|${ex}`, 'Puts sold', '#2E5ECA', all.filter((l) => l.ex === ex && l.put)),
+    ].filter((x): x is Line => !!x) })).filter((g) => g.lines.length);
     const out = [hedgeLine('oc', 'Hedge calls', C.green, hedges.filter((h) => !h.put)), hedgeLine('ip', 'Hedge puts', '#73B6F9', hedges.filter((h) => h.put))]
       .filter((x): x is Line => !!x);
-    const itmLegs = legs.filter((l) => l.intr > 0);
+    const itmLegs = all.filter((l) => l.intr > 0);
     const itmV = sum(itmLegs, (l) => l.intr * l.q * 100);
     const itm: Line | null = itmLegs.length ? {
       k: 'itm', l: 'In the money', bar: C.red, v: itmV, vc: C.red, aria: `In the money, ${money(itmV)}`,
       items: byName(itmLegs, (l) => l.intr * l.q * 100, (l) => `${strike(l.K)} ${l.put ? 'puts' : 'calls'} sold · by ${l.intr.toFixed(2)}`, RED),
     } : null;
-    return { any: legs.length > 0, when: weekWords(p), legs, ready, ok, left, okLeft: sum(ok, (l) => l.tvLeft), inn, out, itm, net: left - hedgeWeek };
+    return { any: all.length > 0, when: weekWords(p).replace(/^(This|Next) week · ends/, (_m, w) => `By expiry · ${w.toLowerCase()} week ends`), legs, ready, ok, left, okLeft: sum(ok, (l) => l.tvLeft), inn, out, itm, net: left - hedgeWeek };
   }, [p]);
 
   /** The sentence (159b): what needs you, then what is on track. */
@@ -206,9 +219,17 @@ export default function TimeValueSheet() {
 
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <Kicker>Coming in · from what you sold</Kicker>
-              {r.inn.map((l) => (
-                <LineRow key={l.k} l={l} tall open={open === l.k} toggle={() => setOpen(open === l.k ? null : l.k)} items={stable(l.k, l.items)}
-                  sub={<>{captured(l.v, l.col ?? 0)} captured of {mask(money(l.col))}</>} unit="left" />
+              {r.inn.map((g) => (
+                <div key={g.ex} style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ padding: '8px 0 0', fontSize: 12, lineHeight: '16px', fontWeight: 600, color: MU }}>{g.words}</span>
+                  {g.lines.map((l) => {
+                    const c = capOf(l.v, l.col ?? 0);
+                    return (
+                      <LineRow key={l.k} l={l} tall open={open === l.k} toggle={() => setOpen(open === l.k ? null : l.k)} items={stable(l.k, l.items)}
+                        sub={<><span style={{ color: c.neg ? C.red : undefined }}>{c.t}</span> of {mask(money(l.col))}</>} unit="left" />
+                    );
+                  })}
+                </div>
               ))}
               {r.out.length > 0 && <>
                 <Kicker top>Going out · a week of your hedges</Kicker>

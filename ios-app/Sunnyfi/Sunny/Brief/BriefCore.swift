@@ -215,7 +215,13 @@ final class BriefState {
             // A test run's -acct opens that account once the real books are in (simulator only).
             if let a = BriefDebug.account, !debugAccountApplied, accounts.contains(a) { account = a; debugAccountApplied = true }
         }
+        #if DEBUG && targetEnvironment(simulator)
+        let t0 = CFAbsoluteTimeGetCurrent()
+        #endif
         let decoded = brief.map(BriefLive.init)
+        #if DEBUG && targetEnvironment(simulator)
+        print("SUNNY-PERF ingest \(Int((CFAbsoluteTimeGetCurrent() - t0) * 1000)) ms")
+        #endif
         if pin != nil { realLive = decoded } else { live = decoded }
     }
 

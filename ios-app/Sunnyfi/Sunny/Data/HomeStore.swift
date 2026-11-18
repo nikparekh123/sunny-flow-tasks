@@ -126,11 +126,26 @@ final class HomeStore {
         }
     }
     private let hitch = Hitch()
+    nonisolated(unsafe) private static var tickFlip = false
     #endif
 
     init() {
         #if DEBUG && targetEnvironment(simulator)
         CADisplayLink(target: hitch, selector: #selector(Hitch.tick(_:))).add(to: .main, forMode: .common)
+        // `-fixtureTick <path>` (speed review 4, 18 Nov 2026): every 4 s the next update reads the other saved row, as
+        // the 15 s builds do, so what one update costs the screen shows as SUNNY-PERF hitch lines while nothing moves.
+        if ProcessInfo.processInfo.arguments.contains("-fixtureTick") {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(6))
+                for _ in 0..<12 {
+                    try? await Task.sleep(for: .seconds(4))
+                    guard let self else { return }
+                    Self.tickFlip.toggle()
+                    print("SUNNY-PERF update \(Self.tickFlip ? "B" : "A")")
+                    await self.refresh(.tick)
+                }
+            }
+        }
         #endif
         // Back online: refresh at once (block 01).
         path.pathUpdateHandler = { [weak self] p in
@@ -275,6 +290,7 @@ final class HomeStore {
         let a = ProcessInfo.processInfo.arguments
         // `-fixtureN <path>`: book N's saved row, for the account strip without signing in.
         if book == "N", let i = a.firstIndex(of: "-fixtureN"), i + 1 < a.count { return try Data(contentsOf: URL(fileURLWithPath: a[i + 1])) }
+        if tickFlip, let i = a.firstIndex(of: "-fixtureTick"), i + 1 < a.count { return try Data(contentsOf: URL(fileURLWithPath: a[i + 1])) }
         if let i = a.firstIndex(of: "-fixture"), i + 1 < a.count {
             let row = try Data(contentsOf: URL(fileURLWithPath: a[i + 1]))
             guard let j = a.firstIndex(of: "-fixtureTodo"), j + 1 < a.count else { return row }

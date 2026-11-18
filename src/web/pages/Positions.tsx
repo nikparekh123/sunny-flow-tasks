@@ -146,7 +146,9 @@ export default function Positions() {
 /* ── One name: the header, then everything that reads its grid ──────────── */
 function Name({ book, t, name, payload }: { book: 'S' | 'N'; t: string; name: J; payload: J }) {
   const { mask } = useWeb();
-  const q = usePositions(book, t, payload?.built_at);
+  // The legs as the grid lists them (key and count), so a trade picked up asks for the grid at once.
+  const legSig = ((payload?.brief_inputs?.names ?? []).find((n: J) => n.t === t)?.legs ?? []).map((l: J) => `${l.k}:${l.q}`).sort().join(',');
+  const q = usePositions(book, t, { built: payload?.built_at, S: +name?.S0 || 0, legs: legSig });
   const grid = q.data as GridW | undefined;
   const ready = !!grid && grid.t === t && grid.stops?.length > 0 && grid.S?.length > 1;
   // ⚠ SMOOTH SWITCHING (Nik, 9 Nov 2026): while the next name's grid is on its way the last name stays on screen,
@@ -154,7 +156,8 @@ function Name({ book, t, name, payload }: { book: 'S' | 'N'; t: string; name: J;
   const last = useRef<{ t: string; grid: GridW } | null>(null);
   if (ready) last.current = { t, grid: grid! };
   const shown = ready ? { t, grid: grid! } : last.current;
-  const S0 = ready ? grid!.S0 : +name?.S0 || 0, P0 = ready ? grid!.P0 : +name?.P0 || S0, mv = P0 ? (S0 / P0 - 1) * 100 : 0;
+  // The header reads Home's price (every 15 s), not the grid's: the grid now refreshes on a real move or each minute.
+  const S0 = +name?.S0 || (ready ? grid!.S0 : 0), P0 = +name?.P0 || (ready ? grid!.P0 : S0), mv = P0 ? (S0 / P0 - 1) * 100 : 0;
   const strat = String(name?.strategy ?? ''), company = String(name?.name ?? t);
   return (
     <>

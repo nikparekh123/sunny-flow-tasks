@@ -23,6 +23,13 @@ import SwiftUI
 struct BriefHomeScreen: View {
     let store: HomeStore
     let home: HomePayload
+    /// DEBUG measuring only (speed review 4): `-perfHide chart,sections,sec-<id>` leaves parts of Home out.
+    #if DEBUG
+    static let perfHide: Set<String> = { let a = ProcessInfo.processInfo.arguments; guard let i = a.firstIndex(of: "-perfHide"), i + 1 < a.count else { return [] }
+        return Set(a[i + 1].split(separator: ",").map(String.init)) }()
+    #else
+    static let perfHide: Set<String> = []
+    #endif
     @Environment(BriefState.self) private var brief
     @Environment(HomeRouter.self) private var router
     @AppStorage(BriefPrivacy.key) private var privacy = false
@@ -56,8 +63,10 @@ struct BriefHomeScreen: View {
                 VStack(alignment: .leading, spacing: 0) {
                     BriefPinBar().padding(.top, brief.pin == nil ? 0 : 8)
                     // The design's page starts at y 120, 4 under the strip (44 + 72).
+                    if !Self.perfHide.contains("chart") {
                     AccountChart(home: home, readTick: store.readTick)
                         .padding(.top, brief.showsStrip ? 4 : 14)
+                    }
                     BriefDeck(moment: moment, doc: doc) { kind in
                         // Aftershock opens its page; Earnings season and Holiday scroll Home to the last section.
                         if kind == "aftershock" { if home.aftershock != nil { router.openAftershock() } }
@@ -72,7 +81,7 @@ struct BriefHomeScreen: View {
                             .padding(.horizontal, S.margin)
                             // The debug menu (Pass 3): a long press on the title.
                             .onLongPressGesture(minimumDuration: 1.0) { brief.debugOpen = true }
-                        ForEach(doc.sections) { s in
+                        ForEach(doc.sections.filter { !Self.perfHide.contains("sections") && !Self.perfHide.contains("sec-\($0.id)") }) { s in
                             BriefSectionView(section: s, privacy: privacy)
                                 .padding(.top, 56)
                                 .id("sec-\(s.id)")
@@ -259,7 +268,9 @@ struct BriefSectionView: View {
             .accessibilityAddTraits(.isHeader)
             VStack(spacing: 20) {
                 ForEach(Array(section.cards.enumerated()), id: \.offset) { _, card in
-                    BriefCardView(card: card, privacy: privacy)
+                    if !BriefHomeScreen.perfHide.contains("card-\(card["type"].string ?? "")") {
+                        BriefCardView(card: card, privacy: privacy)
+                    }
                 }
             }
             .padding(.top, 20)

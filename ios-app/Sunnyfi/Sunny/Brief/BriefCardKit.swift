@@ -560,11 +560,17 @@ struct BRow<Content: View>: View {
     var width: CGFloat? = nil
     /// 12 between cards; the index cards sit 8 apart.
     var spacing: CGFloat = 12
+    /// Builds only the cards on screen (and the next): the 11 sector maps were all redrawn on every 15 s update, about
+    /// 50 ms of each one (speed review 4, 18 Nov 2026). For rows whose cards share one height.
+    var lazy = false
     @ViewBuilder let content: () -> Content
     @State private var pos = ScrollPosition()
     var body: some View {
         ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: spacing) { content() }
+            Group {
+                if lazy { LazyHStack(alignment: .top, spacing: spacing) { content() } }
+                else { HStack(alignment: .top, spacing: spacing) { content() } }
+            }
                 .scrollTargetLayout()
                 .padding(.horizontal, S.margin)
         }

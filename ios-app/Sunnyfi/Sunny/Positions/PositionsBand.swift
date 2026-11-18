@@ -358,7 +358,24 @@ struct PosPayoffView: View {
             GeometryReader { g in
                 let w = g.size.width, ax = { (i: Int) in 17 + (w - 34) * CGFloat(i) / CGFloat(max(1, N)) }
                 let few = N <= 8
-                let shown = few ? Array(0...N) : [0] + { let fr = (1..<N).filter { dates[$0].friday }; return fr.count > 2 ? [fr[fr.count / 2]] : [] }() + [N]
+                let picked = few ? Array(0...N) : [0] + { let fr = (1..<N).filter { dates[$0].friday }; return fr.count > 2 ? [fr[fr.count / 2]] : [] }() + [N]
+                // No two labels touch (Nik, 18 Nov 2026: "Wed" ran into "Fri Nov 27" at a larger text size): each is measured
+                // at the size it is drawn, and a middle label that would touch its neighbour or the last one is left out.
+                let fs = UIFontMetrics(forTextStyle: .caption1).scaledValue(for: 11)
+                let wOf = { (s: String) -> CGFloat in ceil((s as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: fs, weight: .medium)]).width) }
+                let span = { (i: Int) -> (CGFloat, CGFloat) in
+                    let tw = wOf(Self.tickText(dates, i, N, few))
+                    return i == 0 ? (0, tw) : i == N ? (w - tw, w) : (ax(i) - tw / 2, ax(i) + tw / 2)
+                }
+                let shown: [Int] = {
+                    let end = span(N).0
+                    var out = [0], right = span(0).1
+                    for i in picked where i != 0 && i != N {
+                        let (a, b) = span(i)
+                        if a >= right + 6 && b <= end - 6 { out.append(i); right = b }
+                    }
+                    return N > 0 ? out + [N] : out
+                }()
                 ZStack(alignment: .topLeading) {
                     ForEach(0...N, id: \.self) { i in
                         if few || dates[i].friday || i == N {
@@ -367,8 +384,7 @@ struct PosPayoffView: View {
                         }
                     }
                     ForEach(shown, id: \.self) { i in
-                        let tx = i == 0 ? "Today" : i == N ? (few ? "\(dates[i].wd) \(dates[i].date.split(separator: " ").dropFirst().joined(separator: " "))" : dates[i].date.split(separator: " ").dropFirst().joined(separator: " ")) : few ? dates[i].wd : dates[i].date.split(separator: " ").dropFirst().joined(separator: " ")
-                        Text(tx).sType(PT.t(11, 14), tabular: false).foregroundStyle(i == at ? PC.ink : PC.mu).fixedSize()
+                        Text(Self.tickText(dates, i, N, few)).sType(PT.t(11, 14), tabular: false).foregroundStyle(i == at ? PC.ink : PC.mu).fixedSize()
                             .frame(width: 90, alignment: i == 0 ? .leading : i == N ? .trailing : .center)
                             .offset(x: i == 0 ? 0 : i == N ? w - 90 : ax(i) - 45, y: 11)
                     }
@@ -380,6 +396,12 @@ struct PosPayoffView: View {
         }
     }
 
+    /// A tick's words: "Today", the weekday ("Thu"), and the last stop in full ("Fri Nov 27").
+    private static func tickText(_ dates: [PosName.DateStop], _ i: Int, _ N: Int, _ few: Bool) -> String {
+        let md = dates[i].date.split(separator: " ").dropFirst().joined(separator: " ")
+        return i == 0 ? "Today" : i == N ? (few ? "\(dates[i].wd) \(md)" : md) : few ? dates[i].wd : md
+    }
+
     private var rangeSlider: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
@@ -388,9 +410,11 @@ struct PosPayoffView: View {
                 Spacer(minLength: 0)
                 if rangePct != 12 {
                     Button { withAnimation(S.fade) { rangePct = 12 } } label: {
+                        // Plain glass, not .interactive() (Nik, 18 Nov 2026: with the range moved, the Payoff would not scrub on
+                        // his iOS 27 phone, and it came back on Reset; the interactive glass took the touches around it).
                         Text("Reset").sType(PT.t(12, 16, 600), tabular: false).foregroundStyle(PC.ink)
                             .padding(.horizontal, 12).frame(minHeight: 28)
-                            .glassEffect(.regular.interactive(), in: .capsule)
+                            .glassEffect(.regular, in: .capsule)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Reset the range to plus or minus 12 percent")
@@ -613,6 +637,11 @@ struct PosScrubPan: UIGestureRecognizerRepresentable {
             guard let p = g as? UIPanGestureRecognizer else { return true }
             let v = p.velocity(in: p.view)
             return abs(v.x) > abs(v.y)
+        }
+        /// Alongside anything else on the screen (a glass button's own touch handling, iOS 27), except the page's
+        /// scroll, which waits for this one to fail (below).
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith o: UIGestureRecognizer) -> Bool {
+            !(o.view is UIScrollView && o is UIPanGestureRecognizer)
         }
         /// The scroll view's pan waits for this one to fail.
         func gestureRecognizer(_ g: UIGestureRecognizer, shouldBeRequiredToFailBy o: UIGestureRecognizer) -> Bool {

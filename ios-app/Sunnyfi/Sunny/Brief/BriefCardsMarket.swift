@@ -440,7 +440,7 @@ struct BSectorsRow: View {
     var body: some View {
         // The server sends its 11 maps on the card; the sample keeps them once per period.
         let maps = card["maps"].isNull ? BriefSample.sectorMaps(card["mapsRef"].string ?? "day").array : card["maps"].array
-        BRow {
+        BRow(lazy: true) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .center, spacing: 8) {
                     Text(card["label"].string ?? "Sectors").sType(BMk.label, tabular: false).foregroundStyle(S.secondary)

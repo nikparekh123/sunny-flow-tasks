@@ -160,9 +160,12 @@ async function callFn(name: string, body: Record<string, unknown>): Promise<J> {
 const positionsKey = (book: BookId | null | undefined, t: string | null | undefined) => ['sw', 'positions', book, t];
 const fetchPositions = (book: BookId, t: string) => (FX ? fx(`grids/${book}-${t}.json`) : callFn('sunny-positions', { book, t, wide: true }));
 
-/** The name on screen. Its grid is asked again when Home rebuilds (`built`), as PositionsLive does; a name already
-    read (or read ahead, below) shows at once from what is kept and refreshes behind it. */
-export function usePositions(book: BookId | null | undefined, t: string | null | undefined, built?: string) {
+/** The name on screen. A name already read (or read ahead, below) shows at once from what is kept and refreshes
+    behind it. ⚠ SPEED 3 (18 Nov 2026): the grid (about 190 KB) is no longer asked again on every Home build (15 s):
+    only when the name's legs change (a trade picked up, a leg ended), its price has moved 0.25% from the grid's, or a
+    minute has passed. `basis` is Home's build, the name's price now and its legs. As PositionsLive on the phone. */
+export const GRID_MOVE = 0.0025, GRID_EVERY = 60_000;
+export function usePositions(book: BookId | null | undefined, t: string | null | undefined, basis?: { built?: string; S?: number; legs?: string }) {
   const q = useQuery({
     queryKey: positionsKey(book, t),
     enabled: !!book && !!t,
@@ -170,11 +173,18 @@ export function usePositions(book: BookId | null | undefined, t: string | null |
     gcTime: 30 * 60_000,
     queryFn: () => fetchPositions(book!, t!),
   });
-  const seen = useRef<string | undefined>(built);
+  const built = basis?.built, seen = useRef<string | undefined>(built);
   useEffect(() => {
     if (!built || seen.current === built) return;
     seen.current = built;
-    if (book && t) void q.refetch();
+    if (!book || !t || q.isFetching) return;
+    const g = q.data as { S0?: number; legs?: { k: string; q: number }[] } | undefined;
+    const gLegs = (g?.legs ?? []).map((l) => `${l.k}:${l.q}`).sort().join(',');
+    const S = basis?.S ?? 0, S0 = Number(g?.S0 ?? 0);
+    const moved = !(S0 > 0 && S > 0) || Math.abs(S / S0 - 1) >= GRID_MOVE;
+    const legsChanged = basis?.legs != null && basis.legs !== gLegs;
+    const old = Date.now() - q.dataUpdatedAt >= GRID_EVERY;
+    if (!g || moved || legsChanged || old) void q.refetch();
   }, [built]); // eslint-disable-line react-hooks/exhaustive-deps
   return q;
 }

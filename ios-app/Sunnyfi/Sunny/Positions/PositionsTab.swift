@@ -189,7 +189,8 @@ struct PositionsTab: View {
                 PosName.build(mm, inputs: brief.inputs, flip: offs)
             }
         }
-        let S0 = nm?.S0 ?? n.S0
+        // Home's price every 15 s (the grid now refreshes on a real move or each minute, PositionsLive).
+        let S0 = n.S0 > 0 ? n.S0 : (nm?.S0 ?? 0)
         PosHeader(n: n, S0: S0).padding(.horizontal, Self.margin)
         if !own.isEmpty {
             PosNameBook(t: n.t, groups: own, open: $ownOpen, privacy: privacy, reduce: reduce)
@@ -334,11 +335,16 @@ struct PositionsTab: View {
     }
     /// Positions made ready in the background (handoff 2026-11-18 §1.3): about 0.9 s after Home shows, the name it
     /// will open on is fetched (its grid, closes, chain and the book's targets), so the first tap on the tab is instant.
+    /// A name's legs as the grid lists them (key and count), from Home's brief_inputs: a trade picked up asks at once.
+    static func legSig(_ brief: BriefState, _ t: String) -> String {
+        let n = brief.inputs?["names"].array.first { $0["t"].string == t }
+        return (n?["legs"].array ?? []).map { "\($0["k"].string ?? ""):\($0["q"].double ?? 0)" }.sorted().joined(separator: ",")
+    }
     static func prefetch(_ brief: BriefState) {
         let t = firstName(brief)
         guard !t.isEmpty, let b = brief.book, let built = brief.built,
               let n = brief.live?.names.first(where: { $0["t"].string == t }) else { return }
-        brief.positions.load(book: b, t: t, built: built, name: n)
+        brief.positions.load(book: b, t: t, built: built, name: n, legs: legSig(brief, t))
         PositionsTargets.shared.load(book: b)
         PositionsCharts.shared.load(book: b, t: t)
         SDStore.shared.load(book: b, t: t)
@@ -347,7 +353,7 @@ struct PositionsTab: View {
     private func load() {
         guard !name.isEmpty, let b = bookID, let built = brief.built,
               let n = brief.live?.names.first(where: { $0["t"].string == name }) else { return }
-        brief.positions.load(book: b, t: name, built: built, name: n)
+        brief.positions.load(book: b, t: name, built: built, name: n, legs: Self.legSig(brief, name))
         targets.load(book: b)
         charts.load(book: b, t: name)
         sd.load(book: b, t: name)

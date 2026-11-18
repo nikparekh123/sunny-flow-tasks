@@ -32,19 +32,30 @@ final class PositionsSource {
     private(set) var models: [String: (built: String, m: PositionsModel)] = [:]
     private(set) var errors: [String: String] = [:]
     private var inFlight: Set<String> = []
+    /// What each grid was asked on (its price and legs) and when: a new build asks again only on a real change.
+    private var basis: [String: (S: Double, legs: String, at: Date)] = [:]
 
     func model(_ book: String, _ t: String) -> PositionsModel? { models["\(book)|\(t)"]?.m }
     func error(_ book: String, _ t: String) -> String? { errors["\(book)|\(t)"] }
 
-    /// Asks for a name when it is missing or priced on an older build. `name` is Home's brief entry for it.
-    func load(book: String, t: String, built: String, name: JSONValue) {
+    /// Asks for a name when it is missing, or on a newer build when something real changed. `name` is Home's brief
+    /// entry for it, `legs` its legs (key and count). ⚠ SPEED 3 (18 Nov 2026): the grid (about 190 KB) is no longer
+    /// asked again on every Home build (15 s): only when the legs change (a trade picked up, a leg ended), the price
+    /// has moved 0.25% from the grid's, or a minute has passed. The header reads Home's price every 15 s meanwhile.
+    func load(book: String, t: String, built: String, name: JSONValue, legs: String = "") {
         let key = "\(book)|\(t)"
         if models[key]?.built == built || inFlight.contains(key) { return }
+        if models[key] != nil, let b = basis[key] {
+            let S = name["S0"].double ?? 0
+            let moved = !(b.S > 0 && S > 0) || abs(S / b.S - 1) >= 0.0025
+            if !moved && b.legs == legs && Date().timeIntervalSince(b.at) < 60 { return }
+        }
         inFlight.insert(key)
         Task {
             defer { inFlight.remove(key) }
             do {
                 let w = try await Self.fetch(book: book, t: t)
+                basis[key] = (w.S0, legs, Date())
                 models[key] = (built, PositionsModel(wire: w, name: name))
                 errors[key] = nil
             } catch {
