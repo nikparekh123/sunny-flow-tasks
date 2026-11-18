@@ -43,10 +43,16 @@ export interface Ctx { p: Row; at: string; book: string; today: string; draws?: 
    an owner's Home is home_snapshot with it laid back over, a viewer's is home_snapshot alone. This reads with
    the service key, so `owner` (caller's book_members role) is the gate, not RLS. */
 export async function context(book: string, owner = false): Promise<Ctx> {
-  const [[s], [o]] = await Promise.all([db(`home_snapshot?book_id=eq.${book}&select=payload&limit=1`),
-    owner ? db(`home_todo?book_id=eq.${book}&select=payload&limit=1`) : Promise.resolve([] as Row[])]);
+  const [[s], [o], [x]] = await Promise.all([db(`home_snapshot?book_id=eq.${book}&select=payload&limit=1`),
+    owner ? db(`home_todo?book_id=eq.${book}&select=payload&limit=1`) : Promise.resolve([] as Row[]),
+    db(`home_search?book_id=eq.${book}&select=payload&limit=1`).catch(() => [] as Row[])]);
   if (!s) throw new Error(`no Home data for book ${book}`);
-  const p = o ? merged(s.payload, o.payload) : s.payload;
+  let p = o ? merged(s.payload, o.payload) : s.payload;
+  /* Search's own part (18 Nov 2026): plan and flow_profile left the rows the phones download every 15 s for
+     home_search. flow_profile for every member; plan, what to trade, for owners only, as it always was. */
+  const e = (x?.payload ?? {}) as Row;
+  if (e.flow_profile) p = { ...p, flow_profile: e.flow_profile };
+  if (owner && e.plan) p = { ...p, plan: e.plan };
   return { p, at: String(p.built_at), book, today: String(p.today) };
 }
 /* sunny-home's owner part laid over the snapshot: objects merge, anything else replaces, names by ticker

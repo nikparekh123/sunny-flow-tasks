@@ -30,7 +30,7 @@ import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { buildTogether, type Side, type SideEvent, type SideLeg } from './together.ts';
 import { type ActEvent, type ActName, activityEvents, levelsOf } from './activity.ts';
 import { bsDelta, bsValue, fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-18.14';
+const BUILD = '2026-11-18.15';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -3593,6 +3593,11 @@ const refused = () => new Response(JSON.stringify({ ok: false, error: 'not allow
    gives back this exact payload; a viewer's never carries an order. A new key that says what to trade
    goes in here too. */
 const OWNER_TOP = ['this_week', 'todo', 'ways', 'plan', 'overview', 'together'];
+/* ⚠ SPEED (18 Nov 2026, Nik picked 1 and 2 of the speed review): what every phone and the web download every 15 s.
+   Pieces no screen reads any more (the old app's tabs and Home, retired in October and on 13 Nov) leave both rows;
+   Search still answers from plan and flow_profile, so those go to home_search, which only sunny-search reads. */
+const NO_SCREEN = ['daily', 'ways', 'payback', 'this_week', 'insights_all', 'last_week', 'plan', 'flow_profile'];
+const FOR_SEARCH = ['plan', 'flow_profile'];
 const OWNER_NAME = ['plan', 'expected', 'calls', 'puts', 'written', 'delta', 'bar', 'split', 'thesis', 'read_rule'];
 const OWNER_V2 = ['verdict', 'chips', 'orders', 'acts'];
 /* A point or row that names an order: the thin hedge's "Buying N calls ... It is in To do." */
@@ -3719,13 +3724,23 @@ Deno.serve(async (req) => {
         const wait = (at - (Date.now() % 60_000) + 60_000) % 60_000;
         if (wait < (passes === 4 ? 16_000 : 40_000)) await new Promise((r) => setTimeout(r, wait));
       }
-      const { payload, ms, steps } = await build(body.mode ?? 'tick', { dry: body.dry, price: body.price, book });
+      const { payload: whole, ms, steps } = await build(body.mode ?? 'tick', { dry: body.dry, price: body.price, book });
+      const search: Row = {}, payload: Row = { ...whole };
+      for (const k of FOR_SEARCH) if (k in whole) search[k] = whole[k];
+      for (const k of NO_SCREEN) delete payload[k];
       const { open, owner } = forOwners(payload);
-      /* The owners' part first, so a phone that reads between the two writes never lays an older plan
-         over a newer snapshot for long; both carry built_at. */
+      /* Search's part, then the owners' part, so a phone that reads between the writes never lays an older plan
+         over a newer snapshot for long; all carry built_at. A failed Search write never fails the build. */
+      await fetch(`${URL_}/rest/v1/home_search?on_conflict=book_id`, {
+        method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify([{ book_id: book, payload: search, built_at: payload.built_at, build: BUILD }]),
+      }).then(async (r) => { if (!r.ok) console.error('home_search', r.status, (await r.text()).slice(0, 160)); }).catch((e) => console.error('home_search', e));
+      /* ⚠ SPEED 1 (18 Nov 2026): a book with no viewer keeps its snapshot whole, so its owners' part only repeated
+         it (about 93 KB a build for book S): its row is empty then, and the phones' and web's lay-over leave the
+         snapshot as it is. */
       const wt = await fetch(`${URL_}/rest/v1/home_todo?on_conflict=book_id`, {
         method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify([{ book_id: book, payload: owner, built_at: payload.built_at, build: BUILD }]),
+        body: JSON.stringify([{ book_id: book, payload: strip ? owner : {}, built_at: payload.built_at, build: BUILD }]),
       });
       if (!wt.ok) throw new Error(`home_todo ${wt.status} ${(await wt.text()).slice(0, 160)}`);
       const w = await fetch(`${URL_}/rest/v1/home_snapshot?on_conflict=id`, {
