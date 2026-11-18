@@ -28,7 +28,7 @@ import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-16.1';
+const BUILD = '2026-11-17.1';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -339,7 +339,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     page('option_chain_next?select=ticker,expiry,side,strike,mid,delta,iv,oi,spot'
       + '&order=ticker.asc,expiry.asc,side.asc,strike.asc'),
     page(`account_history?book_id=eq.${bookId}&order=day.asc&select=day,nav,cash,margin,interest_cum,commission_cum,dividends_cum,`
-      + 'realized_cum,unrealized,time_value,capital_long,shares_value,groups'),
+      + 'realized_cum,unrealized,open_pl,time_value,capital_long,shares_value,groups'),
     get(`dividends?pay_date=gt.${BOOK_START}&pay_date=lte.${today}&select=ticker,ex_date,pay_date&order=pay_date.asc,ticker.asc`),
     /* The 3- and 12-month upside calls the Planner sizes (chain-next, 15 min). */
     get('option_chain_upside?select=ticker,tenor,expiry,strike,mid,delta,iv,spot&order=ticker.asc,tenor.asc,strike.asc'),
@@ -607,10 +607,11 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
        mark against their average cost; sold legs at minus their mark (the
        premium on an open short is NOT in it, it is PREMIUM_UNREALIZED);
        shares at spot against IBKR's cost basis. */
-    let unrealized = 0, tvSold = 0;
+    let unrealized = 0, tvSold = 0, premiumOpen = 0;
     for (const l of legs) {
       const m = l.mark ?? 0;
       unrealized += l.side === 'bought' ? (m - l.avg) * l.n * 100 : -m * l.n * 100;
+      if (l.side === 'sold') premiumOpen += l.avg * l.n * 100;
       if (l.side === 'sold') {
         const S = spotOf.get(l.ticker) ?? l.underlying ?? 0;
         const intrinsic = l.type === 'call' ? Math.max(0, S - l.strike) : Math.max(0, l.strike - S);
@@ -638,6 +639,10 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
          Unrealized = paper P&L now (the same in both periods); Time value =
          what is left in the options he sold. */
       unrealized: r2(unrealized),
+      /* OPEN P&L (Nik, 17 Nov 2026, replaces Unrealized in Home's stat row, phone and web): what the open
+         positions are up or down since they were opened, the premium of an open sale included. Unrealized
+         counted a sale just made as a loss of its whole mark (book N: -$26K on the day it sold $28K of puts). */
+      open_pl: r2(unrealized + premiumOpen),
       time_value_sold: r2(tvSold),
       month: { from: monthStart, realized: realizedSince(monthStart),
         commission: r2(sum(monthStart, 'commissions') + commToday),
@@ -2775,21 +2780,22 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   for (const p of posAll) (posByDay.get(String(p.report_date)) ?? posByDay.set(String(p.report_date), []).get(String(p.report_date))!).push(p);
   /* What each group held at a close, at IBKR's marks and cost. */
   const snapOf = (d: string) => {
-    const mv = zero(), un = zero(), tv = zero(); let capLong = 0, shVal = 0; const tick = new Set<string>();
+    const mv = zero(), un = zero(), tv = zero(), op = zero(); let capLong = 0, shVal = 0; const tick = new Set<string>();
     for (const p of posByDay.get(d) ?? []) {
       const q = Number(p.position), m = Number(p.multiplier ?? 1), v = Number(p.position_value ?? 0), cb = Number(p.cost_basis_money ?? 0);
       if (p.asset_category === 'OPT') {
         const type = p.put_call === 'C' ? 'call' : 'put', g = gOf(type, q < 0);
         mv[g] += v; un[g] += q < 0 ? v : v - cb;
+        op[g] += v - cb;   // Open P&L: a sale's cost basis is minus its premium (IBKR, net of fees)
         const S = closeOn(String(p.underlying).toUpperCase(), d) ?? 0, K = Number(p.strike);
         const intr = type === 'call' ? Math.max(0, S - K) : Math.max(0, K - S);
         tv[g] += Math.abs(q) * m * Math.max(0, Number(p.mark_price ?? 0) - intr);
         if (q > 0) capLong += cb;
       } else if (p.asset_category === 'STK' && q !== 0) {
-        mv.sh += v; un.sh += v - cb; shVal += v; tick.add(String(p.symbol));
+        mv.sh += v; un.sh += v - cb; op.sh += v - cb; shVal += v; tick.add(String(p.symbol));
       }
     }
-    return { mv, un, tv, capLong, shVal, tickers: tick.size, has: posByDay.has(d) };
+    return { mv, un, tv, op, capLong, shVal, tickers: tick.size, has: posByDay.has(d) };
   };
   const navDays = acctDays.filter((d) => Number(d.accounts) >= accountsN).map((d) => String(d.report_date)).sort();
   const lastClose = navDays.at(-1) ?? null;
@@ -2809,13 +2815,13 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const groups: Record<string, Record<string, number>> = {};
     for (const g of GK_LIST) {
       groups[g] = { line: r2(sn.mv[g] - (base?.mv[g] ?? 0) + cashSum[g]), real: r2(rl[g]), unreal: r2(sn.un[g]),
-                    tv: r2(sn.tv[g]), mv: r2(sn.mv[g]) };
+                    open: r2(sn.op[g]), tv: r2(sn.tv[g]), mv: r2(sn.mv[g]) };
     }
     groups.sh.tickers = sn.tickers;
     return { day: d, nav: r2(nav), cash: r2(cash), margin: r2(nav + Math.max(0, -cash)),
       interest_cum: r2(cum('interest_accrued', d)), commission_cum: r2(cum('commissions', d)),
       dividends_cum: r2(cum('dividends', d)), realized_cum: r2(GK_LIST.reduce((s, g) => s + rl[g], 0)),
-      unrealized: r2(GK_LIST.reduce((s, g) => s + sn.un[g], 0)),
+      unrealized: r2(GK_LIST.reduce((s, g) => s + sn.un[g], 0)), open_pl: r2(GK_LIST.reduce((s, g) => s + sn.op[g], 0)),
       time_value: r2(sn.tv.cs + sn.tv.ps), capital_long: r2(sn.capLong), shares_value: r2(sn.shVal), groups };
   };
   let chartRows: Row[] = savedHistory;
@@ -2838,23 +2844,24 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   let livePt: Row | null = null;
   const lastRow = chartRows.at(-1);
   if (account.ok && isTrading(today) && lastRow && String(lastRow.day) < today) {
-    const mv = zero(), un = zero(), tv = zero();
+    const mv = zero(), un = zero(), tv = zero(), op = zero();
     for (const l of legs) {
       const g = gOf(l.type, l.side === 'sold'), m = l.mark ?? 0, sgn = l.side === 'sold' ? -1 : 1;
       mv[g] += sgn * m * l.n * 100;
       un[g] += l.side === 'sold' ? -m * l.n * 100 : (m - l.avg) * l.n * 100;
+      op[g] += sgn * (m - l.avg) * l.n * 100;
       const S = spotOf.get(l.ticker) ?? l.underlying ?? 0;
       tv[g] += Math.max(0, m - (l.type === 'call' ? Math.max(0, S - l.strike) : Math.max(0, l.strike - S))) * l.n * 100;
     }
     let shVal = 0, shCost = 0;
     for (const [t, q] of sharesNow) { shVal += q * (spotOf.get(t) ?? 0); shCost += shareCost.get(t) ?? 0; }
-    mv.sh = shVal; un.sh = shVal - shCost;
+    mv.sh = shVal; un.sh = shVal - shCost; op.sh = shVal - shCost;
     const since = cashBetween(String(lastRow.day), today), rl = realBy(today);
     const groups: Record<string, Record<string, number>> = {};
     for (const g of GK_LIST) {
       const prev = (lastRow.groups as Record<string, Record<string, number>>)[g];
       groups[g] = { line: r2(Number(prev.line) + (mv[g] - Number(prev.mv)) + since[g]), real: r2(rl[g]),
-                    unreal: r2(un[g]), tv: r2(tv[g]), mv: r2(mv[g]) };
+                    unreal: r2(un[g]), open: r2(op[g]), tv: r2(tv[g]), mv: r2(mv[g]) };
     }
     groups.sh.tickers = sharesNow.size;
     const commToday = trades.filter((t) => String(t.trade_date) > String(lastRow.day)).reduce((s, t) => s + Number(t.commission ?? 0), 0);
@@ -2862,7 +2869,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       margin: r2(Number(account.value) + Math.max(0, -Number(account.cash))),
       interest_cum: lastRow.interest_cum, commission_cum: r2(Number(lastRow.commission_cum) + commToday),
       dividends_cum: lastRow.dividends_cum, realized_cum: r2(GK_LIST.reduce((s, g) => s + rl[g], 0)),
-      unrealized: account.unrealized, time_value: account.time_value_sold,
+      unrealized: account.unrealized, open_pl: account.open_pl, time_value: account.time_value_sold,
       capital_long: r2(legs.filter((l) => l.side === 'bought').reduce((s, l) => s + l.avg * l.n * 100, 0)),
       shares_value: r2(shVal), groups };
   }
@@ -2910,13 +2917,14 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     from: String(pts[0].day), to: String(pts.at(-1)!.day), last_close: lastClose, live_last: !!livePt,
     days: pts.map((p) => String(p.day)),
     nav: col('nav'), margin: col('margin'), realized_cum: col('realized_cum'), unrealized: col('unrealized'),
+    open_pl: col('open_pl'),
     time_value: col('time_value'), interest_cum: col('interest_cum'), commission_cum: col('commission_cum'),
     dividends_cum: col('dividends_cum'), capital_long: col('capital_long'), shares_value: col('shares_value'),
     /* Money paid in and out, running total (IBKR's deposits_withdrawals). Data answer, 6 Nov 2026: a deposit
        shows as its own line and is never a gain, so the change line takes the range's deposits out. */
     deposits_cum: pts.map((p) => r2(cum('deposits_withdrawals', String(p.day)))),
     groups: Object.fromEntries(GK_LIST.map((g) => [g, { line: gcol(g, 'line'), real: gcol(g, 'real'),
-      unreal: gcol(g, 'unreal'), tv: gcol(g, 'tv') }])),
+      unreal: gcol(g, 'unreal'), open: gcol(g, 'open'), tv: gcol(g, 'tv') }])),
     shares_tickers: pts.map((p) => Number((p.groups as Record<string, Record<string, number>>).sh?.tickers ?? 0)),
     closed: closedPos,
     dividends: { paid: paidDays, payers, yield_pct: shNow > 0 ? r2(yearPaid / shNow * 100) : null,

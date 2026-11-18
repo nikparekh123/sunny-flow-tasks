@@ -33,6 +33,21 @@ UNREALIZED = (Current_Price − Buy_Price) × Shares_Held
            + (Current_Value_Of_Open_Long_Options − Long_Option_Cost_Basis)
 ```
 
+### 2b. OPEN P&L (Nik, 17 Nov 2026)
+Only **open** positions, against what they were opened at. Paper only. The premium of an open sale IS in it.
+
+```
+OPEN_PL = UNREALIZED + PREMIUM_UNREALIZED
+        = Σ every open position (IBKR position value − cost basis)
+          (a sold option's cost basis is minus its premium, net of fees)
+```
+
+Why: UNREALIZED counts a sale just made as a loss of its whole mark. Book N, 17 Nov 2026, showed
+Unrealized −$26K the day it sold $28K of puts; its open trades were up $2.4K. OPEN P&L replaced
+Unrealized in Home's stat row (Realized · Open P&L · Time value), phone and web. UNREALIZED keeps its
+definition and stays where it is used elsewhere. sunny-home sends `account.open_pl`, `chart.open_pl`
+per day and `groups[g].open` per position group; account_history stores `open_pl`.
+
 ### 3. NET
 Total P&L across everything (the position today).
 

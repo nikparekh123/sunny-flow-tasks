@@ -3,7 +3,7 @@
 // - A range starts on the last close on or before its start date; 1W is the last 5 closes plus the one before.
 // - Ranges longer than the history are hidden, except All (1W and YTD always show), as the phone does.
 // - The change takes deposits out (the phone's depositLine shows them on their own line).
-// - Stats: Realized, Interest and Fees over the range; Unrealized, Time value and Margin at its last point.
+// - Stats: Realized, Interest and Fees over the range; Open P&L, Time value and Margin at its last point.
 import type { J } from '../../lib/data';
 import { arrow, C, money, pct } from '../../lib/format';
 
@@ -137,15 +137,17 @@ export function weekChange(m: ChartModel | null, day: string | undefined): numbe
 
 export interface Stat { k: string; l: string; v: string; c: string; tv?: boolean }
 
-/** The stats row (README 1, item 4): Realized · Unrealized · Time value › · Margin · Interest · Fees. */
+/** The stats row (README 1, item 4): Realized · Open P&L · Time value › · Margin · Interest · Fees.
+ *  Open P&L replaced Unrealized (Nik, 17 Nov 2026): the open positions against what they were opened at, an open
+ *  sale's premium included. Unrealized counted a sale just made as a loss of its whole mark. */
 export function stats(payload: J, m: ChartModel | null, r: Range): Stat[] {
   const c = payload?.chart, a = payload?.account ?? {};
   const loss = (x: number) => (Math.round(x) < 0 ? C.red : C.ink);
   if (!m || !c) {
-    const u = +(a.unrealized ?? 0);
+    const o = a.open_pl == null ? null : +a.open_pl;
     return [
       { k: 'r', l: 'Realized', v: money(0), c: C.ink },
-      { k: 'u', l: 'Unrealized', v: money(u), c: loss(u) },
+      { k: 'o', l: 'Open P&L', v: o == null ? '-' : money(o), c: o == null ? C.ink : loss(o) },
       { k: 'tv', l: 'Time value ›', v: money(a.time_value_sold), c: C.ink, tv: true },
       { k: 'm', l: 'Margin', v: money(a.margin), c: C.ink },
       { k: 'i', l: 'Interest', v: money(0), c: C.ink },
@@ -155,13 +157,14 @@ export function stats(payload: J, m: ChartModel | null, r: Range): Stat[] {
   const e = m.n - 1, s = Math.min(m.start(r), e), live = !!c.live_last;
   const diff = (k: string) => (+(c[k]?.[e] ?? 0)) - (+(c[k]?.[s] ?? 0));
   const realized = diff('realized_cum');
-  const unreal = live && a.unrealized != null ? +a.unrealized : +(c.unrealized?.[e] ?? 0);
+  const dayOpen = c.open_pl?.[e] == null ? null : +c.open_pl[e];
+  const open = live && a.open_pl != null ? +a.open_pl : dayOpen;
   const tv = live && a.time_value_sold != null ? +a.time_value_sold : +(c.time_value?.[e] ?? 0);
   const margin = live && a.margin != null ? +a.margin : +(c.margin?.[e] ?? 0);
   const interest = diff('interest_cum'), fees = diff('commission_cum');
   return [
     { k: 'r', l: 'Realized', v: money(realized), c: loss(realized) },
-    { k: 'u', l: 'Unrealized', v: money(unreal), c: loss(unreal) },
+    { k: 'o', l: 'Open P&L', v: open == null ? '-' : money(open), c: open == null ? C.ink : loss(open) },
     { k: 'tv', l: 'Time value ›', v: money(tv), c: C.ink, tv: true },
     { k: 'm', l: 'Margin', v: money(margin), c: C.ink },
     // Red says negative (README): interest paid on margin is red, interest earned on cash ink.

@@ -327,6 +327,9 @@ nonisolated struct Account: Decodable {
     let margin: Double?
     let cash: Double?
     let unrealized: Double?
+    /// Open P&L (Nik, 17 Nov 2026): the open positions against what they were opened at, an open sale's premium
+    /// included. Replaces Unrealized in the stat row. Optional: servers before sunny-home 2026-11-17.1 have none.
+    let openPl: Double?
     let timeValueSold: Double?
     let month: Period?
     let book: Period?
@@ -654,6 +657,8 @@ nonisolated struct Chart: Decodable {
     let margin: [Double?]
     let realizedCum: [Double?]
     let unrealized: [Double?]
+    /// Open P&L per day (IBKR value minus cost basis); nil before sunny-home 2026-11-17.1.
+    let openPl: [Double?]?
     let timeValue: [Double?]
     let interestCum: [Double?]
     let commissionCum: [Double?]
@@ -667,7 +672,7 @@ nonisolated struct Chart: Decodable {
     let closed: [[Scalar]]
     let dividends: Dividends
 
-    nonisolated struct Group: Decodable { let line: [Double]; let real: [Double]; let unreal: [Double]; let tv: [Double] }
+    nonisolated struct Group: Decodable { let line: [Double]; let real: [Double]; let unreal: [Double]; let open: [Double]?; let tv: [Double] }
     nonisolated struct Dividends: Decodable {
         let paid: [[Scalar]]
         /// [pay date, ticker] for each name that paid (02b "Payers").

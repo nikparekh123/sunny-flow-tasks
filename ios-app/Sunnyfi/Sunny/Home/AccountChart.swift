@@ -123,6 +123,12 @@ struct ChartModel {
     }
     func realized(_ g: ChartGroup, _ h: ChartHalf, _ i: Int) -> Double { sum(keys(g, h), i) { $0.real } }
     func unreal(_ g: ChartGroup, _ h: ChartHalf, _ i: Int) -> Double { sum(keys(g, h), i) { $0.unreal } }
+    /// Open P&L of a group (17 Nov 2026); nil from a server that does not send it yet.
+    func open(_ g: ChartGroup, _ h: ChartHalf, _ i: Int) -> Double? {
+        let ks = keys(g, h)
+        guard ks.allSatisfy({ c.groups[$0]?.open != nil }) else { return nil }
+        return sum(ks, i) { $0.open ?? [] }
+    }
     func tv(_ g: ChartGroup, _ h: ChartHalf, _ i: Int) -> Double { sum(keys(g, h), i) { $0.tv } }
 
     /// What a group ties up (Nik, 12 Oct): money in long options for Sold and
@@ -729,23 +735,26 @@ struct AccountChart: View {
 
     private var stats: [Stat] {
         guard let m = model, !fresh else {
-            return ["Realized", "Unrealized", "Time value"].map { Stat(label: $0) }
+            return ["Realized", "Open P&L", "Time value"].map { Stat(label: $0) }
         }
         let (s, e) = bounds, i = at
         let lastLive = i == e && m.c.liveLast
         switch single {
         case .none:
             let r = (m.c.realizedCum[i] ?? 0) - (m.c.realizedCum[s] ?? 0)
-            let u = lastLive ? (home.account.unrealized ?? m.c.unrealized[i] ?? 0) : (m.c.unrealized[i] ?? 0)
+            // Open P&L, not Unrealized (Nik, 17 Nov 2026): Unrealized counted a sale just made as a loss of its whole
+            // mark (book N showed -$26K the day it sold $28K of puts). "-" from a server that has none yet.
+            let day: Double? = m.c.openPl.flatMap { $0[safe: i] ?? nil }
+            let o: Double? = lastLive ? (home.account.openPl ?? day) : day
             let tv = lastLive ? (home.account.timeValueSold ?? m.c.timeValue[i] ?? 0) : (m.c.timeValue[i] ?? 0)
             return [Stat(label: "Realized", value: r, color: S.lossInk(r)),
-                    Stat(label: "Unrealized", value: u, color: S.lossInk(u)),
+                    o.map { Stat(label: "Open P&L", value: $0, color: S.lossInk($0)) } ?? Stat(label: "Open P&L", text: "-"),
                     Stat(label: "Time value", value: tv, color: S.lossInk(tv))]
         case .shares?:
             let r = m.realized(.shares, .both, i) - m.realized(.shares, .both, s)
-            let u = m.unreal(.shares, .both, i)
+            let o = m.open(.shares, .both, i) ?? m.unreal(.shares, .both, i)   // the same for shares: value less cost
             return [Stat(label: "Realized", value: r, color: S.lossInk(r)),
-                    Stat(label: "Unrealized", value: u, color: S.lossInk(u)),
+                    Stat(label: "Open P&L", value: o, color: S.lossInk(o)),
                     Stat(label: "Held", value: m.c.sharesValue[i] ?? 0)]
         case .dividends?:
             let paid = (m.c.dividendsCum[i] ?? 0) - (m.c.dividendsCum[s] ?? 0)
@@ -755,9 +764,9 @@ struct AccountChart: View {
                     Stat(label: "Next", text: next)]
         case let g?:
             let r = m.realized(g, half, i) - m.realized(g, half, s)
-            let u = m.unreal(g, half, i), tv = m.tv(g, half, i)
+            let o = m.open(g, half, i), tv = m.tv(g, half, i)
             return [Stat(label: "Realized", value: r, color: S.lossInk(r)),
-                    Stat(label: "Unrealized", value: u, color: S.lossInk(u)),
+                    o.map { Stat(label: "Open P&L", value: $0, color: S.lossInk($0)) } ?? Stat(label: "Open P&L", text: "-"),
                     Stat(label: "Time value", value: tv, color: S.lossInk(tv))]
         }
     }
