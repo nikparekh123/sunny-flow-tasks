@@ -30,7 +30,7 @@ import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { buildTogether, type Side, type SideEvent, type SideLeg } from './together.ts';
 import { type ActEvent, type ActName, activityEvents, levelsOf } from './activity.ts';
 import { bsDelta, bsValue, fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-18.16';
+const BUILD = '2026-11-18.17';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -3534,7 +3534,13 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     trade_to_415: TRADE_TO_415.filter((t) => book.includes(t)),
     /* `up`: a hedge call (the quarterly calls under the call rule), apart from the LEAPs in the
        Positions totals (handoff 30). */
-    fresh, prices_est: pricesEst, account, side, together, share_avg: shareAvg, activity, indices, overnight, futures, watchlist, portfolio, hours, risk,
+    fresh, prices_est: pricesEst, account, side, together, share_avg: shareAvg, activity,
+    /* Per-screen loading (18 Nov 2026): Home's own Activity, the sync line, the Levels figures and each event's title,
+       without bodies or the trades inside a pickup; the phones and the web read `activity` whole only with the page
+       open. */
+    activity_lite: activity ? { sync: activity.sync, levels: activity.levels,
+      events: ((activity.events ?? []) as Row[]).map((e) => ({ key: e.key, day: e.day, at: e.at, kind: e.kind, t: e.t, title: e.title })) } : null,
+    indices, overnight, futures, watchlist, portfolio, hours, risk,
     legs: legs.map((l) => (upside.has(l) ? { ...l, up: true } : l)),
     chart, history, payback, yield: yieldOut, inventory, sold_vs_bought: soldVsBought, performance, allocation,
     deck: { earnings, season: seasonOut, reports: reportsOut, theta_checks: thetaChecks.filter((c) => c.card_today) },
