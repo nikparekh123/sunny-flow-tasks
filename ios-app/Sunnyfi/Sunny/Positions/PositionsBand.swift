@@ -343,17 +343,15 @@ struct PosPayoffView: View {
     // MARK: The sliders
 
     private var dateSlider: some View {
-        let N = dates.count - 1, cur = dates[min(max(0, at), N)], end = dates[N]
+        let N = dates.count - 1, cur = dates[min(max(0, at), N)]
         let lab = cur.days == 0 && cur.i == 0 ? "Today" : cur.full
         let sub = cur.days == 0 && cur.i == 0 ? "\(cur.date) · now" : "close · in \(cur.days) \(cur.days == 1 ? "day" : "days")"
-        let left = end.days - cur.days
-        let exT = at >= N ? "At expiration" : "\(left) \(left == 1 ? "day" : "days") to expiration"
+        // No "At expiration" / "N days to expiration" on the right (Nik, 18 Nov 2026, as on the web); VoiceOver still says it.
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 (Text(lab).fontWeight(.semibold).foregroundStyle(PC.ink) + Text(" · \(sub)").foregroundStyle(PC.mu))
                     .sType(PT.t(14, 18), tabular: true).lineLimit(1)
                 Spacer(minLength: 0)
-                Text(exT).sType(PT.t(12, 16, 500), tabular: false).foregroundStyle(PC.muT)
             }
             PosSlider(value: $at, lo: 0, hi: N, label: "Date the curve is drawn for",
                       said: { i in let d = dates[min(max(0, i), N)]; return (d.days == 0 && d.i == 0 ? "Today, now" : "\(d.full) close, in \(d.days) \(d.days == 1 ? "day" : "days")") + (i >= N ? ". At expiration\(d.ends.isEmpty ? "" : ", " + d.ends.lowercased())" : "") })

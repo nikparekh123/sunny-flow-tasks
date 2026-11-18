@@ -441,9 +441,8 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
                 <span style={{ fontWeight: 600 }}>{ti === 0 ? 'Today' : full}</span>
                 <span style={{ color: MU }}> · {ti === 0 ? `${full} · now` : `close · ${P.cd === 0 ? 'today' : 'in ' + dayWords(P.cd)}`}</span>
               </span>
-              <span style={{ fontSize: 13, lineHeight: '20px', fontWeight: 500, color: MT, textAlign: 'right' }}>
-                {[ew, atExp ? 'At expiration' : exp ? `${dayWords(exD)} to expiration` : ''].filter(Boolean).join(' · ')}
-              </span>
+              {/* No "Sold calls, hedge puts expire · At expiration" line (Nik, 18 Nov 2026): one line, so the date and range
+                  sliders sit level. Screen readers still hear it in the slider's text. */}
             </div>
             <Slider label="Date the curve is drawn for" min={0} max={N} value={ti} onPick={pick}
               text={(ti === 0 ? 'Today, now' : `${full} close, in ${dayWords(P.cd)}`) + (atExp ? `. At expiration${ew ? ', ' + ew.toLowerCase() : ''}` : ew ? `. ${ew}` : '')} />
