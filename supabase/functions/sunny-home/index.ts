@@ -28,7 +28,7 @@ import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { bsDelta, bsValue, fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-18.2';
+const BUILD = '2026-11-18.3';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -561,7 +561,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
      stands overnight and over a weekend, and the first real quotes take over at 9:30.
      Tick builds only, and in this build's payload only: option_greeks, ticker_quotes and leg_marks_daily keep the
      real closing marks, and a report saved this build keeps them (unrealized_close, mark_close). `prices_est` tells
-     the app which names are estimated; a name Yahoo has no extended trade for (SPCX) keeps its close. */
+     the app which names are estimated; a name with no extended trade since the close keeps its close.
+     A held name on the Watchlist (SPCX, TSLA) has its Yahoo row as kind 'watch', not 'name': both count. */
+  const STOCK_ROW = new Set(['name', 'watch']);
   const spotClose = new Map(spotOf);
   const estOf = new Map<string, { price: number; close: number; at: string; session: 'pre' | 'post' }>();
   {
@@ -570,7 +572,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const regular = isTrading(today) && now.mins >= 9 * 60 + 30 && now.mins < closeMins;
     if (mode === 'tick' && !pinned && !regular) {
       for (const m of market) {
-        if (m.kind !== 'name') continue;
+        if (!STOCK_ROW.has(String(m.kind))) continue;
         const t = String(m.symbol).toUpperCase(), state = String(m.market_state ?? '');
         const pre = state.startsWith('PRE') ? num(m.pre_price) : null, post = num(m.post_price);
         const price = pre ?? post, reg = num(m.regular_price);
@@ -621,7 +623,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       /* The day's move, as Home's Today reads it: before the open against the last close, after it (and over a
          weekend) against the close before the last session. */
       const q = quotes.find((x) => String(x.ticker).toUpperCase() === t);
-      const m = market.find((x) => String(x.symbol).toUpperCase() === t && x.kind === 'name');
+      const m = market.find((x) => String(x.symbol).toUpperCase() === t && STOCK_ROW.has(String(x.kind)));
       const base = e.session === 'pre' && isTrading(today) ? e.close : num(m?.prev_close);
       if (q) { q.spot = e.price; if (base) q.day_change_pct = (e.price / base - 1) * 100; }
     }
