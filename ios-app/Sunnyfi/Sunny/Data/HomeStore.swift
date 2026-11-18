@@ -75,6 +75,8 @@ final class HomeStore {
     /// The other books are read quietly after the one on screen, so the strip shows a book at once instead of
     /// holding the page dimmed while the network answers.
     private var cached: [String: HomePayload] = [:]
+    /// A book's last Home, the one on screen or a kept copy (Activity's IBKR card shows every book's sync).
+    func payload(_ book: String) -> HomePayload? { homeBook == book ? home : cached[book] }
     private var cachedAt: [String: Date] = [:]
     private var prefetching: Task<Void, Never>?
     /// The book the strip just showed from `cached`: its first fresh read is not "positions updated".

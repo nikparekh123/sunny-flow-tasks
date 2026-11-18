@@ -146,6 +146,9 @@ struct HomeView: View {
             }
             if brief.activityOpen {
                 ActivityPage(activity: brief.activity, book: brief.book ?? "S", today: brief.today,
+                             books: ([brief.book ?? "S"] + store.books.filter { $0 != (brief.book ?? "S") }).map { b in
+                                 (name: b == "N" ? "Nicolay" : "Sunny", act: b == (brief.book ?? "S") ? brief.activity : store.payload(b)?.activity)
+                             },
                              close: { withAnimation(reduce ? nil : S.standard(0.45)) { brief.activityOpen = false } },
                              openName: { t in
                                  brief.positionsName = t

@@ -91,91 +91,120 @@ struct ActivityBellSlot: View {
     }
 }
 
-/// The Activity page (161a), from the right, with a back button.
+/// The Activity page (161a; SunnyActivity view "center", nav "page"), from the right: the glass back button, the title
+/// and whose book it is, the IBKR card (a row per account: synced when, what it picked up today), All · IBKR · Levels ·
+/// Moves, then Today (with Mark all read), Yesterday, Earlier this week and Last week, each a card of rows. A pickup
+/// shows its trades under "Show N trades"; a level or a move opens Positions on that name.
 struct ActivityPage: View {
     let activity: JSONValue?
     let book: String
     let today: String
+    /// Every book this login sees, the one on screen first: its name and its activity (for the IBKR card).
+    var books: [(name: String, act: JSONValue?)] = []
     let close: () -> Void
     let openName: (String) -> Void
     @State private var reads = ActivityRead.shared
-    @State private var filter = "all"
+    @State private var filter = "All"
     @State private var openKeys: Set<String> = []
     @Environment(\.accessibilityReduceMotion) private var reduce
 
-    private static let filters = [("all", "All"), ("ibkr", "IBKR"), ("lvl", "Levels"), ("move", "Moves")]
+    private static let kinds: [String: String] = ["IBKR": "ibkr", "Levels": "lvl", "Moves": "move"]
+    private static let groupNames = ["Today", "Yesterday", "Earlier this week", "Last week"]
 
     var body: some View {
-        let evs = (activity?["events"].array ?? []).filter { filter == "all" || $0["kind"].string == filter }
-        let sync = activity?["sync"]
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
+        let all = activity?["events"].array ?? []
+        let evs = all.filter { e in Self.kinds[filter].map { e["kind"].string == $0 } ?? true }
+        let nU = all.filter { ActivityWords.group($0["day"].string ?? "", today: today) == 0 && !reads.keys(book).contains($0["key"].string ?? "") }.count
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
                 Button(action: close) {
-                    Image(systemName: "chevron.left").font(.system(size: 18, weight: .semibold)).foregroundStyle(S.ink)
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                    Image(systemName: "chevron.left").font(.system(size: 17, weight: .bold)).foregroundStyle(S.ink)
+                        .frame(width: 44, height: 44).glassEffect(.regular, in: .circle)
                 }
-                .buttonStyle(.plain).accessibilityLabel("Back")
-                Spacer()
-                Button {
-                    reads.mark(book, (activity?["events"].array ?? []).compactMap { $0["key"].string })
-                } label: {
-                    Text("Mark all read").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                        .frame(minHeight: 44).padding(.horizontal, 8)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 8)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                .buttonStyle(.plain).accessibilityLabel("Back to Home")
+                VStack(alignment: .leading, spacing: 2) {
                     Text("Activity").sType(SType(size: 34, weight: 700, line: 40, tracking: -0.03), tabular: false).foregroundStyle(S.ink)
                         .accessibilityAddTraits(.isHeader)
-                    // IBKR first: when it last synced, or red when it stopped.
-                    HStack(spacing: 8) {
-                        Circle().fill((sync?["stopped"].bool ?? false) ? S.red : S.green).frame(width: 8, height: 8)
-                        Text((sync?["stopped"].bool ?? false) ? "No data from IBKR since \(ActivityWords.clock(sync?["at"].string))" : "IBKR synced \(ActivityWords.clock(sync?["at"].string))")
-                            .sType(SType(size: 14, weight: 600, line: 19, tracking: 0), tabular: true)
-                            .foregroundStyle((sync?["stopped"].bool ?? false) ? S.red : S.secondary)
-                    }
-                    HStack(spacing: 6) {
-                        ForEach(Self.filters, id: \.0) { k, l in
-                            let on = filter == k
-                            Button { withAnimation(S.moving(.easeOut(duration: 0.2), reduce)) { filter = k } } label: {
-                                Text(l).sType(SType(size: 14, weight: on ? 700 : 500, line: 18, tracking: 0), tabular: false)
-                                    .foregroundStyle(on ? S.ink : S.secondary)
-                                    .padding(.horizontal, 12).frame(minHeight: 32)
-                                    .background(on ? S.dynA(0x767680, 0.12, 0x767680, 0.24) : .clear, in: Capsule())
+                    Text("\(books.first?.name ?? "Your")’s book · \(Self.nowWords())").sType(SType(size: 14, weight: 500, line: 18, tracking: 0), tabular: false)
+                        .foregroundStyle(S.secondary)
+                }
+                syncCard
+                BSegmented(items: ["All", "IBKR", "Levels", "Moves"], selected: $filter)
+                ForEach(0..<4, id: \.self) { g in
+                    let rows = evs.filter { Self.groupOf($0["day"].string ?? "", today: today) == g }
+                    if !rows.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(Self.groupNames[g]).sType(SType(size: 20, weight: 700, line: 24, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                                    .accessibilityAddTraits(.isHeader)
+                                Spacer()
+                                if g == 0 && nU > 0 {
+                                    Button { reads.mark(book, all.compactMap { $0["key"].string }) } label: {
+                                        Text("Mark all read").sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.blue)
+                                            .frame(minHeight: 44)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
-                        }
-                    }
-                    if evs.isEmpty {
-                        Text("Nothing yet.").sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.secondary)
-                    }
-                    ForEach([0, 1, 2], id: \.self) { g in
-                        let items = evs.filter { ActivityWords.group($0["day"].string ?? "", today: today) == g }
-                        if !items.isEmpty {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text(["Today", "Yesterday", "Earlier this week"][g]).sType(SType(size: 13, weight: 600, line: 18, tracking: 0), tabular: false)
-                                    .foregroundStyle(S.secondary).padding(.bottom, 6)
-                                ForEach(Array(items.enumerated()), id: \.offset) { _, e in row(e) }
+                            .padding(.horizontal, 4)
+                            VStack(spacing: 0) {
+                                ForEach(Array(rows.enumerated()), id: \.offset) { i, e in
+                                    row(e).overlay(alignment: .top) { if i > 0 { Rectangle().fill(S.line).frame(height: 1) } }
+                                }
                             }
+                            .padding(.horizontal, 14)
+                            .briefCard(radius: 22, padding: 0)
                         }
                     }
                 }
-                .padding(.horizontal, S.margin).padding(.bottom, 60)
+                if evs.isEmpty {
+                    Text("Nothing yet.").sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+                }
             }
-            .scrollIndicators(.hidden)
+            .padding(.horizontal, S.margin).padding(.top, 8).padding(.bottom, 60)
         }
+        .scrollIndicators(.hidden)
         .background(SBackground().ignoresSafeArea())
         // Per-screen loading (18 Nov 2026): Activity comes whole (bodies, a pickup's trades) only while the page is open.
         .onAppear { HomeStore.need(.activity, true) }
         .onDisappear { HomeStore.need(.activity, false) }
     }
 
+    /// IBKR · both accounts: a row per book, synced when and what it picked up today (red when it stopped).
+    private var syncCard: some View {
+        let rows = books.isEmpty ? [(name: "Your book", act: activity)] : books
+        return VStack(alignment: .leading, spacing: 0) {
+            Text(rows.count > 1 ? "IBKR · both accounts" : "IBKR").sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false)
+                .foregroundStyle(S.secondary).padding(.bottom, 2)
+            ForEach(Array(rows.enumerated()), id: \.offset) { i, b in
+                let sync = b.act?["sync"], stopped = sync?["stopped"].bool ?? false
+                let picked = (b.act?["events"].array ?? []).filter { ($0["key"].string ?? "").hasPrefix("pickup|") && $0["day"].string == today }
+                    .reduce(0) { $0 + max($1["data"]["trades"].array.count, Int($1["title"].string?.split(separator: " ").first.flatMap { Int($0) } ?? 0)) }
+                HStack(spacing: 10) {
+                    Circle().fill(stopped ? S.red : S.green).frame(width: 8, height: 8)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(b.name).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                        Text(stopped ? "New trades come in when it reconnects" : picked > 0 ? "\(picked) \(picked == 1 ? "trade" : "trades") picked up today" : "No trades yet today")
+                            .sType(SType(size: 12, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Text(stopped ? "No data since \(ActivityWords.clock(sync?["at"].string))" : "Synced \(ActivityWords.clock(sync?["at"].string))")
+                        .sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(stopped ? S.red : S.ink)
+                }
+                .frame(minHeight: 56)
+                .overlay(alignment: .top) { if i > 0 { Rectangle().fill(S.line).frame(height: 1) } }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 4)
+        .briefCard(radius: 22, padding: 0)
+    }
+
     private func row(_ e: JSONValue) -> some View {
         let key = e["key"].string ?? "", unread = !reads.keys(book).contains(key)
         let trades = e["data"]["trades"].array, isOpen = openKeys.contains(key), t = e["t"].string
+        let tks = trades.compactMap { $0["t"].string }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        let body = !trades.isEmpty ? tks.joined(separator: ", ") + " · all in your book" : (e["body"].string ?? "")
         return VStack(alignment: .leading, spacing: 0) {
             Button {
                 reads.mark(book, [key])
@@ -184,19 +213,33 @@ struct ActivityPage: View {
                 } else if let t { openName(t) }
             } label: {
                 HStack(alignment: .top, spacing: 12) {
-                    Circle().fill(unread ? S.blue : .clear).frame(width: 7, height: 7).padding(.top, 13)
                     if let t { BLogo(ticker: t, size: 32) }
                     else {
-                        Image(systemName: "arrow.down.circle.fill").font(.system(size: 28)).foregroundStyle(S.secondary).frame(width: 32, height: 32)
+                        Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 14, weight: .semibold)).foregroundStyle(S.ink)
+                            .frame(width: 32, height: 32).background(Circle().fill(S.chip))
                     }
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(e["title"].string ?? "").sType(SType(size: 16, weight: 600, line: 21, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                            Spacer(minLength: 8)
-                            Text(ActivityWords.clock(e["at"].string)).sType(SType(size: 12, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.secondary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text(e["title"].string ?? "").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                            HStack(spacing: 6) {
+                                if unread { Circle().fill(S.blue).frame(width: 8, height: 8) }
+                                Text(ActivityWords.clock(e["at"].string)).sType(SType(size: 13, weight: 500, line: 18, tracking: 0)).foregroundStyle(S.secondary)
+                            }
+                            .fixedSize()
                         }
-                        if let b = e["body"].string, !b.isEmpty {
-                            Text(b).sType(SType(size: 14, weight: 500, line: 19, tracking: 0), tabular: false).foregroundStyle(S.secondary).fixedSize(horizontal: false, vertical: true)
+                        if !body.isEmpty {
+                            Text(body).sType(SType(size: 14, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if !trades.isEmpty {
+                            HStack(spacing: 4) {
+                                Text("\(isOpen ? "Hide" : "Show") \(trades.count == 1 ? "the trade" : "\(trades.count) trades")")
+                                    .sType(SType(size: 13, weight: 600, line: 18, tracking: 0), tabular: false)
+                                Image(systemName: "chevron.right").font(.system(size: 10, weight: .heavy)).rotationEffect(.degrees(isOpen ? 90 : 0))
+                            }
+                            .foregroundStyle(S.blue).padding(.top, 2)
                         }
                     }
                 }
@@ -208,25 +251,40 @@ struct ActivityPage: View {
             .accessibilityHint(!trades.isEmpty ? (isOpen ? "Hides the trades" : "Shows the trades") : t != nil ? "Opens it on Positions" : "")
             if isOpen {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(trades.enumerated()), id: \.offset) { _, x in
+                    ForEach(Array(trades.enumerated()), id: \.offset) { i, x in
                         HStack(alignment: .top, spacing: 10) {
-                            BLogo(ticker: x["t"].string, size: 24)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(x["what"].string ?? "").sType(SType(size: 14, weight: 600, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                                Text(x["what"].string ?? "").sType(SType(size: 14, weight: 600, line: 19, tracking: 0), tabular: false).foregroundStyle(S.ink)
                                 Text(x["at"].string ?? "").sType(SType(size: 12, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.secondary)
                             }
                             Spacer(minLength: 8)
-                            Text("Added").sType(SType(size: 12, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(S.green)
+                            Text("Added").sType(SType(size: 12, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 10)
+                        .overlay(alignment: .top) { if i > 0 { Rectangle().fill(S.line).frame(height: 1) } }
                         .accessibilityElement(children: .combine)
                     }
                 }
-                .padding(.leading, 51).padding(.bottom, 8)
+                .padding(.horizontal, 12).padding(.vertical, 2)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(S.dynA(0x767680, 0.08, 0x767680, 0.18)))
+                .padding(.leading, 44).padding(.bottom, 12)
                 .transition(.opacity)
             }
         }
-        .overlay(alignment: .top) { Rectangle().fill(S.line).frame(height: 1) }
+    }
+
+    /// Today 0, Yesterday 1 (Friday on a Monday), Earlier this week 2, Last week 3.
+    static func groupOf(_ day: String, today: String) -> Int {
+        let g = ActivityWords.group(day, today: today)
+        if g < 2 { return g }
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withFullDate]
+        guard let a = f.date(from: today), let b = f.date(from: day) else { return 3 }
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!; cal.firstWeekday = 2
+        return cal.isDate(a, equalTo: b, toGranularity: .weekOfYear) ? 2 : 3
+    }
+    static func nowWords() -> String {
+        let f = DateFormatter(); f.timeZone = MarketClock.ny; f.dateFormat = "EEE MMM d, h:mm a"
+        return f.string(from: Date())
     }
 }
 
