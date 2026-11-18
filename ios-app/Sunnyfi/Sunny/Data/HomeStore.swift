@@ -127,9 +127,11 @@ final class HomeStore {
     }
     private let hitch = Hitch()
     nonisolated(unsafe) private static var tickFlip = false
+    nonisolated(unsafe) private static var tickCount = 0
     #endif
 
     init() {
+        Self.current = self
         #if DEBUG && targetEnvironment(simulator)
         CADisplayLink(target: hitch, selector: #selector(Hitch.tick(_:))).add(to: .main, forMode: .common)
         // `-fixtureTick <path>` (speed review 4, 18 Nov 2026): every 4 s the next update reads the other saved row, as
@@ -140,7 +142,7 @@ final class HomeStore {
                 for _ in 0..<12 {
                     try? await Task.sleep(for: .seconds(4))
                     guard let self else { return }
-                    Self.tickFlip.toggle()
+                    Self.tickFlip.toggle(); Self.tickCount += 1
                     print("SUNNY-PERF update \(Self.tickFlip ? "B" : "A")")
                     await self.refresh(.tick)
                 }
@@ -290,6 +292,14 @@ final class HomeStore {
         let a = ProcessInfo.processInfo.arguments
         // `-fixtureN <path>`: book N's saved row, for the account strip without signing in.
         if book == "N", let i = a.firstIndex(of: "-fixtureN"), i + 1 < a.count { return try Data(contentsOf: URL(fileURLWithPath: a[i + 1])) }
+        // `-fixturePartial <path>` (per-screen loading check): the first read is `-fixture` whole, each tick after it the saved
+        // partial row (x_ keys) laid over it by the same Kept.merge the live reads use.
+        if let j = a.firstIndex(of: "-fixturePartial"), j + 1 < a.count, let i = a.firstIndex(of: "-fixture"), i + 1 < a.count {
+            if tickFlip || kept.has("fx|" + book) && a.contains("-fixtureTick") && tickCount > 0 {
+                return try kept.merge(row: try Data(contentsOf: URL(fileURLWithPath: a[j + 1])), who: "fx|" + book, whole: false)
+            }
+            return try kept.merge(row: try Data(contentsOf: URL(fileURLWithPath: a[i + 1])), who: "fx|" + book, whole: true)
+        }
         if tickFlip, let i = a.firstIndex(of: "-fixtureTick"), i + 1 < a.count { return try Data(contentsOf: URL(fileURLWithPath: a[i + 1])) }
         if let i = a.firstIndex(of: "-fixture"), i + 1 < a.count {
             let row = try Data(contentsOf: URL(fileURLWithPath: a[i + 1]))
@@ -298,13 +308,67 @@ final class HomeStore {
             return try await Task.detached(priority: .userInitiated) { try layOver(row: row, todo: todo) }.value
         }
         #endif
+        // ⚠ PER-SCREEN LOADING (18 Nov 2026): the first read of a book (this login) takes the whole row; after that each
+        // update asks only for Home's own keys and what the screen on show needs (Positions its inputs, Overview its
+        // pair of books, the Activity page its events whole), and lays them over the copy kept. Older servers and
+        // builds are untouched: nothing changed on the server but a light `activity_lite`.
+        let who = (SupabaseService.client.auth.currentUser?.id.uuidString ?? "") + "|" + book
+        let whole = !kept.has(who)
+        let sel = whole ? "payload,built_at,book_id" : "built_at,book_id," + Self.keys().map { "x_\($0.0):payload->\($0.1)" }.joined(separator: ",")
         // Both at once: the book's snapshot, and its To do row, which RLS returns only to an owner.
         async let snap = SupabaseService.client.from("home_snapshot")
-            .select("payload,built_at,book_id").eq("book_id", value: book).single().execute()
+            .select(sel).eq("book_id", value: book).single().execute()
         async let owned = SupabaseService.client.from("home_todo").select("book_id,payload").eq("book_id", value: book).execute()
         let (row, todo) = try await (snap.data, owned.data)
-        return try await Task.detached(priority: .userInitiated) { try layOver(row: row, todo: todo) }.value
+        let kept = Self.kept
+        return try await Task.detached(priority: .userInitiated) {
+            try layOver(row: try kept.merge(row: row, who: who, whole: whole), todo: todo)
+        }.value
     }
+
+    // MARK: Per-screen loading
+
+    /// The parts beyond Home a screen on show needs, counted (two views asking keep it until both have gone).
+    enum Part: CaseIterable { case inputs, together, activity }
+    private static var needs: [Part: Int] = [:]
+    /// The store on screen, so a part asked for is read at once.
+    static weak var current: HomeStore?
+    static func need(_ p: Part, _ on: Bool) {
+        let was = needs[p, default: 0] > 0
+        needs[p] = max(0, needs[p, default: 0] + (on ? 1 : -1))
+        if on && !was, let s = current { Task { await s.refresh(.tick) } }
+    }
+    /// Home's own keys (alias, payload key): every screen reads them. `activity` comes light unless the page is open.
+    private static let core = ["build", "built_at", "today", "trading_today", "calendar", "trade_to_415", "fresh", "prices_est", "share_avg",
+        "account", "indices", "overnight", "futures", "chart", "deck", "last_week", "portfolio", "watchlist", "legs", "hours", "inventory",
+        "writes", "yield", "history", "risk", "sold_vs_bought", "performance", "allocation", "theta_checks", "aftershock", "strategies",
+        "todo", "brief", "overview"]
+    private static func keys() -> [(String, String)] {
+        var k = core.map { ($0, $0) }
+        k.append(("activity", needs[.activity, default: 0] > 0 ? "activity" : "activity_lite"))
+        if needs[.inputs, default: 0] > 0 { k.append(("brief_inputs", "brief_inputs")) }
+        if needs[.together, default: 0] > 0 { k.append(("together", "together")) }
+        return k
+    }
+    /// The last whole payload per login and book, each update's keys laid in. Off the main thread, behind a lock.
+    nonisolated final class Kept: @unchecked Sendable {
+        private var p: [String: [String: Any]] = [:]
+        private let lock = NSLock()
+        func has(_ who: String) -> Bool { lock.withLock { p[who] != nil } }
+        func merge(row: Data, who: String, whole: Bool) throws -> Data {
+            guard var r = try JSONSerialization.jsonObject(with: row) as? [String: Any] else { return row }
+            if whole {
+                if let pl = r["payload"] as? [String: Any] { lock.withLock { p[who] = pl } }
+                return row
+            }
+            var pl = lock.withLock { p[who] } ?? [:]
+            for (k, v) in r where k.hasPrefix("x_") { pl[String(k.dropFirst(2))] = v; r[k] = nil }
+            lock.withLock { p[who] = pl }
+            r["payload"] = pl
+            return try JSONSerialization.data(withJSONObject: r)
+        }
+    }
+    private static let kept = Kept()
 
     /// sunny-home's owner part laid over the snapshot row: objects merge, anything else replaces, names
     /// matched by ticker (sunny-home `forOwners`, which this gives back exactly). No row for the snapshot's

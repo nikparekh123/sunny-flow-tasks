@@ -113,6 +113,9 @@ struct PositionsTab: View {
                 .accessibilityHidden(!shown)
         }
         .onAppear { arrive() }
+        // Per-screen loading (18 Nov 2026): Home's inputs come with each update only while Positions is on show.
+        .onAppear { HomeStore.need(.inputs, true) }
+        .onDisappear { HomeStore.need(.inputs, false) }
         .onChange(of: brief.positionsName) { _, _ in arrive() }
         // A name opened from elsewhere (a deck card, Risk): select it.
         .onChange(of: router.positionsName, initial: true) { _, t in
@@ -698,7 +701,8 @@ struct PosEveryLeg: View {
         HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 0) {
                 l.sType(PT.t(15, 20, bold ? 700 : 600), tabular: false).foregroundStyle(PC.ink)
-                if let sub { sub.sType(PT.t(12, 16)).foregroundStyle(PC.mu).lineLimit(1).minimumScaleFactor(0.85) }
+                // Wraps rather than cut: "Dec 18 (30 days) · Hedge puts…" hid the count at a larger text size (Nik 18 Nov).
+                if let sub { sub.sType(PT.t(12, 16)).foregroundStyle(PC.mu).fixedSize(horizontal: false, vertical: true) }
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 0) {

@@ -73,6 +73,8 @@ nonisolated struct SDReply: Decodable, Sendable {
         let sma20: Double?; let sma50: Double?; let sma100: Double?; let sma200: Double?; let rsi14: Double?; let hv20: Double?
         let ivRank: Double?; let ivLow52: Double?; let ivHigh52: Double?
         let zones: [Zone]?
+        /// The close the technicals were worked out from (ISO), for the lane's "updated" line.
+        let day: String?
     }
     /// Today's session: the prior close, the high and low so far, the last price; after 4:00 PM ET closedToday and the
     /// close (closeStored once the 4:30 PM daily close is in).
@@ -98,10 +100,12 @@ nonisolated struct SDReply: Decodable, Sendable {
     let exps: [Exp]
     let cover: Cover?
     let tech: Tech?
+    /// When the chains were read (sunny-sd 18 Nov 2026): the SD and IV lane's "updated" line. Older replies have none.
+    let chainAt: String?
     let day: Day?
     let closes: [Close]?
     let events: Events?
-    enum CodingKeys: String, CodingKey { case ok, t, name, strategy, price = "S", prev, today, cfg, counts, sold, exps, cover, tech, day, closes, events }
+    enum CodingKeys: String, CodingKey { case ok, t, name, strategy, price = "S", prev, today, cfg, counts, sold, exps, cover, tech, day, closes, events, chainAt = "chain_at" }
 }
 
 enum SDClient {

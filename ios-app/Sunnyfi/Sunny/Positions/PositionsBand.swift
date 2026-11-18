@@ -36,10 +36,12 @@ struct PosPriceChart: View {
                         Button {
                             withAnimation(S.moving(.timingCurve(0.22, 1, 0.36, 1, duration: 0.55), reduce) ?? .linear(duration: 0)) { cone.toggle() }
                         } label: {
-                            Text("1 SD").sType(PT.t(13, 16, 600), tabular: false).foregroundStyle(cone ? Color.black : PC.ink)
+                            // On: the ink capsule with the page's colour on it (it read black on black in light mode, Nik 18 Nov).
+                            // Plain glass, not .interactive(): on iOS 27 that took the touches around it (the Payoff scrub).
+                            Text("1 SD").sType(PT.t(13, 16, 600), tabular: false).foregroundStyle(cone ? PC.onInk : PC.ink)
                                 .padding(.horizontal, 12).frame(minHeight: 30)
                                 .background { if cone { Capsule().fill(PC.ink) } }
-                                .glassEffect(cone ? .identity : .regular.interactive(), in: .capsule)
+                                .glassEffect(cone ? .identity : .regular, in: .capsule)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("1 SD cone, when the price could reach your strikes")
@@ -49,9 +51,13 @@ struct PosPriceChart: View {
                 }
                 chart(p).frame(height: H)
                 labels(p).frame(height: 16)
+                // One line, as the design (SunnyPositionsPhone): "Past week ▼ 15.3% · to Fri Nov 20". The how-to note is
+                // gone (Nik, 18 Nov 2026), and it no longer grows when 1 SD is on, which jumped the page.
+                (Text("Past week ") + Text("\(p.move < 0 ? "▼" : "▲") \(PE.pcx(p.move))").foregroundStyle(p.move < 0 ? PC.red : PC.green)
+                 + Text(" · to \(p.fridayWords)"))
+                    .sType(PT.t(12, 16), tabular: true).foregroundStyle(PC.mu)
+                    .accessibilityLabel(PosSay.words("Past week \(p.move < 0 ? "down" : "up") \(PE.pcx(p.move)), to \(p.fridayWords)"))
                 if !p.near.isEmpty { nearCard(p) }
-                Text(note(p)).sType(PT.t(12, 16), tabular: false).foregroundStyle(PC.mu)
-                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Group {
                     if failed { Text("No price history for this name yet.").sType(PT.t(13, 18), tabular: false).foregroundStyle(PC.mu) }
@@ -60,15 +66,6 @@ struct PosPriceChart: View {
                 .frame(maxWidth: .infinity, minHeight: H)
             }
         }
-    }
-
-    private func note(_ p: PosPrice) -> String {
-        let mv = "Past week \(p.move < 0 ? "down" : "up") \(PE.pcx(p.move)). "
-        if p.coneOn, let c = p.cone {
-            return mv + "1 SD cone: a normal week, \(PosFmt.price(c.lo)) to \(PosFmt.price(c.hi)) by \(p.fridayWords); about 2 weeks in 3 end inside. Green: inside your sold strikes; red: where it spills past them. The dot marks the day it first reaches one. Calls blue, puts brown; sold dashed, hedges dotted."
-        }
-        return mv + "Calls blue, puts brown; sold dashed, hedges dotted. " + (p.m0 > 0 ? "Each tag gives the strike’s SD on this week’s move: red under 0.5 SD or in the money, orange to 1 SD, grey past 1 SD." : "Each tag gives how far the strike is from today.")
-            + (p.room != nil ? " Green is the room between your nearest sold put and call, faint red past them." : "") + " After the dot, the days left to \(p.fridayWords)."
     }
 
     private func chart(_ p: PosPrice) -> some View {
@@ -170,6 +167,7 @@ struct PosPriceChart: View {
                 if p.coneOn && !n.itm {
                     Text(n.reach != nil ? "The cone reaches it \(n.day ?? "")" : "Outside the cone to \(n.fri)").sType(PT.t(13, 18), tabular: false).foregroundStyle(PC.mu)
                         .padding(.leading, 28).padding(.top, -6)
+                        .transition(.opacity)
                         .accessibilityHidden(true)
                 }
             }
@@ -315,8 +313,7 @@ struct PosPayoffView: View {
                 }
                 .padding(.top, 8)
             }
-            Text("P&L from today’s marks, the legs switched on in Every leg\(changed ? "" : " (income to start)"). Drag the date to draw the curve for any trading day until your sold legs expire; the scale holds so you see it change. Range widens or narrows the prices. Shaded: the priced move.")
-                .sType(PT.t(12, 16), tabular: false).foregroundStyle(PC.mu)
+            // No how-to note under the Greeks (Nik, 18 Nov 2026: "I don't need jargon on how to use the slider").
         }
     }
 

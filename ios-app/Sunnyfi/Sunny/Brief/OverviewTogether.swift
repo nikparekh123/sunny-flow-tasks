@@ -257,7 +257,8 @@ struct OverviewTogether: View {
         case "cs", "ps":
             let what = r["k"].string == "cs" ? "calls" : "puts"
             let pc = base > 0 ? Int((all / base * 100).rounded()) : 0
-            return unrealized ? "of \(k(base)) collected" : "\(Self.n0(n)) \(what) · \(who)\(base > 0 ? " · \(abs(pc))% \(pc < 0 ? "lost" : "captured")" : "")"
+            // "so far": kept out of what was collected since each leg was sold (the design's sample said "this week").
+            return unrealized ? "of \(k(base)) collected" : "\(Self.n0(n)) \(what) · \(who)\(base > 0 ? " · \(abs(pc))% \(pc < 0 ? "lost" : "captured") so far" : "")"
         case "sh": return unrealized ? "on \(k(base)) paid" : "\(Self.n0(n)) shares · \(who)"
         default:
             let c = r["hedgeCalls"].double ?? 0, p = r["hedgePuts"].double ?? 0

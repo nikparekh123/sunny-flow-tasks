@@ -82,6 +82,9 @@ struct PosIntel {
     let readOn: String
     let scale: PE.Scale
     var boxes: (iv: [Box], sd: [Box], gamma: [Box]?, tech: [Box]?, move: [Box]?, held: [Box]?)
+    /// Each lane's "updated" line from its own source (handoff 2026-11-18 §2.5): "s" the chain's time, "g" the gamma
+    /// run's day, "t" the technicals' close, "m" the last close.
+    var upd: [String: String] = [:]
 
     var sub: String { "\(long) · \(cd <= 0 ? "ends today" : cd == 1 ? "1 day" : "\(Int(cd)) days") · \(kind)" }
     func state(_ L: Double?) -> PE.LevelState { PE.levelState(L, day) }
@@ -150,6 +153,14 @@ struct PosIntel {
                           boxes: ([], [], nil, nil, nil, nil))
         me.alerts = me.alertsOf()
         me.boxes = me.makeBoxes(d)
+        let md = { (iso: String?) in iso.flatMap { $0.count >= 10 ? PosFmt.md(String($0.prefix(10))) : nil } }
+        if let c = d.chainAt, let at = SXClient.parseDate(c) {
+            let f = DateFormatter(); f.timeZone = MarketClock.ny; f.dateFormat = "MMM d · h:mm a"
+            me.upd["s"] = "updated " + f.string(from: at)
+        }
+        if let g = md(e.gamma?.day) { me.upd["g"] = "updated \(g) run" }
+        if let t = md(d.tech?.day) { me.upd["t"] = "updated \(t) close" }
+        if let c = md(d.closes?.last?.d) { me.upd["m"] = "updated \(c) close" }
         return me
     }
 

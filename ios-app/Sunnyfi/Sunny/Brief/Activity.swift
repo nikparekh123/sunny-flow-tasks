@@ -168,6 +168,9 @@ struct ActivityPage: View {
             .scrollIndicators(.hidden)
         }
         .background(SBackground().ignoresSafeArea())
+        // Per-screen loading (18 Nov 2026): Activity comes whole (bodies, a pickup's trades) only while the page is open.
+        .onAppear { HomeStore.need(.activity, true) }
+        .onDisappear { HomeStore.need(.activity, false) }
     }
 
     private func row(_ e: JSONValue) -> some View {

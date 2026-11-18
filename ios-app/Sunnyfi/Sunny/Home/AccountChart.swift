@@ -747,8 +747,9 @@ struct AccountChart: View {
             let day: Double? = m.c.openPl.flatMap { $0[safe: i] ?? nil }
             let o: Double? = lastLive ? (home.account.openPl ?? day) : day
             // Live: the receipt's own figure, this week's time value left (Nov 17); else the account's.
-            let wkTv = home.brief?["timeValue"]["week"]["tvLeft"].double
-            let tv = lastLive ? (wkTv ?? home.account.timeValueSold ?? m.c.timeValue[i] ?? 0) : (m.c.timeValue[i] ?? 0)
+            // Every sold leg, calls and puts, every expiry (Nik, 18 Nov 2026: not this week's): the server's timeValue.tvLeft.
+            let allTv = home.brief?["timeValue"]["tvLeft"].double
+            let tv = lastLive ? (allTv ?? home.account.timeValueSold ?? m.c.timeValue[i] ?? 0) : (m.c.timeValue[i] ?? 0)
             return [Stat(label: "Realized", value: r, color: S.lossInk(r)),
                     o.map { Stat(label: "Open P&L", value: $0, color: S.lossInk($0)) } ?? Stat(label: "Open P&L", text: "-"),
                     Stat(label: "Time value", value: tv, color: S.lossInk(tv))]

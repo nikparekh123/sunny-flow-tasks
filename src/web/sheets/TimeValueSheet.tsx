@@ -15,7 +15,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { useHome, type J } from '../lib/data';
 import { C, money, pct } from '../lib/format';
 import { useWeb } from '../lib/state';
-import { readyToRoll, strike, tvHedges, tvLeftTotal, tvLegs, type TvHedge, type TvLeg } from '../home/rail/model';
+import { readyToRoll, strike, tvHedges, tvLeftWeek, tvLegs, type TvHedge, type TvLeg } from '../home/rail/model';
 
 const MU = C.ink2, LN = '1px solid rgba(255,255,255,.08)', OR = '#F2A93B';
 /** The pills (dark): grey for time value still to come, red for what goes out or sits in the money. */
@@ -130,7 +130,7 @@ export default function TimeValueSheet() {
     // Every sold leg, grouped by expiry (Nik, 18 Nov 2026, option A: the same legs as Your book's Calls sold and Puts
     // sold); what needs you, what is left to earn by Friday and Net by Friday stay this week's.
     const all = tvLegs(p), legs = all.filter((l) => l.wk), hedges = tvHedges(p);
-    const left = tvLeftTotal(p) ?? 0;
+    const left = tvLeftWeek(p) ?? 0;   // Net by Friday stays this week's
     const hedgeWeek = p?.brief?.timeValue?.hedgeWeek != null ? Number(p.brief.timeValue.hedgeWeek) : sum(hedges, (h) => h.week);
     const ready = readyToRoll(legs), ok = legs.filter((l) => !l.ready);
     const inn = [...new Set(all.map((l) => l.ex))].sort().map((ex) => ({ ex, words: endsWords(ex), lines: [

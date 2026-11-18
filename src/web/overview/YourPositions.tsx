@@ -22,7 +22,7 @@ function sub(r: PosRow, isT: boolean): string {
     const head = `${plural(r.n, r.k === 'cs' ? 'call' : 'put', r.k === 'cs' ? 'calls' : 'puts')} · ${nm}`;
     if (!(r.base > 0)) return head;
     const f = r.all / r.base;
-    return `${head} · ${pct(Math.abs(f) * 100)} ${f < 0 ? 'lost' : 'captured'}`;
+    return `${head} · ${pct(Math.abs(f) * 100)} ${f < 0 ? 'lost' : 'captured'} so far`;   // kept since each leg was sold
   }
   if (!isT) return `on ${money(r.base)} paid`;
   if (r.k === 'sh') return `${plural(r.n, 'share', 'shares')} · ${nm}`;

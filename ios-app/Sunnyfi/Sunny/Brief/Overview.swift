@@ -20,6 +20,13 @@ struct OverviewScreen: View {
     @State private var slid = true
 
     var body: some View {
+        content
+            // Per-screen loading (18 Nov 2026): the pair of books comes with each update only while Overview is on show.
+            .onAppear { HomeStore.need(.together, true) }
+            .onDisappear { HomeStore.need(.together, false) }
+    }
+
+    private var content: some View {
         ZStack(alignment: .top) {
             SBackground()
             ScrollView {

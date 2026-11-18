@@ -174,12 +174,18 @@ export function tvHedges(p: J): TvHedge[] {
 }
 /** The one Time value figure (Nik, 17 Nov 2026): time value left in every sold leg still open, the receipt's "Coming
     in", the Home stat and the sentence all read it. Null when the payload has no time value block. */
+/** Time value left on every sold leg, calls and puts, every expiry (Nik, 18 Nov 2026: Home's Time value is all of
+    what was sold, not this week's). */
 export function tvLeftTotal(p: J): number | null {
   const tv = p?.brief?.timeValue;
   if (!tv) return null;
-  // This week's (the receipt's "to earn by Friday"), when the server sends it; else every sold leg.
-  if (tv.week?.tvLeft != null) return Number(tv.week.tvLeft);
   return tv.tvLeft != null ? Number(tv.tvLeft) : tvLegs(p).reduce((a, l) => a + l.tvLeft, 0);
+}
+/** This week's time value left (the receipt's "to earn by Friday" and Net by Friday); older servers: every leg. */
+export function tvLeftWeek(p: J): number | null {
+  const tv = p?.brief?.timeValue;
+  if (!tv) return null;
+  return tv.week?.tvLeft != null ? Number(tv.week.tvLeft) : tvLeftTotal(p);
 }
 /** Ready to roll (the server's rule: under $0.05 a share left, 90% captured, or in the money): in the money first
     (assignment risk), then the most captured. */
