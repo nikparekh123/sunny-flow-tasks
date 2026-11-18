@@ -53,7 +53,7 @@ const toolsFor = (owner: boolean) => TOOLS.filter((x) => owner || !x.owner).map(
 
 const SYSTEM = `You are the search in Sunny, Nik's options app. Nik runs an income book: deep in-the-money LEAPS calls on a
 few names, a weekly call sold against each LEAPS at the money, hedge calls bought to stay delta positive up to +1.5 SD by
-Thursday's close, insurance puts, and weekly puts sold only when the gates pass. Answer his question from his own data.
+Thursday's close, hedge puts, and weekly puts sold only when the gates pass. Answer his question from his own data.
 
 Reading:
 - Always read with the lookups first, then answer. Never answer from memory, and never say you need to look something
@@ -147,6 +147,11 @@ The shape: pick what fits, never more than the question needs.
   under its 74 calls, then LULU {o:1.0%} under the Ceiling." For the 50-day: how many are under it and the furthest.
   This is not "all my sold positions" or "what I bought": those stay rows. follow_ups such as "Show them as small
   charts", "Which names are under their 50-day?".
+- Share average, when he asks for his share averages or the average on a name (Show my share averages. What's my share
+  average on Nike? What do my Nike shares really cost?): read share_average (ticker when he names one). Then one "say" of
+  ONE sentence and {"share_avg": true}: Sunny draws the card. Nothing else. Lower is better. The sentence: "Nike's shares
+  now cost {o:$38.65} a share, down {g:$1.75} this week and $2.27 behind the price." For all: how many fell this week and
+  the one that moved most. A name with no shares has no share average: say so plainly, no card.
 - Performance, when he asks how his trades did over a month or the year, or which names made or lost the most (Show me
   my performance. How did I do in October? What have I made this year? Which names lost money this month? What was my
   best month?): read performance (month when he names one). Then one "say" of ONE sentence and {"performance": true}:
@@ -243,7 +248,7 @@ A panel's table is {"cols": ["NKE", "Peers", "Sector"], "rows": [{"label": "Divi
 Terms: captured % is how much of a sold option's premium is already earned. Walls are option strikes where dealers'
 gamma piles up: a Ceiling or Floor tends to hold, an Accelerator speeds a move through it, Unclear has no clear read.
 The flip is the price where dealer gamma turns from calming to amplifying. Net after hedges is premium sold, less what
-was paid to close options, less this week's share of hedge costs. Insurance puts are long puts; hedge calls are long
+was paid to close options, less this week's share of hedge costs. Hedge puts are long puts (never call them insurance or OTM); hedge calls are long
 calls that are not LEAPS. Delta figures are in shares unless a field says dollars. The value of calls (or puts) sold
 is the premium collected for them; what they would cost to buy back is what is left, and the difference is kept.`;
 
@@ -415,6 +420,10 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
       // Your book (block 29): a row per name, drawn on the phone; its source line is its own.
       const card = ran.filter((x) => x.ok && x.name === 'book').at(-1)?.card;
       if (card?.chart) parts.push({ type: 'book', ...card.chart, at: marketOpen() ? clock(new Date()) : `${lastClose()} close` });
+    } else if (p.share_avg) {
+      // Share average (round 157a): the phone draws the card(s) from its own payload (share_avg); one name or all.
+      const card = ran.filter((x) => x.ok && x.name === 'share_average').at(-1)?.card;
+      if (card && c.draws?.includes('shareAvg')) parts.push({ type: 'shareAvg', t: card.data?.ticker ?? null });
     } else if (p.performance) {
       // Performance (10 Nov 2026): the phone draws the old Home's card from its own payload, opened on the month asked.
       const card = ran.filter((x) => x.ok && x.name === 'performance').at(-1)?.card;
@@ -458,7 +467,7 @@ function build(f: Row, sl: Slots, ran: Ran[], c: Ctx, seen: Seen) {
   const recap = f.recap ? plain(S(f.recap) ?? '') : null;
   // The source line ends every answer, unless its last part is a panel with a source of its own.
   const last = parts.at(-1);
-  const source = ['panel', 'none', 'payoff', 'chart', 'book', 'whatif', 'tech', 'page', 'performance'].includes(last?.type) ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
+  const source = ['panel', 'none', 'payoff', 'chart', 'book', 'whatif', 'tech', 'page', 'performance', 'shareAvg'].includes(last?.type) ? null : sourceLine(f.source ?? 'sunny', ran, c, seen, webN);
   return { parts, source, follow_ups, recap, can_answer: f.can_answer !== false && !parts.some((x) => x.type === 'none'),
     bad, literal: lit.join(' \n '), webLiteral: webLit.join(' \n ') };
 }
@@ -516,7 +525,7 @@ function routeOf(id: string): string {
 
 /** The line a folded answer shows above its first sentence: the card it drew, or what it read. */
 function labelOf(parts: Row[], ran: Ran[]): string | null {
-  const p = parts.find((x) => ['payoff', 'chart', 'book', 'whatif', 'tech', 'page', 'performance'].includes(x.type));
+  const p = parts.find((x) => ['payoff', 'chart', 'book', 'whatif', 'tech', 'page', 'performance', 'shareAvg'].includes(x.type));
   if (p?.type === 'page') return `${p.t} · ${p.co} page`;
   if (p?.type === 'payoff') {
     const t = p.names?.[0]?.t;
@@ -527,6 +536,7 @@ function labelOf(parts: Row[], ran: Ran[]): string | null {
   if (p?.type === 'whatif') return `${p.t} · What if · Delta and Gamma`;
   if (p?.type === 'tech') return `${p.t} · Technicals`;
   if (p?.type === 'performance') return 'Performance';
+  if (p?.type === 'shareAvg') return p.t ? `${p.t} · Share average` : 'Share averages';
   const r = ran.find((x) => x.ok && x.card);
   if (!r) return null;
   const t = r.args.ticker ? String(r.args.ticker).toUpperCase() : '';
@@ -554,7 +564,7 @@ async function ask(question: string, thread: Row[], deep: boolean, c: Ctx, owner
     // Earlier questions in this thread, as plain text: "and for BABA?" carries on from them.
     ...thread.flatMap((x) => [{ role: 'user', content: String(x.q ?? '') }, { role: 'assistant', content: String(x.a ?? '') }]),
     { role: 'user', content: `Today is ${c.today}, ${clock(now)} New York time; the market is ${marketOpen(now) ? 'open' : 'closed'}. ` +
-      `Names in the book: ${names}. Watchlist: ${(c.p.watchlist ?? []).map((w: Row) => w.ticker).join(', ') || 'none'}.\n\n` +
+      `Names in the book: ${names}.\n\n` +
       (owner ? '' : 'This login views the book only: it has no To do, so never say what to buy, sell, roll or hedge.\n\n') +
       `${deep ? DEEP + '\n\n' : ''}${spoken ? SPOKEN + '\n\n' : ''}Question: ${question}` +
       (aid && !deep ? `\n(Asked from a tile or a name under the last answer, answer id ${aid}: this is ${routeOf(aid)}.)` : '') },
@@ -762,6 +772,9 @@ async function suggest(c: Ctx, owner: boolean): Promise<Row[]> {
   const add = (q: string, why: string, t?: string) => { if (out.length < 6 && !out.some((x) => x.q === q)) { out.push({ q, why }); if (t) seen.add(t); } };
   // To do and the rolls are an owner's (31 Oct 2026); a viewer's plan is empty, so no roll is suggested either.
   // No To do suggestion (11 Nov 2026).
+  // Share average first (handoff 2026-11-18, round 157a), when the book holds shares: the biggest move this week.
+  const sa = ((c.p.share_avg ?? []) as Row[]).filter((x) => Math.abs(Number(x.wk)) >= 0.005).sort((a, b) => Math.abs(b.wk) - Math.abs(a.wk));
+  if ((c.p.share_avg ?? []).length) add('Show my share averages', sa[0] ? `${sa[0].t} ${sa[0].wk < 0 ? 'fell' : 'rose'} $${Math.abs(sa[0].wk).toFixed(2)} a share this week` : 'What your shares really cost now');
   const plan = (c.p.plan ?? {}) as Record<string, Row>, mineSet = new Set(bookNames(c));
   const short = Object.entries(plan).map(([t, p]) => ({ t, s: p.story })).filter((x) => x.s && !x.s.earnings && x.s.need > 0)
     .sort((a, b) => b.s.need - a.s.need).slice(0, 2);
@@ -791,7 +804,7 @@ const SAID: Record<string, string[]> = { BABA: ['Alibaba'], FIS: ['Fidelity Nati
 function hints(c: Ctx): string[] {
   const tickers = [...bookNames(c), ...((c.p.watchlist ?? []) as Row[]).map((w) => String(w.ticker)), 'SPY', 'QQQ', 'IWM'];
   return [...new Set([...tickers, ...tickers.flatMap((t) => SAID[t] ?? []), 'LEAPS', 'delta', 'gamma', 'theta', 'Ceiling', 'Floor',
-    'Accelerator', 'flip', 'walls', 'To do', 'hedge calls', 'insurance puts', 'roll', 'strike', 'premium', 'time value', 'fair value',
+    'Accelerator', 'flip', 'walls', 'To do', 'hedge calls', 'hedge puts', 'roll', 'strike', 'premium', 'time value', 'fair value',
     'Investing Pro', 'earnings', 'expiry', 'standard deviation'])];
 }
 

@@ -316,7 +316,7 @@ const chipOf = (g: Kind, ls: PLeg[]) => {
   const ks = [...new Set(ls.map((l) => l.k))].sort((a, b) => a - b).map(kf).join(' · ');
   return g === 'sc' ? `Sold ${ks} calls` : g === 'sp' ? `Sold ${ks} puts` : g === 'lp' ? `LEAPS ${ks}` : g === 'hc' ? `Hedge ${ks}` : `Insurance ${ks}`;
 };
-const LEG_WORD: Record<Kind, string> = { sc: 'calls sold', sp: 'puts sold', lp: 'LEAPS', hc: 'hedge calls', ip: 'insurance puts' };
+const LEG_WORD: Record<Kind, string> = { sc: 'calls sold', sp: 'puts sold', lp: 'LEAPS', hc: 'hedge calls', ip: 'hedge puts' };
 /** P&L at a price by Friday: from today, or from the sale. */
 function pnlAt(L: PLeg[], S: number, d0: number, fromSale = false): number {
   return L.reduce((s, l) => s + l.n * 100 * (bs(S, l.k, l.T - d0, l.v, l.cp) - (fromSale ? l.paid : l.now)), 0);
@@ -536,7 +536,7 @@ async function priceChart(c: Ctx, t: string, range: string, mark: string | null)
   const ahead = open.reduce((s, w) => s + Math.max(0, w.close - Math.max(w.open, now)), 0);
   const cap = sold.length && col > 0 ? Math.round((1 - left / col) * 100) : null, pace = Math.round((1 - Math.sqrt(ahead / tot)) * 100);
   const tag = cap == null ? null : cap >= pace + 5 ? 'ahead of pace' : cap <= pace - 5 ? 'behind pace' : 'on pace';
-  const word = { leaps: 'LEAPS', hedge: 'Hedge', insurance: 'Insurance' } as const;
+  const word = { leaps: 'LEAPS', hedge: 'Hedge call', insurance: 'Hedge put' } as const;   // never OTM or Insurance (18 Nov 2026)
   const bought = [...new Map(legs.filter((l) => l.side === 'bought').map((l) => [`${kindOf(l)}${l.strike}`,
     { g: word[kindOf(l) as keyof typeof word], k: Number(l.strike), n: Number(l.n) }])).values()];
   const leaps = bought.filter((l) => l.g === 'LEAPS').sort((a, b) => b.n - a.n)[0];
@@ -918,13 +918,13 @@ async function yourName(c: Ctx, t: string, ch: Row) {
   const strikes = (ls: Row[]) => [...new Set(ls.map((l) => Number(l.strike)))].sort((a, b) => a - b);
   const sold = (type: string, label: string) => {
     const ls = legs.filter((l) => l.side === 'sold' && l.type === type);
-    if (!ls.length) return { k: type === 'call' ? 'cs' : 'ps', l: label, v: 'None', d: [] as string[], s: null, tone: null };
+    if (!ls.length) return { k: type === 'call' ? 'cs' : 'ps', l: label, v: '-', d: [] as string[], s: null, tone: null };
     const ks = strikes(ls), exps = [...new Set(ls.map((l) => String(l.expiry)))].sort(), avg = sum(ls, (l) => Number(l.avg ?? 0));
     const mark = sum(ls, (l) => Number(l.mark ?? l.avg ?? 0)), kept = avg > 0 ? Math.round((1 - mark / avg) * 100) : null;
     return { k: type === 'call' ? 'cs' : 'ps', l: label, v: ks.length === 1 ? `${nOf(ls)} × ${kf(ks[0])}` : `${nOf(ls)} ${type}s`,
       d: [`${exps.map(monDay).join(', ')} · sold at $${avg.toFixed(2)}`,
         ...(ks.length > 1 ? [ks.map((k) => `${nOf(ls.filter((l) => Number(l.strike) === k))} × ${kf(k)}`).join(', ')] : [])],
-      s: kept == null ? null : kept >= 0 ? `${kept}% kept` : `${-kept}% lost`, tone: kept == null ? null : kept >= 0 ? 'up' : 'down' };
+      s: kept == null ? null : kept >= 0 ? `${kept}% captured` : `${-kept}% lost`, tone: kept == null ? null : kept >= 0 ? 'up' : 'down' };
   };
   const leaps = legs.filter((l) => l.side === 'bought' && kindOf(l) === 'leaps'), hedge = legs.filter((l) => l.side === 'bought' && kindOf(l) === 'hedge');
   const ins = legs.filter((l) => l.side === 'bought' && kindOf(l) === 'insurance');
@@ -935,11 +935,11 @@ async function yourName(c: Ctx, t: string, ch: Row) {
   const cb = leaps.length ? { k: 'cb', l: 'Calls bought', v: lk.length === 1 ? `${nOf(leaps)} × ${kf(lk[0])} LEAPS` : `${nOf(leaps)} LEAPS`,
     d: [`${le.map(yShort).join(', ')} · Δ ${sum(leaps, (l) => Number(l.delta ?? 0)).toFixed(2)}`, ...hedgeLines], s: null, tone: null }
     : hedge.length ? { k: 'cb', l: 'Calls bought', v: `${nOf(hedge)} hedge calls`, d: hedgeLines.map((x) => x.slice(2)), s: null, tone: null }
-    : { k: 'cb', l: 'Calls bought', v: 'None', d: [], s: null, tone: null };
+    : { k: 'cb', l: 'Calls bought', v: '-', d: [], s: null, tone: null };
   const ik = strikes(ins), ie = [...new Set(ins.map((l) => String(l.expiry)))].sort();
   const pb = ins.length ? { k: 'pb', l: 'Puts bought', v: ik.length === 1 ? `${nOf(ins)} × ${kf(ik[0])}` : `${nOf(ins)} puts`,
-    d: [`${ie.map(monDay).join(', ')} · insurance`], s: `${Math.abs(Math.round((1 - ik[0] / spot) * 100))}% ${ik[0] > spot ? 'above' : 'below'} today`, tone: 'muted' }
-    : { k: 'pb', l: 'Puts bought', v: 'None', d: [], s: null, tone: null };
+    d: [`${ie.map(monDay).join(', ')} · hedge puts`], s: `${Math.abs(Math.round((1 - ik[0] / spot) * 100))}% ${ik[0] > spot ? 'above' : 'below'} today`, tone: 'muted' }
+    : { k: 'pb', l: 'Puts bought', v: '-', d: [], s: null, tone: null };
   const hold = { tiles: [sold('call', 'Calls sold'), sold('put', 'Puts sold'), cb, pb], right: 'Calls left, puts right',
     payoff: po?.chart ? { type: 'payoff', ...po.chart } : null };
 
@@ -1078,9 +1078,9 @@ export const MENU: Row[] = [
   { name: 'sold', shows: 'Sold options with captured %, days left, how far in the money, and theta: what time decay earns a day in dollars; one name or all', args: { ...TICKER,
       filter: { type: 'string', enum: ['all', 'in_the_money', 'captured'], description: 'in_the_money: only those in the money; captured: only those at or past min_captured' },
       min_captured: { type: 'number', description: 'Captured % threshold for filter captured, default 80' } } },
-  { name: 'bought', shows: 'Bought options (LEAPS, hedge calls, insurance puts) with delta, value, time value, days left, and theta: what time decay costs a day in dollars (negative); one name or all', args: { ...TICKER,
+  { name: 'bought', shows: 'Bought options (LEAPS, hedge calls, hedge puts) with delta, value, time value, days left, and theta: what time decay costs a day in dollars (negative); one name or all', args: { ...TICKER,
       kind: { type: 'string', enum: ['all', 'leaps', 'hedge', 'insurance'] } } },
-  { name: 'todo', shows: "This week's orders: the call sale, hedge calls, insurance puts, weekly puts; one name or all", args: TICKER },
+  { name: 'todo', shows: "This week's orders: the call sale, hedge calls, hedge puts, weekly puts; one name or all", args: TICKER },
   { name: 'delta_gamma', shows: 'Delta and the P&L of a move: one name from -15% to +15% (the What if card: net, bought and sold delta in shares, thin or short, and the To do hedge), or the whole book from -10% to +10%', args: { ...TICKER,
       move_pct: { type: 'number', description: 'The move the question names, for example -10 for a 10% drop; 10 when it names none' } } },
   { name: 'gamma', shows: "Gamma ladder for one name: walls with the tape's labels and confidence, the flip, the regime, the priced move. Read this first for walls; it covers the book names and TSLA", args: { ...TICKER,
@@ -1088,7 +1088,7 @@ export const MENU: Row[] = [
   { name: 'walls_live', shows: 'Walls worked out now from live option prices, for any ticker and expiry (open interest only, no tape labels). Only when gamma has no view for that ticker or expiry', args: { ...TICKER,
       expiry: { type: 'string', description: 'An expiry date like 2027-01-15; leave out for the next 45 days' } }, required: ['ticker'] },
   { name: 'roll', shows: "Rolling one name's calls to next Friday, as delta in shares: the calls sold now and what they could be at +1.5 SD by Thursday, what is bought, what insurance takes away, the net, the delta still needed, and each month's call walls (Ceiling, Accelerator) with what one call adds and how many would cover it. Read this for rolling, or how much delta a name needs", args: TICKER, required: ['ticker'] },
-  { name: 'payoff', shows: "Payoff by Friday: what each price at this week's expiry adds or costs, every leg re-priced at its own IV: 1 SD down, flat and 1 SD up, with what each leg (calls sold, LEAPS, hedge calls, insurance puts) carries, the breakevens and the walls. legs 'sold' for what is sold alone, from the sale. No ticker for the whole book, every name moving the same %", args: { ...TICKER,
+  { name: 'payoff', shows: "Payoff by Friday: what each price at this week's expiry adds or costs, every leg re-priced at its own IV: 1 SD down, flat and 1 SD up, with what each leg (calls sold, LEAPS, hedge calls, hedge puts) carries, the breakevens and the walls. legs 'sold' for what is sold alone, from the sale. No ticker for the whole book, every name moving the same %", args: { ...TICKER,
       legs: { type: 'string', enum: ['all', 'sold'], description: "'sold' for what is sold alone (how are my calls doing?); default all" } } },
   { name: 'chart', shows: "Price chart for a name in the book over a Week, Month, Quarter or Year: the move over each range, this week's sold strikes with captured % and pace, this week's Ceiling and Floor, the 50 and 200-day averages and how far the price sits from them, RSI, the last cross of the 50-day this quarter (and of the 200-day this year), the 52-week high and low from closes, how far the LEAPS are in the money, and the analysts' target and fair value where research is saved", args: { ...TICKER,
       range: { type: 'string', enum: ['w', 'm', 'q', 'y'], description: 'The range the question names: w week (the default), m month, q quarter, y year' },
@@ -1100,13 +1100,14 @@ export const MENU: Row[] = [
   { name: 'book', shows: "Your book: every name at once, each with its price, its move over the range and the nearest thing that needs him (Week: the closest sold strike or the Ceiling; Month and Quarter: how far from the 50-day; Year: how far under the 52-week high), in that order", args: {
       range: { type: 'string', enum: ['w', 'm', 'q', 'y'], description: 'w week (the default), m month (under their 50-day), q quarter, y year' },
       view: { type: 'string', enum: ['list', 'grid'], description: "'grid' only when he asks for charts (small charts); default list" } } },
-  { name: 'hedges', shows: 'Hedge calls and insurance puts: held, needed, strike, cost; one name or a list of the names that need some', args: TICKER },
-  { name: 'hedge_rungs', shows: 'Every hedge call and insurance put with days left; rolls are due at 45 days left', args: {} },
+  { name: 'hedges', shows: 'Hedge calls and hedge puts: held, needed, strike, cost; one name or a list of the names that need some', args: TICKER },
+  { name: 'hedge_rungs', shows: 'Every hedge call and hedge put with days left; rolls are due at 45 days left', args: {} },
   { name: 'put_gates', shows: 'Whether weekly puts can sell: a Floor below and no Accelerator between, and where the price sits against its 50-day (shown only: since 11 Nov 2026 puts never pause below the 50-day); one name or all', args: TICKER },
   { name: 'yield', shows: 'Yield: premium sold, closing cost, hedges and net on the LEAPS base, for a week or a month', args: {
       period: { type: 'string', enum: ['week', 'month'] },
       at: { type: 'string', description: 'A date in the week, or a month like 2026-10; default now' } } },
   { name: 'payback', shows: 'Payback: what the book has made against what the LEAPS cost, and the pace', args: {} },
+  { name: 'share_average', shows: "Share average for each name holding shares: what the shares really cost now, a share, after every closed trade on the ticker since the book started (calls sold, puts sold, calls bought, puts bought, shares sold; a profit lowers it), against the average paid and the price, this week's change, and what moved it a share by kind. Lower is better. One name or all; a name with no shares has none", args: TICKER },
   { name: 'performance', shows: "Performance: realized P&L (closed trades only) by month since the book's start, by name and by kind (calls sold, puts sold, calls bought, puts bought, shares) for one month, the year so far and the best and worst months; and open P&L by name. Read this for how he did in a month or this year, his best month, or which names made or lost the most", args: {
       month: { type: 'string', description: "'YYYY-MM' when he names a month (October is 2026-10); none for this month" } } },
   { name: 'events', shows: 'Earnings and market holidays coming up; one name or all', args: { ...TICKER,
@@ -1222,7 +1223,7 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
       const bought = [s.leaps, s.hedge_calls].filter(Boolean) as Row[];
       const sc = s.sold_calls;
       return card('roll', tagOf(k, 'Roll'), sunny(c), {
-        units: 'Delta in shares. Negative takes delta away (calls sold, insurance puts). delta_now is today at the price; ' +
+        units: 'Delta in shares. Negative takes delta away (calls sold, hedge puts). delta_now is today at the price; ' +
           'delta_at_target is at the target price as of Thursday\'s close.',
         ticker: k, price: s.spot, rolls_to_expiry: s.week, thursday: s.by, earnings_week: s.earnings,
         target: { price: s.target.px, sd: s.target.sd, move_pct: s.target.pct,
@@ -1303,6 +1304,16 @@ export async function lookup(name: string, a: Row, c: Ctx, owner: boolean): Prom
       const x = c.p.payback ?? {};
       return card('payback', 'Payback', sunny(c), { leaps_base: x.base, made: x.made, settled: x.settled, open: x.open, closing: x.closing,
         hedges: x.hedges, pace_since_start_per_week: x.pace_start, pace_last_4_weeks_per_week: x.pace_recent, leaps_value: x.leaps_value });
+    }
+    case 'share_average': {
+      /* sunny-home share_avg (handoff 2026-11-18, round 157a): new average = (shares × paid − realized) ÷ shares. */
+      const all = (c.p.share_avg ?? []) as Row[], rows = t ? all.filter((x) => x.t === t) : all;
+      const kinds = ['calls_sold', 'puts_sold', 'calls_bought', 'puts_bought', 'shares_sold'];
+      return card('share_average', 'Share average', sunny(c), { ticker: t ?? null, rule: 'new average = (shares × average paid − realized since the book started) ÷ shares; lower is better; a step up is a loss',
+        names: rows.map((x) => ({ ticker: x.t, shares: x.sh, average_paid: x.paid, new_average: x.w?.[1], price: x.px, last_friday_average: x.w?.[0],
+          this_week_change: x.wk, ahead_of_price_by: x.px - (x.w?.[1] ?? 0),
+          moved_it_a_share: Object.fromEntries(kinds.map((k, i) => [k, x.s2?.[i] ?? 0])) })),
+        ...(t && !rows.length ? { none: `${t} holds no shares, so it has no share average` } : {}) });
     }
     case 'performance': {
       /* The Performance card's figures (sunny-home block 20, payload.performance: [month, ticker, kind, $] rows). A month

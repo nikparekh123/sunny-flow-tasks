@@ -518,6 +518,8 @@ Deno.serve(async (req) => {
       exDiv: exDiv ? String(exDiv.ex_date) : null, divAmt: exDiv ? Number(exDiv.cash_amount) : null, exDivEst };
     return json(200, {
       ok: true, v: 1, build: BUILD, source: useTheta ? 'theta' : 'polygon', ms: Date.now() - t0,
+      // When the chains were read (each request reads them live): the IV and SD lanes' "updated" time (handoff 2026-11-18 A5).
+      chain_at: new Date(t0).toISOString(),
       t, name: shortName, strategy, S: +S.toFixed(4), prev: +prev.toFixed(4), move: prev > 0 ? +(S / prev - 1).toFixed(5) : 0,
       open: mins >= 9 * 60 + 30 && mins < 16 * 60, today,
       // The 20% day opens the calls to ATM, a 2 SD drop in an uptrend the puts to one strike in the money.

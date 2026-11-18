@@ -64,7 +64,7 @@ Deno.test('Your position · pre · Sunny', () => {
     ['$624', '$5.9K', '$13.7K', '$379K', '$1.2M', '$2K', '$4.2K', '$999', '$1K', '$99.9K', '$100K', '$999K', '$1M']);
   assertEquals(yp.stats.map((s) => s.v), ['$40.2K', '$3.8K', '$52K']);
   assertEquals(yp.stats.map((s) => s.c), ['green', 'green', 'red']);
-  assertEquals(yp.cover, 'Insurance puts cover 4,000 of your 15,000 shares, 27%. Shares have no floor below that.');
+  assertEquals(yp.cover, 'Hedge puts cover 4,000 of your 15,000 shares, 27%. Shares have no floor below that.');
   assertEquals(yp.count, '1 past its best, 2 thin at a priced move');
   assertEquals(yp.rows.map((r) => r.id), ['NKE', 'BABA', 'NFLX', 'FIS', 'PEP', 'UBER', 'LULU']);
   assertEquals(row(yp, 'NKE').right, 'Short 917 Δ');
@@ -88,7 +88,7 @@ Deno.test('Your position · open · Sunny and Nicolay', () => {
   assertEquals(a.stats.map((s) => s.v), ['$39.9K', '$3.4K', '$52.3K']);
   assertEquals(fK(b.dollarDelta), '$2.8K');
   assertEquals(b.stats.map((s) => s.v), ['$12K', '$863', '$15.4K']);
-  assertEquals(b.cover, 'Insurance puts cover 1,200 of your 5,300 shares, 23%. Shares have no floor below that.');
+  assertEquals(b.cover, 'Hedge puts cover 1,200 of your 5,300 shares, 23%. Shares have no floor below that.');
   assertEquals(b.count, '2 past their best at a priced move');
   assertEquals(b.rows.slice(0, 2).map((r) => r.id), ['NKE', 'BABA']);
   assertEquals(row(b, 'NKE').right, 'Short 262 Δ');

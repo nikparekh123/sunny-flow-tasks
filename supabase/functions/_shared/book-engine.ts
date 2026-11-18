@@ -190,6 +190,8 @@ export interface AssignIn { t: string; exLabel: string }
 export interface PositionRow {
   id: string; name: string; line: string; lineColor: string; right: string; rightColor: string; at: string; st: number;
   fp: number | null; n: number; lg: number; frac: number; sd: number;
+  /** Net delta by Friday from today to three priced moves up, 13 points (the By name small line). */
+  curve?: number[];
 }
 export interface YourPosition {
   subtitle: string; sentence: Span[]; grid: number[]; friday: number[]; today: number[]; shortAt: number | null;
@@ -230,6 +232,9 @@ export function yourPosition(names: NameBook[], clk: PositionClock, name: (t: st
       lineColor: fp != null ? (short ? 'red' : 'orange') : 'secondary',
       right: short ? 'Short ' + fn(r.n) + ' Δ' : thin ? 'Thin' : 'Long ' + fn(r.n) + ' Δ',
       rightColor: short ? 'red' : thin ? 'orange' : 'ink', at: 'at ↑' + f1(x.sd) + '%',
+      /* The row's small line (handoff 2026-11-18, Nov 17 "Your position · By name"): net delta in shares by Friday as
+         the price rises from today to three priced moves, 13 points; the priced move is point 4. */
+      curve: Array.from({ length: 13 }, (_, i) => Math.round(x.at(x.sd * 3 * i / 12, th).n)),
     };
   }).sort((a, b) => b.st - a.st || a.frac - b.frac);
 
@@ -248,7 +253,7 @@ export function yourPosition(names: NameBook[], clk: PositionClock, name: (t: st
   return {
     subtitle: clk.sub, sentence: story, grid: M, friday: F.map((r) => Math.round(r.p)), today: Nw.map((r) => Math.round(r.p)), shortAt: fm,
     stats: [{ v: fK(up5), l: 'if up 5%', c: col(up5) }, { v: fK(pv), l: clk.nextFriday ? 'flat to next Fri' : 'flat to Friday', c: col(pv) }, { v: fK(dn5), l: 'if down 5%', c: col(dn5) }],
-    cover: cover.shares > 0 ? 'Insurance puts cover ' + fn(cover.covered) + ' of your ' + fn(cover.shares) + ' shares, ' + coverPct + '%. Shares have no floor below that.' : '',
+    cover: cover.shares > 0 ? 'Hedge puts cover ' + fn(cover.covered) + ' of your ' + fn(cover.shares) + ' shares, ' + coverPct + '%. Shares have no floor below that.' : '',
     assign: assign.length ? 'Ex-dividend this week: ' + assign.map((a) => name(a.t) + ' ' + a.exLabel).join(', ') + '. Calls in the money with less time value than the dividend can be assigned the day before.' : null,
     count: nS || nT ? [nS ? nS + (nS === 1 ? ' past its best' : ' past their best') : '', nT ? nT + ' thin' : ''].filter(Boolean).join(', ') + ' at a priced move' : 'Every name long at a priced move',
     countColor: nS ? 'red' : nT ? 'orange' : 'secondary', rows,

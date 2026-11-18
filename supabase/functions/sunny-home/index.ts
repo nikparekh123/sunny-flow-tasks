@@ -27,8 +27,10 @@ import { buildDoc, type NameDay } from './doc.ts';
 import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
+import { buildTogether, type Side, type SideEvent, type SideLeg } from './together.ts';
+import { type ActEvent, type ActName, activityEvents, levelsOf } from './activity.ts';
 import { bsDelta, bsValue, fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-18.3';
+const BUILD = '2026-11-18.13';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -309,7 +311,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   const [trades, greeks, quotes, market, acctDays, cal, earn, seasons, closes, runs, sells, lots, savedReports, macro,
          openChecks, divs, posAll, lmd, chainRows, savedHistory, divPast, upQuotes, rungQuotes] = await Promise.all([
     page(`option_trades?voided_at=is.null&book_id=eq.${bookId}&order=id.asc&select=id,ticker,trade_date,action,option_type,`
-      + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl,realized_pl_source,note'),
+      + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl,realized_pl_source,note,created_at'),
     /* One row per leg ever marked: grows with every trade, so paged. */
     page('option_greeks_live?order=option_trade_id.asc&select=option_trade_id,last_mark,iv,delta,gamma,theta,vega,underlying,captured_at'),
     get('ticker_quotes_live?select=ticker,spot,day_change_pct,captured_at'),
@@ -340,7 +342,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       + '&order=ticker.asc,expiry.asc,side.asc,strike.asc'),
     page(`account_history?book_id=eq.${bookId}&order=day.asc&select=day,nav,cash,margin,interest_cum,commission_cum,dividends_cum,`
       + 'realized_cum,unrealized,open_pl,time_value,capital_long,shares_value,groups'),
-    get(`dividends?pay_date=gt.${BOOK_START}&pay_date=lte.${today}&select=ticker,ex_date,pay_date&order=pay_date.asc,ticker.asc`),
+    get(`dividends?pay_date=gt.${BOOK_START}&pay_date=lte.${today}&select=ticker,ex_date,pay_date,cash_amount&order=pay_date.asc,ticker.asc`),
     /* The 3- and 12-month upside calls the Planner sizes (chain-next, 15 min). */
     get('option_chain_upside?select=ticker,tenor,expiry,strike,mid,delta,iv,spot&order=ticker.asc,tenor.asc,strike.asc'),
     /* The hedge rungs' calls: every monthly 40 to 185 days out, 1x to 1.8x the price (chain-next, 15 min), and since
@@ -642,6 +644,44 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   // ── Account: IBKR's last close, moved by today's prices and fills ──
   const anchor = acctDays.find((d) => Number(d.accounts) >= accountsN) ?? null;
   let account: Row = { ok: false, why: 'no IBKR daily statement yet' };
+  /* ⚠ YOUR BOOK (handoff 2026-11-18 §2.1 and §3.3; Nik, 18 Nov 2026). Each name's five parts in Nik's groups of
+     11 Nov (he kept them over the handoff's LEAPS-under-Long): Long = sh (shares); Hedge = hc (every call bought,
+     LEAPS too) + ip (every put bought); Income = sc (calls sold) + sp (puts sold).
+     today: the very pieces Home's today is made of (A1): each IBKR position's mark now against IBKR's mark at its
+     last close, and each fill since (its cash and what it holds now), so the parts add up to Home's today to the
+     cent. On a weekend or a holiday Home's today is the last session's change in IBKR's value; that session is split
+     the same way (position values at both closes, the day's trade cash) and what is left, the day's interest and
+     fees, is `other` (37 dollars on book S, 17 Nov 2026).
+     value, all: what is held now. Shares at the price against IBKR's cost basis; a leg bought at its mark against
+     IBKR's average cost (A2); a leg sold reads what was collected, and all = collected less the cost to close it.
+     tbase / abase: what today's and all-time percentages divide by (yesterday's value, or the premium collected for
+     what was sold; the cost for what is held), so a group's % is its parts' sums divided. */
+  type PKey = 'sh' | 'hc' | 'ip' | 'sc' | 'sp';
+  type Part = { value: number; today: number; tbase: number; all: number; abase: number; held: boolean; tv: number };
+  const partsBy = new Map<string, Map<PKey, Part>>();
+  const partOf = (t: string, k: PKey): Part => {
+    const m = partsBy.get(t) ?? partsBy.set(t, new Map()).get(t)!;
+    return m.get(k) ?? m.set(k, { value: 0, today: 0, tbase: 0, all: 0, abase: 0, held: false, tv: 0 }).get(k)!;
+  };
+  const posKey = (p: Row): PKey => p.asset_category === 'STK' ? 'sh'
+    : Number(p.position) < 0 ? (p.put_call === 'C' ? 'sc' : 'sp') : (p.put_call === 'C' ? 'hc' : 'ip');
+  const tradeKey = (t: Row): PKey => t.direction === 'short' ? (t.option_type === 'call' ? 'sc' : 'sp')
+    : (t.option_type === 'call' ? 'hc' : 'ip');
+  const posTicker = (p: Row) => String(p.asset_category === 'STK' ? p.symbol : p.underlying).toUpperCase();
+  let partsOther = 0;
+  /* The same figures leg by leg (the Overview's rows open to them): one entry per contract and side, shares one a name. */
+  const MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const exLabel = (ex: string) => { const [y, m, d] = ex.split('-').map(Number);
+    return (Date.parse(ex) - Date.parse(today)) / 864e5 > 183 ? `${MONS[m - 1]} ’${String(y).slice(2)}` : `${MONS[m - 1]} ${d}`; };
+  const legParts = new Map<string, SideLeg>();
+  const legOf = (t: string, k: PKey, strike: number | null, ex: string | null): SideLeg => {
+    const key = k === 'sh' ? `${t}|sh` : `${t}|${k}|${strike}|${ex}`;
+    const kind = k === 'sc' || k === 'hc' ? 'calls' : 'puts';
+    return legParts.get(key) ?? legParts.set(key, { key, t, k, label: k === 'sh' ? 'shares' : `${Number(strike)} ${kind} · ${exLabel(String(ex))}`,
+      ex: k === 'sh' ? null : String(ex), n: 0, today: 0, all: 0, value: 0, base: 0 }).get(key)!;
+  };
+  const posLeg = (p: Row) => p.asset_category === 'STK' ? legOf(posTicker(p), 'sh', null, null) : legOf(posTicker(p), posKey(p), Number(p.strike), String(p.expiry));
+  const tradeLeg = (t: Row) => legOf(String(t.ticker).toUpperCase(), tradeKey(t), Number(t.strike), String(t.expiry));
   if (anchor) {
     const D = String(anchor.report_date);
     const posD = posAll.filter((p) => String(p.report_date) === D);
@@ -659,6 +699,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       if (nowMark == null) { unpriced++; nowMark = was; }
       moveHeld += q * m * (nowMark - was);
       mvNow += q * m * nowMark;
+      partOf(posTicker(p), posKey(p)).today += q * m * (nowMark - was);
+      posLeg(p).today += q * m * (nowMark - was);
     }
     /* Fills since that close: their cash, plus what they hold now at the mark. */
     let fills = 0, cashIn = 0, commToday = 0, nFills = 0;
@@ -672,6 +714,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const mk = String(t.expiry) < today ? 0 : (markOf.get(k)?.mark ?? Number(t.premium));
       fills += cash + qty * 100 * mk; cashIn += cash; mvNow += qty * 100 * mk;
       commToday += Number(t.commission ?? 0); nFills++;
+      partOf(String(t.ticker).toUpperCase(), tradeKey(t)).today += cash + qty * 100 * mk;
+      tradeLeg(t).today += cash + qty * 100 * mk;
     }
     const navD = Number(anchor.nav);
     const value = navD + moveHeld + fills;
@@ -682,7 +726,34 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     let base = navD, baseDate = D, stale = false;
     if (!tradingToday) {
       const before = acctDays.find((d) => String(d.report_date) < D && Number(d.accounts) >= accountsN);
-      if (before) { base = Number(before.nav); baseDate = String(before.report_date); }
+      if (before) {
+        base = Number(before.nav); baseDate = String(before.report_date);
+        /* Your book on a day off: the last session (before -> D) by part, then the rest (interest, fees). */
+        const B = baseDate;
+        let split = 0;
+        for (const p of posAll) {
+          const d = String(p.report_date); if (d !== D && d !== B) continue;
+          const v = (d === D ? 1 : -1) * Number(p.position_value ?? Number(p.position) * Number(p.multiplier ?? 1) * Number(p.mark_price));
+          partOf(posTicker(p), posKey(p)).today += v; posLeg(p).today += v; split += v;
+        }
+        for (const t of trades) {
+          const d = String(t.trade_date); if (!(d > B && d <= D)) continue;
+          const sells = (t.direction === 'short') === (t.action === 'open');
+          const cash = t.net_cash != null ? Number(t.net_cash) : (sells ? 1 : -1) * Number(t.premium) * Number(t.contracts) * 100;
+          partOf(String(t.ticker).toUpperCase(), tradeKey(t)).today += cash; tradeLeg(t).today += cash; split += cash;
+        }
+        for (const l of lots) {
+          const d = String(l.acquired_date); if (!(d > B && d <= D)) continue;
+          const cash = -Number(l.qty_original) * Number(l.cost_per_share);
+          partOf(String(l.ticker).toUpperCase(), 'sh').today += cash; legOf(String(l.ticker).toUpperCase(), 'sh', null, null).today += cash; split += cash;
+        }
+        for (const x of sells) {
+          const d = String(x.trade_date); if (!(d > B && d <= D)) continue;
+          const cash = Number(x.quantity) * Number(x.price);
+          partOf(String(x.ticker).toUpperCase(), 'sh').today += cash; legOf(String(x.ticker).toUpperCase(), 'sh', null, null).today += cash; split += cash;
+        }
+        partsOther = navD - base - split;
+      }
     } else if (D !== prevClose) stale = true;
     const sum = (from: string, f: string) => acctDays
       .filter((d) => String(d.report_date) >= from && String(d.report_date) <= D)
@@ -747,7 +818,58 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       ibkr_close: { date: D, value: r2(navD), accounts: Number(anchor.accounts) },
       fills_since_close: nFills, unpriced_positions: unpriced,
     };
+    /* Your book, what is held now: shares from IBKR's last positions, legs from the ledger (today's fills in). */
+    for (const p of posD) {
+      if (p.asset_category !== 'STK' || !(Number(p.position) > 0)) continue;
+      const t = posTicker(p), q = Number(p.position), px = spotOf.get(t) ?? Number(p.mark_price), cost = Number(p.cost_basis_money ?? 0);
+      const x = partOf(t, 'sh');
+      x.value += q * px; x.abase += cost; x.all += q * px - cost; x.held = true;
+      const y = legOf(t, 'sh', null, null);
+      y.n += q; y.value += q * px; y.base += cost; y.all += q * px - cost;
+    }
+    for (const l of legs) {
+      const n100 = l.n * 100, mark = l.mark ?? l.avg;
+      const pk: PKey = l.side === 'sold' ? (l.type === 'call' ? 'sc' : 'sp') : (l.type === 'call' ? 'hc' : 'ip');
+      const x = partOf(l.ticker, pk);
+      const y = legOf(l.ticker, pk, l.strike, l.expiry);
+      y.n += l.n;
+      if (l.side === 'sold') { y.value += l.avg * n100; y.base += l.avg * n100; y.all += (l.avg - mark) * n100; }
+      else { y.value += mark * n100; y.base += l.avg * n100; y.all += (mark - l.avg) * n100; }
+      if (l.side === 'sold') {
+        x.value += l.avg * n100; x.abase += l.avg * n100; x.all += (l.avg - mark) * n100;
+        /* The time value still in what was sold (the name's own book shows it in brackets, §2.3). */
+        const S = spotOf.get(l.ticker) ?? l.underlying ?? 0;
+        x.tv += Math.max(0, mark - Math.max(0, l.type === 'call' ? S - l.strike : l.strike - S)) * n100;
+      }
+      else { x.value += mark * n100; x.abase += l.avg * n100; x.all += (mark - l.avg) * n100; }
+      x.held = true;
+    }
+    for (const [, m] of partsBy) for (const [k, x] of m) x.tbase = k === 'sc' || k === 'sp' ? x.value : x.value - x.today;
   }
+  const PKEYS: PKey[] = ['sh', 'hc', 'ip', 'sc', 'sp'];
+  const partsOut = (m: Map<PKey, Part> | undefined) => {
+    const o: Record<string, Row> = {};
+    for (const k of PKEYS) {
+      const x = m?.get(k);
+      /* A part shows when it is held, or when it moved today (closed out today: its today still counts). */
+      if (!x || (!x.held && Math.abs(x.today) < 0.5)) continue;
+      o[k] = { value: r2(x.value), today: r2(x.today), tbase: r2(x.tbase), all: r2(x.all), abase: r2(x.abase), held: x.held,
+               ...(k === 'sc' || k === 'sp' ? { tv: r2(x.tv) } : {}) };
+    }
+    return o;
+  };
+  const wholeParts = new Map<PKey, Part>();
+  for (const [, m] of partsBy) for (const [k, x] of m) {
+    const w = wholeParts.get(k) ?? wholeParts.set(k, { value: 0, today: 0, tbase: 0, all: 0, abase: 0, held: false, tv: 0 }).get(k)!;
+    w.value += x.value; w.today += x.today; w.tbase += x.tbase; w.all += x.all; w.abase += x.abase; w.held ||= x.held; w.tv += x.tv;
+  }
+  const bookParts: Row | null = anchor ? {
+    book: partsOut(wholeParts),
+    names: Object.fromEntries([...partsBy.keys()].sort().map((t) => [t, partsOut(partsBy.get(t))])
+      .filter(([, o]) => Object.keys(o as Row).length)),
+    /* Home's today; the parts add up to it, less `other` (a day off's interest and fees). */
+    today: account.today?.amount ?? null, other: r2(partsOther), vs: account.today?.vs ?? null,
+  } : null;
 
   step('account');
   // ── Market: Today row, overnight, watchlist ──
@@ -802,6 +924,35 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     }
   }
   const names = [...new Set([...book, ...sharesNow.keys()])].sort();
+  /* ── SHARE AVERAGE (handoff 2026-11-18, round 157a; Nik's rule of 15 Nov 2026, docs/SHARE_AVERAGE_CARD_DESIGN_BRIEF.md)
+     Per name holding shares: new average = (shares × average paid − realized) ÷ shares, realized = every close on the
+     ticker after the book's start (calls sold, puts sold, calls bought, puts bought, shares sold), a profit lowering it.
+     Five steps a share at the Friday before this week (s1) and now (s2): up is a loss. The week's closes for the chart.
+     On the weekend Home (doc.ts) and in Search; never on Positions. ── */
+  const shareAvg: Row[] = [];
+  {
+    const wdT = new Date(today + 'T12:00:00Z').getUTCDay();
+    const mon = addDays(today, wdT === 0 ? -6 : wdT === 6 ? -5 : 1 - wdT);   // this week's Monday (the week just ended on a weekend)
+    const F0 = addDays(mon, -3);
+    const KIND = ['calls sold', 'puts sold', 'calls bought', 'puts bought', 'shares'];
+    const r4 = (v: number) => Math.round(v * 10000) / 10000;
+    for (const [t, sh] of [...sharesNow].sort((a, b) => a[0].localeCompare(b[0]))) {
+      if (!(sh > 0)) continue;
+      const paid = (shareCost.get(t) ?? 0) / sh;
+      if (!(paid > 0)) continue;
+      const evs = realized.filter((e) => e.ticker === t && e.d > BOOK_START && e.d <= today);
+      const steps = (to: string) => KIND.map((k) => r4(-evs.filter((e) => e.kind === k && e.d <= to).reduce((a, e) => a + e.amt, 0) / sh));
+      const s1 = steps(F0), s2 = steps(today), sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+      const w = [r4(paid + sum(s1)), r4(paid + sum(s2))];
+      const px = spotOf.get(t) ?? 0;
+      const cl = closes.filter((c) => c.ticker === t && String(c.date) >= F0 && String(c.date) <= today)
+        .map((c) => ({ d: String(c.date), v: Number(c.close_price) })).filter((c) => c.v > 0);
+      if (px > 0 && (!cl.length || cl[cl.length - 1].d < today) && isTrading(today)) cl.push({ d: today, v: px });
+      else if (px > 0 && cl.length && cl[cl.length - 1].d === today) cl[cl.length - 1].v = px;
+      shareAvg.push({ t, name: companyOf(t), sh, paid: r4(paid), px: r2(px), days: cl.map((c) => c.d), cl: cl.map((c) => r2(c.v)),
+        s1, s2, w, wk: r4(w[1] - w[0]), from: F0 });
+    }
+  }
   const portfolio = names.map((t) => {
     const ls = legs.filter((l) => l.ticker === t);
     const spot = spotOf.get(t) ?? ls.find((l) => l.underlying)?.underlying ?? null;
@@ -3155,9 +3306,70 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const t = String(n.t);
       n.walls = wallsFor(t, pctx); n.tech = techFor(t, pctx); n.ended = endedFor(t, eDay, pctx);
     }
-    if (briefInputs) { briefInputs.ended_day = eDay; briefInputs.prices_est = pricesEst; }
+    if (briefInputs) { briefInputs.ended_day = eDay; briefInputs.prices_est = pricesEst; briefInputs.parts = bookParts; }
   } catch (e) { brief = { v: 1, error: String((e as Error)?.message ?? e) }; }
   step('brief');
+  /* ── ACTIVITY (activity.ts; handoff 2026-11-18, round 161): the events as of now, written to activity_events (one row
+     per key, updated when it changes the same day), then the last eight days, the sync state and the Levels card's
+     figures in the payload. Tick builds only; a pinned build writes nothing. Never breaks the build. ── */
+  let activity: Row | null = null;
+  try {
+    const since = addDays(today, -8);
+    const held = [...new Set([...legs.map((l) => l.ticker), ...[...sharesNow].filter(([, n]) => n > 0).map(([t]) => t)])].sort();
+    const [runsW, techs, saved] = await Promise.all([
+      get(`ibkr_sync_runs?book_id=eq.${bookId}&status=eq.success&rows_inserted=gt.0&started_at=gte.${since}&order=started_at.desc&select=id,started_at,finished_at,rows_inserted`),
+      held.length ? get(`ticker_technicals?ticker=in.(${held.join(',')})&day=gte.${addDays(today, -10)}&order=day.desc&select=ticker,day,sma20,sma50,sma200`) : Promise.resolve([]),
+      get(`activity_events?book_id=eq.${bookId}&day=gte.${since}&order=at.desc&select=key,day,at,kind,t,title,body,opens,data`),
+    ]);
+    const inp = new Map(((briefInputs?.names ?? []) as Row[]).map((n) => [String(n.t), n]));
+    const fri = String(brief.friday ?? today);
+    const prevDay = prevTrading(today);
+    const names: ActName[] = held.map((t) => {
+      const n = inp.get(t), w0 = ((n?.walls ?? []) as Row[]).filter((w) => String(w.ex) >= today)[0];
+      const tc = (techs as Row[]).find((x) => x.ticker === t);
+      const at = (side: 'call' | 'put') => Object.fromEntries(legs.filter((l) => l.ticker === t && l.side === 'sold' && l.type === side && l.expiry <= fri)
+        .map((l) => [String(Number(l.strike) % 1 ? (Math.round(l.strike * 100) % 10 ? l.strike.toFixed(2) : l.strike.toFixed(1)) : l.strike), l.n]));
+      return { t, name: companyOf(t), px: spotOf.get(t) ?? 0, prev: priceOn(t, prevDay), iv: num(n?.iv), shares: sharesNow.get(t) ?? 0,
+        sma: { 20: num(tc?.sma20), 50: num(tc?.sma50), 200: num(tc?.sma200) }, ceiling: num(w0?.c?.k), floor: num(w0?.f?.k),
+        callsAt: at('call'), putsAt: at('put') };
+    });
+    const expiredBy = new Map<string, { n: number; asg: number }>();
+    for (const t of trades) {
+      const code = String(t.note ?? '').match(/IBKR (A|Ep) lifecycle/)?.[1];
+      if (!code || t.action !== 'close' || t.direction !== 'short' || String(t.trade_date) < since) continue;
+      const e = expiredBy.get(String(t.trade_date)) ?? expiredBy.set(String(t.trade_date), { n: 0, asg: 0 }).get(String(t.trade_date))!;
+      e.n += Number(t.contracts); if (code === 'A') e.asg += Number(t.contracts);
+    }
+    const closeAt = cal.find((c) => String(c.date) === today && c.kind === 'early_close')?.closes;
+    const evs: ActEvent[] = mode === 'tick' && !pinned ? activityEvents({
+      today, mins: now.mins, trading: isTrading(today), nowISO: new Date().toISOString(),
+      closeMins: closeAt ? Number(String(closeAt).slice(0, 2)) * 60 + Number(String(closeAt).slice(3, 5)) : 16 * 60,
+      names, runs: (runsW as Row[]).map((r) => ({ id: String(r.id), started: String(r.started_at), finished: String(r.finished_at ?? r.started_at), inserted: Number(r.rows_inserted) })),
+      trades: trades.filter((t) => t.created_at && String(t.created_at) >= since),
+      expired: [...expiredBy].map(([d, e]) => ({ d, ...e })),
+      divsPaid: (divPast as Row[]).filter((d) => String(d.pay_date) === today && (sharesNow.get(String(d.ticker)) ?? 0) > 0 && num(d.cash_amount))
+        .map((d) => ({ t: String(d.ticker), amount: Number(d.cash_amount), shares: sharesNow.get(String(d.ticker)) ?? 0 })),
+      seen: Object.fromEntries((saved as Row[]).filter((r) => String(r.day) === today && r.kind === 'lvl').map((r) => [String(r.key), String(r.title)])),
+    }) : [];
+    // Write what is new or changed (a level crossed back, a move grown, a wall gone through); the first time keeps its time.
+    const byKey = new Map((saved as Row[]).map((r) => [String(r.key), r]));
+    const write = evs.filter((e) => { const o = byKey.get(e.key); return !o || o.title !== e.title || (o.body ?? '') !== e.body; })
+      .map((e) => { const o = byKey.get(e.key); return { book_id: bookId, key: e.key, day: e.day, at: o && e.kind !== 'ibkr' ? o.at : e.at, kind: e.kind, t: e.t,
+        title: e.title, body: e.body, opens: e.opens, data: e.data ?? null, updated_at: new Date().toISOString() }; });
+    if (write.length) {
+      const w = await fetch(`${URL_}/rest/v1/activity_events?on_conflict=book_id,key`, {
+        method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(write) });
+      if (!w.ok) console.warn('sunny-home activity write', w.status, (await w.text()).slice(0, 160));
+      for (const r of write) byKey.set(r.key, r);
+    }
+    const events = [...byKey.values()].sort((a, b) => String(b.at).localeCompare(String(a.at)))
+      .map((r) => ({ key: r.key, day: String(r.day), at: r.at, kind: r.kind, t: r.t ?? null, title: r.title, body: r.body ?? '', opens: r.opens ?? '', data: r.data ?? null }));
+    /* The sync line: IBKR's last good run; stopped when the market is open and two runs (5 minutes apart) have been missed. */
+    const lastRun = runs[0]?.finished_at ?? null;
+    const open = isTrading(today) && now.mins >= 9 * 60 + 30 && now.mins < 16 * 60;
+    const stopped = !!lastRun && open && Date.now() - Date.parse(String(lastRun)) > 12 * 60_000;
+    activity = { sync: { at: lastRun, stopped }, events, levels: levelsOf(names) };
+  } catch (e) { console.warn('sunny-home activity', bookId, String((e as Error)?.message ?? e)); }
   /* ── NEW HOME'S PAGE (doc.ts): the sections and cards for the moment, from the same reads. The whole page
      goes to owners (home_todo); the copy without orders to the snapshot (forOwners). ── */
   let briefDocOpen: Row | null = null;
@@ -3229,7 +3441,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const docOrders: Row[] = [];
       // SPY's last two years of closes: the market sentence's context (best day since, a run of days, the week).
       const spyHist = await page(`daily_closes?ticker=eq.SPY&date=gte.${addDays(today, -800)}&order=date.asc&select=date,close_price`).catch(() => []);
-      const docs = buildDoc({ moment: brief.moment, today, mins: now.mins, isTrading, addDays, cal, brief, names: nameDays, spy: spyHist,
+      const docs = buildDoc({ moment: brief.moment, today, mins: now.mins, isTrading, addDays, cal, brief, names: nameDays, spy: spyHist, shareAvg, activity,
         market, sectors: sectorRows, futures, watch: watchlist as Row[], chart, yieldWeeks: yieldOut, payback, history,
         earnings, macro, divs, trades, orders: docOrders, aftershock, baseNow: baseAt(today), baseAt, econ: econRows, closes,
         perf: performance, perfFrom: CHART_START, feeds: { stopped: stoppedFeeds, marketAt } });
@@ -3250,14 +3462,55 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     } catch (e) { brief = { ...brief, doc: { v: 1, error: String((e as Error)?.message ?? e) } }; }
   }
   step('doc');
+  /* ── THIS BOOK'S SIDE OF THE OVERVIEW (together.ts; handoff 2026-11-18 §4): its value by day, its legs (Your book's
+     figures), realized and dividends by month since its start, and what is coming up for it. Every book writes one;
+     book S's build reads N's and puts the two together. Never breaks the build. ── */
+  let side: Side | null = null;
+  try {
+    const full = acctDays.filter((d) => Number(d.accounts) >= accountsN);
+    const depOf = new Map(full.map((d) => [String(d.report_date), Number(d.deposits_withdrawals ?? 0)]));
+    const byMonth = (xs: { d: string; amt: number }[]) => {
+      const m = new Map<string, number>();
+      for (const x of xs) m.set(x.d.slice(0, 7), (m.get(x.d.slice(0, 7)) ?? 0) + x.amt);
+      return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => [k, r2(v)] as [string, number]);
+    };
+    const heldT = new Set([...legs.map((l) => l.ticker), ...[...sharesNow].filter(([, n]) => n > 0).map(([t]) => t)]);
+    const evs: SideEvent[] = [];
+    for (const e of earn) {
+      const t = String(e.ticker).toUpperCase();
+      if (heldT.has(t) && String(e.report_date) >= today) evs.push({ d: String(e.report_date), kind: 'earnings', t, shares: sharesNow.get(t) ?? 0 });
+    }
+    for (const d of divs) {
+      const t = String(d.ticker).toUpperCase(), sh = sharesNow.get(t) ?? 0;
+      if (sh > 0) evs.push({ d: String(d.ex_date), kind: 'exdiv', t, shares: sh, amount: num(d.cash_amount) });
+    }
+    const exps = new Map<string, { calls: number; puts: number }>();
+    for (const l of legs.filter((x) => x.side === 'sold' && x.expiry >= today && x.expiry <= addDays(today, 14))) {
+      const e = exps.get(l.expiry) ?? exps.set(l.expiry, { calls: 0, puts: 0 }).get(l.expiry)!;
+      if (l.type === 'call') e.calls += l.n; else e.puts += l.n;
+    }
+    for (const [d, e] of exps) evs.push({ d, kind: 'expiry', calls: e.calls, puts: e.puts });
+    for (const m of macro) evs.push({ d: String(m.event_date), kind: 'macro', title: String(m.name), time: m.event_time ?? null });
+    for (const c of cal) if (c.kind === 'closed' && String(c.date) >= today && String(c.date) <= addDays(today, 45)) evs.push({ d: String(c.date), kind: 'market', title: String(c.name ?? 'Market holiday') });
+    side = {
+      id: bookId, name: bookId === 'S' ? 'Sunny' : 'Nicolay', start: BOOK_START,
+      nav: (savedHistory as Row[]).filter((h) => h.nav != null).map((h) => [String(h.day), Number(h.nav), depOf.get(String(h.day)) ?? 0] as [string, number, number]),
+      live: account.ok ? { d: today, v: Number(account.value), today: Number(account.today?.amount ?? 0) } : null,
+      legs: [...legParts.values()].filter((l) => l.n > 0 || Math.abs(l.today) >= 0.5)
+        .map((l) => ({ ...l, n: r2(l.n), today: r2(l.today), all: r2(l.all), value: r2(l.value), base: r2(l.base) })),
+      realized: byMonth(realized.filter((e) => e.d >= BOOK_START && e.d <= today)),
+      dividends: byMonth(full.filter((d) => String(d.report_date) >= BOOK_START).map((d) => ({ d: String(d.report_date), amt: Number(d.dividends ?? 0) }))),
+      events: evs, built: today,
+    };
+  } catch (e) { console.warn('sunny-home side', bookId, String((e as Error)?.message ?? e)); }
   /* ── OVERVIEW (overview.ts): both books, built in book S's build from S's brief and N's latest one. Owners only
      (OWNER_TOP): it counts the trades to place. Never breaks the build. ── */
-  let overview: Row | null = null;
+  let overview: Row | null = null, together: Row | null = null;
   if (bookId === 'S' && !brief.error) {
     try {
       const other = 'N';
       const [snapN] = await Promise.all([
-        get(`home_snapshot?book_id=eq.${other}&select=brief:payload->brief,inputs:payload->brief_inputs,built_at`),
+        get(`home_snapshot?book_id=eq.${other}&select=brief:payload->brief,inputs:payload->brief_inputs,side:payload->side,built_at`),
       ]);
       const sides: BookSide[] = [
         // No To do orders (11 Nov 2026): the Overview counts none.
@@ -3268,6 +3521,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const failedO = checkOverview(ov, sides, divs);
       if (failedO.length) console.warn('sunny-home overview invariants', JSON.stringify(failedO.slice(0, 10)));
       overview = { ...ov, audit: { ok: !failedO.length, failed: failedO.slice(0, 20) } };
+      /* The new Overview (165a): both sides together; N's side is its latest build's. */
+      const sideN = snapN[0]?.side as Side | null;
+      if (side) together = buildTogether(sideN ? [side, sideN] : [side], today, companyOf);
     } catch (e) { overview = { v: 1, error: String((e as Error)?.message ?? e) }; }
   }
   step('overview');
@@ -3278,7 +3534,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     trade_to_415: TRADE_TO_415.filter((t) => book.includes(t)),
     /* `up`: a hedge call (the quarterly calls under the call rule), apart from the LEAPs in the
        Positions totals (handoff 30). */
-    fresh, prices_est: pricesEst, account, indices, overnight, futures, watchlist, portfolio, hours, risk,
+    fresh, prices_est: pricesEst, account, side, together, share_avg: shareAvg, activity, indices, overnight, futures, watchlist, portfolio, hours, risk,
     legs: legs.map((l) => (upside.has(l) ? { ...l, up: true } : l)),
     chart, history, payback, yield: yieldOut, inventory, sold_vs_bought: soldVsBought, performance, allocation,
     deck: { earnings, season: seasonOut, reports: reportsOut, theta_checks: thetaChecks.filter((c) => c.card_today) },
@@ -3336,7 +3592,7 @@ const refused = () => new Response(JSON.stringify({ ok: false, error: 'not allow
    lay `owner` back over `open` (objects merge, anything else replaces, names matched by ticker), which
    gives back this exact payload; a viewer's never carries an order. A new key that says what to trade
    goes in here too. */
-const OWNER_TOP = ['this_week', 'todo', 'ways', 'plan', 'overview'];
+const OWNER_TOP = ['this_week', 'todo', 'ways', 'plan', 'overview', 'together'];
 const OWNER_NAME = ['plan', 'expected', 'calls', 'puts', 'written', 'delta', 'bar', 'split', 'thesis', 'read_rule'];
 const OWNER_V2 = ['verdict', 'chips', 'orders', 'acts'];
 /* A point or row that names an order: the thin hedge's "Buying N calls ... It is in To do." */

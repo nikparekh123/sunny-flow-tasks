@@ -238,7 +238,7 @@ export function buildBrief(x: BriefIn) {
     for (const l of ls) {
       const kind: Kind = l.side === 'sold' ? (l.type === 'call' ? 'sc' : 'sp') : l.type === 'put' ? 'ins' : x.isLeap(l) ? 'leaps' : 'otm';
       const days = daysTo(l.expiry), el = expLabel(l.expiry, days);
-      const nm = kind === 'sc' ? 'Calls' : kind === 'sp' ? 'Puts' : kind === 'ins' ? 'Insurance puts' : kind === 'leaps' ? 'LEAPS' : 'OTM calls';
+      const nm = kind === 'sc' ? 'Calls' : kind === 'sp' ? 'Puts' : kind === 'ins' ? 'Hedge puts' : kind === 'leaps' ? 'LEAPS' : 'Hedge calls';
       legs.push({ k: `${kind}-${fk(l.strike)}-${l.expiry}`, kind, ty: l.type === 'call' ? 'C' : 'P', K: l.strike, q: l.side === 'sold' ? -l.n : l.n,
         days: +days.toFixed(4), iv: good(l.iv) ? l.iv! : impliedOf(l, S0) ?? (noIv ? 1e-4 : ivN), ex: l.expiry, label: `${nm} ${fk(l.strike)} ×${l.n}, ${el}`,
         at: l.avg, ...(l.mark != null ? { now: l.mark } : {}),
@@ -306,11 +306,24 @@ export function buildBrief(x: BriefIn) {
     return { t: nb.t, name: company(nb.t), kind: l.kind, put: l.ty === 'P', K: l.K, q, ex: l.ex, exLabel: expLabel(l.ex, l.days),
       at, now, col: Math.round(q * 100 * at), left: Math.round(q * 100 * now), kept: Math.round(q * 100 * (at - now)), cap, itm,
       intr: +intr.toFixed(2), tvPer: +tvPer.toFixed(2), tvLeft: Math.round(q * 100 * tvPer),
-      ready: tvPer < 0.05 || cap >= 90 || itm };
+      ready: tvPer < 0.05 || cap >= 90 || itm,
+      /* This week's (ends by Friday): the Time value receipt and stat read only these (Nov 17, soldRows(true)). */
+      wk: l.ex <= F };
   })).sort((a, b) => a.ex.localeCompare(b.ex) || b.left - a.left);
   const col = sold.reduce((a, s) => a + s.col, 0), left = sold.reduce((a, s) => a + s.left, 0), tvLeft = sold.reduce((a, s) => a + s.tvLeft, 0);
+  /* The receipt's "Going out · a week of your hedges" (handoff 2026-11-18, 159a): what a week takes out of every
+     option bought (Nik's groups of 11 Nov 2026: every call bought is a hedge call, LEAPS too; every put bought a hedge
+     put), Black-Scholes at the leg's own IV, today's price, its time to expiry now less seven days. */
+  const hedges = books.flatMap((nb) => nb.legs.filter((l) => l.q > 0 && l.ty !== 'S').map((l) => {
+    const put = l.ty === 'P', T = Math.max(0, l.days) / 365, T7 = Math.max(0, l.days - 7) / 365;
+    const v = l.iv > 0 ? l.iv : nb.iv;
+    const week = v > 0 ? Math.max(0, bsValue(nb.S0, l.K, T, v, put, RATE) - bsValue(nb.S0, l.K, T7, v, put, RATE)) * l.q * 100 : 0;
+    return { t: nb.t, name: company(nb.t), put, kind: l.kind, K: l.K, q: l.q, ex: l.ex, exLabel: expLabel(l.ex, l.days), week: Math.round(week) };
+  })).filter((h) => h.week > 0).sort((a, b) => b.week - a.week);
+  const hedgeWeek = hedges.reduce((a, h) => a + h.week, 0);
   const timeValue = { col, left, kept: col - left, cap: col > 0 ? Math.round((col - left) / col * 100) : 0, tvLeft,
-    tvCap: col > 0 ? Math.round((1 - tvLeft / col) * 100) : 0, legs: sold };
+    tvCap: col > 0 ? Math.round((1 - tvLeft / col) * 100) : 0, legs: sold, hedges, hedgeWeek,
+    week: { col: sold.filter((x) => x.wk).reduce((a, x) => a + x.col, 0), tvLeft: sold.filter((x) => x.wk).reduce((a, x) => a + x.tvLeft, 0) } };
 
   return {
     brief: {

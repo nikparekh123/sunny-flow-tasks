@@ -32,6 +32,10 @@ export interface DocIn {
   moment: Moment; today: string; mins: number;
   isTrading: (d: string) => boolean; addDays: (d: string, n: number) => string; cal: Row[];
   brief: Row; names: NameDay[];
+  /** Each name's share average (index.ts shareAvg, round 157a): the weekend's Share average section. */
+  shareAvg?: Row[];
+  /** Activity (activity.ts): the Levels card's lead sentence for apps that draw it as a plain card. */
+  activity?: Row | null;
   market: Row[]; sectors: Row[]; futures: Row[]; watch: Row[];
   chart: Row | null; yieldWeeks: Row[]; payback: Row | null; history: Row | null;
   earnings: Row[]; macro: Row[]; divs: Row[]; trades: Row[]; orders: Row[]; aftershock: Row | null;
@@ -411,12 +415,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     if (!held) return null;
     const pages: Row[] = [heatMap('Your names', names.map((n) => ({ ticker: n.t, name: n.name, move: n.move, weight: (((n.shares + n.leaps * 100) || (n.opts ?? 0) * 100) * n.S0) / 1000 })),
       { kind: 'yourNames', weightBasis: 'weight = (shares + LEAPS × 100) × price ÷ 1000, the tile area; a name held only in options, its contracts × 100' }, wk ? 'Week' : '')];
-    const ws = x.watch.map((w) => {
-      const m = mk(String(w.ticker)); const cap = num(m?.market_cap);
-      const mv = wk ? weekPct(m) : moment === 'pre' && num(m?.pre_change_pct) != null && String(m?.market_state).startsWith('PRE') ? num(m?.pre_change_pct) : num(w.ranges?.d);
-      return cap && mv != null ? { ticker: String(w.ticker), name: company(String(w.ticker)), move: mv, weight: cap / 1e9 } : null;
-    }).filter(Boolean) as { ticker: string; name: string; move: number; weight: number }[];
-    if (ws.length) pages.push(heatMap('Watchlist', ws, { kind: 'watchlist', weightBasis: 'weight = market cap in $B' }, wk ? 'Week' : ''));
+    /* No watchlist anywhere (handoff 2026-11-18): Your names is the book's names only. */
     return { type: 'yourNames', pages };
   };
   const whatsMoving = () => {
@@ -449,7 +448,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     if (look) {
       const itm = look.itm;
       return { type: 'toDecide', title: 'To decide · needs a look',
-        subtitle: itm ? `${company(look.t)}’s ${look.K} calls are in the money with ${dleft(look.ex)} days left` : `${company(look.t)} is ${look.cap}% kept with ${dleft(look.ex)} days left`,
+        subtitle: itm ? `${company(look.t)}’s ${look.K} calls are in the money with ${dleft(look.ex)} days left` : `${company(look.t)} is ${look.cap}% captured with ${dleft(look.ex)} days left`,
         body: itm ? 'Roll them or let them go?' : 'Close early and sell next week’s calls now?',
         footer: [sp(`${fK(look.left)} left to earn on ${look.q} calls, ${fK(look.kept)} kept.`, true)] };
     }
@@ -613,7 +612,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const rows = [...byLeg.values()].map((g) => {
       const c = g[0], t = T(c), n = g.reduce((a, r) => a + Number(r.contracts), 0);
       const opened = tr.find((o) => o.action === 'open' && T(o) === t && o.option_type === c.option_type && o.direction === c.direction);
-      const kind = c.direction === 'short' ? (c.option_type === 'call' ? 'calls' : 'puts') : c.option_type === 'call' ? 'calls bought' : 'insurance puts';
+      const kind = c.direction === 'short' ? (c.option_type === 'call' ? 'calls' : 'puts') : c.option_type === 'call' ? 'hedge calls' : 'hedge puts';
       const unit = c.option_type === 'call' ? (n === 1 ? 'call' : 'calls') : n === 1 ? 'put' : 'puts';
       const pl = g.reduce((a, r) => a + (made.get(r) ?? 0), 0), e = c.executed_at ? new Date(String(c.executed_at)) : null;
       const when = e ? hm(Number(e.toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' })) * 60
@@ -922,7 +921,7 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
 
   if (moment === 'futures' || moment === 'pre') {
     S.push({ kicker: 'World and economy', headline: worldHead(), cards: [moment === 'futures' ? futuresCards() : indexCards(), overnight(), economyCard(), sectorsCard(false)] });
-    S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), yourPosition()] });
+    S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), levelsCard(), yourPosition()] });
     const ne = earningsAhead(14);
     const ch = nextEarn && dayDiff(today, String(nextEarn.date)) <= 14 ? `${company(nextEarn.ticker)} reports in ${dayDiff(today, String(nextEarn.date))} days.` : (comingRows(today, addDays(today, 45))[0] ? `Next: ${leadOf(comingRows(today, addDays(today, 45))[0].text)}, ${comingRows(today, addDays(today, 45))[0].date}.` : 'Nothing dated in the next six weeks.');
     S.push({ kicker: 'Coming up', headline: [sp(ch, true)], cards: [ne, (() => { const rows = comingRows(today, addDays(today, 45)); return rows.length ? { type: 'comingUp', title: 'Coming up', rows } : null; })()] });
@@ -930,10 +929,10 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     S.push({ kicker: 'The market', headline: marketHead(), cards: [indexCards(), outToday(), sectorsCard(false)] });
     const bt = bookToday, m = bt ? mostOf(Math.sign(bt.made) || -1) : null;
     const h = (p: boolean): Span[] => (bt && held ? [sp(`${bt.made < 0 ? 'Down' : 'Up'} `, true), sp(money(bt.made, p), true, col(bt.made)), sp(m ? `, most of it ${m.name}.` : '.', true)] : namesHead());
-    S.push({ kicker: 'Your book', headline: h(false), privacy: h(true), cards: [yourNames(), whatsMoving(), yourPosition()] });
+    S.push({ kicker: 'Your book', headline: h(false), privacy: h(true), cards: [yourNames(), levelsCard(), whatsMoving(), yourPosition()] });
     if (shorts.length || look) {
       const two = shorts.length >= 2, n = shorts[0], k = n?.soldCalls.filter((c) => c.ex <= F).sort((a, b) => a.K - b.K)[0]?.K;
-      const head = shorts.length === 0 ? [sp(`Every name still gains from a priced rise by Friday. ${company(look.t)}’s calls are ${look.cap}% kept.`, true)]
+      const head = shorts.length === 0 ? [sp(`Every name still gains from a priced rise by Friday. ${company(look.t)}’s calls are ${look.cap}% captured.`, true)]
         : two ? [sp(`${shorts.length === 2 ? `${shorts[0].name} and ${shorts[1].name}` : `${shorts.slice(0, -1).map((y) => y.name).join(', ')} and ${shorts.at(-1)!.name}`} are past their best at a priced rise by Friday.`, true)]
         : [sp(`${n.name} makes the most at $${n.fp!.toFixed(2)} by Friday.`, true)];
       const full = shorts.length === 0 ? head : [sp(`${head[0].t}${two ? ' Roll the calls or add before then.' : ` Roll the ${k ?? ''} calls or add before then.`.replace('the  calls', 'the calls')}`, true)];
@@ -943,13 +942,17 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     S.push({ kicker: 'Coming up', headline: [sp(`Post-market takes over at ${hm(closeMin)}.`, true)], cards: [cl] });
   } else if (moment === 'post') {
     S.push({ kicker: 'The market', headline: marketHead(), cards: [indexCards(), sectorsCard(false)] });
-    S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), yourResults(), closedRolled(), held ? performanceCard() : null, yourPosition()] });
+    S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), levelsCard(), yourResults(), closedRolled(), held ? performanceCard() : null, yourPosition()] });
     // No Tomorrow's orders (11 Nov 2026: To do removed): the section leads with what is coming.
     const cl = comingLine();
     S.push({ kicker: 'Tomorrow', headline: [sp(cl ? cl.line[0].t : 'Tomorrow.', true)], cards: [cl] });
   } else {
     S.push({ kicker: 'The week', headline: marketHead(), cards: [weekIndexes(), worldThisWeek(), economyCard(), sectorsCard(true)] });
-    S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), held ? results() : null, held ? performanceCard() : null, yourPosition()] });
+    S.push({ kicker: 'Your book', headline: namesHead(), cards: [yourNames(), levelsCard(), held ? results() : null, held ? performanceCard() : null, yourPosition()] });
+    /* Share average (handoff 2026-11-18 §, Nov 16 "Share average · weekend cards"): after Your book, one card per name
+       whose average moved this week, biggest move first, the rest in one quiet line. Down is good. */
+    const sa = shareAvgSection();
+    if (sa) S.push(sa);
     const pb = payback(), tm2 = thetaMonth(), mName = MONTH[ymd(today).m - 1], done = ymd(addDays(today, 7)).m !== ymd(today).m && dayDiff(today, `${today.slice(0, 7)}-28`) <= 0;
     const pbPct = x.payback && x.baseNow > 0 ? (Number(x.payback.made ?? 0) / x.baseNow) * 100 : 0;
     /* "October is done: 6.2% of what you bought is paid back." with the figure green (red when given back), as the design. */
@@ -959,6 +962,43 @@ export function buildDoc(x: DocIn): { full: Row; open: Row } {
     const first = rem?.rows.find((r: Row) => !r.owner);
     S.push({ kicker: weekOpen ? 'Coming up' : 'Next week', headline: [sp(sells ? `${word(sells)} ${sells === 1 ? 'sale' : 'sales'} ${salesDay}.` : first ? `${leadOf(first.text)}, ${first.date}.` : 'A quiet week ahead.', true)],
       openHeadline: [sp(first ? `${leadOf(first.text)}, ${first.date}.` : 'A quiet week ahead.', true)], cards: [ne, rem] });
+  }
+
+  /* The Levels card (handoff 2026-11-18, round 161c) in Your book at every moment, after Your names: the app and web
+     draw it from payload.activity (levels and the day's level events). Before the bell it reads yesterday; on the
+     weekend, this week. */
+  function levelsCard(): Row | null {
+    if (!held || !x.activity) return null;
+    const when = moment === 'pre' || moment === 'futures' ? 'yday' : moment === 'weekend' ? 'week' : 'today';
+    // The lead, as the app and web write it: apps before 3.0 (32) draw this card plain, from title and body.
+    const crossed = new Set(((x.activity.events ?? []) as Row[])
+      .filter((e) => (e.kind === 'lvl' || e.kind === 'move') && (when === 'today' ? e.day === x.today : when === 'yday' ? e.day < x.today && e.day >= x.addDays(x.today, -3) : true))
+      .map((e) => String(e.t)));
+    const under = ((x.activity.levels ?? []) as Row[]).filter((l) => l.ma === '000').map((l) => String(l.name));
+    const label = when === 'yday' ? 'yesterday' : when === 'week' ? 'this week' : 'today';
+    const list = (xs: string[]) => xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
+    const body = (crossed.size ? `${crossed.size} ${crossed.size === 1 ? 'name' : 'names'} crossed a line ${label}.` : `No name crossed a line ${label}.`)
+      + (under.length ? ` ${list(under)} ${under.length === 1 ? 'is' : 'are'} under all three averages.` : '');
+    return { type: 'levels', when, title: 'Levels', body };
+  }
+
+  function shareAvgSection(): Sec | null {
+    const xs = (x.shareAvg ?? []) as Row[];
+    if (!xs.length) return null;
+    const m2 = (v: number) => '$' + Math.abs(v).toFixed(2);
+    const moved = xs.filter((a) => Math.abs(Number(a.wk)) >= 0.005).sort((a, b) => Math.abs(Number(b.wk)) - Math.abs(Number(a.wk)));
+    const held = xs.filter((a) => Math.abs(Number(a.wk)) < 0.005);
+    const fell = moved.filter((a) => a.wk < 0).length, rose = moved.length - fell, top = moved[0];
+    const Cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+    const avgs = (n: number) => `${Cap(word(n))} ${n === 1 ? 'average' : 'averages'}`, low = (n: number) => word(n).toLowerCase();
+    const headline: Span[] = !moved.length ? [sp('Every average held this week.', true)]
+      : moved.length === 1 ? [sp(`${top.name}’s average ${top.wk < 0 ? 'fell' : 'rose'} ${m2(top.wk)} a share this week.`, true)]
+      : [sp(rose && fell ? `${avgs(fell)} fell and ${low(rose)} rose this week.` : `${avgs(moved.length)} ${fell ? 'fell' : 'rose'} this week.`, true),
+         sp(` ${top.name}’s ${rose && fell ? 'moved' : fell ? 'fell' : 'rose'} the most, ${m2(top.wk)} a share.`)];
+    const note = !moved.length ? 'Nothing closed this week, so every average held.'
+      : held.length === 1 ? `${held[0].t} held at ${m2(held[0].w[1])}: nothing closed on it this week.`
+      : held.length > 1 ? `${held.map((a) => a.t).join(', ').replace(/, ([^,]*)$/, ' and $1')} held: nothing closed on them this week.` : '';
+    return { kicker: 'Share average', headline, cards: [{ type: 'shareAvg', names: moved, note }] };
   }
 
   const build = (forOwner: boolean) => {
