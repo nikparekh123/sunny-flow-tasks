@@ -10,6 +10,7 @@
 // capsule with ↑ or ↓ (positions-engine levelState, on the server's `day`).
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { atSd, crossAdds, levelState, priceScale, sdColour, sdK, LV, SD_RAMP, zOf, type Lane as LaneM, type LevelState } from '../../../supabase/functions/_shared/positions-engine.ts';
+import { clock12, monthDay, ny } from '../lib/clock';
 import { money } from '../lib/format';
 import { stateWords, type IntelModel, type SdReply } from './intel';
 import { Box, CEIL, FLOOR, G, Hover, IVL, K, MT, MU, O, QU, R, TEAL, TEAL2, WallIcon, Y, tnum, type BoxQ, type Pop } from './ui';
@@ -29,7 +30,7 @@ function LaneRow({ name, sub, tint, track, boxes, empty, trackH = 84 }: LaneRowP
     <div style={{ display: 'grid', gridTemplateColumns: COLS, columnGap: 12, alignItems: 'center', height: LANE_H, borderTop: '1px solid rgba(255,255,255,.08)', background: tint }}>
       <span style={{ display: 'flex', flexDirection: 'column', paddingLeft: 12 }}>
         <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600 }}>{name}</span>
-        <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>{sub}</span>
+        {sub && <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>{sub}</span>}
       </span>
       <span style={{ position: 'relative', display: 'block', height: trackH }}>{track}</span>
       <div style={{ paddingLeft: 24, paddingRight: 12, display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, alignItems: 'center', ...tnum }}>
@@ -63,6 +64,13 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
     return Math.max(lo, Math.min(tw - w, l));
   };
   const { e, S, m, lv } = M, day = d.day;
+  // Handoff 2026-11-18 A5: under each lane's name, when its own source was last updated. Walls read their daily run
+  // (the reply's gamma day; Home's fallback walls carry no day), Technicals the technicals row's day, Move the last
+  // close. IV and SD read the chains sunny-sd fetched for this reply (chain_at: "Nov 18 · 10:45 AM").
+  const mdy = (iso?: string | null) => (iso && /^\d{4}-\d\d-\d\d/.test(iso) ? monthDay(iso.slice(0, 10)) : '');
+  const lastClose = d.closes?.length ? mdy(d.closes[d.closes.length - 1].d) : '';
+  const chainAt = d.chain_at ? (() => { const n = ny(new Date(d.chain_at!)); return `${monthDay(n.date)} · ${clock12(n)}`; })() : '';
+  const upd = { iv: chainAt, sd: chainAt, gx: mdy(e.gamma?.day) ? `${mdy(e.gamma?.day)} run` : '', tc: mdy(d.tech?.day) ? `${mdy(d.tech?.day)} close` : '', mv: lastClose ? `${lastClose} close` : '' };
   const Kc = M.rc.K, Kp = M.rp.K;
   const sc = priceScale(S, m, [lv.ceiling, lv.floor, lv.accelerator, lv.flip, lv.support, lv.resistance, lv.sma20, lv.sma50, lv.sma100, lv.sma200, Kc, Kp,
     ...M.held.map((l) => l.K), M.LB.dn, M.LB.up]);
@@ -402,11 +410,11 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
         <span />
       </div>
       <div style={{ position: 'relative', display: 'flex', flexDirection: 'column' }}>
-        <LaneRow name="IV" sub="by strike · brighter is richer" tint={TINT.iv} track={ivTrack} boxes={ivBoxes} />
-        <LaneRow name="SD" sub="the base · 0.25 to 2" tint={TINT.sd} track={sdTrack} boxes={sdBoxes} />
-        <LaneRow name="Gamma Exposure" sub="walls · size is gamma" tint={TINT.w} track={gTrack} boxes={gBoxes} empty={`No gamma walls for ${e.label} yet.`} />
-        <LaneRow name="Technicals" sub="averages · filled holds, hatched caps" tint={TINT.t} track={tTrack} boxes={tBoxes} empty="Support, resistance and RSI come with the technicals." />
-        <LaneRow name="Move" sub="last week, this week, pace" tint={TINT.mv} track={mvTrack} boxes={mvBoxes} empty="The week’s moves come with the closes." />
+        <LaneRow name="IV" sub={upd.iv} tint={TINT.iv} track={ivTrack} boxes={ivBoxes} />
+        <LaneRow name="SD" sub={upd.sd} tint={TINT.sd} track={sdTrack} boxes={sdBoxes} />
+        <LaneRow name="Gamma Exposure" sub={upd.gx} tint={TINT.w} track={gTrack} boxes={gBoxes} empty={`No gamma walls for ${e.label} yet.`} />
+        <LaneRow name="Technicals" sub={upd.tc} tint={TINT.t} track={tTrack} boxes={tBoxes} empty="Support, resistance and RSI come with the technicals." />
+        <LaneRow name="Move" sub={upd.mv} tint={TINT.mv} track={mvTrack} boxes={mvBoxes} empty="The week’s moves come with the closes." />
         <LaneRow name="Held" sub={M.LH.has ? `sold for ${e.label}` : `nothing for ${e.label}`} tint={TINT.h} track={M.LH.has ? hnb('h', M.LH, 'Held') : <Quiet t={`Nothing sold for ${e.long} yet.`} />}
           boxes={lxBoxes(M.LH, null)} empty={`Nothing sold for ${e.label}.`} trackH={80} />
         <LaneRow name="+ New" sub="the sale above" tint={TINT.h} track={M.LN.has ? hnb('n', M.LN, 'New') : <Quiet t="Set a count above to try a sale." />}

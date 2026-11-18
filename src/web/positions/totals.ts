@@ -69,7 +69,7 @@ export function nameTotals(p: J): Map<string, Row> {
   return out;
 }
 
-/** The whole book: every name added up (a piece no name holds reads None). */
+/** The whole book: every name added up (a piece no name holds is null: it has no column). */
 export function bookTotals(names: Map<string, Row>): Row {
   const row = {} as Row;
   for (const g of PIECES) {

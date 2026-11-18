@@ -1,4 +1,5 @@
-// The web's shared state (README "State"): which account is open, privacy, the rail view and the Time value sheet.
+// The web's shared state (README "State"): which account is open, privacy, the rail view, the Time value sheet and the
+// Activity panel.
 // Picking an account changes every card about a book; market cards stay the same.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -6,8 +7,9 @@ import { useBooks, type BookId } from './data';
 import { maskMoney } from './format';
 
 export type Account = BookId | 'both';
-/** The Home rail: By ticker or By leg (handoff 2026-11-12-positions-rail), remembered per computer; opens on By ticker. */
-export type RailView = 'ticker' | 'leg';
+/** The Home rail: What you hold or By name (handoff 2026-11-18, SunnyRail pills), remembered per computer; opens on
+    What you hold. */
+export type RailView = 'hold' | 'name';
 
 const read = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const write = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private window */ } };
@@ -27,6 +29,12 @@ interface WebState {
   setRailView: (v: RailView) => void;
   tvOpen: boolean;
   setTvOpen: (on: boolean) => void;
+  /** The Activity panel (handoff 2026-11-18, 161a): open or not, and the line to show when a Levels row opened it
+      (`n` counts each open, so the same line asked twice scrolls to it again). */
+  actOpen: boolean;
+  actFocus: { key: string; n: number } | null;
+  openActivity: (key?: string) => void;
+  closeActivity: () => void;
 }
 
 const Ctx = createContext<WebState | null>(null);
@@ -58,9 +66,16 @@ export function WebStateProvider({ children }: { children: ReactNode }) {
 
   const [privacy, setPrivacyS] = useState(() => read('sw-privacy') === '1');
   const setPrivacy = useCallback((on: boolean) => { setPrivacyS(on); write('sw-privacy', on ? '1' : '0'); }, []);
-  const [railView, setRailViewS] = useState<RailView>(() => (read('sw-rail-by') === 'leg' ? 'leg' : 'ticker'));
+  const [railView, setRailViewS] = useState<RailView>(() => (read('sw-rail-by') === 'name' ? 'name' : 'hold'));
   const setRailView = useCallback((v: RailView) => { setRailViewS(v); write('sw-rail-by', v); }, []);
   const [tvOpen, setTvOpen] = useState(false);
+  const [actOpen, setActOpen] = useState(false);
+  const [actFocus, setActFocus] = useState<{ key: string; n: number } | null>(null);
+  const openActivity = useCallback((key?: string) => {
+    setActOpen(true);
+    setActFocus((f) => (key ? { key, n: (f?.n ?? 0) + 1 } : null));
+  }, []);
+  const closeActivity = useCallback(() => setActOpen(false), []);
 
   const book: BookId | null = !books.length ? null : account === 'both' ? (books.includes(lastBook) ? lastBook : books[0]) : account;
   // The page decides what the menu says: Overview is always "Both accounts" (even opened by its address), and any
@@ -68,8 +83,9 @@ export function WebStateProvider({ children }: { children: ReactNode }) {
   const shown: Account = onOverview && books.length > 1 ? 'both' : account === 'both' ? (book ?? 'S') : account;
   const mask = useCallback((s: string) => (privacy ? maskMoney(s) : s), [privacy]);
 
-  const value = useMemo(() => ({ book, books, account: shown, pickAccount, privacy, setPrivacy, mask, railView, setRailView, tvOpen, setTvOpen }),
-    [book, books, shown, pickAccount, privacy, setPrivacy, mask, railView, setRailView, tvOpen]);
+  const value = useMemo(() => ({ book, books, account: shown, pickAccount, privacy, setPrivacy, mask, railView, setRailView, tvOpen, setTvOpen,
+    actOpen, actFocus, openActivity, closeActivity }),
+  [book, books, shown, pickAccount, privacy, setPrivacy, mask, railView, setRailView, tvOpen, actOpen, actFocus, openActivity, closeActivity]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

@@ -6,6 +6,7 @@
 // - Stats: Realized, Interest and Fees over the range; Open P&L, Time value and Margin at its last point.
 import type { J } from '../../lib/data';
 import { arrow, C, money, pct } from '../../lib/format';
+import { tvLeftTotal } from '../rail/model';
 
 export type Range = '1W' | '1M' | '3M' | 'YTD' | '1Y' | 'All';
 export const RANGES: Range[] = ['1W', '1M', '3M', 'YTD', '1Y', 'All'];
@@ -148,7 +149,7 @@ export function stats(payload: J, m: ChartModel | null, r: Range): Stat[] {
     return [
       { k: 'r', l: 'Realized', v: money(0), c: C.ink },
       { k: 'o', l: 'Open P&L', v: o == null ? '-' : money(o), c: o == null ? C.ink : loss(o) },
-      { k: 'tv', l: 'Time value ›', v: money(a.time_value_sold), c: C.ink, tv: true },
+      { k: 'tv', l: 'Time value ›', v: money(tvLeftTotal(payload) ?? a.time_value_sold), c: C.ink, tv: true },
       { k: 'm', l: 'Margin', v: money(a.margin), c: C.ink },
       { k: 'i', l: 'Interest', v: money(0), c: C.ink },
       { k: 'f', l: 'Fees', v: money(0), c: C.ink },
@@ -159,7 +160,10 @@ export function stats(payload: J, m: ChartModel | null, r: Range): Stat[] {
   const realized = diff('realized_cum');
   const dayOpen = c.open_pl?.[e] == null ? null : +c.open_pl[e];
   const open = live && a.open_pl != null ? +a.open_pl : dayOpen;
-  const tv = live && a.time_value_sold != null ? +a.time_value_sold : +(c.time_value?.[e] ?? 0);
+  // One number for Time value (handoff 2026-11-18, Nik 17 Nov): the receipt's own figure, the time value left in
+  // every sold leg still open (brief.timeValue.tvLeft), for the account on screen; the older fields only without it.
+  const tvNow = tvLeftTotal(payload);
+  const tv = tvNow != null ? tvNow : live && a.time_value_sold != null ? +a.time_value_sold : +(c.time_value?.[e] ?? 0);
   const margin = live && a.margin != null ? +a.margin : +(c.margin?.[e] ?? 0);
   const interest = diff('interest_cum'), fees = diff('commission_cum');
   return [

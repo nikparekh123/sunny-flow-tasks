@@ -175,6 +175,8 @@ export function PosStyles() {
 .sw .swp-add:hover{background:#FFFFFF!important}
 .sw .swp-hv:focus-visible{outline:2px solid #86A8F0;outline-offset:2px;border-radius:6px}
 .sw .swp-scroll{scrollbar-width:none}.sw .swp-scroll::-webkit-scrollbar{display:none}
+.sw .swp-slider:focus-visible{box-shadow:0 0 0 2px rgba(10,132,255,.55)}
+.sw .swp-press:active{transform:scale(.97)}
 @keyframes swpFade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
 .sw .swp-fade{animation:swpFade .4s cubic-bezier(.22,1,.36,1) both}`}</style>
   );

@@ -60,6 +60,11 @@ function docMoves(doc: J): Map<string, number> {
 
 /** The next earnings or ex-dividend still ahead: "Earnings Tue Nov 24", "Ex-div Mon Dec 14". */
 function nextEvent(t: string, p: J): string {
+  return nextEvents(t, p)[0] ?? '';
+}
+
+/** The earnings and ex-dividend dates still ahead, soonest first (Home's Every name: the next, then the one after). */
+export function nextEvents(t: string, p: J): string[] {
   const today = String(p?.today ?? '');
   const w = (p?.writes?.names ?? []).find((n: J) => n?.ticker === t);
   const inp = w?.thesis?.reads?.inputs ?? {};
@@ -71,7 +76,7 @@ function nextEvent(t: string, p: J): string {
   if (earn && String(earn) >= today) c.push([String(earn), 'Earnings ' + dayLabel(String(earn))]);
   if (exd && String(exd) >= today) c.push([String(exd), 'Ex-div ' + dayLabel(String(exd))]);
   c.sort((a, b) => a[0].localeCompare(b[0]));
-  return c[0]?.[1] ?? '';
+  return c.map((x) => x[1]);
 }
 
 /** The name's To do in the footer: none since 11 Nov 2026 (Nik: "Remove To do, we don't need it"), so the footer
@@ -145,15 +150,36 @@ export function inSessionOrder(book: string, names: RailName[]): RailName[] {
 }
 
 /* ── The Time value sheet and the rail's button row (brief.timeValue, sunny-home brief.ts: every sold leg still open) ── */
-export interface TvLeg { t: string; name: string; K: number; q: number; put: boolean; col: number; tvLeft: number; tvPer: number;
-  intr: number; itm: boolean; cap: number; ready: boolean }
+export interface TvLeg { t: string; name: string; K: number; q: number; put: boolean; ex: string; exLabel: string; col: number;
+  tvLeft: number; tvPer: number; intr: number; itm: boolean; cap: number; ready: boolean;
+  /** Ends by this Friday (sunny-home 18 Nov 2026); older builds send none, read as this week. */
+  wk: boolean }
 
 export function tvLegs(p: J): TvLeg[] {
   return ((p?.brief?.timeValue?.legs ?? []) as J[]).map((l) => ({
-    t: String(l.t), name: String(l.name ?? l.t), K: Number(l.K), q: Number(l.q), put: !!l.put, col: Number(l.col ?? 0),
+    t: String(l.t), name: String(l.name ?? l.t), K: Number(l.K), q: Number(l.q), put: !!l.put, ex: String(l.ex ?? ''),
+    exLabel: String(l.exLabel ?? ''), col: Number(l.col ?? 0),
     tvLeft: Number(l.tvLeft ?? 0), tvPer: Number(l.tvPer ?? 0), intr: Number(l.intr ?? 0), itm: !!l.itm, cap: Number(l.cap ?? 0),
-    ready: !!l.ready,
+    ready: !!l.ready, wk: l.wk !== false,
   }));
+}
+/** A week of decay on every option bought (brief.timeValue.hedges, 18 Nov 2026; Nik's rule: every call bought, LEAPS
+    too, is a Hedge call, every put bought a Hedge put). Empty on a payload built before the field existed. */
+export interface TvHedge { t: string; name: string; K: number; q: number; put: boolean; ex: string; exLabel: string; week: number }
+export function tvHedges(p: J): TvHedge[] {
+  return ((p?.brief?.timeValue?.hedges ?? []) as J[]).map((h) => ({
+    t: String(h.t), name: String(h.name ?? h.t), K: Number(h.K), q: Number(h.q), put: !!h.put, ex: String(h.ex ?? ''),
+    exLabel: String(h.exLabel ?? ''), week: Number(h.week ?? 0),
+  })).filter((h) => h.week > 0);
+}
+/** The one Time value figure (Nik, 17 Nov 2026): time value left in every sold leg still open, the receipt's "Coming
+    in", the Home stat and the sentence all read it. Null when the payload has no time value block. */
+export function tvLeftTotal(p: J): number | null {
+  const tv = p?.brief?.timeValue;
+  if (!tv) return null;
+  // This week's (the receipt's "to earn by Friday"), when the server sends it; else every sold leg.
+  if (tv.week?.tvLeft != null) return Number(tv.week.tvLeft);
+  return tv.tvLeft != null ? Number(tv.tvLeft) : tvLegs(p).reduce((a, l) => a + l.tvLeft, 0);
 }
 /** Ready to roll (the server's rule: under $0.05 a share left, 90% captured, or in the money): in the money first
     (assignment risk), then the most captured. */

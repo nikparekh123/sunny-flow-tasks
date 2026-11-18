@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { usePrefetchTicker, type J } from '../../lib/data';
 import { useWeb } from '../../lib/state';
 import { C, clean, named, pct } from '../../lib/format';
-import { Bars, Big, Caption, Card, Line, MapTiles, Rows, Stats, Text, Words, type Bar, type MapTile, type Row, type Stat } from './Card';
+import { Bars, Big, Caption, Card, Line, MapTiles, Rows, Stats, Text, useFullRow, Words, type Bar, type MapTile, type Row, type Stat } from './Card';
 import { move, plain, pmove, spans, tidy, type Mo } from './util';
 
 export interface Ctx {
@@ -23,31 +23,39 @@ const bm = (cx: Ctx, s: unknown) => cx.mask(tidy(s == null ? '' : String(s)));
 const col = (c: string | null | undefined, fb: string = C.ink) => (c ? named(c, fb) : fb);
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
-/** The grid cards one doc card becomes (Your names and the watchlist are two). */
-export function gridCards(card: J, cx: Ctx, key: string): ReactNode[] {
+/** One box in a section's grid: `wide` boxes take the row; the section works out which half-width ones are alone. */
+export interface GridItem { k: string; wide: boolean; node: ReactNode }
+
+/** The grid boxes one doc card becomes. Your names is one box: the server's Watchlist page is left out (handoff
+    2026-11-18, "No watchlist": there is no watchlist anywhere). */
+export function gridCards(card: J, cx: Ctx, key: string): GridItem[] {
+  const one = (node: ReactNode, wide = false): GridItem[] => [{ k: key, wide, node }];
   switch (card.type) {
-    case 'yourNames': return (card.pages ?? []).map((p: J, i: number) => <NamesMap key={key + i} page={p} cx={cx} />);
-    case 'yourPosition': return [<YourPosition key={key} card={card} cx={cx} />];
-    case 'whatsMoving': return [<WhatsMoving key={key} card={card} cx={cx} />];
-    case 'toDecide': return [<ToDecide key={key} card={card} cx={cx} />];
-    case 'comingUp': case 'remember': return [<Dated key={key} card={card} cx={cx} />];
-    case 'yourResults': case 'results': return [<Results key={key} card={card} cx={cx} />];
-    case 'tomorrowOrders': return [<Orders key={key} card={card} cx={cx} />];
-    case 'thetaMonth': return [<Theta key={key} card={card} cx={cx} />];
-    case 'payback': return [<Payback key={key} card={card} cx={cx} />];
+    case 'yourNames': return (card.pages ?? []).filter((p: J) => p?.kind !== 'watchlist')
+      .map((p: J, i: number) => ({ k: key + i, wide: false, node: <NamesMap key={key + i} page={p} cx={cx} /> }));
+    case 'yourPosition': return one(<YourPosition key={key} card={card} cx={cx} />, true);
+    case 'whatsMoving': return one(<WhatsMoving key={key} card={card} cx={cx} />);
+    case 'toDecide': return one(<ToDecide key={key} card={card} cx={cx} />, true);
+    case 'comingUp': case 'remember': return one(<Dated key={key} card={card} cx={cx} />);
+    case 'yourResults': case 'results': return one(<Results key={key} card={card} cx={cx} />, card.type === 'results');
+    case 'tomorrowOrders': return one(<Orders key={key} card={card} cx={cx} />);
+    case 'thetaMonth': return one(<Theta key={key} card={card} cx={cx} />);
+    case 'payback': return one(<Payback key={key} card={card} cx={cx} />);
     // Performance (10 Nov 2026): this month's realized, a bar per month, this month's names; the payback card's shape.
-    case 'performance': return [<Payback key={key} card={card} cx={cx} />];
-    case 'earningsAhead': return [<EarningsAhead key={key} card={card} cx={cx} />];
-    case 'closedRolled': return [<ClosedRolled key={key} card={card} cx={cx} />];
-    default: return [<Generic key={key} card={card} cx={cx} />];
+    case 'performance': return one(<Payback key={key} card={card} cx={cx} />);
+    case 'earningsAhead': return one(<EarningsAhead key={key} card={card} cx={cx} />);
+    case 'closedRolled': return one(<ClosedRolled key={key} card={card} cx={cx} />);
+    default: return one(<Generic key={key} card={card} cx={cx} />);
   }
 }
 
-/* ── Your names and the watchlist: flex tiles sized by weight; a tile opens its ticker page ── */
+/* ── Your names: flex tiles sized by weight; a tile opens its ticker page. Beside another box the tiles sit in two
+   rows, 4 and 3 (each at least a quarter less 3 px), 160 tall; alone on its row, one row the full width, 112 tall
+   (handoff 2026-11-18, "Your names, reorganized"). ── */
 function NamesMap({ page, cx }: { page: J; cx: Ctx }) {
   const navigate = useNavigate();
   const pre = usePrefetchTicker(useWeb().book);
-  const watch = page.kind === 'watchlist';
+  const full = !!useFullRow();
   const mv = move(page.move, page.moveColor, page.moveSigned);
   const when = cx.mo === 'pre' ? 'Before the bell' : cx.mo === 'weekend' ? 'The week' : 'Today';
   const tiles: MapTile[] = (page.tiles ?? []).map((x: J) => {
@@ -55,11 +63,15 @@ function NamesMap({ page, cx }: { page: J; cx: Ctx }) {
     return { k: t, t, m, p, g: Math.max(1, +x.weight || 1), aria: `${clean(x.name) || t} ${m}`, go: () => navigate('/t/' + t, { state: { from: 'home' } }), pre: () => pre(t) };
   });
   return (
-    <Card title={clean(page.title)} sub={watch ? 'by market cap' : `${when} ${mv.t}`}>
-      <MapTiles tiles={tiles} />
+    <Card title={clean(page.title)} sub={`${when} ${mv.t}`}>
+      <MapTiles tiles={tiles} h={full ? 112 : 160} mw={full ? '58px' : 'calc(25% - 3px)'} />
     </Card>
   );
 }
+
+/** The weekend's "by next Friday" (handoff 2026-11-18 §3.1): when the card's header says next Friday, every row
+    says it too (the engine writes "Thin by Friday" whatever the week). */
+export const byNextFriday = (header: string) => (s: string) => (/next Friday/i.test(header) ? s.replace(/\bby Friday\b/g, 'by next Friday') : s);
 
 /* ── Your position: the book by Friday if the whole market moves together ── */
 function YourPosition({ card, cx }: { card: J; cx: Ctx }) {
@@ -80,13 +92,14 @@ function YourPosition({ card, cx }: { card: J; cx: Ctx }) {
     const l = clean(s.l).replace(/^if\s+/i, '');
     return { l: cap1(l), v: bm(cx, s.v), c: col(s.c) };
   });
+  const head = clean(card.subtitle ?? m.subtitle), fri = byNextFriday(head);
   const rows: Row[] = (m.rows ?? []).map((r: J) => ({
-    k: r.id, l: clean(r.name), s: bm(cx, r.line), sc: col(r.lineColor, C.ink2), v: clean(r.right), c: col(r.rightColor),
-    go: () => navigate('/positions/' + r.id), aria: `${clean(r.name)}, ${clean(r.line)}, ${clean(r.right)}. Opens Positions`,
+    k: r.id, l: clean(r.name), s: bm(cx, fri(clean(r.line))), sc: col(r.lineColor, C.ink2), v: clean(r.right), c: col(r.rightColor),
+    go: () => navigate('/positions/' + r.id), aria: `${clean(r.name)}, ${fri(clean(r.line))}, ${clean(r.right)}. Opens Positions`,
   }));
   const short = m.shortAt != null && isFinite(+m.shortAt) ? ` · makes the most at ↑${(+m.shortAt).toFixed(1)}%` : '';
   return (
-    <Card title="Your position" sub={clean(card.subtitle ?? m.subtitle)} wide aria="Your position">
+    <Card title="Your position" sub={head} wide aria="Your position">
       {stats.length ? <Stats stats={stats} /> : null}
       <Line pts={f.map(y)} z={y(0)} cap={'↓10% · today · ↑10%' + short} />
       {m.sentence ? <Text><Words runs={spans(m.sentence).map((r) => ({ ...r, t: tidy(r.t) }))} mask={cx.mask} /></Text> : null}
@@ -163,7 +176,8 @@ function Results({ card, cx }: { card: J; cx: Ctx }) {
       {stats.length ? <Stats stats={stats} /> : null}
       {paired?.title ? <Text>{bm(cx, paired.title)}</Text> : null}
       {body ? <Text>{bm(cx, body)}</Text> : null}
-      {dv ? <Rows rows={[{ l: clean(dv.title) || 'Dividends', s: bm(cx, plain(dv.line)), v: bm(cx, dv.right), c: none ? C.ink : col(dv.rightColor) }]} /> : null}
+      {/* No dividends is left out, never "None" (handoff 2026-11-18 §7). */}
+      {dv && !none ? <Rows rows={[{ l: clean(dv.title) || 'Dividends', s: bm(cx, plain(dv.line)), v: bm(cx, dv.right), c: col(dv.rightColor) }]} /> : null}
       {flat.map((c: J, i: number) => (
         <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Bars bars={(c.bars as J[]).map((b, j) => barOf(b, j, cx))} />

@@ -1,8 +1,10 @@
 // Sold, in SD (handoff 2026-11-13-positions §3.3; Web Dark v2 `d.sd153`): every sold option leg on the account on
 // screen, on one SD axis, one row per leg. The rows come from Home's legs (brief_inputs: strike, count, sold at, the
-// mark, each leg's own IV), already loaded, so the card opens at once. The hollow dot (SD when sold) is the fill's,
-// from each name's sunny-sd reply (`sold[i].z0`), read only once the card is opened; a leg without one has no hollow
-// dot (never back-solved). No buy-back or roll hints (Nik removed them).
+// mark, each leg's own IV), already loaded, so the card opens at once. Simpler since 17 Nov 2026 (handoff 2026-11-18):
+// each row is one solid dot for the strike in its risk colour, a line from today to it and a tick for the breakeven
+// (in colour only under 0.5 SD or in the money). The SD when sold reads only in the Strike column (sold → now), from
+// each name's sunny-sd reply (`sold[i].z0`), read once the card is opened; never back-solved. No buy-back or roll
+// hints (Nik removed them).
 import type { J } from '../lib/data';
 import { ny } from '../lib/clock';
 import { tradingDays, type SoldIn, type SoldRow, type Tone } from '../../../supabase/functions/_shared/positions-engine.ts';
@@ -81,7 +83,7 @@ export function SoldCard({ rows, within, inTheMoney, open, close, onPick }:
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 16, flexWrap: 'wrap' }}>
           <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ fontSize: 20, lineHeight: '26px', fontWeight: 700 }}>Sold, in SD</span>
-            <span style={{ fontSize: 13, lineHeight: '18px', color: MU }}>Every sold leg from today’s price. The dot is the strike now, the hollow dot when sold, the tick its breakeven.</span>
+            <span style={{ fontSize: 13, lineHeight: '18px', color: MU }}>Every sold leg from today’s price. The dot is the strike, the line its distance from today, the tick its breakeven.</span>
           </span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600 }}>{sum}</span>
@@ -105,7 +107,7 @@ export function SoldCard({ rows, within, inTheMoney, open, close, onPick }:
           {rows.map((r) => <SoldRowView key={r.key} r={r} onPick={onPick} />)}
         </div>
         <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>
-          SD now green when further than when sold, red when closer · dots red under 0.5 SD, orange 0.5 to 1 SD, grey past 1 SD, filled red in the money · the hollow dot is where the strike sat when sold · breakeven shows under 0.5 SD or in the money · a tap opens the name
+          Red under 0.5 SD or in the money, orange 0.5 to 1 SD, grey past 1 SD · Strike reads SD when sold → SD now, green when further, red when closer · the breakeven number shows under 0.5 SD or in the money, its tick in colour then · a tap opens the name
         </span>
       </div>
     </Fold>
@@ -113,10 +115,12 @@ export function SoldCard({ rows, within, inTheMoney, open, close, onPick }:
 }
 
 function SoldRowView({ r, onPick }: { r: SoldRow; onPick: (t: string, ex: string) => void }) {
+  // The dot's risk colour (positions-engine toneOf): red under 0.5 SD or in the money, orange to 1 SD, grey past it.
   const c = TONE[r.tone], lc = r.tone === 'quiet' ? 'rgba(174,174,178,.55)' : c, mc = moveColour(r);
+  const xn = r.x, x0 = 0.5;
   const what = `${fk(r.K)} ${r.put ? 'puts' : 'calls'} · ${r.exLabel} · ${r.n}`;
   const sdNow = `${r.a.toFixed(2)} SD${r.itm ? ' in' : ''}`;
-  const kept = r.kept == null ? null : r.kept >= 0 ? `${Math.round(r.kept * 100)}% kept` : `${Math.round(-r.kept * 100)}% lost`;
+  const kept = r.kept == null ? null : r.kept >= 0 ? `${Math.round(r.kept * 100)}% captured` : `${Math.round(-r.kept * 100)}% lost`;
   const aria = `${r.t} ${fk(r.K)} ${r.put ? 'puts' : 'calls'} ${r.exLabel}, ${r.a0 != null ? `sold ${r.a0.toFixed(2)} SD out, ` : ''}now ${r.a.toFixed(2)} SD ${r.itm ? 'in the money' : 'out'}${r.showBE && r.be != null ? `, breakeven ${r.be.toFixed(2)}` : ''}, opens Intelligence`;
   return (
     <button type="button" className="bare swp-row" onClick={() => onPick(r.t, r.ex)} aria-label={aria}
@@ -126,15 +130,12 @@ function SoldRowView({ r, onPick }: { r: SoldRow; onPick: (t: string, ex: string
         <span style={{ fontSize: 12, lineHeight: '16px', color: MU, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{what}</span>
       </span>
       <span aria-hidden="true" style={{ position: 'relative', display: 'block', height: 28 }}>
-        {r.x0 != null && <>
-          <span style={{ position: 'absolute', top: 13, height: 0, left: pc(Math.min(r.x0, r.x)), width: pc(Math.abs(r.x - r.x0)), borderTop: '1.5px dotted rgba(245,245,247,.35)' }} />
-          <span style={{ position: 'absolute', top: 9, width: 10, height: 10, marginLeft: -5, left: pc(r.x0), borderRadius: '50%', border: '1.5px solid rgba(245,245,247,.4)' }} />
-        </>}
-        {r.xb != null && <>
-          <span style={{ position: 'absolute', top: 13, height: 2, left: pc(Math.min(r.x, r.xb)), width: pc(Math.abs(r.x - r.xb)), background: lc, opacity: 0.5 }} />
-          <span style={{ position: 'absolute', top: 6, height: 16, width: 2, marginLeft: -1, left: pc(r.xb), borderRadius: 1, background: lc }} />
-        </>}
-        <span style={{ position: 'absolute', top: 8, width: 12, height: 12, marginLeft: -6, left: pc(r.x), borderRadius: '50%', border: `2px solid ${c}`, background: r.itm ? R : '#0B0D0C' }} />
+        {/* Today to the strike, then the breakeven tick, then the strike's dot on top. */}
+        <span style={{ position: 'absolute', top: 13, height: 2, left: pc(Math.min(x0, xn)), width: pc(Math.abs(xn - x0)), borderRadius: 1, background: lc, opacity: 0.6 }} />
+        {r.xb != null && (
+          <span style={{ position: 'absolute', top: 8, height: 12, width: 2, marginLeft: -1, left: pc(r.xb), borderRadius: 1, background: r.showBE ? c : 'rgba(245,245,247,.45)' }} />
+        )}
+        <span style={{ position: 'absolute', top: 9, width: 10, height: 10, marginLeft: -5, left: pc(xn), borderRadius: '50%', background: c, boxShadow: '0 0 0 2px #0B0D0C' }} />
       </span>
       <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         <span style={{ fontSize: 14, lineHeight: '20px', fontWeight: 600, whiteSpace: 'nowrap' }}>

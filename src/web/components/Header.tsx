@@ -5,7 +5,8 @@
 // so the spec's relations are kept on it: the mark's flat edge sits on the bar's bottom edge, the tabs 9 from it.
 import { useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { headerTime, useNY } from '../lib/clock';
+import { ActivityBell } from '../activity/Activity';
+import { clock12, headerTime, useNY } from '../lib/clock';
 import { useWeb } from '../lib/state';
 import { TodoButton } from '../todo/TodoPopover';
 
@@ -66,14 +67,14 @@ export function Header() {
   const pvL = privacy ? 'Show amounts' : 'Hide amounts';
   return (
     <header className="glass-header" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 10, height: 64 }}>
-      <div style={{ maxWidth: 1440, height: '100%', margin: '0 auto', padding: '0 48px', display: 'flex', alignItems: 'center', gap: 36 }}>
+      <div className="sw-hd" style={{ maxWidth: 1440, height: '100%', margin: '0 auto', padding: '0 48px', display: 'flex', alignItems: 'center', gap: 36 }}>
         {/* The sun and the tabs, 32 apart as in the design (the bar's other gaps stay as built). */}
-        <div style={{ alignSelf: 'stretch', display: 'flex', gap: 32 }}>
+        <div className="sw-hd-l" style={{ flex: 'none', alignSelf: 'stretch', display: 'flex', gap: 32 }}>
           <button type="button" className="bare" onClick={() => nav('/home')} aria-label="Sunny, Home"
             style={{ position: 'relative', alignSelf: 'stretch', display: 'flex', alignItems: 'flex-end' }}>
             <Sun />
           </button>
-          <nav style={{ alignSelf: 'stretch', display: 'flex', gap: 32 }}>
+          <nav className="sw-hd-tabs" style={{ alignSelf: 'stretch', display: 'flex', gap: 32 }}>
             {tabs.map((t) => (
               <button key={t.k} type="button" className="bare sw-navtab" onClick={t.go} aria-current={t.on ? 'page' : undefined}
                 style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 9, fontSize: 14, lineHeight: '20px', fontWeight: 400,
@@ -81,8 +82,10 @@ export function Header() {
             ))}
           </nav>
         </div>
-        <span style={{ flex: 1 }} />
+        <span className="sw-hd-sp" style={{ flex: 1 }} />
         <TodoButton />
+        {/* Activity (161a, 16 Nov 2026): the bell between To do and the eye, when the book's payload carries it. */}
+        <ActivityBell />
         <button type="button" className="bare sw-pv" onClick={() => setPrivacy(!privacy)} aria-pressed={privacy} aria-label={pvL} title={pvL}
           style={{ flex: 'none', width: 36, height: 36, borderRadius: '50%', background: privacy ? 'rgba(255,255,255,.2)' : 'rgba(118,118,128,.2)',
             display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -91,9 +94,17 @@ export function Header() {
             {privacy && <path d="M4 4l16 16" />}
           </svg>
         </button>
-        <span style={{ fontSize: 12, letterSpacing: '.04em', color: '#98989D', whiteSpace: 'nowrap' }}>{headerTime(n)}</span>
+        {/* The clock never clips (handoff 2026-11-18): the whole line on a wide bar, the time alone under 720 px, and
+            under 480 px the bar's gaps close up and the time may wrap onto two lines ("11:00" over "AM ET"). */}
+        <span style={{ flex: '0 1 auto', minWidth: 0, fontSize: 12, lineHeight: '14px', letterSpacing: '.04em', color: '#98989D', textAlign: 'right' }}>
+          <span className="sw-clk-l" style={{ whiteSpace: 'nowrap' }}>{headerTime(n)}</span>
+          <span className="sw-clk-s">{clock12(n)}{'\u00A0'}ET</span>
+        </span>
       </div>
       <style>{`.sw .sw-navtab:hover{color:#F5F5F7!important}.sw .sw-pv:hover{filter:brightness(1.3)}
+.sw .sw-clk-s{display:none}
+@media (max-width:720px){.sw .sw-clk-l{display:none}.sw .sw-clk-s{display:inline}}
+@media (max-width:480px){.sw .sw-hd{padding:0 16px!important;gap:10px!important}.sw .sw-hd-l{gap:14px!important}.sw .sw-hd-tabs{gap:18px!important}.sw .sw-hd .sw-todo{margin-right:0!important}.sw .sw-hd-sp{display:none}.sw .sw-hd-l{margin-right:auto}}
 @keyframes s138rise{from{transform:translateY(22px)}to{transform:translateY(0)}}
 @keyframes s138ray{from{opacity:0;stroke-dashoffset:8}to{opacity:1;stroke-dashoffset:0}}
 @keyframes s138glow{from{opacity:0;transform:scaleX(.3)}to{opacity:1;transform:scaleX(1)}}

@@ -1,4 +1,4 @@
-// Overnight (Web Dark v2, `b.isOvn`): four columns, Asia · Europe · Rates and the dollar · Commodities and crypto,
+// Overnight (Current Web, `b.isOvn`, in a box since 2026-11-18): four columns, Asia · Europe · Rates and the dollar · Commodities and crypto,
 // each row the name and its value, under them the region and the move, and between them the month's line (Nik,
 // 9 Nov 2026: trend lines, one month; the server sends `trend`: the closes, ending on today's price, its colour and
 // words). Also draws The world this week.
@@ -7,6 +7,7 @@
 import { Fragment } from 'react';
 import type { J } from '../../lib/data';
 import { C, clean, named } from '../../lib/format';
+import { BOX, TABLE_PAD } from './Card';
 import { move } from './util';
 
 const GROUPS: { k: string; l: string; status: boolean; re: RegExp }[] = [
@@ -62,7 +63,7 @@ export default function Overnight({ card }: { card: J }) {
       }).filter((g) => g.rows.length);
   const sub = clean(card.footer ?? card.subtitle);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', padding: '16px 0 0', borderTop: '1px solid rgba(255,255,255,.14)' }}>
+    <div style={{ ...BOX, display: 'flex', flexDirection: 'column', padding: TABLE_PAD }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, paddingBottom: 10 }}>
         <span style={{ fontSize: 17, fontWeight: 600 }}>{clean(card.title) || 'Overnight'}</span>
         {sub ? <span style={{ fontSize: 13, color: C.ink2 }}>{sub}</span> : null}

@@ -1,7 +1,8 @@
-// Home's numbered sections (README 1, item 8, and "Blocks used inside sections"; Web Dark v2 `d.hs`).
+// Home's numbered sections (README 1, item 8, and "Blocks used inside sections"; Current Web `d.hs`).
 // Each section: padding-top 64, gap 22 inside; the kicker ("1 · WORLD AND ECONOMY") 8 over the headline (h2 28/36,
-// the first sentence 600, the rest 400 at .72); then its blocks. Cards sit in a two-column grid; Overnight, the
-// economy readings and the sectors table with its heat maps take the full width.
+// the first sentence 600, the rest 400 at .72); then its blocks. Cards sit in boxes on a two-column grid (handoff
+// 2026-11-18 §3.1); a half-width box left alone on its row takes the full row. Overnight, the economy readings, the
+// sectors table with its heat maps and Every name take the full width; Every name leads Your book.
 // The index cards (indexCards, futuresCards, theWeekIndexes) are not drawn here: the index strip at the top of Home
 // carries those numbers. A section with nothing else is skipped (its headline moves into the strip), and the
 // sections drawn are numbered 1, 2, 3 in order.
@@ -10,10 +11,13 @@ import type { BookId, J } from '../lib/data';
 import { useWeb } from '../lib/state';
 import { clean, named } from '../lib/format';
 import './blocks/blocks.css';
-import { Grid, More } from './blocks/Card';
-import { gridCards, type Ctx } from './blocks/cards';
+import { FullRow, Grid, More } from './blocks/Card';
+import { gridCards, type Ctx, type GridItem } from './blocks/cards';
 import Economy, { OutToday, readings } from './blocks/Economy';
+import EveryName from './blocks/EveryName';
+import Levels from './blocks/Levels';
 import Overnight from './blocks/Overnight';
+import ShareAvg from './blocks/ShareAvg';
 import { SectorMaps, SectorTable, sectorsOf } from './blocks/Sectors';
 import { momentOf, scrollToSel, spans, tidy, type Mo, type Span } from './blocks/util';
 
@@ -72,6 +76,20 @@ function Headline({ runs, mask }: { runs: Span[]; mask: (s: string) => string })
   );
 }
 
+/** Which grid boxes take the full row: a wide one, and a half-width one left alone on its row (the one before a wide
+    box, or the last one, when it would sit on its own). The design's rule (Current Web, Nov 18 "Home in boxes"). */
+function fullRows(items: GridItem[]): boolean[] {
+  const full = items.map((x) => x.wide);
+  let col = 0, prev = -1;
+  items.forEach((x, i) => {
+    if (x.wide) { if (col === 1) full[prev] = true; col = 0; return; }
+    col = col ? 0 : 1;
+    prev = i;
+  });
+  if (col === 1 && prev >= 0) full[prev] = true;
+  return full;
+}
+
 /* ── The sections ─────────────────────────────────────────────────────────── */
 export default function Sections({ doc, payload, book }: { doc: J; payload: J; book: BookId }) {
   const { mask, privacy } = useWeb();
@@ -88,29 +106,37 @@ export default function Sections({ doc, payload, book }: { doc: J; payload: J; b
     for (const r of payload?.brief?.position?.rows ?? []) if (r?.id && !m[r.id]) m[r.id] = r.name;
     return m;
   }, [names, payload]);
-  // A heat-map tile opens the ticker page for a book or watchlist name only.
+  // A heat-map tile opens the ticker page for a book name only (there is no watchlist, handoff 2026-11-18).
   const linked = useMemo(() => {
     const s = new Set<string>(held);
-    for (const w of payload?.watchlist ?? []) if (w?.ticker) s.add(String(w.ticker));
     for (const sec of doc?.sections ?? []) for (const c of sec.cards ?? []) if (c.type === 'yourNames')
-      for (const p of c.pages ?? []) for (const t of p.tiles ?? []) if (t?.ticker) s.add(String(t.ticker));
+      for (const p of c.pages ?? []) if (p?.kind !== 'watchlist') for (const t of p.tiles ?? []) if (t?.ticker) s.add(String(t.ticker));
     return s;
-  }, [held, payload, doc]);
+  }, [held, doc]);
+  // Every name leads the first Your book section, when the book holds something.
+  const bookAt = (doc?.sections ?? []).findIndex((s: J) => /Your book/i.test(String(s?.kicker ?? '')));
+  const holds = ((payload?.brief_inputs?.names ?? []) as J[]).some((n) => +n?.S0 > 0 && Array.isArray(n?.legs) && n.legs.length > 0);
 
   const cx: Ctx = { mo, mask, position: payload?.brief?.position, company };
   const secs = (doc?.sections ?? [])
-    .map((s: J) => ({ s, cards: (s.cards ?? []).filter((c: J) => c && !INDEX.has(c.type)) }))
+    .map((s: J, i: number) => ({ s, book: i === bookAt, cards: (s.cards ?? []).filter((c: J) => c && !INDEX.has(c.type)) }))
     .filter((x: { cards: J[] }) => x.cards.length);
   if (!secs.length) return null;
 
   return (
     <>
-      {secs.map(({ s, cards }: { s: J; cards: J[] }, si: number) => {
+      {secs.map(({ s, book: isBook, cards }: { s: J; book: boolean; cards: J[] }, si: number) => {
         const runs = spans(privacy ? (s.privacy?.headline ?? s.headline) : s.headline);
         const blocks: ReactNode[] = [];
-        let grid: ReactNode[] = [];
-        const flush = () => { if (grid.length) { blocks.push(<Grid key={'g' + blocks.length}>{grid}</Grid>); grid = []; } };
+        let grid: GridItem[] = [];
+        const flush = () => {
+          if (!grid.length) return;
+          const fr = fullRows(grid);
+          blocks.push(<Grid key={'g' + blocks.length}>{grid.map((x, i) => <FullRow.Provider key={x.k} value={fr[i]}>{x.node}</FullRow.Provider>)}</Grid>);
+          grid = [];
+        };
         const full = (n: ReactNode) => { flush(); blocks.push(<div key={'b' + blocks.length} style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>{n}</div>); };
+        if (isBook && holds) full(<EveryName payload={payload} doc={doc} book={book} mo={mo} />);
         cards.forEach((c: J, ci: number) => {
           const key = `${si}-${ci}`;
           switch (c.type) {
@@ -130,6 +156,15 @@ export default function Sections({ doc, payload, book }: { doc: J; payload: J; b
             }
             case 'outToday':
               full(<OutToday card={c} />);
+              break;
+            // The weekend's Share average (handoff 2026-11-18): its own grid of boxes, at least 300 wide each.
+            case 'shareAvg':
+              full(<ShareAvg card={c} />);
+              break;
+            // The Levels card (handoff 2026-11-18, 161c): two columns across the row, its figures from
+            // payload.activity; an older payload without it draws nothing.
+            case 'levels':
+              if (payload?.activity) full(<Levels card={c} payload={payload} />);
               break;
             case 'sectors': {
               const sx = sectorsOf(c, held);

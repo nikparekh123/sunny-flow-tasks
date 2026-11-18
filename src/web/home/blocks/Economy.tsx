@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import type { J } from '../../lib/data';
 import { C, clean } from '../../lib/format';
+import { BOX, TABLE_PAD } from './Card';
 import { isNeg, numOf, unsign } from './util';
 
 type Filter = 'all' | 'w' | 'n';
@@ -116,12 +117,12 @@ function Tile({ e }: { e: J }) {
 
 /** Out today (the doc's outToday: readings that landed today). The design's table wants each release's time,
     prior, forecast and actual, which the doc does not carry; the readings it does carry are drawn as the same
-    soft tiles under the design's block head. */
+    soft tiles under the design's block head, in a box (Today's readings, 2026-11-18). */
 export function OutToday({ card }: { card: J }) {
   const list: J[] = card.indicators ?? [];
   if (!list.length) return null;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 16, borderTop: '1px solid rgba(255,255,255,.14)' }}>
+    <div style={{ ...BOX, display: 'flex', flexDirection: 'column', gap: 14, padding: TABLE_PAD }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
         <span style={{ fontSize: 17, fontWeight: 600 }}>{clean(card.title) || 'Out today'}</span>
       </div>

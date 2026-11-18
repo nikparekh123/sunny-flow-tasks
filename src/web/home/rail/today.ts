@@ -7,7 +7,7 @@
 //   A leg is never added across strikes or expiries: two sold call strikes are two rows.
 //
 // By leg follows Nik's grouping (11 and 12 Nov 2026, over the handoff's Shares-and-LEAPS card): Shares the shares;
-// Hedges every call bought (LEAPS and OTM calls alike), then every put bought; Income everything sold.
+// Hedges every call bought (LEAPS and hedge calls alike), then every put bought; Income everything sold.
 import { NameBook, type Div, type Leg } from '../../../../supabase/functions/_shared/book-engine.ts';
 import type { J } from '../../lib/data';
 import { count, money } from '../../lib/format';
@@ -59,7 +59,7 @@ export function railToday(p: J, order: string[]): RailToday {
       let s = `${n0} ${sold ? 'sold' : 'bought'} · ${exL}`;
       if (sold && l.at != null && l.at > 0) {
         const kp = 1 - now / l.at;
-        s += ' · ' + (kp >= 0 ? `${Math.round(kp * 100)}% kept` : `costs ${Math.round(-kp * 100)}% more`);
+        s += ' · ' + (kp >= 0 ? `${Math.round(kp * 100)}% captured` : `costs ${Math.round(-kp * 100)}% more`);
       }
       // Since opened: a sold leg's premium collected and what is kept of it; a bought leg's cost and its gain.
       const n = Math.abs(l.q) * 100;

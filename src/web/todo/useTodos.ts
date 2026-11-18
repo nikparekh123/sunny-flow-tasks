@@ -41,7 +41,6 @@ const SAMPLE: [string, string | null, string, boolean?][] = [
   ['Look at LULU again after the holidays', '2027-01-04', ''],
   ['Set up the 2026 tax lot report', null, ''],
   ['Renew the market data subscription', '2026-10-23', '', true],
-  ['Update the watchlist', null, '', true],
 ];
 let fxList: Todo[] | null = null;
 const fxSeed = (): Todo[] => {

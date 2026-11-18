@@ -21,15 +21,16 @@ import { useHome, usePositions, usePrefetchPositions, useSd, useSdMany, useTicke
 import { arrow, pct, price } from '../lib/format';
 import { useWeb } from '../lib/state';
 import type { PCRange } from '../../../supabase/functions/_shared/price-chart.ts';
-import { Payoff, PriceChart, rangeWords } from '../positions/Band';
+import { ConeSwitch, Payoff, PriceChart, XR0, rangeWords, useCone } from '../positions/Band';
 import { BookTotals } from '../positions/BookTotals';
 import { EveryLeg, type LegFilter } from '../positions/EveryLeg';
 import { Intelligence } from '../positions/Intelligence';
 import { pickExpiry, requestIntelScroll, setIntelOpen, useIntelOpen, type SdReply } from '../positions/intel';
-import { PosModel, Pricer, expLabel, type GridW, type Inputs, type PLeg, type Seg } from '../positions/model';
+import { PosModel, Pricer, expLabel, type GridW, type Inputs, type PLeg } from '../positions/model';
 import { SoldCapsule, SoldCard, closedDays, soldLegs } from '../positions/SoldInSd';
 import { bookTotals, nameTotals } from '../positions/totals';
-import { G, K, MU, O, PosStyles, R, Segmented } from '../positions/ui';
+import { useTarget } from '../positions/target';
+import { G, K, MU, O, PosStyles, R, Segmented, useReducedMotion } from '../positions/ui';
 import { WhatIf } from '../positions/WhatIfPanel';
 import { useWhatIf, type Draft } from '../positions/whatif';
 
@@ -40,8 +41,17 @@ const asOf = (iso: string | undefined) => {
   return n.date < today.date || n.mins >= 16 * 60 ? `${shortDate(n.date)} close` : `${shortDate(n.date)} · ${clock12(n)} ET`;
 };
 
+/** A company's logo (public/logos/TICKER.png) at 60% of the disc; the ticker when there is no logo file. */
+function Logo({ t }: { t: string }) {
+  const [bad, setBad] = useState(false);
+  useEffect(() => setBad(false), [t]);
+  if (bad) return <span aria-hidden="true" style={{ fontSize: 10, lineHeight: '12px', fontWeight: 700, color: '#1D1D1F' }}>{t}</span>;
+  return <img src={`/logos/${t}.png`} alt="" aria-hidden="true" draggable={false} onError={() => setBad(true)} style={{ width: '60%', height: '60%', objectFit: 'contain', pointerEvents: 'none' }} />;
+}
+
 export default function Positions() {
   const { t: tParam } = useParams();
+  const rm = useReducedMotion();
   const nav = useNavigate();
   const loc = useLocation();
   const { book, mask } = useWeb();
@@ -111,9 +121,12 @@ export default function Positions() {
                 <button key={n.t} type="button" className="bare" onClick={() => go(n.t)} aria-current={on ? 'true' : undefined}
                   aria-label={`${n.name ?? n.t}${dot === 'red' ? ', short at the priced move by Friday' : dot === 'orange' ? ', a sold leg within 0.5 SD' : ''}`}
                   style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, width: 70 }}>
-                  <span style={{ position: 'relative', width: 50, height: 50, borderRadius: '50%', background: 'rgba(255,255,255,.07)',
-                    border: on ? '3px solid #F5F5F7' : '1.5px solid rgba(255,255,255,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>
-                    {n.t}
+                  {/* Handoff 2026-11-18 §3.2: a white disc with the logo at 60%; the ring is an inset shadow, so the dot
+                      (pinned to the top right) never moves when a name is picked. */}
+                  <span style={{ position: 'relative', width: 50, height: 50, boxSizing: 'border-box', borderRadius: '50%', background: '#FFFFFF',
+                    boxShadow: on ? 'inset 0 0 0 3px #F5F5F7' : 'inset 0 0 0 1.5px rgba(255,255,255,.2)', transition: rm ? 'none' : 'box-shadow .2s ease',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Logo t={n.t} />
                     {dot && <span style={{ position: 'absolute', right: 0, top: 0, width: 11, height: 11, borderRadius: '50%', background: dot === 'red' ? R : O, boxShadow: '0 0 0 2px #050706' }} />}
                   </span>
                   <span style={{ fontSize: 13, fontWeight: on ? 700 : 400, color: on ? K : MU }}>{n.t}</span>
@@ -163,9 +176,9 @@ function Name({ book, t, name, payload }: { book: 'S' | 'N'; t: string; name: J;
   );
 }
 
-// The page's own state, kept across names and rebuilds: the date, Price or Payoff, Chart or Table, the range, the
-// Every leg filter.
-const pageState = { day: null as string | null, view: 'price' as 'price' | 'pay', tab: 'chart' as 'chart' | 'table', rg: '1W' as PCRange, lf: 'all' as LegFilter };
+// The page's own state, kept across names and rebuilds: the Payoff date ('now', an ISO day, or null for this Friday)
+// and range (±%), Price or Payoff, Chart or Table, the Price chart's range, the Every leg filter.
+const pageState = { day: null as string | null, xr: XR0 as number, view: 'price' as 'price' | 'pay', tab: 'chart' as 'chart' | 'table', rg: '1W' as PCRange, lf: 'all' as LegFilter };
 function usePageState<K extends keyof typeof pageState>(k: K): [(typeof pageState)[K], (v: (typeof pageState)[K]) => void] {
   const [v, setV] = useState(pageState[k]);
   return [v, (x) => { pageState[k] = x; setV(x); }];
@@ -182,16 +195,16 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
   const [rg, setRg] = usePageState('rg');
   const [lf, setLf] = usePageState('lf');
   const [day, setDay] = usePageState('day');
+  const [xr, setXr] = usePageState('xr');
+  const [cone, toggleCone] = useCone();
+  const target = useTarget(book, t);
   const chart = useTicker(t, book);
   const sdQ = useSd(book, t);
   const sd = sdQ.data as SdReply | undefined;
   const intelOpen = useIntelOpen();
 
-  // The date: this Friday unless one is picked (kept by its day across names and rebuilds).
+  // The grid's dates (What if's default expiry reads this Friday from them).
   const segs = useMemo(() => m.segments(), [m]);
-  const seg = segs.find((s) => s.key === day) ?? segs.find((s) => s.i === m.fridayStop) ?? segs[segs.length - 1];
-  const pick = (s: Seg) => setDay(s.key);
-  const dLong = (s: Seg) => m.stops[s.i]?.long.replace(/ close$/, '') ?? s.label;
 
   // The switches (Nik, 13 Nov 2026: "by default only keep income on and rest off", every name): a leg sold starts on,
   // shares and legs bought start off; `flip` holds the legs switched away from that. Payoff, its Greeks and Every leg
@@ -222,7 +235,9 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
   const strikeList = strikes.includes(draft.K) ? strikes : [...strikes, draft.K].sort((a, b) => a - b);
   const expL = (iso: string) => expLabel(iso, m.wholeDays(iso));
   const closed = useMemo(() => closedDays(payload?.calendar), [payload?.calendar]);
-  const rw = view === 'price' ? rangeWords(chart.data, S0, closed, rg) : null;
+  // The Price chart's SD and the 1 SD cone read this week's IV: the name's IV on the Friday chain at the strike nearest
+  // the price (Home's brief_inputs, the same IV as the Payoff's priced move).
+  const rw = view === 'price' ? rangeWords(chart.data, S0, closed, rg, m.iv) : null;
   // The Price chart keeps every strike held, whatever the switches (Nik, 13 Nov 2026).
   const optLegs = base.filter((l) => l.ty !== 'S');
   // This name's Sold in SD rows: the Price chart's sold tags wear their closeness (Nik, 14 Nov 2026).
@@ -235,12 +250,17 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
         <div style={{ flex: '4 1 560px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, minHeight: 34 }}>
             <Segmented label="Price or payoff" items={[['price', 'Price'], ['pay', 'Payoff']]} value={view} onPick={setView} width={184} />
-            {view === 'price' ? (rw && <span style={{ fontSize: 13, color: MU }}>{rw.l} <span style={{ fontWeight: 600, color: rw.c }}>{rw.v}</span></span>)
-              : <Segmented label="Chart or table" items={[['chart', 'Chart'], ['table', 'Table']]} value={tab} onPick={setTab} width={170} size={13} />}
+            {view === 'price' ? (rw && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <span style={{ fontSize: 13, color: MU }}>{rw.l} <span style={{ fontWeight: 600, color: rw.c }}>{rw.v}</span></span>
+                {rw.coneOk && <ConeSwitch on={cone} toggle={toggleCone} />}
+              </div>
+            )) : <Segmented label="Chart or table" items={[['chart', 'Chart'], ['table', 'Table']]} value={tab} onPick={setTab} width={170} size={13} />}
           </div>
           {view === 'price'
-            ? <PriceChart chart={chart.data} failed={chart.isError} S0={S0} closed={closed} legs={optLegs} trades={tradesOn} sold={soldHere} rg={rg} setRg={setRg} />
-            : <Payoff t={t} pr={pr} base={start} wi={wi} chg={viewChg} segs={segs} seg={seg} dLong={dLong} pick={pick} tab={tab} mask={mask} iv={m.iv} />}
+            ? <PriceChart chart={chart.data} failed={chart.isError} S0={S0} closed={closed} legs={optLegs} trades={tradesOn} sold={soldHere} rg={rg} setRg={setRg} iv={m.iv} cone={cone} />
+            : <Payoff t={t} pr={pr} base={start} wi={wi} chg={viewChg} tab={tab} mask={mask} iv={m.iv} closed={closed} day={day} setDay={setDay} xr={xr} setXr={setXr}
+                tg={target.tg} setTg={target.set} />}
         </div>
         <WhatIf pr={pr} base={base} off={shut} trades={wf.trades} draft={draft} strikes={strikeList} expiries={expiries} expL={expL} nCh={nCh} cashC={cashC} mask={mask}
           setDraft={wf.setDraft} add={wf.add} remove={wf.remove} reset={wf.reset} />

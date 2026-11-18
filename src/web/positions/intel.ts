@@ -29,11 +29,15 @@ export interface SdSold { put: boolean; K: number; n: number; ex: string; be: nu
   fill?: { S: number; iv: number; td: number; approx: boolean } }
 export interface Zone { kind: 'support' | 'resistance'; lo: number; hi: number; mid: number; strength: number }
 export interface Tech {
+  /** The ticker_technicals row's day (ISO), the close it was worked out from. */
+  day?: string | null;
   sma20: number | null; sma50: number | null; sma100: number | null; sma200: number | null; rsi14: number | null; hv20: number | null; ivRank: number | null;
   ivLow52?: number | null; ivHigh52?: number | null; zones: Zone[];
 }
 export interface SdReply {
   ok: boolean; t: string; name: string; S: number; prev: number; move: number; open: boolean; today: string;
+  /** When the chains were read (sunny-sd 18 Nov 2026): the IV and SD lanes' "updated" time. Older replies have none. */
+  chain_at?: string;
   cfg: { cLo: number; cHi: number; pLo: number; pHi: number };
   counts: { calls: number; puts: number };
   sold: SdSold[]; exps: SdExp[];

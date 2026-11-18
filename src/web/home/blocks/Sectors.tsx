@@ -1,8 +1,9 @@
-// Sectors (Web Dark v2, `b.isSecbar` and `b.isMaps`): the All 11 sectors table (Sector · Weight · Move on a bar
-// centred on zero · Leads · Trails · Your names), then a heat map per sector, three a row (two when narrow):
-// a squarified treemap of its biggest names by weight, tiles coloured by move with the text in the tile's own
+// Sectors (Current Web, `b.isSecbar` and `b.isMaps`): the All 11 sectors table, in a box since 2026-11-18 (Sector ·
+// Weight · Move on a bar centred on zero · Leads · Trails · Your names, a quiet - when none), then a heat map per
+// sector, three a row (two when narrow): a squarified treemap of its biggest names by weight, tiles coloured by move
+// with the text in the tile's own
 // colour, labels only when they fit, the book's names ringed, a tooltip and aria-label on every tile, and a tile
-// of a book or watchlist name opening its ticker page. Data: the brief doc's sectors card (`maps`, one per sector,
+// of a book name opening its ticker page. Data: the brief doc's sectors card (`maps`, one per sector,
 // each with its tiles: ticker, name, move, weight). Leads and Trails are the best and worst movers among those tiles.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -10,6 +11,7 @@ import { usePrefetchTicker, type J } from '../../lib/data';
 import { useWeb } from '../../lib/state';
 import { C, clean, pct } from '../../lib/format';
 import { NARROW_QUERY } from '../../WebLayout';
+import { BOX, TABLE_PAD } from './Card';
 import { pmove, tileColors } from './util';
 
 const HAIR = '1px solid rgba(255,255,255,.08)';
@@ -48,7 +50,7 @@ export function SectorTable({ secs, sub, onRow }: { secs: Sec[]; sub: string; on
   const rows = secs.slice().sort((a, b) => b.mv - a.mv);
   const mx = Math.max(...rows.map((x) => Math.abs(x.mv)), 0) || 1;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 16, borderTop: '1px solid rgba(255,255,255,.14)' }}>
+    <div style={{ ...BOX, display: 'flex', flexDirection: 'column', padding: TABLE_PAD }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, paddingBottom: 10 }}>
         <span style={{ fontSize: 17, fontWeight: 600 }}>All {secs.length} sectors</span>
         <span style={{ fontSize: 13, color: C.ink2 }}>{sub}</span>
@@ -71,7 +73,7 @@ export function SectorTable({ secs, sub, onRow }: { secs: Sec[]; sub: string; on
             </span>
             <span style={{ fontSize: 13, color: x.ld ? (x.ld.p >= 0 ? C.green : C.red) : C.ink2 }}>{x.ld ? `${x.ld.nm} ${pmove(x.ld.p)}` : ''}</span>
             <span style={{ fontSize: 13, color: x.tr ? (x.tr.p >= 0 ? C.green : C.red) : C.ink2 }}>{x.tr ? `${x.tr.nm} ${pmove(x.tr.p)}` : ''}</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: x.yours.length ? C.ink : C.ink2 }}>{x.yours.length ? x.yours.join(' · ') : 'none'}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: x.yours.length ? C.ink : C.ink2 }}>{x.yours.length ? x.yours.join(' · ') : '-'}</span>
           </>
         );
         const style = { boxSizing: 'border-box' as const, width: '100%', display: 'grid', gridTemplateColumns: COLS, gap: 12, alignItems: 'center', padding: '11px 0', borderTop: HAIR };

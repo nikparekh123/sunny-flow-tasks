@@ -1,7 +1,11 @@
 // Home's account block (README 1, items 2 to 4): the account value counting up, the change lines, the 260 tall
 // chart with its hover, the ranges and the stats row. The hover paints straight into the page through refs (the
 // design's DH.amv / DH.aml), so a mouse, trackpad or finger never re-renders React.
-import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
+// The read never jumps (handoff 2026-11-18 §3.1): it is one line laid over the lines under the value, which hide
+// but keep their room. It never reads while the page scrolls (§5.1): any scroll ends it; the mouse moves a browser
+// sends in the 250 ms after a scroll, and moves that did not move, are ignored; a finger starts it after a 160 ms
+// hold or a sideways drag past 8 px, a vertical drag is a scroll and cancels it, and lifting the finger ends it.
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { CountUp } from '../../components/CountUp';
 import type { J } from '../../lib/data';
 import { C, dollars, money } from '../../lib/format';
@@ -40,13 +44,17 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
   const lineEl = useRef<HTMLSpanElement>(null), dateEl = useRef<HTMLSpanElement>(null), dotEl = useRef<HTMLSpanElement>(null);
   const live = useRef({ v, privacy, mask });
   live.current = { v, privacy, mask };
+  /** When the page last scrolled (performance.now()), whether a read is on screen, and the finger being watched. */
+  const scrolled = useRef(-1e9), reading = useRef(false);
+  const finger = useRef<{ id: number; x0: number; y0: number; x: number; on: boolean; timer: number } | null>(null);
 
-  const move = (e: PointerEvent<HTMLDivElement>) => {
+  const paint = (clientX: number) => {
     const { v: r, mask: mk } = live.current, b = box.current;
     if (!r || !b) return;
     const rc = b.getBoundingClientRect();
     if (!rc.width) return;
-    const f = Math.max(0, Math.min(1, (e.clientX - rc.left) / rc.width)), k = r.ser.length;
+    reading.current = true;
+    const f = Math.max(0, Math.min(1, (clientX - rc.left) / rc.width)), k = r.ser.length;
     // The line and the dot follow the pointer exactly; the numbers are the nearest day's close.
     const fi = f * Math.max(0, k - 1), i0 = Math.min(Math.max(0, k - 2), Math.floor(fi)), t = fi - i0;
     const y = k > 1 ? r.ys[i0] + (r.ys[i0 + 1] - r.ys[i0]) * t : r.ys[0];
@@ -68,16 +76,63 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
       hl.style.display = 'block';
     }
   };
-  const leave = () => {
+  // Refs only, so one function serves every render and the scroll listener.
+  const leave = useCallback(() => {
+    reading.current = false;
     if (lineEl.current) lineEl.current.style.opacity = '0';
     if (dotEl.current) dotEl.current.style.opacity = '0';
     if (valEl.current) valEl.current.style.display = 'inline';
     if (hvalEl.current) hvalEl.current.style.display = 'none';
     if (linesEl.current) linesEl.current.style.visibility = 'visible';
     if (hlEl.current) hlEl.current.style.display = 'none';
-  };
+  }, []);
+  const dropFinger = useCallback(() => {
+    const t = finger.current;
+    if (t) window.clearTimeout(t.timer);
+    finger.current = null;
+  }, []);
   // A new range or a new book while the pointer rests: start clean.
-  useEffect(() => { leave(); }, [range, payload?.chart]);
+  useEffect(() => { leave(); }, [range, payload?.chart, leave]);
+  // Any scroll (the page or anything in it) ends a read at once and starts the 250 ms the mouse is not listened to.
+  useEffect(() => {
+    const onScroll = () => {
+      scrolled.current = performance.now();
+      dropFinger();
+      if (reading.current) leave();
+    };
+    document.addEventListener('scroll', onScroll, { capture: true, passive: true });
+    return () => { document.removeEventListener('scroll', onScroll, { capture: true }); dropFinger(); };
+  }, [leave, dropFinger]);
+
+  const down = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== 'touch') { paint(e.clientX); return; }
+    // A finger: wait for a 160 ms hold or a sideways drag before reading.
+    dropFinger();
+    const t = { id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, on: false, timer: 0 };
+    t.timer = window.setTimeout(() => { if (finger.current === t) { t.on = true; paint(t.x); } }, 160);
+    finger.current = t;
+  };
+  const move = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'touch') {
+      const t = finger.current;
+      if (!t || t.id !== e.pointerId) return;
+      t.x = e.clientX;
+      if (!t.on) {
+        const dx = Math.abs(e.clientX - t.x0), dy = Math.abs(e.clientY - t.y0);
+        if (dy > 8 && dy >= dx) { dropFinger(); leave(); return; }   // a vertical drag is a scroll
+        if (!(dx > 8 && dx > dy)) return;                              // not decided yet
+        window.clearTimeout(t.timer);
+        t.on = true;
+      }
+      paint(e.clientX);
+      return;
+    }
+    // The mouse: moves right after a scroll, or with no movement, are the page sliding under a still cursor.
+    if (performance.now() - scrolled.current < 250 || (!e.movementX && !e.movementY)) return;
+    paint(e.clientX);
+  };
+  const up = (e: PointerEvent<HTMLDivElement>) => { if (e.pointerType === 'touch') { dropFinger(); leave(); } };
+  const out = () => { dropFinger(); leave(); };
 
   const st = stats(payload, m, range);
 
@@ -102,7 +157,7 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
         </div>
       </div>
 
-      <div ref={box} onPointerMove={move} onPointerDown={move} onPointerLeave={leave} onPointerCancel={leave}
+      <div ref={box} onPointerMove={move} onPointerDown={down} onPointerUp={up} onPointerLeave={out} onPointerCancel={out}
         style={{ position: 'relative', height: 260, marginTop: 20, cursor: 'crosshair', touchAction: 'pan-y', userSelect: 'none', WebkitUserSelect: 'none' }}>
         {v && (
           <svg viewBox="0 0 400 100" preserveAspectRatio="none" aria-hidden="true"
@@ -142,9 +197,9 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
               <span className="tnum" style={{ fontSize: 19, lineHeight: '24px', fontWeight: 600, color: x.c }}>{mask(x.v)}</span>
             </>
           );
-          // Time value opens its sheet (README 5); its value is what is left to earn.
+          // Time value opens its receipt (README §3.5); its value is the receipt's time value left by Friday.
           return x.tv
-            ? <button key={x.k} type="button" className="bare" onClick={() => setTvOpen(true)} aria-label={`Time value, left to earn, ${mask(x.v)}`} style={style}>{inner}</button>
+            ? <button key={x.k} type="button" className="bare" onClick={() => setTvOpen(true)} aria-label={`Time value, ${mask(x.v)} left by Friday, opens the receipt`} title="Left by Friday" style={style}>{inner}</button>
             : <div key={x.k} style={style}>{inner}</div>;
         })}
       </div>

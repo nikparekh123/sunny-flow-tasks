@@ -1,23 +1,36 @@
-// A card inside a section (Web Dark v2, `b.isCards`): open on the page, a 1px hair-strong rule on top and 16 px
-// under it, the title 17/600 with its sub line 13 on the right, then the blocks 14 apart in the design's order:
-// Big number, Stats, Line, Map, Text, Rows, Bars. Cards sit two to a row (gap 36 44); a wide one takes the row.
-import type { CSSProperties, ReactNode } from 'react';
+// A card inside a section (Current Web, `b.isCards`; handoff 2026-11-18 §3.1, "Home in boxes"): a solid box (radius
+// 20, white at 4%, a 1 px ring at 8%, padding 20 24 22, no glass and no hairline on top), the title 17/600 with its
+// sub line 13 on the right, then the blocks 14 apart in the design's order: Big number, Stats, Line, Map, Text, Rows,
+// Bars. Boxes sit two to a row, 16 apart, and boxes in a row stretch to the same height; a wide one takes the row,
+// and so does a half-width box left alone on its row (the section lays that out and says so through FullRow).
+import { createContext, useContext, type CSSProperties, type ReactNode } from 'react';
 import { C, named } from '../../lib/format';
 import { tileColors, type Span } from './util';
 
 const INK88 = 'rgba(245,245,247,.88)';
 
+/** The box every Home block sits in. Cards pad 20 24 22; tables (Overnight, the sectors, Every name) 20 24 18. */
+export const BOX: CSSProperties = {
+  boxSizing: 'border-box', borderRadius: 20, background: 'rgba(255,255,255,.04)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.08)',
+};
+export const BOX_PAD = '20px 24px 22px', TABLE_PAD = '20px 24px 18px';
+
+/** True when this card takes the whole row (a wide card, or a half-width one alone on its row). */
+export const FullRow = createContext<boolean | null>(null);
+export const useFullRow = () => useContext(FullRow);
+
 export function Grid({ children }: { children: ReactNode }) {
   return (
-    <div className="tnum" style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: '36px 44px', alignItems: 'start' }}>
+    <div className="tnum" style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 16, alignItems: 'stretch' }}>
       {children}
     </div>
   );
 }
 
 export function Card({ title, sub, wide, children, aria }: { title: ReactNode; sub?: ReactNode; wide?: boolean; children?: ReactNode; aria?: string }) {
+  const full = useFullRow() ?? !!wide;
   return (
-    <div aria-label={aria} style={{ gridColumn: wide ? '1 / -1' : 'span 1', minWidth: 0, paddingTop: 16, borderTop: '1px solid rgba(255,255,255,.14)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div aria-label={aria} style={{ ...BOX, gridColumn: full ? '1 / -1' : 'span 1', minWidth: 0, padding: BOX_PAD, display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
         <span style={{ fontSize: 17, fontWeight: 600 }}>{title}</span>
         {sub ? <span style={{ fontSize: 13, color: C.ink2, textAlign: 'right' }}>{sub}</span> : null}
@@ -76,15 +89,16 @@ export function Caption({ children }: { children: ReactNode }) {
 }
 
 export interface MapTile { k: string; t: string; m: string; p: number; g: number; aria: string; go?: () => void; pre?: () => void }
-/** Map: flex tiles sized by weight, radius 6, the ticker 13/600 over the move 12, the text in the tile's colour. */
-export function MapTiles({ tiles, h = 160 }: { tiles: MapTile[]; h?: number }) {
+/** Map: flex tiles sized by weight, radius 6, the ticker 13/600 over the move 12, the text in the tile's colour.
+    `mw` is each tile's least width: 58 px for one long row, `calc(25% - 3px)` for rows of four. */
+export function MapTiles({ tiles, h = 160, mw = '58px' }: { tiles: MapTile[]; h?: number; mw?: string }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, height: h, alignContent: 'stretch' }}>
       {tiles.map((x) => {
         const { bg, fg } = tileColors(x.p);
         return (
           <button key={x.k} type="button" className="bare swb-tile" onClick={x.go} onPointerEnter={x.pre} onFocus={x.pre} aria-label={x.aria} title={x.aria}
-            style={{ cursor: x.go ? 'pointer' : 'default', flex: `${x.g} 1 0`, minWidth: 58, borderRadius: 6, background: bg, color: fg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+            style={{ cursor: x.go ? 'pointer' : 'default', flex: `${x.g} 1 0`, minWidth: mw, borderRadius: 6, background: bg, color: fg, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>{x.t}</span>
             <span style={{ fontSize: 12 }}>{x.m}</span>
           </button>

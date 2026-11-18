@@ -16,10 +16,18 @@ export const spans = (v: J): Span[] => {
 };
 export const plain = (v: J) => spans(v).map((s) => s.t).join('');
 
+/** The copy rules on the server's words (handoff 2026-11-18 §7): "Hedge calls" and "Hedge puts", never OTM or
+    Insurance (an OTM call can go in the money; the data keys stay), and "% captured" for a share of the premium
+    ("kept" only means realized, so "Sold · kept" stays). */
+export const words = (s: string) =>
+  s.replace(/\bOTM (calls?)\b/g, 'Hedge $1').replace(/\botm (calls?)\b/g, 'hedge $1')
+    .replace(/\bInsurance (puts?)\b/g, 'Hedge $1').replace(/\binsurance (puts?)\b/g, 'hedge $1')
+    .replace(/(\d)% kept\b/g, '$1% captured');
+
 /** The numbers rules on a book sentence from the server: whole dollars with thousands become K and M ($16,432 →
     $16.4K; prices with cents, strikes and $211 stay), and a percentage keeps one decimal (two only under 0.1%). */
 export const tidy = (s: string | null | undefined) =>
-  clean(s)
+  words(clean(s))
     .replace(/\$(\d{1,3}(?:,\d{3})+)(?!\d|[.,]\d)/g, (_, n: string) => money(+n.replace(/,/g, '')))
     .replace(/(?<![\d.])(\d+\.\d{2,})%/g, (m, n: string) => (+n >= 0.1 ? pct(+n) : m));
 

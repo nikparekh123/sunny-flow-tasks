@@ -4,6 +4,7 @@
 import type { CSSProperties } from 'react';
 import type { J } from '../../lib/data';
 import { clean, named } from '../../lib/format';
+import { words } from '../blocks/util';
 
 export interface Span { t: string; b?: boolean; c?: string }
 
@@ -25,7 +26,7 @@ export function Runs({ spans, mask, bold = 700 }: { spans: Span[]; mask: (s: str
         if (s.b) st.fontWeight = bold;
         const col = runColor(s.c);
         if (col) st.color = col;
-        return <span key={i} style={st}>{mask(clean(s.t))}</span>;
+        return <span key={i} style={st}>{mask(words(clean(s.t)))}</span>;
       })}
     </>
   );
