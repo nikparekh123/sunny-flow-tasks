@@ -43,6 +43,7 @@ struct SXAnswerView: View {
         case .tech(let t): SXTechCard(p: t)
         case .page(let pg): SXPageEntry(p: pg)
         case .performance(let m): SXPerformance(month: m)
+        case .shareAvg(let t): SXShareAvg(t: t)
         case .none(let why, let dym): SXNone(why: why, didYouMean: dym, ask: ask)
         }
     }
@@ -415,6 +416,21 @@ struct SXSourceLine: View {
 
 /// Performance in a Search answer (10 Nov 2026): the old Home's card from the phone's own Home data, on the month
 /// asked; nothing before that data is in (the sentence above it still answers).
+/// Share average in Search (round 157a): "Show my share averages" (every name, moved first) or one name's card.
+struct SXShareAvg: View {
+    let t: String?
+    @Environment(\.homeWords) private var words
+    @AppStorage(BriefPrivacy.key) private var privacy = false
+    var body: some View {
+        let all = words?.shareAvg?.array ?? []
+        let rows = (t.map { tk in all.filter { $0["t"].string == tk } } ?? all)
+            .sorted { abs($0["wk"].double ?? 0) > abs($1["wk"].double ?? 0) }
+        VStack(spacing: 12) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, a in ShareAvgCard(a: a, privacy: privacy) }
+        }
+    }
+}
+
 struct SXPerformance: View {
     let month: String?
     @Environment(\.homeWords) private var words

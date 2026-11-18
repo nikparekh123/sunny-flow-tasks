@@ -21,6 +21,12 @@ nonisolated struct HomePayload: Decodable {
     /// Before the open and after the close (18 Nov 2026): the book priced from pre-market or after-hours trades.
     /// Nil in the session, or when no held name has traded since the close. Optional: older servers send none.
     let pricesEst: PricesEst?
+    /// The Overview for both books (sunny-home together.ts, book S's build; handoff 2026-11-18 §4). Drawn as it comes.
+    let together: JSONValue?
+    /// Each name's share average (sunny-home share_avg, round 157a): Search draws it from here.
+    let shareAvg: JSONValue?
+    /// Activity (sunny-home activity.ts, round 161a): {sync: {at, stopped}, events, levels}. Older servers send none.
+    let activity: JSONValue?
     let account: Account
     let indices: [Tape]
     let overnight: [Tape]

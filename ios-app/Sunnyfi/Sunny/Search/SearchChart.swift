@@ -480,7 +480,7 @@ struct SXChartBuild {
         var labs: [SXChartOut.Label] = [], foot: [[Run]] = []
 
         if pos {
-            let col = ["LEAPS": SX.ink, "Hedge": SX.call, "Insurance": SX.put]
+            let col = ["LEAPS": SX.ink, "Hedge call": SX.call, "Hedge put": SX.put, "Hedge": SX.call, "Insurance": SX.put]
             if let k = p.leapsK {
                 o.fills.append(.init(pts: cs.enumerated().map { CGPoint(x: XI($0.offset), y: Y(max($0.element, k))) }
                     + [CGPoint(x: xe, y: Y(k)), CGPoint(x: 0, y: Y(k))], c: SX.upTint))

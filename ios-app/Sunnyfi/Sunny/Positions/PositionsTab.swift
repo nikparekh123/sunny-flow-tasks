@@ -4,14 +4,13 @@
 //
 //  The Positions tab (handoff 2026-11-13-positions §2, App Explorations 154a), view only, top to bottom:
 //    the account strip (owners of both books) · large title Positions, "Sunny’s book · Fri Nov 13 close" ·
-//    Book totals (three cards sideways: Long, Hedge, Income; Nik's five pieces, D7) · Sold, in SD (a full-width glass
-//    row; a tap opens every sold leg on one SD axis, a row tap selects that name and scrolls to Intelligence, D2) ·
-//    the name strip (a dot: red short at the priced move by Friday, orange a sold leg within 0.5 SD, A7) · the name
+//    Your book (handoff 2026-11-18 §2.1: one glass card, Long · Hedge · Income with Today and All time, a tap opens a
+//    group's parts; it replaces the Nov 13 totals cards and Sold, in SD) · the name strip (a dot: red short at the priced move by Friday, orange a sold leg within 0.5 SD, A7) · the name
 //    header · Price | Payoff (Payoff at this Friday's close) · Every leg, a native switch on each row (Nik 13 Nov 2026),
 //    and the Whole TICKER book row · Intelligence for this week, always open (PositionsIntelView).
 //    Legs sold start on, shares and legs bought start off (Nik, 13 Nov 2026, every name). A leg switched off drops out
 //    of the Whole TICKER book row and the Payoff with its Greeks, per book and name, for as long as the app is open.
-//    The Price chart keeps every strike held; Book totals, Sold in SD and Intelligence stay whole.
+//    The Price chart keeps every strike held; Your book and Intelligence stay whole.
 //  Not on the phone: the SD calculator, What if, Try a trade, New and Both, the cover check, dates, table.
 //
 //  Every model is worked out once per input (PositionsMemo), never in a body. The screen handles its own loading,
@@ -30,21 +29,27 @@ struct PositionsTab: View {
     @State private var todo = TodoStore.shared
     @State private var sd = SDStore.shared
     @State private var charts = PositionsCharts.shared
+    @State private var targets = PositionsTargets.shared
+    /// The Payoff's date (an index on its slider; nil = the end, the expiry) and range in % either side (168b).
+    @State private var payAt: Int?
+    @State private var payRange = 12
+    /// The Price chart's 1 SD layer, remembered (round 164; the web keeps it as sunny.cone164 too).
+    @AppStorage("sunny.cone164") private var cone = false
     @State private var memo = PositionsMemo()
 
     @State private var name: String = BriefDebug.name ?? ""
     @State private var view: Band = .price
-    @State private var soldOpen = false
     /// Legs switched away from how they start in Every leg (Income on, the rest off), per "book|TICKER".
     @State private var flip: [String: Set<String>] = [:]
     /// The open box ("lane|box"): one at a time across the lanes.
     @State private var box: String?
     @State private var scrolled: CGFloat = 0
     @State private var pos = ScrollPosition()
-    /// Where Intelligence sits in the page: a Sold in SD row scrolls there (never read in layout).
-    @State private var intelY: CGFloat = 0
     @State private var picks = 0
-    @State private var intelTick = 0
+    /// Your book's open groups.
+    @State private var bookOpen: Set<String> = []
+    /// The name's own book: its open group (one at a time).
+    @State private var ownOpen: String?
     // The account switch, as Home does it: the page at 15% and 28 pt toward the new account, then back.
     @State private var faded = false
     @State private var slid = false
@@ -71,6 +76,7 @@ struct PositionsTab: View {
                         .opacity(faded ? 0.15 : 1)
                         .offset(x: slid ? 28 * dipDir : 0)
                 }
+                .overlay(alignment: .topTrailing) { ActivityBellSlot() }
                 .padding(.bottom, 120)
                 .containerRelativeFrame(.horizontal)
                 .coordinateSpace(.named(Self.page))
@@ -78,29 +84,21 @@ struct PositionsTab: View {
             .scrollIndicators(.hidden)
             .scrollPosition($pos)
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, v in scrolled = v }
-            .onChange(of: intelTick) { _, _ in
-                // A Sold in SD row tap: once the rows have folded away, bring Intelligence up under the small title bar
-                // (scrollTo(y:) puts that point at the safe area's top; the bar is 44 pt under it).
-                Task {
-                    try? await Task.sleep(for: .milliseconds(reduce ? 60 : 520))
-                    withAnimation(S.moving(S.standard(0.5), reduce)) { pos.scrollTo(y: max(0, intelY - 52)) }
-                }
-            }
             .task {
                 #if DEBUG && targetEnvironment(simulator)
-                // Screens checked in the simulator: `-posOpen sold` opens Sold, in SD; `-posBox w|ce` opens a box's
-                // detail; `-posAt intel` scrolls to Intelligence; `-posView payoff` shows Payoff.
+                // Screens checked in the simulator: `-posOpen Hedge` opens a Your book group; `-posBox w|ce` opens a
+                // box's detail; `-posAt intel` scrolls to Intelligence; `-posView payoff` shows Payoff.
                 let a = ProcessInfo.processInfo.arguments
                 func arg(_ k: String) -> String? { a.firstIndex(of: k).flatMap { a.indices.contains($0 + 1) ? a[$0 + 1] : nil } }
                 if arg("-posView") == "payoff" { view = .payoff }
-                if arg("-posOpen") == "sold" { try? await Task.sleep(for: .milliseconds(900)); soldOpen = true }
+                if let g = arg("-posOpen") { bookOpen = [g] }
                 if let b = arg("-posBox") { box = b }
                 if let at = arg("-posAt") { try? await Task.sleep(for: .milliseconds(1400)); proxy.scrollTo(at, anchor: .top) }
                 if let y = BriefDebug.scroll { try? await Task.sleep(for: .milliseconds(1200)); pos.scrollTo(y: y) }
                 #endif
             }
         }
-        .background(SBackground(glows: false))
+        .background(SBackground(glows: true))   // Home's background, glows fixed (handoff 2026-11-18 §1.1)
         .overlay(alignment: .top) { BriefTopEdge() }
         // The small title once the large one has scrolled under the top edge: "NKE Positions".
         .overlay(alignment: .top) {
@@ -125,12 +123,15 @@ struct PositionsTab: View {
         }
         .onChange(of: brief.built) { _, _ in arrive() }
         .onChange(of: name) { _, t in
+            ownOpen = nil
+            payAt = nil; payRange = 12
             if !t.isEmpty, let b = bookID { UserDefaults.standard.set(t, forKey: "positions.last.\(b)") }
             box = nil
             load()
         }
-        .onChange(of: soldOpen) { _, open in if open { loadSold() } }
-        .onChange(of: pageBook) { _, _ in soldOpen = false; box = nil; dip() }
+        .onChange(of: pageBook) { _, _ in bookOpen = []; box = nil; dip() }
+        // Back from Overview, even to the same account, the page plays the same move (handoff 2026-11-18 §1.2).
+        .onChange(of: brief.onOverview) { was, now in if was && !now && router.tab == .positions { dip() } }
         .onChange(of: pageReady) { _, ready in if ready && faded { settle(wait: false) } }
     }
 
@@ -163,14 +164,9 @@ struct PositionsTab: View {
             PosBook.build(brief: live, inputs: brief.inputs, calendar: brief.calendar, replies: { sd.reply(b, $0) }, now: SClock.now())
         }
         let n = book.names.first { $0.t == name } ?? book.names.first
-        PosTotals(groups: book.groups, privacy: privacy)
-        if !book.sold.isEmpty {
-            PosSoldInSD(book: book, open: $soldOpen, reduce: reduce) { t in
-                if t != name { name = t }
-                withAnimation(S.moving(.timingCurve(0.4, 0, 0.2, 1, duration: 0.45), reduce)) { soldOpen = false }
-                intelTick += 1
-            }
-            .padding(.horizontal, Self.margin)
+        if !book.groups.isEmpty {
+            PosYourBook(groups: book.groups, open: $bookOpen, privacy: privacy, reduce: reduce)
+                .padding(.horizontal, Self.margin)
         }
         PosStrip(names: book.names, selected: n?.t ?? "") { t in
             guard t != name else { return }
@@ -179,12 +175,12 @@ struct PositionsTab: View {
         }
         .sensoryFeedback(.selection, trigger: picks)
         if let n {
-            nameSection(n, book: b, sold: book.sold)
+            nameSection(n, book: b, sold: book.sold, own: book.nameGroups[n.t] ?? [])
         }
     }
 
     /// The header, Price | Payoff, Every leg and Intelligence for the name on screen.
-    @ViewBuilder private func nameSection(_ n: PosBook.Name, book b: String, sold: [PE.SoldRow]) -> some View {
+    @ViewBuilder private func nameSection(_ n: PosBook.Name, book b: String, sold: [PE.SoldRow], own: [PosBook.Group]) -> some View {
         let m = brief.positions.model(b, n.t)
         let built = brief.positions.models["\(b)|\(n.t)"]?.built ?? ""
         let offK = "\(b)|\(n.t)", offs = flip[offK] ?? []
@@ -195,6 +191,11 @@ struct PositionsTab: View {
         }
         let S0 = nm?.S0 ?? n.S0
         PosHeader(n: n, S0: S0).padding(.horizontal, Self.margin)
+        if !own.isEmpty {
+            PosNameBook(t: n.t, groups: own, open: $ownOpen, privacy: privacy, reduce: reduce)
+                .padding(.horizontal, Self.margin)
+                .padding(.top, -4)
+        }
         VStack(alignment: .leading, spacing: 12) {
             Picker("Price or payoff", selection: $view) {
                 Text("Price").tag(Band.price)
@@ -207,15 +208,25 @@ struct PositionsTab: View {
                 if view == .price {
                     // A sold strike wears its Sold in SD closeness (Nik, 14 Nov 2026, "4 + 2").
                     let w = charts.chart(b, n.t), now = MarketClock.ny(SClock.now()), stk = PosPrice.toned(nm?.strikes ?? [], sold.filter { $0.l.t == n.t })
+                    // This week's IV (Home's brief_inputs, the Friday chain's at the money), for the strikes' SD and the cone.
+                    let ivNow = brief.inputs?["names"].array.first { $0["t"].string == n.t }?["iv"].double
                     let closed = Set(brief.calendar.filter { $0.kind == "closed" }.map(\.date))
                     let pr = w.flatMap { w in
-                        memo.price(key: "\(b)|\(n.t)|\(w.dates.last ?? "")|\(w.hours?.count ?? 0)|\(S0)|\(now.date)|\(now.minutes)|\(stk.map { $0.id + ($0.tone?.rawValue ?? "") }.joined(separator: ","))") {
-                            PosPrice.build(w, S0: S0, today: now.date, mins: now.minutes, closed: closed, strikes: stk)
+                        memo.price(key: "\(b)|\(n.t)|\(w.dates.last ?? "")|\(w.hours?.count ?? 0)|\(S0)|\(now.date)|\(now.minutes)|\(cone)|\(stk.map { $0.id + ($0.tone?.rawValue ?? "") }.joined(separator: ","))") {
+                            PosPrice.build(w, S0: S0, today: now.date, mins: now.minutes, closed: closed, strikes: stk, iv: ivNow, cone: cone)
                         }
                     }
-                    PosPriceChart(price: pr, failed: charts.hasFailed(b, n.t))
-                } else if let p = nm?.payoff {
-                    PosPayoffView(t: n.t, S0: S0, p: p, privacy: privacy, changed: nm?.changed ?? false)
+                    PosPriceChart(price: pr, failed: charts.hasFailed(b, n.t), cone: $cone)
+                } else if let mm = m, let nm, !nm.dates.isEmpty {
+                    let ai = min(payAt ?? nm.dateEnd, nm.dateEnd), stop = nm.dates[ai].i
+                    if let p = memo.payoff(key: "\(b)|\(n.t)|\(built)|\(brief.built ?? "")|\(offs.sorted().joined(separator: ","))|\(stop)|\(payRange)", {
+                        PosName.payoff(mm, off: PosName.offs(mm, flip: offs), stop: stop, range: Double(payRange) / 100, hold: nm.dates.map(\.i))
+                    }) {
+                        PosPayoffView(t: n.t, S0: S0, p: p, privacy: privacy, changed: nm.changed, dates: nm.dates,
+                                      at: Binding(get: { ai }, set: { payAt = $0 }), rangePct: $payRange, target: targets.price(b, n.t))
+                    } else {
+                        loadingBox(error: brief.positions.error(b, n.t), height: 300)
+                    }
                 } else {
                     loadingBox(error: brief.positions.error(b, n.t), height: 300)
                 }
@@ -239,7 +250,6 @@ struct PositionsTab: View {
         .padding(.horizontal, Self.margin)
         intelSection(n, book: b)
             .id("intel")
-            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.page)).minY } action: { intelY = $0 }
             .padding(.horizontal, Self.margin)
     }
 
@@ -311,30 +321,36 @@ struct PositionsTab: View {
     private func arrive() {
         let names = brief.live?.names.compactMap { $0["t"].string } ?? []
         if let t = brief.positionsName, names.contains(t) { name = t; brief.positionsName = nil }
-        if !names.contains(name) {
-            let last = bookID.flatMap { UserDefaults.standard.string(forKey: "positions.last.\($0)") }
-            let live = brief.live?.names ?? []
-            if let l = last, names.contains(l) { name = l }
-            else if let s = live.first(where: { $0["short"].bool })?["t"].string { name = s }
-            else { name = live.max { ($0["size"].double ?? 0) < ($1["size"].double ?? 0) }?["t"].string ?? names.first ?? "" }
-        }
+        if !names.contains(name) { name = Self.firstName(brief) }
         load()
+    }
+    /// The name Positions opens on: the last one looked at in this book, else a name short at its priced move, else
+    /// the biggest.
+    static func firstName(_ brief: BriefState) -> String {
+        let live = brief.live?.names ?? [], names = live.compactMap { $0["t"].string }
+        if let l = brief.book.flatMap({ UserDefaults.standard.string(forKey: "positions.last.\($0)") }), names.contains(l) { return l }
+        if let s = live.first(where: { $0["short"].bool })?["t"].string { return s }
+        return live.max { ($0["size"].double ?? 0) < ($1["size"].double ?? 0) }?["t"].string ?? names.first ?? ""
+    }
+    /// Positions made ready in the background (handoff 2026-11-18 §1.3): about 0.9 s after Home shows, the name it
+    /// will open on is fetched (its grid, closes, chain and the book's targets), so the first tap on the tab is instant.
+    static func prefetch(_ brief: BriefState) {
+        let t = firstName(brief)
+        guard !t.isEmpty, let b = brief.book, let built = brief.built,
+              let n = brief.live?.names.first(where: { $0["t"].string == t }) else { return }
+        brief.positions.load(book: b, t: t, built: built, name: n)
+        PositionsTargets.shared.load(book: b)
+        PositionsCharts.shared.load(book: b, t: t)
+        SDStore.shared.load(book: b, t: t)
     }
     /// The name's grid (sunny-positions), its closes (sunny-chart) and its chain (sunny-sd).
     private func load() {
         guard !name.isEmpty, let b = bookID, let built = brief.built,
               let n = brief.live?.names.first(where: { $0["t"].string == name }) else { return }
         brief.positions.load(book: b, t: name, built: built, name: n)
+        targets.load(book: b)
         charts.load(book: b, t: name)
         sd.load(book: b, t: name)
-        if soldOpen { loadSold() }
-    }
-    /// Sold, in SD opened: every name with a sold leg, for the SD each sat at when sold.
-    private func loadSold() {
-        guard let b = bookID, let inp = brief.inputs else { return }
-        for n in inp["names"].array where n["legs"].array.contains(where: { ($0["q"].double ?? 0) < 0 && $0["ty"].string != "S" }) {
-            if let t = n["t"].string { sd.load(book: b, t: t) }
-        }
     }
 
     // MARK: The account switch (Home's dip)
@@ -367,62 +383,192 @@ extension PositionsTab: Equatable {
 /// README §3.1 with Nik's D7: LONG Shares · HEDGE Calls (every call bought, LEAPS too), Puts · INCOME Calls, Puts. Long
 /// and Hedge read their value now, and the gain on what was paid; Income reads what was collected, and what is kept
 /// (collected less the cost to close) on it. "None" where the book holds none. Gains green, losses red, never a sign.
-struct PosTotals: View {
+/// Your book (handoff 2026-11-18 §2.1): one glass card. A header row (Your book · Today · All time), then Long, Hedge
+/// and Income, the groups the book holds, each its value under its name and its Today and All time ($ over %, green up
+/// or kept, red down, never a sign). A tap opens the group's parts in the same columns; a group with one part names it
+/// ("Long · Shares") and has no chevron. Figures from sunny-home (brief_inputs.parts): Today is Home's today split by
+/// part, so the rows add up to it; All time is against IBKR's cost, or kept of what was sold.
+struct PosYourBook: View {
     let groups: [PosBook.Group]
+    @Binding var open: Set<String>
     let privacy: Bool
+    let reduce: Bool
+
+    private static let label = PC.say                          // #C7C7CC
+    private static let chevron = S.dyn(0x8E8E93, 0x636366)
+
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 8) {
-                ForEach(groups) { g in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(g.title.uppercased()).sType(PT.t(12, 16, 700, tr: 0.05), tabular: false).foregroundStyle(PC.mu)
-                            .accessibilityHidden(true)
-                        HStack(alignment: .top, spacing: 8) {
-                            ForEach(g.pieces) { p in piece(g.title, p).frame(maxWidth: .infinity, alignment: .leading) }
-                            if g.pieces.count == 1 { Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
-                        }
-                    }
-                    .padding(.horizontal, 14).padding(.vertical, 12)
-                    .frame(width: 244, alignment: .topLeading)
-                    .frame(maxHeight: .infinity, alignment: .topLeading)
-                    .modifier(PosSoftCard(radius: 16, fill: PC.totalsFill))
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text("Your book").sType(PT.t(13, 16, 600), tabular: false).foregroundStyle(Self.label)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Today").sType(PT.t(12, 16, 500), tabular: false).foregroundStyle(PC.mu).frame(width: 74, alignment: .trailing)
+                Text("All time").sType(PT.t(12, 16, 500), tabular: false).foregroundStyle(PC.mu).frame(width: 74, alignment: .trailing)
+                Color.clear.frame(width: 12, height: 1)
+            }
+            .padding(.bottom, 4)
+            .accessibilityElement(children: .combine)
+            ForEach(groups) { g in row(g) }
+        }
+        .padding(.top, 16).padding(.horizontal, 16).padding(.bottom, 6)
+        .sunnyGlass(radius: 22)
+    }
+
+    @ViewBuilder private func row(_ g: PosBook.Group) -> some View {
+        let one = g.parts.count == 1, isOpen = !one && open.contains(g.title), x = g.sum
+        VStack(spacing: 0) {
+            Button {
+                guard !one else { return }
+                withAnimation(S.moving(.easeInOut(duration: 0.25), reduce) ?? .linear(duration: 0)) {
+                    if isOpen { open.remove(g.title) } else { open.insert(g.title) }
                 }
+            } label: {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        (Text(g.title).foregroundStyle(Self.label)
+                         + Text(one ? " · \(g.parts[0].label)" : "").font(.custom("Inter", size: 15).weight(.medium)).foregroundStyle(PC.mu))
+                            .sType(PT.t(15, 20, 600), tabular: false)
+                        Text(money(x.value)).sType(PT.t(24, 28, 700, tr: -0.02)).foregroundStyle(PC.ink)
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    figure(x.today, x.todayPct, big: true).frame(width: 74, alignment: .trailing)
+                    figure(x.all, x.allPct, big: true).frame(width: 74, alignment: .trailing)
+                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Self.chevron)
+                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                        .frame(width: 12)
+                        .opacity(one ? 0 : 1)
+                }
+                .frame(minHeight: 44)      // at least 68 with the 12 above and below
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .scrollTargetLayout()
+            .buttonStyle(.plain)
+            .allowsHitTesting(!one)   // a one-part group does not open (not .disabled: that dims it)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(said(one ? "\(g.title), \(g.parts[0].label)" : g.title, x))
+            .accessibilityHint(one ? "" : (isOpen ? "Hides its parts" : "Shows its parts"))
+            .accessibilityAddTraits(one ? [] : .isButton)
+            if isOpen {
+                VStack(spacing: 0) {
+                    ForEach(g.parts) { p in
+                        HStack(alignment: .center, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(p.label).sType(PT.t(13, 17), tabular: false).foregroundStyle(PC.mu)
+                                Text(money(p.value)).sType(PT.t(15, 20, 600)).foregroundStyle(PC.ink)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            figure(p.today, p.todayPct, big: false).frame(width: 74, alignment: .trailing)
+                            figure(p.all, p.allPct, big: false).frame(width: 74, alignment: .trailing)
+                            Color.clear.frame(width: 12, height: 1)
+                        }
+                        .padding(.vertical, 6)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(said(p.label, p))
+                    }
+                }
+                .padding(.bottom, 8)
+                .transition(.opacity)
+            }
         }
-        .scrollIndicators(.hidden)
-        .scrollTargetBehavior(.viewAligned)
-        .contentMargins(.horizontal, 16, for: .scrollContent)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Book totals")
+        .overlay(alignment: .top) { Rectangle().fill(PC.rule).frame(height: 1) }
     }
 
-    private func piece(_ group: String, _ p: PosBook.Piece) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(p.label).sType(PT.t(13, 18), tabular: false).foregroundStyle(PC.muT)
-            if let f = p.fig {
-                let g = p.sold ? f.paid - f.now : f.now - f.paid, pct = f.paid > 0 ? g / f.paid : 0
-                Text(privacy ? BriefMask.shown : PosFmt.money(p.sold ? f.paid : f.now)).sType(PT.t(19, 24, 600)).foregroundStyle(PC.ink)
-                Text("\(p.sold ? (g < 0 ? "lost " : "kept ") : "")\(privacy ? BriefMask.shown : PosFmt.money(g)) · \(PE.pcx(pct))")
-                    .sType(PT.t(13, 18, 600)).foregroundStyle(g > 0.5 ? PC.green : g < -0.5 ? PC.red : PC.ink)
-            } else {
-                Text("None").sType(PT.t(19, 24, 600), tabular: false).foregroundStyle(PC.mu)
-            }
+    /// $ over %, green when up or kept, red when down; no sign.
+    private func figure(_ v: Double, _ pct: Double, big: Bool) -> some View {
+        let c = v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink
+        return VStack(alignment: .trailing, spacing: 0) {
+            Text(money(v)).sType(big ? PT.t(15, 20, 600) : PT.t(14, 18, 600))
+            Text(PE.pcx(pct)).sType(big ? PT.t(12, 16, 600) : PT.t(11, 14, 600))
         }
+        .foregroundStyle(c)
         .lineLimit(1).minimumScaleFactor(0.8)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(said(group, p))
     }
 
-    /// "Income calls, collected 13.5 thousand dollars, kept 3.9 thousand dollars, 28.9 percent".
-    private func said(_ group: String, _ p: PosBook.Piece) -> String {
-        let n = "\(group) \(p.label.lowercased())"
-        guard let f = p.fig else { return "\(n), none" }
-        let g = p.sold ? f.paid - f.now : f.now - f.paid, pct = PE.pcx(f.paid > 0 ? g / f.paid : 0)
-        return PosSay.words(p.sold ? "\(n), collected \(PosSay.money(f.paid, privacy)), \(g < 0 ? "lost" : "kept") \(PosSay.money(g, privacy)), \(pct)"
-                                   : "\(n), \(PosSay.money(f.now, privacy)), \(g < 0 ? "down" : "up") \(PosSay.money(g, privacy)), \(pct)")
+    private func money(_ v: Double) -> String { privacy ? BriefMask.shown : PosFmt.money(v) }
+
+    /// "Hedge, 87.2 thousand dollars, today up 1.2 thousand dollars, 1.4 percent, all time down 25.4 thousand dollars, 22.7 percent".
+    private func said(_ what: String, _ x: PosBook.Part) -> String {
+        PosSay.words("\(what), \(PosSay.money(x.value, privacy)), today \(PosSay.signed(x.today, privacy)), \(PE.pcx(x.todayPct)), "
+                     + "all time \(PosSay.signed(x.all, privacy)), \(PE.pcx(x.allPct))")
     }
+}
+
+/// The picked name's own book (handoff 2026-11-18 §2.3), under the name: Long · Hedge · Income in as many columns as
+/// the name holds (never None or To do), each its value and its all-time gain ($ · %, green or red). A tap on a group
+/// with two parts opens them under the row; the open cell sits on a soft tile. Same parts as Your book, this name only.
+struct PosNameBook: View {
+    let t: String
+    let groups: [PosBook.Group]
+    @Binding var open: String?
+    let privacy: Bool
+    let reduce: Bool
+
+    var body: some View {
+        let shown = groups.first { $0.title == open && $0.parts.count > 1 }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 4) {
+                ForEach(groups) { g in cell(g) }
+            }
+            .padding(.vertical, 6)
+            .overlay(alignment: .top) { Rectangle().fill(PC.rule).frame(height: 1) }
+            .overlay(alignment: .bottom) { Rectangle().fill(PC.rule).frame(height: 1) }
+            if let g = shown {
+                VStack(spacing: 8) {
+                    ForEach(g.parts) { p in partRow(p) }
+                }
+                .padding(.top, 12).padding(.bottom, 4)
+                .transition(.opacity)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(t) in your book")
+    }
+
+    private func cell(_ g: PosBook.Group) -> some View {
+        let x = g.sum, two = g.parts.count > 1, on = two && open == g.title
+        return Button {
+            guard two else { return }
+            withAnimation(S.moving(.easeOut(duration: 0.2), reduce) ?? .linear(duration: 0)) { open = on ? nil : g.title }
+        } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(g.title).sType(PT.t(12, 16, 500), tabular: false).foregroundStyle(PC.mu)
+                Text(money(x.value)).sType(PT.t(17, 22, 700)).foregroundStyle(PC.ink)
+                Text("\(money(x.all)) · \(PE.pcx(x.allPct))").sType(PT.t(12, 16, 600)).foregroundStyle(tone(x.all))
+            }
+            .lineLimit(1).minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity, minHeight: 46, alignment: .topLeading)
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .background(on ? S.dynA(0x1D1D1F, 0.06, 0xFFFFFF, 0.08) : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .allowsHitTesting(two)
+        .padding(.horizontal, -2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(PosSay.words("\(t) \(g.title), \(PosSay.money(x.value, privacy)), \(PosSay.signed(x.all, privacy)), \(PE.pcx(x.allPct))"))
+        .accessibilityHint(two ? (on ? "Hides its parts" : "Shows its parts") : "")
+        .accessibilityAddTraits(two ? .isButton : [])
+    }
+
+    private func partRow(_ p: PosBook.Part) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(p.label).sType(PT.t(14, 18), tabular: false).foregroundStyle(PC.say)
+            Spacer(minLength: 8)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(money(p.value)).sType(PT.t(14, 18, 600)).foregroundStyle(PC.ink)
+                if let tv = p.tv { Text("(\(money(tv)))").sType(PT.t(12, 16)).foregroundStyle(PC.mu) }
+                Text("\(money(p.all)) · \(PE.pcx(p.allPct))").sType(PT.t(12, 16, 600)).foregroundStyle(tone(p.all))
+            }
+            .lineLimit(1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(PosSay.words("\(p.label), \(PosSay.money(p.value, privacy))\(p.tv.map { ", time value left \(PosSay.money($0, privacy))" } ?? ""), \(PosSay.signed(p.all, privacy)), \(PE.pcx(p.allPct))"))
+    }
+
+    private func tone(_ v: Double) -> Color { v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink }
+    private func money(_ v: Double) -> String { privacy ? BriefMask.shown : PosFmt.money(v) }
 }
 
 // MARK: - The name strip and the header
@@ -438,23 +584,33 @@ struct PosStrip: View {
                     let on = n.t == selected
                     Button { pick(n.t) } label: {
                         VStack(spacing: 6) {
+                            // Handoff 2026-11-18 §2.2: the company's logo at 60% on a white disc; the picked ring is drawn
+                            // inside the disc (an inset, never a border), so the red dot never moves when it thickens.
                             ZStack(alignment: .topTrailing) {
-                                Circle().fill(PC.stripFill)
-                                    .overlay { Circle().strokeBorder(on ? PC.ink : PC.stripRing, lineWidth: on ? 3 : 1.5) }
-                                    .overlay { Text(n.t).font(.inter(n.t.count > 4 ? 11 : 12, 700)).tracking(-0.12).foregroundStyle(PC.ink).lineLimit(1).minimumScaleFactor(0.7).padding(.horizontal, 4) }
+                                Circle().fill(.white)
+                                    .overlay {
+                                        if let img = UIImage(named: "logo-\(n.t)") {
+                                            Image(uiImage: img).resizable().scaledToFit().frame(width: 34, height: 34)
+                                        } else {
+                                            Text(n.t).font(.inter(n.t.count > 4 ? 11 : 12, 700)).tracking(-0.12).foregroundStyle(Color(hex: 0x1D1D1F))
+                                                .lineLimit(1).minimumScaleFactor(0.7).padding(.horizontal, 4)
+                                        }
+                                    }
+                                    .overlay { Circle().strokeBorder(PC.ink, lineWidth: on ? 2.5 : 0) }
+                                    .animation(.easeOut(duration: 0.2), value: on)
                                     .frame(width: 56, height: 56)
-                                if let d = n.dot {
-                                    Circle().fill(PC.tone(d)).frame(width: 12, height: 12)
-                                        .background(Circle().fill(PC.page).padding(-2))
+                                if n.dot != nil {
+                                    Circle().fill(PC.red).frame(width: 12, height: 12)
+                                        .background(Circle().fill(Color(hex: 0x060807)).padding(-2))
                                 }
                             }
-                            Text(n.t).sType(PT.t(13, 16, on ? 700 : 400), tabular: false).foregroundStyle(on ? PC.ink : PC.mu)
+                            Text(n.t).sType(PT.t(13, 16, on ? 700 : 500), tabular: false).foregroundStyle(on ? PC.ink : PC.mu)
                         }
                         .frame(width: 64)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(n.company + (n.dot == .red ? ", short at the priced move by Friday" : n.dot == .orange ? ", a sold leg within 0.5 SD" : ""))
+                    .accessibilityLabel(n.company + (n.dot != nil ? ", a strike sold this week within 0.5 SD" : ""))
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
@@ -509,30 +665,34 @@ struct PosEveryLeg: View {
                     }
                     .labelsHidden()
                     .fixedSize()
-                    row(l.contract, sub: "\(l.group) · \(l.qty)", soFar: l.soFar, delta: l.delta, bold: false)
+                    row(Text(l.contract), sub: Text(l.sub), soFar: l.soFar, delta: l.delta, bold: false)
                         .opacity(l.on ? 1 : 0.4)
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(PosSay.words("\(l.contract), \(l.group), \(l.qty), so far \(PosSay.signed(l.soFar, privacy)), delta \(PosFmt.side(l.delta))"))
+                        .accessibilityLabel(PosSay.words("\(l.contract), \(l.sub.replacingOccurrences(of: "−", with: "minus ").replacingOccurrences(of: "+", with: "plus ")), so far \(PosSay.signed(l.soFar, privacy)), delta \(PosFmt.side(l.delta))"))
                 }
                 .overlay(alignment: .top) { Rectangle().fill(PC.rule).frame(height: 1) }
             }
             HStack(spacing: 12) {
                 // Keeps the words in line with the rows' above.
                 Toggle("", isOn: .constant(true)).labelsHidden().fixedSize().hidden().accessibilityHidden(true)
-                row("Whole \(t) book", sub: m.changed ? "with your changes" : "income only", soFar: m.soFar, delta: m.delta, bold: true)
+                // At, as the web's Whole row (Nov 18): "$8.5K in" green · "$4.3K out" red, the legs switched on.
+                let inOut = Text(privacy ? BriefMask.shown : PosFmt.money(m.cashIn)).foregroundStyle(PC.green) + Text(" in · ")
+                    + Text(privacy ? BriefMask.shown : PosFmt.money(m.cashOut)).foregroundStyle(PC.red) + Text(" out")
+                row(Text("Whole \(t) book"), sub: m.cashIn > 0 || m.cashOut > 0 ? inOut : Text(m.changed ? "with your changes" : "income only"),
+                    soFar: m.soFar, delta: m.delta, bold: true)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(PosSay.words("Whole \(t) book, \(m.changed ? "with your changes" : "income only"), so far \(PosSay.signed(m.soFar, privacy)), delta \(PosFmt.side(m.delta))"))
+                    .accessibilityLabel(PosSay.words("Whole \(t) book, \(PosSay.money(m.cashIn, privacy)) in, \(PosSay.money(m.cashOut, privacy)) out, so far \(PosSay.signed(m.soFar, privacy)), delta \(PosFmt.side(m.delta))"))
             }
             .padding(.top, 4)
             .overlay(alignment: .top) { Rectangle().fill(PC.ruleStrong).frame(height: 1) }
         }
     }
 
-    private func row(_ l: String, sub: String?, soFar: Double, delta: Double, bold: Bool) -> some View {
+    private func row(_ l: Text, sub: Text?, soFar: Double, delta: Double, bold: Bool) -> some View {
         HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(l).sType(PT.t(15, 20, bold ? 700 : 600), tabular: false).foregroundStyle(PC.ink)
-                if let sub { Text(sub).sType(PT.t(12, 16)).foregroundStyle(PC.mu).lineLimit(1).minimumScaleFactor(0.85) }
+                l.sType(PT.t(15, 20, bold ? 700 : 600), tabular: false).foregroundStyle(PC.ink)
+                if let sub { sub.sType(PT.t(12, 16)).foregroundStyle(PC.mu).lineLimit(1).minimumScaleFactor(0.85) }
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 0) {

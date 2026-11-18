@@ -136,6 +136,10 @@ final class BriefState {
     /// Overlays (block 33): the Time value sheet, the economy sheet, a ticker chart pushed from a name tile.
     var sheet: BriefSheetKind?
     var ticker: String?
+    /// Activity (round 161a): the page from the bell, and the payload's events for the bell and the Levels card.
+    var activityOpen = false
+    var activity: JSONValue?
+    var today = ""
 
     /// The server's brief for the book on screen, decoded once per update (memoized: never built in a body).
     private(set) var live: BriefLive?
@@ -151,6 +155,9 @@ final class BriefState {
     /// Called on each new Home payload: decodes the brief only when the build is new.
     /// Overview (block 32): both books, from book S's last build (owners only). Kept while another book is on screen.
     private(set) var liveOverview: JSONValue?
+    /// The new Overview's data (payload.together, book S's build): kept like liveOverview, so Overview stays on S's
+    /// last build while N is on screen.
+    private(set) var liveTogether: JSONValue?
 
     // MARK: Pinned (the debug menu, Pass 3)
     /// A moment pinned from the debug menu: its page replaces the live one until Back to live.
@@ -190,8 +197,10 @@ final class BriefState {
 
     private var debugAccountApplied = false
 
-    func ingest(_ brief: JSONValue?, key: String?, book: String? = nil, overview: JSONValue? = nil, books: [String] = [], inputs: JSONValue? = nil) {
+    func ingest(_ brief: JSONValue?, key: String?, book: String? = nil, overview: JSONValue? = nil, books: [String] = [], inputs: JSONValue? = nil,
+                together: JSONValue? = nil) {
         guard key != liveKey || book != self.book else { return }
+        if let g = together, case .object = g { liveTogether = g }
         liveKey = key
         self.book = book
         self.inputs = inputs

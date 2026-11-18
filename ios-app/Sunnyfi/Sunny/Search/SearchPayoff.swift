@@ -249,7 +249,7 @@ struct SXPayoffCard: View {
             tags = [px * (1 - m), px, px * (1 + m)].enumerated().map { .init(S: $1, v: f($1), dot: $0 != 1, t2: "") }
         }
         var ax: [SXPlot.Ax] = [.init(S: px, t: SXPay.px(px), t2: "Today", pr: 1, weight: .bold, ink: true)]
-        let word = ["lp": "LEAPS", "hc": "Hedge", "ip": "Insurance"]
+        let word = ["lp": "LEAPS", "hc": "Hedge call", "ip": "Hedge put"]   // never OTM or Insurance (18 Nov 2026)
         for l in L {
             let sold = l.n < 0
             ax.append(.init(S: l.k, t: SXPay.k(l.k), t2: sold ? "Sold" : word[l.g] ?? "", pr: sold ? 2 : 5, weight: sold ? .semibold : .medium, ink: sold))

@@ -131,6 +131,31 @@ struct YourPositionCard: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// A name's net delta by Friday from today (left) to three priced moves up (right): solid while long, dotted where it
+    /// turns short, a dashed zero line, the dot at the priced move (point 4 of 13).
+    static func deltaLine(_ c: [Double]) -> some View {
+        let lo = min(0, c.min() ?? 0), hi = max(0, c.max() ?? 0), pad = (hi - lo) * 0.08 == 0 ? 1 : (hi - lo) * 0.08
+        let a = lo - pad, b = hi + pad, n = c.count - 1
+        return GeometryReader { g in
+            let w = g.size.width, h = g.size.height
+            let X = { (i: Int) in CGFloat(i) / CGFloat(n) * w }, Y = { (v: Double) in CGFloat((b - v) / (b - a)) * h }
+            let seg = { (long: Bool) in Path { p in
+                for i in 0..<n where (c[i] >= 0 && c[i + 1] >= 0) == long {
+                    p.move(to: CGPoint(x: X(i), y: Y(c[i]))); p.addLine(to: CGPoint(x: X(i + 1), y: Y(c[i + 1])))
+                }
+            } }
+            let k = min(4, n), tone = c[k] < 0 ? S.red : c[k] < 0.25 * (c.first.map { max($0, 1) } ?? 1) ? S.act : S.secondary
+            ZStack(alignment: .topLeading) {
+                Path { p in p.move(to: CGPoint(x: 0, y: Y(0))); p.addLine(to: CGPoint(x: w, y: Y(0))) }
+                    .stroke(S.secondary.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [1.5, 3]))
+                seg(true).stroke(S.secondary, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                seg(false).stroke(S.red, style: StrokeStyle(lineWidth: 1.6, lineCap: .round, dash: [2, 2.5]))
+                Circle().fill(tone).frame(width: 5, height: 5).position(x: X(k), y: Y(c[k]))
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
     static let sub = SType(size: 15, weight: 500, line: 20, tracking: 0)
     static let legend = SType(size: 12, weight: 500, line: 16, tracking: 0)
 
@@ -145,9 +170,16 @@ struct YourPositionCard: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .trailing, spacing: 0) {
-                // 15/20 600 (Nov 8, was 700).
-                Text(r.right).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(BK.color(r.rightColor)).lineLimit(1)
+            // The rail's row style (Nov 17): a small line (net delta by Friday as the price rises to three priced
+            // moves, dotted where it turns short, the dot at the priced move), then a pill (Short red, Thin orange,
+            // Long grey) with "at ↑2.9%" under it.
+            if r.curve.count > 1 { Self.deltaLine(r.curve).frame(width: 52, height: 24) }
+            VStack(alignment: .trailing, spacing: 2) {
+                let tone = r.rightColor == "red" ? S.red : r.rightColor == "orange" ? S.act : nil
+                Text(r.right).sType(SType(size: 14, weight: 600, line: 18, tracking: 0)).lineLimit(1)
+                    .foregroundStyle(tone == nil ? S.ink : S.dyn(0xFFFFFF, 0x000000))
+                    .padding(.horizontal, 9).frame(minWidth: 68, minHeight: 30)
+                    .background(tone ?? S.dynA(0x767680, 0.16, 0x767680, 0.32), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 if !r.at.isEmpty {   // empty for a name with no option prices (no priced move)
                     Text(r.at).sType(SType(size: 12, weight: 500, line: 15, tracking: 0)).foregroundStyle(S.secondary).lineLimit(1)
                 }

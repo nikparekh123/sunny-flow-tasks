@@ -292,11 +292,10 @@ struct TickerChartPage: View {
         let d0 = Self.firstLabel(dates.first, range)
         // "past 3 months"; All reads "since Nov 8, 2021" (the design's d0).
         let phrase = range == "All" ? "since " + d0 : (Self.rangePhrase[range] ?? "")
-        // The sub line (13/16 600 muted): the name and its strategy word ("Nike · Rebound"); a name not held that is
-        // on the watchlist says so; else the name alone.
+        // The sub line (13/16 600 muted): the name and its strategy word ("Nike · Rebound"), else the name alone.
         let stRaw = live ? wire?.strategy : SampleBook.book(acct)[t]?.strategy
         let st = Strategy.name(stRaw?.lowercased()) ?? stRaw.flatMap { $0.isEmpty ? nil : $0.prefix(1).uppercased() + $0.dropFirst() }
-        let sub = name + (st.map { " · " + $0 } ?? (!held && (wire?.watch ?? false) ? " · Watchlist" : ""))
+        let sub = name + (st.map { " · " + $0 } ?? "")   // no watchlist anywhere (handoff 2026-11-18)
         let on = self.on
         // The range's averages and RSI, cut from the whole history so the 200-day is right from the first close.
         let s0 = max(0, all.count - pts.count)

@@ -89,6 +89,8 @@ struct BriefHomeScreen: View {
                 // The strip draws `lift` above its 72 pt slot (y 44 on a 402 pt phone); the page follows it up.
                 .padding(.top, brief.showsStrip ? -AccountStrip.lift : 0)
             }
+            // Activity's bell (round 161a), top right in the strip's row; it scrolls away with the strip.
+            .overlay(alignment: .topTrailing) { ActivityBellSlot() }
             .padding(.bottom, 128)
             .containerRelativeFrame(.horizontal)
         }
@@ -99,6 +101,8 @@ struct BriefHomeScreen: View {
         }
         .onChange(of: router.topTick[.home]) { _, _ in withAnimation(S.moving(S.page, reduce)) { pos.scrollTo(edge: .top) } }
         .onChange(of: pageBook) { _, _ in dip() }
+        // Back from Overview, even to the same account, Home plays the same move (handoff 2026-11-18 §1.2).
+        .onChange(of: brief.onOverview) { was, now in if was && !now && pageBook == brief.account { dip() } }
         .onChange(of: pageReady) { _, ready in if ready && faded { settle(wait: false) } }
         .sheet(isPresented: Binding(get: { brief.debugOpen }, set: { brief.debugOpen = $0 })) {
             BriefDebugMenu().presentationDetents([.large])

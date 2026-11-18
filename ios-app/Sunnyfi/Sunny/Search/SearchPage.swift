@@ -40,7 +40,7 @@ struct SXPage: Decodable, Equatable {
         let premium: Int?, delta: Int?
         let src: String, finding: String?
     }
-    /// A What you hold tile: label, what is held, detail lines, a status ("81% kept") and its tone.
+    /// A What you hold tile: label, what is held, detail lines, a status ("81% captured") and its tone.
     struct Tile: Decodable, Equatable { let k: String; let l: String; let v: String; let d: [String]; let s: String?; let tone: String? }
     struct Hold: Decodable, Equatable { let tiles: [Tile]; let right: String?; let payoff: SXPayoff?; let finding: String? }
     /// A day since entry: [date, made $, made as % of the first day's value, the stock's move %].
@@ -1175,7 +1175,7 @@ private struct SXWeeksCard: View {
             }
             .frame(height: 8)
             if let pc = n.pace {
-                Text("The tick is pace: \(Int(pc.rounded()))% kept by now")
+                Text("The tick is pace: \(Int(pc.rounded()))% captured by now")
                     .sx(.source).foregroundStyle(SX.muted)
             }
         }

@@ -103,7 +103,9 @@ enum SampleEngine {
 
 /// Your position, built (block 30). The same shape the server will send from Pass 2.
 struct YourPositionModel {
-    struct Row: Identifiable { let id: String; let name: String; let line: String; let lineColor: String; let right: String; let rightColor: String; let at: String; let st: Int }
+    struct Row: Identifiable { let id: String; let name: String; let line: String; let lineColor: String; let right: String; let rightColor: String; let at: String; let st: Int
+        /// Net delta by Friday from today to three priced moves up, 13 points (the small line, Nov 17); empty when unknown.
+        var curve: [Double] = [] }
     var subtitle: String
     var sentence: [BriefSpan]
     var grid: [Double]                 // % moves, −10 to +10 in .25

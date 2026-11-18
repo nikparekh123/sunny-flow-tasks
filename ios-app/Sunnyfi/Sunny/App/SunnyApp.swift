@@ -46,6 +46,18 @@ struct RootView: View {
     }
 
     var body: some View {
+        #if DEBUG && targetEnvironment(simulator)
+        if let parts = YourBookCheck.file {
+            YourBookCheck(path: parts)
+        } else if let pay = PayoffCheck.file {
+            PayoffCheck(path: pay)
+        } else { main }
+        #else
+        main
+        #endif
+    }
+
+    @ViewBuilder private var main: some View {
         if devBypass {
             HomeView(store: store)
         } else {

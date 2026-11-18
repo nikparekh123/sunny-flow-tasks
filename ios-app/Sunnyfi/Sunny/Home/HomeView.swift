@@ -14,6 +14,8 @@ import SwiftUI
 
 struct HomeView: View {
     let store: HomeStore
+    /// Positions has been fetched in the background (once a launch).
+    @State private var positionsReady = false
     @State private var router = HomeRouter()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduce
@@ -135,10 +137,23 @@ struct HomeView: View {
                 }
             }
             if brief.onOverview {
+                // Every switch on the strip moves the same way (handoff 2026-11-18 §1.2): Overview's content fades up
+                // from .15 and slides 28 pt from the side it comes from (OverviewScreen); its background stays put.
                 OverviewScreen()
                     .accessibilityAddTraits(.isModal)   // VoiceOver stays on Overview, not the page under it
-                    .transition(reduce ? .opacity : .move(edge: .leading).combined(with: .opacity))
+                    .transition(.opacity)
                     .zIndex(1)
+            }
+            if brief.activityOpen {
+                ActivityPage(activity: brief.activity, book: brief.book ?? "S", today: brief.today,
+                             close: { withAnimation(reduce ? nil : S.standard(0.45)) { brief.activityOpen = false } },
+                             openName: { t in
+                                 brief.positionsName = t
+                                 router.tab = .positions
+                                 withAnimation(reduce ? nil : S.standard(0.45)) { brief.activityOpen = false }
+                             })
+                    .transition(reduce ? .opacity : .move(edge: .trailing))
+                    .zIndex(2.5)
             }
             // A ticker chart, pushed from any name tile (block 33): from the right, full screen, X goes back.
             if let t = brief.ticker {
@@ -155,11 +170,13 @@ struct HomeView: View {
         .environment(\.todoTap, todo.allowed ? { brief.sheet = .todo } : nil)
         .animation(reduce ? S.fade : S.page, value: brief.onOverview)
         .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.45), value: brief.ticker)
+        .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.45), value: brief.activityOpen)
         .sheet(item: Binding(get: { brief.sheet }, set: { brief.sheet = $0 })) { k in
             Group {
                 switch k {
                 case .timeValue: TimeValueSheet(acct: brief.account.sampleKey, privacy: UserDefaults.standard.bool(forKey: BriefPrivacy.key),
-                                                live: brief.live?.timeValue ?? .null) { brief.sheet = nil }
+                                                live: brief.live?.timeValue ?? .null, close: { brief.sheet = nil },
+                                                friday: brief.live?.friday.map { PosPrice.dayWords($0) })
                 case .economy: EconomySheet(live: brief.live?.economy ?? .null) { brief.sheet = nil }
                 // To do (10 Nov 2026): Nik's own notes, over whatever tab is up.
                 case .todo: TodoSheet(known: Self.knownTickers(home, brief)) { brief.sheet = nil }
@@ -181,8 +198,16 @@ struct HomeView: View {
         .onChange(of: home.builtAt, initial: true) { _, _ in
             brief.fresh = (SXClient.parseDate(home.fresh.marks ?? ""), SXClient.parseDate(home.fresh.trades ?? ""))
             brief.est = home.pricesEst.map { ($0.session, SXClient.parseDate($0.at ?? "")) }
-            brief.ingest(home.brief, key: home.builtAt, book: store.bookIDNow, overview: home.overview, books: store.books, inputs: home.briefInputs)
+            brief.activity = home.activity
+            brief.today = home.today
+            brief.ingest(home.brief, key: home.builtAt, book: store.bookIDNow, overview: home.overview, books: store.books, inputs: home.briefInputs,
+                         together: home.together)
             brief.calendar = home.calendar   // early closes move the moments (Audit 7)
+            // Positions made ready in the background, once, about 0.9 s after Home first shows (handoff 2026-11-18 §1.3).
+            if !positionsReady {
+                positionsReady = true
+                Task { try? await Task.sleep(for: .milliseconds(900)); if router.tab != .positions { PositionsTab.prefetch(brief) } }
+            }
         }
         // The strip picked a book: read its Home (Overview stays on S's last build).
         .onChange(of: brief.account) { _, a in
@@ -458,9 +483,9 @@ private struct TabBarHost: View {
     let search: (_ listening: Bool) -> Void
     var body: some View {
         SunnyTabBar(tab: router.tab, pick: pick, search: search)
-            .offset(y: barDown || brief.onOverview || brief.ticker != nil ? 120 : 0)
-            .opacity(barGone || brief.onOverview || brief.ticker != nil ? 0 : 1)
-            .allowsHitTesting(!router.searchOpen && !brief.onOverview && brief.ticker == nil)
+            .offset(y: barDown || brief.onOverview || brief.ticker != nil || brief.activityOpen ? 120 : 0)
+            .opacity(barGone || brief.onOverview || brief.ticker != nil || brief.activityOpen ? 0 : 1)
+            .allowsHitTesting(!router.searchOpen && !brief.onOverview && brief.ticker == nil && !brief.activityOpen)
             .animation(reduce ? S.fade : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: brief.onOverview)
             // A ticker chart pushed from a tile: the bar leaves with it (it used to vanish at once).
             .animation(reduce ? S.fade : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: brief.ticker != nil)

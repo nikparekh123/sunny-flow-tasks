@@ -746,7 +746,9 @@ struct AccountChart: View {
             // mark (book N showed -$26K the day it sold $28K of puts). "-" from a server that has none yet.
             let day: Double? = m.c.openPl.flatMap { $0[safe: i] ?? nil }
             let o: Double? = lastLive ? (home.account.openPl ?? day) : day
-            let tv = lastLive ? (home.account.timeValueSold ?? m.c.timeValue[i] ?? 0) : (m.c.timeValue[i] ?? 0)
+            // Live: the receipt's own figure, this week's time value left (Nov 17); else the account's.
+            let wkTv = home.brief?["timeValue"]["week"]["tvLeft"].double
+            let tv = lastLive ? (wkTv ?? home.account.timeValueSold ?? m.c.timeValue[i] ?? 0) : (m.c.timeValue[i] ?? 0)
             return [Stat(label: "Realized", value: r, color: S.lossInk(r)),
                     o.map { Stat(label: "Open P&L", value: $0, color: S.lossInk($0)) } ?? Stat(label: "Open P&L", text: "-"),
                     Stat(label: "Time value", value: tv, color: S.lossInk(tv))]
@@ -1071,9 +1073,14 @@ struct ScrubGesture: UIGestureRecognizerRepresentable {
     }
 }
 
+/// ⚠ A CHART NEVER READS WHILE THE PAGE SCROLLS (handoff 2026-11-18 §5.1, Nik: "scrolling over the account chart
+/// started a read for a moment"). The read starts only after a 160 ms hold, or a sideways drag of more than 8 pt that is
+/// wider than it is tall; a drag of more than 8 pt at least as tall as it is wide is a scroll and ends any read. Lifting
+/// the finger ends the read; a quick tap reads nothing.
 final class ScrubRecognizer: UIGestureRecognizer {
     private var start: CGPoint = .zero
     private var decided = false
+    private var hold: Timer?
     /// The view the finger landed on: the scroll views to hold are above it.
     private weak var touched: UIView?
 
@@ -1082,7 +1089,13 @@ final class ScrubRecognizer: UIGestureRecognizer {
         touched = t.view
         start = t.location(in: view)
         decided = false
-        state = .began
+        hold?.invalidate()
+        hold = Timer.scheduledTimer(withTimeInterval: 0.16, repeats: false) { [weak self] _ in
+            guard let self, self.state == .possible else { return }
+            self.decided = true
+            self.holdPage()
+            self.state = .began
+        }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
@@ -1090,18 +1103,26 @@ final class ScrubRecognizer: UIGestureRecognizer {
         let p = t.location(in: view)
         if !decided {
             let dx = abs(p.x - start.x), dy = abs(p.y - start.y)
-            if hypot(dx, dy) > 6 {
-                decided = true
-                if dy > dx { state = .cancelled; return }
-                holdPage()
-            }
+            guard hypot(dx, dy) > 8 else { return }
+            decided = true
+            hold?.invalidate()
+            if dy >= dx { state = state == .possible ? .failed : .cancelled; return }
+            holdPage()
+            state = .began
+            return
         }
-        state = .changed
+        if state == .began || state == .changed { state = .changed }
     }
 
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { state = .ended }
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { state = .cancelled }
-    override func reset() { decided = false }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        hold?.invalidate()
+        state = state == .possible ? .failed : .ended
+    }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        hold?.invalidate()
+        state = state == .possible ? .failed : .cancelled
+    }
+    override func reset() { decided = false; hold?.invalidate(); hold = nil }
 
     /// Cancel every enclosing scroll view's pan so the page, and a sideways
     /// card row (Theta and Delta), hold still while scrubbing. Walks up from

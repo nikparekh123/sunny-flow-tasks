@@ -33,6 +33,8 @@ struct BriefCardView: View {
         case "thetaMonth": BThetaMonth(card: card, privacy: privacy)
         case "payback": BPayback(card: card, privacy: privacy)
         case "performance": BPerformance(card: card, privacy: privacy)
+        case "shareAvg": ShareAvgRow(card: card, privacy: privacy)
+        case "levels": LevelsCardHost(card: card)
         case "thesisCheck": BThesisCheck(card: card, privacy: privacy)
         default: GenericBriefCard(card: card, privacy: privacy).padding(.horizontal, S.margin)
         }

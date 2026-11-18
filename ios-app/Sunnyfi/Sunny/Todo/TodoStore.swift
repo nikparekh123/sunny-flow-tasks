@@ -188,7 +188,7 @@ final class TodoStore {
             ("Download the September statements", -1, "", false), ("Call IBKR about the margin rate", 0, "Ask what the rate is over $250K", false),
             ("Check the NKE ex-dividend date before Friday", 2, "", false), ("Move cash over for the Jan calls", 3, "About $12K from savings", false),
             ("Read the BABA earnings preview", 7, "", false), ("Look at LULU again after the holidays", 69, "", false),
-            ("Set up the 2026 tax lot report", nil, "", false), ("Renew the market data subscription", -4, "", true), ("Update the watchlist", nil, "", true),
+            ("Set up the 2026 tax lot report", nil, "", false), ("Renew the market data subscription", -4, "", true),
         ]
         return rows.enumerated().map { i, r in
             Item(id: "s\(i)", text: r.0, due: r.1.map { TodoDates.plus(t, $0) }, note: r.2, done: r.3, created_at: String(format: "2026-10-01T00:00:%02dZ", i))

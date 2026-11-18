@@ -146,16 +146,17 @@ struct TimeValueSheet: View {
     @State private var open: Set<String> = []
 
     struct Row: Identifiable { let id: String; let t: String; let name: String; let leg: String; let left: Double; let collected: Double; let intrinsic: Double; let perShare: Double
-        var k: Double = 0; var put = false }
+        var k: Double = 0; var put = false; var q: Double = 0 }
 
     /// The sold legs: the server's real ones (answer 2), or the sample book's in a -sample run.
     private var rows: [Row] {
         if !BriefDebug.sample {
-            return live["legs"].array.enumerated().map { i, l in
+            // This week's sold strikes (ends by Friday); an older server sends no `wk`: every leg.
+            return live["legs"].array.filter { $0["wk"].isNull || $0["wk"].bool }.enumerated().map { i, l in
                 let t = l["t"].string ?? "", k = l["K"].double ?? 0, q = l["q"].double ?? 0
                 return Row(id: "\(t)\(i)", t: t, name: l["name"].string ?? t, leg: "\(String(format: "%g", k)) \(l["put"].bool ? "puts" : "calls") ×\(Int(q))",
                            left: l["tvLeft"].double ?? 0, collected: l["col"].double ?? 0, intrinsic: l["intr"].double ?? 0, perShare: l["tvPer"].double ?? 0,
-                           k: k, put: l["put"].bool)
+                           k: k, put: l["put"].bool, q: q)
             }
         }
         let book = SampleBook.book(acct)
@@ -165,264 +166,237 @@ struct TimeValueSheet: View {
                 let intr = s.put ? max(0, s.k - q.0) : max(0, q.0 - s.k)
                 let tv = max(0, s.now - intr)
                 return Row(id: "\(t)\(i)", t: t, name: SampleBook.company[t] ?? t, leg: "\(String(format: "%g", s.k)) \(s.put ? "puts" : "calls") ×\(s.q)",
-                           left: tv * Double(s.q) * 100, collected: s.at * Double(s.q) * 100, intrinsic: intr, perShare: tv, k: s.k, put: s.put)
+                           left: tv * Double(s.q) * 100, collected: s.at * Double(s.q) * 100, intrinsic: intr, perShare: tv, k: s.k, put: s.put, q: Double(s.q))
             }
         }
     }
 
-    /// The design's bar track: rgba(118,118,128,.2), .32 in dark (the system fill).
-    private let barTrack = Color(uiColor: .systemFill)
-
-    private func bar(_ k: Double, height h: CGFloat) -> some View {
-        GeometryReader { g in
-            ZStack(alignment: .leading) {
-                Capsule().fill(barTrack)
-                Capsule().fill(S.green).frame(width: g.size.width * CGFloat(min(1, max(0, k))))
-            }
+    /// A week of decay on every option bought (the server's timeValue.hedges; Nik's groups: every call bought is a
+    /// hedge call, LEAPS too). None in a -sample run.
+    struct Hedge: Identifiable { let id: String; let t: String; let name: String; let put: Bool; let leg: String; let week: Double }
+    private var hedges: [Hedge] {
+        live["hedges"].array.enumerated().map { i, h in
+            let k = h["K"].double ?? 0, q = h["q"].double ?? 0, put = h["put"].bool
+            return Hedge(id: "h\(i)", t: h["t"].string ?? "", name: h["name"].string ?? "", put: put,
+                         leg: "\(String(format: "%g", k)) \(put ? "puts" : "calls") · \(h["exLabel"].string ?? "") · \(Int(q)) \(q == 1 ? "contract" : "contracts")",
+                         week: h["week"].double ?? 0)
         }
-        .frame(height: h)
     }
+    /// The Friday the week ends, "Fri Nov 20".
+    var friday: String? = nil
+
+    // MARK: The receipt (handoff 2026-11-16, App Explorations 159a with 159b's sentence; README 2026-11-18)
+
+    /// One sentence on what needs you (a tap opens the strikes to roll), then the week as a receipt: Coming in (calls
+    /// sold, puts sold: time value left, % captured of what was collected), Going out (a week of decay on the hedge calls
+    /// and puts), Net by Friday, and In the money on its own line. No bars; a loss is a red number. Every line opens to
+    /// its names; privacy masks every dollar figure.
+    @State private var openLine: String?
+    @State private var needsOpen = false
+
+    private func k(_ v: Double) -> String { BriefWords.plain(SampleEngine.fK(v), privacy: privacy) }
+    private static func pcT(_ left: Double, _ col: Double) -> String {
+        guard col > 0 else { return "0%" }
+        let x = max(0, (1 - left / col) * 100)
+        return x < 0.05 ? "0%" : x < 0.1 ? String(format: "%.2f%%", x) : String(format: "%.1f%%", x)
+    }
+    private static let callTone = S.dyn(0x327133, 0x65C466), putTone = S.dyn(0x2E5ECA, 0x73B6F9)
 
     var body: some View {
-        let rows = rows
-        let left = rows.reduce(0) { $0 + $1.left }, coll = rows.reduce(0) { $0 + $1.collected }
-        let cap = coll > 0 ? 1 - left / coll : 0
-        // The design's order (SunnyHomeChart RD): in the money first, then the most captured.
+        let rows = rows, hs = hedges
         let ready = rows.filter { $0.perShare < 0.05 || ($0.collected > 0 && 1 - $0.left / $0.collected >= 0.9) || $0.intrinsic > 0 }
             .sorted { ($0.intrinsic > 0) != ($1.intrinsic > 0) ? $0.intrinsic > 0 : Self.captured($0) > Self.captured($1) }
-        BriefSheetChrome(title: "Time value", close: close) {
-            if rows.isEmpty {
-                // An account with nothing sold (README 10): one line, no zero bars.
+        let okRows = rows.filter { r in !ready.contains { $0.id == r.id } }
+        let tvAll = rows.reduce(0) { $0 + $1.left }, hw = hs.reduce(0) { $0 + $1.week }
+        let itm = rows.filter { $0.intrinsic > 0 }
+        BriefSheetChrome(title: "Time value", sub: friday.map { "This week · ends \($0)" }, close: close) {
+            if rows.isEmpty && hs.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Nothing sold yet").sType(SType(size: 20, weight: 700, line: 24, tracking: 0), tabular: false).foregroundStyle(S.ink)
                     Text("Time value shows here once calls or puts are sold.").sType(BK.sub, tabular: false).foregroundStyle(S.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-            // SunnyHomeChart view="tv": 16 between the total, Ready to roll and the list.
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        BriefWords.line(SampleEngine.fK(left), privacy: privacy)
-                            .sType(SType(size: 34, weight: 800, line: 38, tracking: -0.02)).foregroundStyle(S.ink)
-                            .fixedSize()   // the number never breaks; the words beside it wrap at large text (Audit 6)
-                        Text("left of \(BriefWords.plain(SampleEngine.fK(coll), privacy: privacy)) collected")
-                            .accessibilityLabel(BriefMask.spoken("left of \(BriefWords.plain(SampleEngine.fK(coll), privacy: privacy)) collected"))
-                            .sType(SType(size: 15, weight: 500, line: 20, tracking: 0)).foregroundStyle(S.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(privacy ? "Time value left, hidden" : BSay.words("\(SampleEngine.fK(left)) left of \(SampleEngine.fK(coll)) collected"))
-                    HStack(spacing: 10) {
-                        bar(cap, height: 10)
-                        // Worth more than it was sold for: a loss so far, in red without a minus sign (colour carries the sign).
-                        Text("\(Int(abs(cap * 100).rounded()))% \(cap < -0.005 ? "given back" : "captured")").sType(SType(size: 13, weight: 700, line: 16, tracking: 0))
-                            .foregroundStyle(cap < -0.005 ? S.red : S.green).fixedSize()
-                    }
-                }
-                VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("Ready to roll").sType(SType(size: 17, weight: 700, line: 22, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                            Spacer(minLength: 0)
-                            if !ready.isEmpty {   // "Nothing ready yet" below says it; no "0 strikes"
-                                Text("\(ready.count) strike\(ready.count == 1 ? "" : "s")").sType(SType(size: 13, weight: 600, line: 16, tracking: 0)).foregroundStyle(S.secondary)
-                            }
-                        }
-                        Text("Under $0.05 a share left, or 90% captured").sType(SType(size: 13, weight: 500, line: 17, tracking: 0)).foregroundStyle(S.secondary)
-                    }
-                    if ready.isEmpty {
-                        Text("Nothing ready yet.").sType(BK.body, tabular: false).foregroundStyle(S.secondary)
-                    } else {
-                        ScrollView(.horizontal) {
-                            // 148 wide cards, 10 apart, padding 12 top and bottom and 14 across, radius 16, all as tall as the tallest.
-                            HStack(alignment: .top, spacing: 10) {
-                                ForEach(ready) { r in rollCard(r) }
-                            }
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, S.margin).padding(.bottom, 2)
-                        }
-                        .scrollIndicators(.hidden)
-                        .padding(.horizontal, -S.margin)
-                    }
-                }
-                let byName = Dictionary(grouping: rows, by: \.t)
-                let order = byName.keys.sorted { byName[$0]!.reduce(0) { $0 + $1.left } > byName[$1]!.reduce(0) { $0 + $1.left } }
-                // A row per name between 1 pt rules: logo 26, the name 15/18 and its legs 13/16 over a bar 8 and its
-                // percent 12/15, left and "of" on the right (64 wide at least), 10 across. The rows render 69 apart
-                // in screen 24 (its CSS sums to 65): 13 above and below, 9 down to the bar, 3 down to "of".
-                // SunnyHomeChart view="tv": a row per name between 1 pt rules, most left first. A name with more than one
-                // strike reads "· 3 strikes" with a chevron and opens on a tap to its strikes (calls by strike up, then
-                // puts down), 36 in, 12 apart; "Show every strike" opens them all, "Fold every name" closes them.
-                let multi = order.filter { byName[$0]!.count > 1 }
-                let allOpen = !multi.isEmpty && multi.allSatisfy { open.contains($0) }
-                VStack(alignment: .leading, spacing: 0) {
-                    BHairline()
-                    ForEach(order, id: \.self) { t in
-                        let rs = byName[t]!, isMulti = rs.count > 1, isOpen = isMulti && open.contains(t)
-                        VStack(alignment: .leading, spacing: 0) {
-                            nameRow(t, rs, isMulti: isMulti, isOpen: isOpen)
-                            if isOpen {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    ForEach(rs.sorted { $0.put != $1.put ? !$0.put : ($0.put ? $0.k > $1.k : $0.k < $1.k) }) { r in strikeRow(r) }
-                                }
-                                .padding(.leading, 36)
-                                .padding(.bottom, 14)
-                                .transition(.opacity)   // the design's hcFade .25s
-                            }
-                        }
-                        BHairline()
-                    }
-                    if !multi.isEmpty {
-                        Button {
-                            withAnimation(S.moving(S.fade, reduce)) { open = allOpen ? [] : Set(multi) }   // rows push the list: instant under Reduce Motion
-                        } label: {
-                            Text(allOpen ? "Fold every name" : "Show every strike")
-                                .sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                                .frame(height: 44).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.top, 8)
-                    }
-                }
-            }
-            }
-        }
-    }
-
-    /// A name's row: logo 26, the name 15/18 and "· 3 strikes" (or its one leg) 13/16 with a chevron that turns down
-    /// when open, over a bar 8 and its percent 12/15; left and "of" on the right (64 wide at least), 10 across.
-    @ViewBuilder private func nameRow(_ t: String, _ rs: [Row], isMulti: Bool, isOpen: Bool) -> some View {
-        let l = rs.reduce(0) { $0 + $1.left }, c = rs.reduce(0) { $0 + $1.collected }
-        let k = c > 0 ? 1 - l / c : 0
-        let sub = isMulti ? "· \(rs.count) strikes" : "· \(rs[0].leg)"
-        let row = HStack(spacing: 10) {
-            BLogo(ticker: t, size: 26)
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(alignment: .center, spacing: 5) {
-                    Text(rs.first?.name ?? t).sType(SType(size: 15, weight: 600, line: 18, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                        .lineLimit(1).layoutPriority(1)
-                    Text(sub).sType(SType(size: 13, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.secondary)
-                        .lineLimit(dts > .large ? nil : 1)
-                    if isMulti {
-                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold)).foregroundStyle(S.secondary)
-                            .rotationEffect(.degrees(isOpen ? 90 : 0))
-                            .accessibilityHidden(true)
-                    }
-                }
-                HStack(spacing: 8) {
-                    bar(k, height: 8)
-                    Text("\(Int(abs(k * 100).rounded()))%").sType(SType(size: 12, weight: 700, line: 15, tracking: 0))
-                        .foregroundStyle(k < -0.005 ? S.red : S.green).frame(minWidth: 34, alignment: .trailing)
-                }
-            }
-            VStack(alignment: .trailing, spacing: 3) {
-                BriefWords.line(SampleEngine.fK(l), privacy: privacy).sType(SType(size: 15, weight: 800, line: 18, tracking: 0)).foregroundStyle(S.ink)
-                Text("of \(BriefWords.plain(SampleEngine.fK(c), privacy: privacy))")
-                    .sType(SType(size: 12, weight: 500, line: 15, tracking: 0)).foregroundStyle(S.secondary)
-            }
-            .fixedSize()
-            .frame(minWidth: 64, alignment: .trailing)
-        }
-        .padding(.vertical, 13)
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
-        // One stop per name, the sign in words: "Alibaba, 3 strikes, 24% captured, $824 left of $1,090".
-        let said = BSay.join([rs.first?.name ?? t, isMulti ? "\(rs.count) strikes" : BSay.words(rs[0].leg),
-                              "\(Int(abs(k * 100).rounded()))% \(k < -0.005 ? "given back" : "captured")",
-                              privacy ? "amounts hidden" : BSay.words("\(SampleEngine.fK(l)) left of \(SampleEngine.fK(c))")])
-        if isMulti {
-            Button {
-                withAnimation(S.moving(S.fade, reduce)) { if isOpen { open.remove(t) } else { open.insert(t) } }
-            } label: { row }
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(said)
-            .accessibilityValue(isOpen ? "Open" : "Folded")
-            .accessibilityAddTraits(.isButton)
-        } else {
-            row.accessibilityElement(children: .ignore).accessibilityLabel(said)
-        }
-    }
-
-    /// One strike under an open name: its leg 13/16 over a bar 6 and percent 12/15; left 13/16 bold and "of" 12/15.
-    private func strikeRow(_ r: Row) -> some View {
-        let k = r.collected > 0 ? 1 - r.left / r.collected : 0
-        return HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(r.leg).sType(SType(size: 13, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.ink).lineLimit(1)
-                HStack(spacing: 8) {
-                    bar(k, height: 6)
-                    Text("\(Int(abs(k * 100).rounded()))%").sType(SType(size: 12, weight: 700, line: 15, tracking: 0))
-                        .foregroundStyle(k < -0.005 ? S.red : S.green).frame(minWidth: 34, alignment: .trailing)
-                }
-            }
-            VStack(alignment: .trailing, spacing: 1) {
-                BriefWords.line(SampleEngine.fK(r.left), privacy: privacy).sType(SType(size: 13, weight: 700, line: 16, tracking: 0)).foregroundStyle(S.ink)
-                Text("of \(BriefWords.plain(SampleEngine.fK(r.collected), privacy: privacy))")
-                    .sType(SType(size: 12, weight: 500, line: 15, tracking: 0)).foregroundStyle(S.secondary)
-            }
-            .fixedSize()
-            .frame(minWidth: 64, alignment: .trailing)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(BSay.join([r.name, BSay.words(r.leg), "\(Int(abs(k * 100).rounded()))% \(k < -0.005 ? "given back" : "captured")",
-                                       privacy ? "amounts hidden" : BSay.words("\(SampleEngine.fK(r.left)) left of \(SampleEngine.fK(r.collected))")]))
-    }
-
-    /// Share of what was collected that is kept so far, in whole percent (the design's cpN).
-    static func captured(_ r: Row) -> Int { r.collected > 0 ? Int(((1 - r.left / r.collected) * 100).rounded()) : 0 }
-
-    /// A Ready to roll card (SunnyHomeChart, Nov 8): logo 32, the name 15/19 and leg 13/17, 8 apart, then at the foot
-    /// what is left 24/28 heavy and why, 13/17. In the money it says just "0.41 ITM", 700, red, one line; else
-    /// "96% captured" (or "$0.04 a share left") 700, orange (Nik 9 Nov: no "Roll to next week"). Padding 12 top and bottom.
-    private func rollCard(_ r: Row) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            BLogo(ticker: r.t, size: 32)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(r.name).sType(SType(size: 15, weight: 600, line: 19, tracking: 0), tabular: false).foregroundStyle(S.ink).lineLimit(1)
-                Text(r.leg).sType(SType(size: 13, weight: 500, line: 17, tracking: 0)).foregroundStyle(S.secondary).lineLimit(1)
-                    .accessibilityLabel(BSay.words(r.leg))
-            }
-            Spacer(minLength: 0)
-            VStack(alignment: .leading, spacing: 4) {
-                // At a large text size "left" drops under the amount rather than cutting it (Pass 5).
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        BriefWords.line(SampleEngine.fK(r.left), privacy: privacy)
-                            .sType(SType(size: 24, weight: 800, line: 28, tracking: -0.01)).foregroundStyle(S.ink)
-                        Text("left").sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary)
-                    }
+                VStack(alignment: .leading, spacing: 20) {
+                    sentence(ready: ready, ok: okRows, all: rows, tvAll: tvAll)
                     VStack(alignment: .leading, spacing: 0) {
-                        BriefWords.line(SampleEngine.fK(r.left), privacy: privacy)
-                            .sType(SType(size: 24, weight: 800, line: 28, tracking: -0.01)).foregroundStyle(S.ink)
-                            .lineLimit(1).minimumScaleFactor(0.7)
-                        Text("left").sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary)
+                        if !rows.isEmpty {
+                            head("Coming in · from what you sold")
+                            let cs = rows.filter { !$0.put }, ps = rows.filter(\.put)
+                            if !cs.isEmpty { soldLine("cs", "Calls sold", Self.callTone, cs) }
+                            if !ps.isEmpty { soldLine("ps", "Puts sold", Self.putTone, ps) }
+                        }
+                        if !hs.isEmpty {
+                            head("Going out · a week of your hedges").padding(.top, 14)
+                            let hc = hs.filter { !$0.put }, hp = hs.filter(\.put)
+                            if !hc.isEmpty { hedgeLine("hc", "Hedge calls", S.dyn(0x65C466, 0x65C466), hc) }
+                            if !hp.isEmpty { hedgeLine("hp", "Hedge puts", S.dyn(0x73B6F9, 0x73B6F9), hp) }
+                        }
+                        // Net by Friday: time value left less that week of hedges.
+                        let net = tvAll - hw
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Net by Friday").sType(SType(size: 17, weight: 700, line: 22, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                            Spacer()
+                            Text(k(net)).sType(SType(size: 20, weight: 800, line: 24, tracking: -0.01)).foregroundStyle(net < -0.5 ? S.red : S.ink)
+                        }
+                        .padding(.top, 14).padding(.trailing, 22).padding(.top, 10)
+                        .overlay(alignment: .top) { Rectangle().fill(S.ink).frame(height: 1.5).padding(.top, 10) }
+                        .accessibilityElement(children: .combine)
+                        if !itm.isEmpty {
+                            itmLine(itm).padding(.top, 14)
+                        }
                     }
                 }
-                VStack(alignment: .leading, spacing: 0) {
-                    if r.intrinsic > 0 {
-                        Text("\(String(format: "%.2f", r.intrinsic)) ITM").sType(SType(size: 13, weight: 700, line: 17, tracking: 0)).foregroundStyle(S.red)
-                            .lineLimit(1)
-                            .accessibilityLabel("in the money by \(String(format: "%.2f", r.intrinsic)) dollars")
-                    } else {
-                        let cp = Self.captured(r)
-                        Text(cp >= 90 ? "\(cp)% captured" : "$\(String(format: "%.2f", r.perShare)) a share left")
-                            .sType(SType(size: 13, weight: 700, line: 17, tracking: 0)).foregroundStyle(S.act)
-                    }
-                }
-                .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.vertical, 12).padding(.horizontal, 14)
-        .frame(width: 148, alignment: .leading)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(S.chip))
+    }
+
+    private func head(_ t: String) -> some View {
+        Text(t).sType(SType(size: 13, weight: 600, line: 18, tracking: 0), tabular: false).foregroundStyle(S.secondary).padding(.bottom, 2)
+    }
+
+    /// "3 strikes need you. The other 10 are on track, $X to earn by Friday."; a tap opens the strikes to roll.
+    @ViewBuilder private func sentence(ready: [Row], ok: [Row], all: [Row], tvAll: Double) -> some View {
+        let n = ready.count, nO = ok.count
+        let lead = n > 0 ? "\(n) \(n == 1 ? "strike needs" : "strikes need") you." : "Nothing needs you this week."
+        let rest = n > 0 ? (nO > 0 ? " The other \(nO) \(nO == 1 ? "is" : "are") on track, \(k(ok.reduce(0) { $0 + $1.left })) to earn by Friday." : "")
+            : (all.count == 1 ? " Your one strike is on track, \(k(tvAll)) to earn by Friday." : " All \(all.count) strikes are on track, \(k(tvAll)) to earn by Friday.")
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                guard n > 0 else { return }
+                withAnimation(S.moving(.easeOut(duration: 0.25), reduce) ?? .linear(duration: 0)) { needsOpen.toggle() }
+            } label: {
+                (Text(lead).fontWeight(.semibold) + Text(n > 0 ? Image(systemName: "chevron.right") : Image(systemName: "")).font(.system(size: 13, weight: .heavy)).foregroundStyle(S.secondary)
+                 + Text(rest))
+                    .sType(SType(size: 19, weight: 400, line: 26, tracking: 0), tabular: true).foregroundStyle(S.ink)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .buttonStyle(.plain)
+            .disabled(n == 0)
+            .accessibilityLabel(BSay.words(lead + rest, privacy: privacy))
+            .accessibilityHint(n > 0 ? (needsOpen ? "Hides the strikes" : "Shows the strikes to roll") : "")
+            if needsOpen && n > 0 {
+                VStack(spacing: 0) {
+                    ForEach(Array(ready.enumerated()), id: \.offset) { i, r in
+                        let x = r.intrinsic > 0
+                        HStack(spacing: 12) {
+                            BLogo(ticker: r.t, size: 32)
+                            VStack(alignment: .leading, spacing: 2) {
+                                (Text(r.name).fontWeight(.semibold).foregroundStyle(S.ink) + Text("  \(r.leg.replacingOccurrences(of: " ×", with: " sold ×"))").foregroundStyle(S.secondary))
+                                    .sType(SType(size: 15, weight: 500, line: 19, tracking: 0), tabular: true)
+                                Text(x ? "In the money by \(String(format: "%.2f", r.intrinsic))" : "\(Self.captured(r))% captured · \(k(r.left)) left")
+                                    .sType(SType(size: 13, weight: 600, line: 17, tracking: 0)).foregroundStyle(x ? S.red : S.act)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Text("Roll").sType(SType(size: 12, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(S.act)
+                                .padding(.horizontal, 10).frame(height: 24)
+                                .background(Capsule().fill(Color(.sRGB, red: 242 / 255, green: 169 / 255, blue: 59 / 255, opacity: 0.18)))
+                        }
+                        .padding(.vertical, 14)
+                        .overlay(alignment: .top) { if i > 0 { Rectangle().fill(S.line).frame(height: 1) } }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(S.chip))
+                .transition(.opacity)
+            }
+        }
+    }
+
+    /// A Coming in line: a 4 pt bar in the group's colour, "Calls sold", "52% captured of $4.1K", "$1.9K left", a chevron.
+    @ViewBuilder private func soldLine(_ key: String, _ label: String, _ color: Color, _ rs: [Row]) -> some View {
+        let left = rs.reduce(0) { $0 + $1.left }, col = rs.reduce(0) { $0 + $1.collected }, on = openLine == key
+        lineButton(key: key, color: color, label: label, sub: "\(Self.pcT(left, col)) captured of \(k(col))", value: k(left), valueTone: S.ink, tail: "left",
+                   aria: "\(label), \(SampleEngine.fK(left)) left to earn, \(Self.pcT(left, col)) captured of \(SampleEngine.fK(col)) sold", on: on)
+        if on {
+            let byName = Dictionary(grouping: rs, by: \.t).map { ($0.key, $0.value) }.sorted { $0.1.reduce(0) { $0 + $1.left } > $1.1.reduce(0) { $0 + $1.left } }
+            VStack(spacing: 0) {
+                ForEach(byName, id: \.0) { t, xs in
+                    let l = xs.reduce(0) { $0 + $1.left }, c = xs.reduce(0) { $0 + $1.collected }
+                    itemRow(t: t, name: xs[0].name, sub: xs.map { String(format: "%g", $0.k) }.joined(separator: " · ") + (xs[0].put ? " puts" : " calls") + " · \(Self.pcT(l, c)) captured",
+                            value: k(l), red: false)
+                }
+            }
+            .padding(.trailing, 22).padding(.bottom, 8)
+            .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder private func hedgeLine(_ key: String, _ label: String, _ color: Color, _ hs: [Hedge]) -> some View {
+        let w = hs.reduce(0) { $0 + $1.week }, on = openLine == key
+        lineButton(key: key, color: color, label: label, sub: nil, value: k(w), valueTone: S.red, tail: "a week",
+                   aria: "\(label), \(SampleEngine.fK(w)) a week", on: on)
+        if on {
+            VStack(spacing: 0) {
+                ForEach(hs) { h in itemRow(t: h.t, name: h.name, sub: h.leg, value: k(h.week), red: true) }
+            }
+            .padding(.trailing, 22).padding(.bottom, 8)
+            .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder private func itmLine(_ rs: [Row]) -> some View {
+        let v = rs.reduce(0) { $0 + $1.intrinsic * $1.q * 100 }, on = openLine == "itm"
+        lineButton(key: "itm", color: S.red, label: "In the money", sub: nil, value: k(v), valueTone: S.red, tail: "",
+                   aria: "In the money, \(SampleEngine.fK(v))", on: on)
+        if on {
+            VStack(spacing: 0) {
+                ForEach(rs) { r in itemRow(t: r.t, name: r.name, sub: "\(r.leg.replacingOccurrences(of: " ×", with: " sold ×")) · by \(String(format: "%.2f", r.intrinsic))",
+                                           value: k(r.intrinsic * r.q * 100), red: true) }
+            }
+            .padding(.trailing, 22).padding(.bottom, 8)
+            .transition(.opacity)
+        }
+    }
+
+    private func lineButton(key: String, color: Color, label: String, sub: String?, value: String, valueTone: Color, tail: String, aria: String, on: Bool) -> some View {
+        Button {
+            withAnimation(S.moving(.easeInOut(duration: 0.25), reduce) ?? .linear(duration: 0)) { openLine = on ? nil : key }
+        } label: {
+            HStack(alignment: .center, spacing: 10) {
+                RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 4, height: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label).sType(SType(size: 16, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                    if let sub { Text(sub).sType(SType(size: 12, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.secondary) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                (Text(value).font(.inter(16, 600, tabular: true)).foregroundStyle(valueTone)
+                 + Text(tail.isEmpty ? "" : " \(tail)").font(.inter(12, 500)).foregroundStyle(S.secondary))
+                    .lineLimit(1)
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .heavy)).foregroundStyle(S.secondary)
+                    .rotationEffect(.degrees(on ? 90 : 0))
+            }
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: .top) { Rectangle().fill(S.line).frame(height: 1) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(BSay.words(aria, privacy: privacy))
+        .accessibilityHint(on ? "Hides the names" : "Shows the names")
+    }
+
+    private func itemRow(t: String, name: String, sub: String, value: String, red: Bool) -> some View {
+        HStack(spacing: 10) {
+            BLogo(ticker: t, size: 28)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
+                Text(sub).sType(SType(size: 12, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(value).sType(SType(size: 14, weight: 600, line: 18, tracking: 0))
+                .foregroundStyle(red ? S.dyn(0xFFFFFF, 0x000000) : S.ink)
+                .padding(.horizontal, 9).frame(minWidth: 68, minHeight: 30)
+                .background(red ? S.red : S.dynA(0x767680, 0.16, 0x767680, 0.32), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
     }
-}
 
-// MARK: - The economy (12 indicators)
+    static func captured(_ r: Row) -> Int { r.collected > 0 ? Int(((1 - r.left / r.collected) * 100).rounded()) : 0 }
+}
 
 struct EconomySheet: View {
     /// The live sheet (doc.economy); the sample's in sample mode.

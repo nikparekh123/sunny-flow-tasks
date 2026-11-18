@@ -412,13 +412,7 @@ struct BWhatsMoving: View {
                 }
                 .accessibilityElement(children: .combine)
             }
-            if let w = card["watchlistLine"].string {
-                VStack(alignment: .leading, spacing: 0) {
-                    BHairline()
-                    Text(w).sType(SType(size: 14, weight: 600, line: 19, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                        .fixedSize(horizontal: false, vertical: true).padding(.top, 12)
-                }
-            }
+            // No "Watchlist past its move" line: there is no watchlist anywhere (handoff 2026-11-18).
         }
         .briefCard()
         .padding(.horizontal, S.margin)

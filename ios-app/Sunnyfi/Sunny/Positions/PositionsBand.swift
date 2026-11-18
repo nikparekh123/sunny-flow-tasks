@@ -2,152 +2,12 @@
 //  PositionsBand.swift
 //  Sunny
 //
-//  Sold, in SD (§3.3), and the band: Price (§3.4) and Payoff at this Friday's close, read only (§3.5), on the phone
+//  The band: Price (§3.4) and Payoff at this Friday's close, read only (§3.5), on the phone
 //  (App Explorations 154a). No em dashes in any words here.
 //
 
 import SwiftUI
 import UIKit
-
-// MARK: - Sold, in SD
-
-/// The closed box: "Sold, in SD", "N within 0.5 SD" in red (or "N sold, all past 0.5 SD"), a chevron; a tap opens one
-/// row per sold leg on one SD axis, in the money first, then SD now, nearest first. A row tap selects that name.
-struct PosSoldInSD: View {
-    let book: PosBook
-    @Binding var open: Bool
-    let reduce: Bool
-    let pick: (String) -> Void
-
-    var body: some View {
-        let hot = book.hot
-        let cap = hot > 0 ? "\(hot) within 0.5 SD" : "\(book.sold.count) sold, all past 0.5 SD"
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(S.moving(open ? .timingCurve(0.4, 0, 0.2, 1, duration: 0.45) : .timingCurve(0.22, 1, 0.36, 1, duration: 0.55), reduce)) { open.toggle() }
-            } label: {
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Sold, in SD").sType(PT.t(15, 20, 600), tabular: false).foregroundStyle(PC.ink)
-                        HStack(spacing: 6) {
-                            if hot > 0 { Circle().fill(PC.red).frame(width: 6, height: 6) }
-                            Text(cap).sType(PT.t(12, 16, 600)).foregroundStyle(hot > 0 ? PC.red : PC.mu)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.down").font(.system(size: 13, weight: .semibold)).foregroundStyle(PC.muT)
-                        .rotationEffect(.degrees(open ? 180 : 0))
-                        .animation(S.moving(.timingCurve(0.22, 1, 0.36, 1, duration: 0.3), reduce), value: open)
-                }
-                .padding(.horizontal, 14).padding(.vertical, 8)
-                .frame(minHeight: 52)
-                .modifier(PosGlass(radius: 16, on: open))
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Sold, in SD, \(cap)")
-            .accessibilityValue(open ? "Open" : "Closed")
-            .accessibilityHint(open ? "Closes the sold legs" : "Opens every sold leg in SD")
-            if open {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(book.sold) { r in PosSoldRow(r: r) { pick(r.l.t) } }
-                }
-                .padding(.top, 4)
-                .transition(reduce ? .identity : .opacity.animation(open ? .easeOut(duration: 0.4).delay(0.12) : .easeOut(duration: 0.2)))
-            }
-        }
-        .clipped()
-    }
-}
-
-struct PosSoldRow: View {
-    let r: PE.SoldRow
-    let tap: () -> Void
-    var body: some View {
-        let c = PC.tone(r.tone), lc = r.tone == .quiet ? PC.muT.opacity(0.55) : c, mc = move
-        let what = "\(PE.fk(r.l.K)) \(r.l.put ? "puts" : "calls") · \(r.l.exLabel) · \(Int(r.l.n))"
-        let sdNow = String(format: "%.2f", r.a) + " SD" + (r.itm ? " in" : "")
-        let kept = r.kept.map { $0 >= 0 ? "\(Int(PE.jsRound($0 * 100)))% kept" : "\(Int(PE.jsRound(-$0 * 100)))% lost" }
-        Button(action: tap) {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(r.l.t).sType(PT.t(15, 20, 600), tabular: false).foregroundStyle(PC.ink)
-                        Text(what).sType(PT.t(12, 16)).foregroundStyle(PC.mu).lineLimit(1)
-                    }
-                    Spacer(minLength: 4)
-                    HStack(spacing: 4) {
-                        if let a0 = r.a0 {
-                            Text(String(format: "%.2f", a0)).sType(PT.t(13, 18, 500)).foregroundStyle(PC.quiet)
-                            Text("→").sType(PT.t(13, 18, 600)).foregroundStyle(mc ?? PC.quiet)
-                        }
-                        Text(sdNow).sType(PT.t(13, 18, 600)).foregroundStyle(mc ?? PC.ink)
-                    }
-                    .fixedSize()
-                }
-                track(lc: lc, c: c).frame(height: 18)
-                SXFlowGaps(column: 8, row: 2) {
-                    Text("\(r.l.entry.map(PosFmt.price) ?? "-") → \(r.l.mark.map(PosFmt.price) ?? "-")").foregroundStyle(PC.muT)
-                    if let kept { Text(kept).foregroundStyle((r.kept ?? 0) >= 0 ? PC.green : PC.red) }
-                    if r.showBE, let be = r.be {
-                        HStack(spacing: 0) {
-                            Text("BE \(String(format: "%.2f", be))").foregroundStyle(PC.ink)
-                            Text(" · \(r.past ? "past it" : String(format: "%.2f", abs(r.zb ?? 0)) + " SD away")").foregroundStyle(PC.mu)
-                        }
-                    }
-                }
-                .sType(PT.t(12, 16))
-            }
-            .padding(.vertical, 9)
-            .frame(minHeight: 44)
-            .overlay(alignment: .bottom) { Rectangle().fill(PC.rule.opacity(0.75)).frame(height: 1) }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(PosSay.words("\(r.l.t) \(PE.fk(r.l.K)) \(r.l.put ? "puts" : "calls") \(r.l.exLabel), \(Int(r.l.n)) contracts, "
-                                         + (r.a0 != nil ? "sold \(String(format: "%.2f", r.a0!)) SD out, " : "")
-                                         + "now \(String(format: "%.2f", r.a)) SD \(r.itm ? "in the money" : "out")"
-                                         + (kept.map { ", \($0)" } ?? "")
-                                         + (r.showBE && r.be != nil ? ", breakeven \(String(format: "%.2f", r.be!))\(r.past ? ", past it" : "")" : "")))
-        .accessibilityHint("Opens \(r.l.t) and its Intelligence")
-    }
-
-    /// SD now against SD when sold (Nik 13 Nov 2026): further is good for a seller, green; closer red; nil (ink) with no
-    /// SD when sold or no change. The red, orange and quiet distance tones stay on the track's dots only.
-    private var move: Color? {
-        guard let a0 = r.a0 else { return nil }
-        if r.closer == true { return PC.red }
-        return (r.itm ? -r.a : r.a) > a0 + 0.005 ? PC.green : nil
-    }
-
-    /// 2.2 SD each side of today's line with the 0.5, 1, 1.5 and 2 SD bands; the dot is the strike now, the hollow dot
-    /// where it sat when sold (dotted to the dot), the tick its breakeven.
-    private func track(lc: Color, c: Color) -> some View {
-        GeometryReader { g in
-            let w = g.size.width, X = { (f: Double) in CGFloat(f) * w }
-            let xp = { (z: Double) in CGFloat(0.5 + max(-PE.TRACK_SD, min(PE.TRACK_SD, z)) / PE.TRACK_SD / 2) * w }
-            ZStack(alignment: .topLeading) {
-                ForEach([2.0, 1.5, 1, 0.5], id: \.self) { k in
-                    Rectangle().fill(PC.sdBand).frame(width: CGFloat(k / PE.TRACK_SD) * w, height: 18).offset(x: xp(-k))
-                }
-                Rectangle().fill(PC.today).frame(width: 1.5, height: 18).offset(x: w / 2 - 0.75)
-                if let x0 = r.x0 {
-                    Path { p in p.move(to: CGPoint(x: min(X(x0), X(r.x)), y: 8)); p.addLine(to: CGPoint(x: max(X(x0), X(r.x)), y: 8)) }
-                        .stroke(PC.ink.opacity(0.35), style: StrokeStyle(lineWidth: 1.5, dash: [1.5, 2.5]))
-                    Circle().strokeBorder(PC.ink.opacity(0.4), lineWidth: 1.5).frame(width: 9, height: 9).offset(x: X(x0) - 4.5, y: 4)
-                }
-                if let xb = r.xb {
-                    Rectangle().fill(lc).opacity(0.5).frame(width: abs(X(r.x) - X(xb)), height: 2).offset(x: min(X(r.x), X(xb)), y: 8)
-                    RoundedRectangle(cornerRadius: 1).fill(lc).frame(width: 2, height: 12).offset(x: X(xb) - 1, y: 3)
-                }
-                Circle().fill(r.itm ? PC.red : PC.page).overlay(Circle().strokeBorder(c, lineWidth: 2)).frame(width: 11, height: 11).offset(x: X(r.x) - 5.5, y: 3)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-        .accessibilityHidden(true)
-    }
-}
 
 // MARK: - Price
 
@@ -159,16 +19,39 @@ struct PosSoldRow: View {
 struct PosPriceChart: View {
     let price: PosPrice?
     let failed: Bool
-    private let H = PosPrice.CH, TAGW: CGFloat = 88
+    /// The 1 SD layer (round 164, remembered as `sunny.cone164`, as the web keeps it).
+    @Binding var cone: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    private let H = PosPrice.CH, TAGW: CGFloat = 96
+
+    /// Calls blue, puts brown (162a).
+    static func tc(_ put: Bool, _ a: Double = 1) -> Color { (put ? PC.floor : PC.ceiling).opacity(a) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let p = price {
+                if p.coneOk {
+                    HStack {
+                        Spacer()
+                        Button {
+                            withAnimation(S.moving(.timingCurve(0.22, 1, 0.36, 1, duration: 0.55), reduce) ?? .linear(duration: 0)) { cone.toggle() }
+                        } label: {
+                            Text("1 SD").sType(PT.t(13, 16, 600), tabular: false).foregroundStyle(cone ? Color.black : PC.ink)
+                                .padding(.horizontal, 12).frame(minHeight: 30)
+                                .background { if cone { Capsule().fill(PC.ink) } }
+                                .glassEffect(cone ? .identity : .regular.interactive(), in: .capsule)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("1 SD cone, when the price could reach your strikes")
+                        .accessibilityAddTraits(cone ? [.isSelected, .isButton] : .isButton)
+                        .sensoryFeedback(.selection, trigger: cone)
+                    }
+                }
                 chart(p).frame(height: H)
                 labels(p).frame(height: 16)
-                Text("Past week \(Text("\(p.move < 0 ? "▼" : "▲") \(PE.pcx(p.move))").font(.inter(12, 600, tabular: true)).foregroundStyle(p.move < 0 ? PC.red : PC.green)) · sold dashed, bought dotted · to \(p.fridayWords) · a sold strike's % red within 0.5 SD, orange within 1 SD")
-                    .sType(PT.t(12, 16)).foregroundStyle(PC.mu)
-                    .accessibilityLabel(PosSay.words("Past week \(p.move < 0 ? "down" : "up") \(PE.pcx(p.move)), sold dashed, bought dotted, to \(p.fridayWords), a sold strike's percent red within half an SD, orange within 1 SD"))
+                if !p.near.isEmpty { nearCard(p) }
+                Text(note(p)).sType(PT.t(12, 16), tabular: false).foregroundStyle(PC.mu)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Group {
                     if failed { Text("No price history for this name yet.").sType(PT.t(13, 18), tabular: false).foregroundStyle(PC.mu) }
@@ -179,22 +62,82 @@ struct PosPriceChart: View {
         }
     }
 
+    private func note(_ p: PosPrice) -> String {
+        let mv = "Past week \(p.move < 0 ? "down" : "up") \(PE.pcx(p.move)). "
+        if p.coneOn, let c = p.cone {
+            return mv + "1 SD cone: a normal week, \(PosFmt.price(c.lo)) to \(PosFmt.price(c.hi)) by \(p.fridayWords); about 2 weeks in 3 end inside. Green: inside your sold strikes; red: where it spills past them. The dot marks the day it first reaches one. Calls blue, puts brown; sold dashed, hedges dotted."
+        }
+        return mv + "Calls blue, puts brown; sold dashed, hedges dotted. " + (p.m0 > 0 ? "Each tag gives the strike’s SD on this week’s move: red under 0.5 SD or in the money, orange to 1 SD, grey past 1 SD." : "Each tag gives how far the strike is from today.")
+            + (p.room != nil ? " Green is the room between your nearest sold put and call, faint red past them." : "") + " After the dot, the days left to \(p.fridayWords)."
+    }
+
     private func chart(_ p: PosPrice) -> some View {
         let col = p.up ? PC.green : PC.red
         return GeometryReader { g in
             let pw = max(1, g.size.width - TAGW)
             ZStack(alignment: .topLeading) {
+                // 162a: the room between the nearest sold strikes (it goes while the cone is on).
+                if let r = p.room {
+                    ZStack(alignment: .topLeading) {
+                        Rectangle().fill(PC.green.opacity(0.10)).frame(width: pw, height: max(0, r.bottom - r.top)).offset(y: r.top)
+                        if r.up { Rectangle().fill(PC.red.opacity(0.08)).frame(width: pw, height: r.top) }
+                        if r.dn { Rectangle().fill(PC.red.opacity(0.08)).frame(width: pw, height: max(0, H - r.bottom)).offset(y: r.bottom) }
+                    }
+                    .opacity(p.coneOn ? 0 : 1)
+                }
+                // 164: the cone, on the scale before it widened, riding the same transform as the price line.
+                if let c = p.cone {
+                    let P = { (ys: [CGFloat]) in Path { pp in for (i, y) in ys.enumerated() { let pt = CGPoint(x: CGFloat(c.X[i]) * pw, y: y); if i == 0 { pp.move(to: pt) } else { pp.addLine(to: pt) } } } }
+                    let poly = { (f: ([CGFloat], [CGFloat])) in Path { pp in
+                        for (i, y) in f.0.enumerated() { let pt = CGPoint(x: CGFloat(c.X[i]) * pw, y: y); if i == 0 { pp.move(to: pt) } else { pp.addLine(to: pt) } }
+                        for (i, y) in f.1.enumerated().reversed() { pp.addLine(to: CGPoint(x: CGFloat(c.X[i]) * pw, y: y)) }
+                        pp.closeSubpath()
+                    } }
+                    ZStack(alignment: .topLeading) {
+                        if let f = c.fG { poly(f).fill(PC.green.opacity(0.24)) }
+                        if let f = c.fU { poly(f).fill(PC.red.opacity(0.45)) }
+                        if let f = c.fD { poly(f).fill(PC.red.opacity(0.45)) }
+                        P(c.YU).stroke(PC.ink.opacity(0.8), lineWidth: 1)
+                        P(c.YD).stroke(PC.ink.opacity(0.8), lineWidth: 1)
+                    }
+                    .frame(width: pw, height: H, alignment: .topLeading)
+                    .scaleEffect(x: 1, y: p.tfSy, anchor: .top).offset(y: p.tfTy)
+                    .clipped()
+                    .opacity(p.coneOn ? 1 : 0)
+                }
                 ForEach(p.lines) { l in
                     Path { $0.move(to: CGPoint(x: 0, y: l.y)); $0.addLine(to: CGPoint(x: pw, y: l.y)) }
-                        .stroke(PC.ink.opacity(l.sold ? 0.42 : 0.30), style: l.sold ? StrokeStyle(lineWidth: 1, dash: [3, 3]) : StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [0.1, 3.5]))
+                        .stroke(Self.tc(l.put, l.sold ? 0.9 : 0.55), style: l.sold ? StrokeStyle(lineWidth: 1.5, dash: [4, 3]) : StrokeStyle(lineWidth: 1, lineCap: .round, dash: [0.1, 3]))
+                    if l.shown && !l.name.isEmpty {
+                        Text(l.name).sType(PT.t(12, 14, 600), tabular: true).foregroundStyle(Self.tc(l.put, l.sold ? 1 : 0.85))
+                            .padding(.horizontal, 3)
+                            .background(RoundedRectangle(cornerRadius: 3).fill(p.coneOn ? PC.page : .clear))
+                            .fixedSize()
+                            .frame(width: pw - 4, alignment: .trailing)
+                            .offset(y: l.y + l.lt)
+                    }
                 }
+                // The price line, on the scale before the cone widened it; the past week dims under the cone.
                 Path { path in
                     for (i, q) in p.pts.enumerated() {
-                        let pt = CGPoint(x: CGFloat(q.x) * pw, y: p.y(q.v))
+                        let pt = CGPoint(x: CGFloat(q.x) * pw, y: p.yb(q.v))
                         if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
                     }
                 }
                 .stroke(col, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                .frame(width: pw, height: H, alignment: .topLeading)
+                .scaleEffect(x: 1, y: p.tfSy, anchor: .top).offset(y: p.tfTy)
+                .opacity(p.coneOn ? 0.35 : 1)
+                if let c = p.cone, p.coneOn {
+                    ForEach(c.drops, id: \.id) { q in
+                        Path { $0.move(to: CGPoint(x: CGFloat(q.x) * pw, y: q.y)); $0.addLine(to: CGPoint(x: CGFloat(q.x) * pw, y: H)) }
+                            .stroke(Self.tc(q.put, 0.8), style: StrokeStyle(lineWidth: 1, dash: [1, 2]))
+                    }
+                    ForEach(c.dots, id: \.id) { q in
+                        Circle().fill(Self.tc(q.put)).frame(width: 9, height: 9).background(Circle().fill(PC.page).padding(-2))
+                            .position(x: CGFloat(q.x) * pw, y: q.y)
+                    }
+                }
                 Circle().strokeBorder(col, lineWidth: 2.5).background(Circle().fill(PC.page)).frame(width: 12, height: 12)
                     .shadow(color: .black.opacity(0.6), radius: 2, y: 1)
                     .position(x: CGFloat(p.dotX) * pw, y: p.dotY)
@@ -207,17 +150,46 @@ struct PosPriceChart: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(PosSay.words("Price chart, past week, \(PosFmt.price(p.pts.last?.v ?? 0)) today. " + p.tags.filter { !$0.px }.map { "\($0.title), \($0.s)" + ($0.tone == .red ? ", close" : $0.tone == .orange ? ", near" : "") }.joined(separator: "; ")))
+        .accessibilityLabel(PosSay.words("Price chart, past week, \(PosFmt.price(p.pts.last?.v ?? 0)) today. " + p.tags.filter { !$0.px }.map { "\($0.title)" + ($0.zTone == .red ? ", close" : $0.zTone == .orange ? ", near" : "") }.joined(separator: "; ")))
     }
 
-    /// Nik, 14 Nov 2026 ("4 + 2"): bright text on a solid pill so the numbers read. Sold: the strike 700 ink, the %
+    /// The nearest sold call and put, nearest first: "Sold call 36  ↑2.0% · 0.46 SD", and with the cone on, the day it
+    /// first reaches it ("the cone reaches it Wed") or "outside the cone to Fri".
+    private func nearCard(_ p: PosPrice) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(p.near) { n in
+                HStack(spacing: 10) {
+                    Path { $0.move(to: CGPoint(x: 0, y: 1)); $0.addLine(to: CGPoint(x: 18, y: 1)) }
+                        .stroke(Self.tc(n.put), style: StrokeStyle(lineWidth: 2, dash: [4, 3])).frame(width: 18, height: 2)
+                    Text(n.name).sType(PT.t(15, 20, 600), tabular: true).foregroundStyle(Self.tc(n.put))
+                    Text(n.d).sType(PT.t(14, 20, 600)).foregroundStyle(n.tone == .red ? PC.red : n.tone == .orange ? PC.orange : PC.mu).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(PosSay.words("\(n.name), \(n.d)" + (p.coneOn && !n.itm ? ", " + (n.reach != nil ? "the cone reaches it \(n.day ?? "")" : "outside the cone to \(n.fri)") : "")))
+                if p.coneOn && !n.itm {
+                    Text(n.reach != nil ? "The cone reaches it \(n.day ?? "")" : "Outside the cone to \(n.fri)").sType(PT.t(13, 18), tabular: false).foregroundStyle(PC.mu)
+                        .padding(.leading, 28).padding(.top, -6)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(0.05)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+    }
+
+/// Nik, 14 Nov 2026 ("4 + 2"): bright text on a solid pill so the numbers read. Sold: the strike 700 ink, the %
     /// in how close it is (red under 0.5 SD or in the money, orange to 1 SD, bright grey past; Sold in SD's rings);
     /// bought: the strike 600 bright grey, the % #AEAEB2; puts in a grey capsule; today's price a white capsule.
     private func tag(_ t: PosPrice.Tag) -> some View {
-        let pc = t.tone == .red ? PC.red : t.tone == .orange ? PC.orange : t.sold ? PC.bright : PC.muT
+        // 162a: the strike and its SD on this week's move ("36 0.46 SD"); without an IV, the % as before.
+        let zt = t.zTone ?? t.tone
+        let pc = zt == .red ? PC.red : zt == .orange ? PC.orange : t.sold ? PC.bright : PC.muT
         return HStack(spacing: 4) {
-            Text(t.n).font(.inter(13, t.px || t.sold ? 700 : 600, tabular: true)).foregroundStyle(t.px ? PC.onInk : t.sold ? PC.ink : PC.bright)
-            if !t.px { Text(t.s).font(.inter(12, t.sold ? 600 : 500, tabular: true)).foregroundStyle(pc) }
+            Text(t.sd != nil ? t.k : t.n).font(.inter(13, t.px || t.sold ? 700 : 600, tabular: true)).foregroundStyle(t.px ? PC.onInk : t.sold ? PC.ink : PC.bright)
+            if !t.px { Text((t.sd ?? t.s) + (t.fold > 0 ? " +\(t.fold)" : "")).font(.inter(12, t.sold ? 600 : 500, tabular: true)).foregroundStyle(pc) }
         }
         .lineLimit(1)
         .padding(.horizontal, t.px ? 8 : t.put ? 7 : 0)
@@ -231,7 +203,9 @@ struct PosPriceChart: View {
             let pw = max(1, g.size.width - TAGW)
             ZStack(alignment: .topLeading) {
                 ForEach(p.xl) { x in
-                    Text(x.t).sType(PT.t(12, 16), tabular: false).foregroundStyle(x.now ? PC.ink : PC.mu).fixedSize().offset(x: CGFloat(x.x) * pw)
+                    Text(x.t).sType(PT.t(12, 16, x.put != nil ? 700 : 400), tabular: false)
+                        .foregroundStyle(x.put.map { Self.tc($0) } ?? (x.now ? PC.ink : PC.mu)).fixedSize()
+                        .offset(x: x.put != nil ? CGFloat(x.x) * pw - 12 : CGFloat(x.x) * pw)
                 }
             }
         }
@@ -284,11 +258,13 @@ private struct PosPriceScrub: View {
     }
 }
 
-// MARK: - Payoff at this Friday's close
+// MARK: - Payoff, with the date and range sliders
 
-/// README §3.5, read only: the P&L by price at this Friday's close from today's marks, ±12% of the price, the priced
-/// move shaded, where the P&L peaks (Nik's "Makes the most at $41.69 by Fri Nov 13"), the dot at today's price, then
-/// the Greeks at that date.
+/// README §3.5 with rounds 168b and Nov 18 (phone): the P&L by price from today's marks, the priced move shaded, where
+/// it peaks ("Makes the most at $41.69 by Fri Nov 13"), the dot at today's price; under it a date slider (each trading
+/// day from today to the day the nearest sold legs expire: "At expiration" at its end, "N days to expiration" before)
+/// and a range slider (±5% to ±50%, opens ±12%, Reset once moved), then the Greeks at that date. The P&L scale holds
+/// across the dates so the curve is seen to change. A target set on the web shows as a dashed line, a ring and a pill.
 struct PosPayoffView: View {
     let t: String
     let S0: Double
@@ -296,11 +272,19 @@ struct PosPayoffView: View {
     let privacy: Bool
     /// Some leg is switched off in Every leg.
     var changed = false
+    let dates: [PosName.DateStop]
+    @Binding var at: Int
+    @Binding var rangePct: Int
+    /// A target price set on the web (payoff_targets), or nil.
+    var target: Double? = nil
     private let H: CGFloat = 180
     /// How far across the chart the finger is while it scrubs sideways (0 to 1). Held in a reference only the headline
     /// and the scrub layer read, so a drag redraws those two and never the shaded curve or the Greeks (Nik, 13 Nov
     /// 2026: "Why is the scrub so jerky").
     @State private var scrub = PosScrubAt()
+
+    private var r: Double { p.range }
+    private func xp(_ x: Double) -> CGFloat { CGFloat((x / S0 - (1 - r)) / (2 * r)) }
 
     var body: some View {
         let peak = p.peak
@@ -312,8 +296,11 @@ struct PosPayoffView: View {
                 Text(right).sType(PT.t(13, 18, 600)).foregroundStyle(peak != nil ? PC.orange : PC.ink).multilineTextAlignment(.trailing)
                     .accessibilityLabel(PosSay.words(right))
             }
+            if let tg = target { targetLine(tg) }
             chart.frame(height: H)
             axis.frame(height: 16)
+            if dates.count > 1 { dateSlider.padding(.top, 6) }
+            rangeSlider
             VStack(spacing: 0) {
                 Rectangle().fill(PC.rule).frame(height: 1)
                 Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
@@ -328,8 +315,18 @@ struct PosPayoffView: View {
                 }
                 .padding(.top, 8)
             }
-            Text("At the Friday close, the legs switched on in Every leg\(changed ? "" : " (income to start)"). Shaded: the priced move.").sType(PT.t(12, 16), tabular: false).foregroundStyle(PC.mu)
+            Text("P&L from today’s marks, the legs switched on in Every leg\(changed ? "" : " (income to start)"). Drag the date to draw the curve for any trading day until your sold legs expire; the scale holds so you see it change. Range widens or narrows the prices. Shaded: the priced move.")
+                .sType(PT.t(12, 16), tabular: false).foregroundStyle(PC.mu)
         }
+    }
+
+    /// "At your target $38.00 · ↑7.7%, by Fri Oct 30: $5.6K" (the web's headline line; off the chart, only this).
+    private func targetLine(_ tg: Double) -> some View {
+        let v = PosPayoffHead.plAt(p, S0, tg), m = tg / S0 - 1
+        return (Text("At your target \(PosFmt.price(tg)) · \(m >= 0 ? "↑" : "↓")\(PE.pcx(m)), \(p.byT): ").foregroundStyle(PC.mu)
+                + Text(privacy ? BriefMask.shown : PosFmt.money(v)).foregroundStyle(sign(v)).fontWeight(.semibold))
+            .sType(PT.t(13, 18), tabular: true)
+            .accessibilityLabel(PosSay.words("At your target \(PosFmt.price(tg)), \(p.byT), \(PosSay.signed(v, privacy))"))
     }
 
     private func sign(_ v: Double) -> Color { v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink }
@@ -343,11 +340,83 @@ struct PosPayoffView: View {
         .accessibilityLabel(PosSay.words("\(l), \(p.dateLabel), \(said)"))
     }
 
+    // MARK: The sliders
+
+    private var dateSlider: some View {
+        let N = dates.count - 1, cur = dates[min(max(0, at), N)], end = dates[N]
+        let lab = cur.days == 0 && cur.i == 0 ? "Today" : cur.full
+        let sub = cur.days == 0 && cur.i == 0 ? "\(cur.date) · now" : "close · in \(cur.days) \(cur.days == 1 ? "day" : "days")"
+        let left = end.days - cur.days
+        let exT = at >= N ? "At expiration" : "\(left) \(left == 1 ? "day" : "days") to expiration"
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                (Text(lab).fontWeight(.semibold).foregroundStyle(PC.ink) + Text(" · \(sub)").foregroundStyle(PC.mu))
+                    .sType(PT.t(14, 18), tabular: true).lineLimit(1)
+                Spacer(minLength: 0)
+                Text(exT).sType(PT.t(12, 16, 500), tabular: false).foregroundStyle(PC.muT)
+            }
+            PosSlider(value: $at, lo: 0, hi: N, label: "Date the curve is drawn for",
+                      said: { i in let d = dates[min(max(0, i), N)]; return (d.days == 0 && d.i == 0 ? "Today, now" : "\(d.full) close, in \(d.days) \(d.days == 1 ? "day" : "days")") + (i >= N ? ". At expiration\(d.ends.isEmpty ? "" : ", " + d.ends.lowercased())" : "") })
+            GeometryReader { g in
+                let w = g.size.width, ax = { (i: Int) in 17 + (w - 34) * CGFloat(i) / CGFloat(max(1, N)) }
+                let few = N <= 8
+                let shown = few ? Array(0...N) : [0] + { let fr = (1..<N).filter { dates[$0].friday }; return fr.count > 2 ? [fr[fr.count / 2]] : [] }() + [N]
+                ZStack(alignment: .topLeading) {
+                    ForEach(0...N, id: \.self) { i in
+                        if few || dates[i].friday || i == N {
+                            Rectangle().fill(i == N ? PC.ink.opacity(0.7) : Color.white.opacity(0.22))
+                                .frame(width: 1, height: i == N ? 8 : dates[i].friday ? 6 : 4).offset(x: ax(i))
+                        }
+                    }
+                    ForEach(shown, id: \.self) { i in
+                        let tx = i == 0 ? "Today" : i == N ? (few ? "\(dates[i].wd) \(dates[i].date.split(separator: " ").dropFirst().joined(separator: " "))" : dates[i].date.split(separator: " ").dropFirst().joined(separator: " ")) : few ? dates[i].wd : dates[i].date.split(separator: " ").dropFirst().joined(separator: " ")
+                        Text(tx).sType(PT.t(11, 14), tabular: false).foregroundStyle(i == at ? PC.ink : PC.mu).fixedSize()
+                            .frame(width: 90, alignment: i == 0 ? .leading : i == N ? .trailing : .center)
+                            .offset(x: i == 0 ? 0 : i == N ? w - 90 : ax(i) - 45, y: 11)
+                    }
+                }
+            }
+            .frame(height: 28)
+            .padding(.top, -10)
+            .accessibilityHidden(true)
+        }
+    }
+
+    private var rangeSlider: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                (Text("Range ").foregroundStyle(PC.mu) + Text("±\(rangePct)%").fontWeight(.semibold).foregroundStyle(PC.ink))
+                    .sType(PT.t(14, 18), tabular: true)
+                Spacer(minLength: 0)
+                if rangePct != 12 {
+                    Button { withAnimation(S.fade) { rangePct = 12 } } label: {
+                        Text("Reset").sType(PT.t(12, 16, 600), tabular: false).foregroundStyle(PC.ink)
+                            .padding(.horizontal, 12).frame(minHeight: 28)
+                            .glassEffect(.regular.interactive(), in: .capsule)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Reset the range to plus or minus 12 percent")
+                    .transition(.opacity)
+                }
+            }
+            .frame(minHeight: 28)
+            .padding(.top, 10)
+            PosSlider(value: $rangePct, lo: 5, hi: 50, label: "Price range of the chart", said: { "Plus or minus \($0) percent" })
+            HStack {
+                Text("±5%"); Spacer(); Text("±50%")
+            }
+            .sType(PT.t(11, 14), tabular: false).foregroundStyle(PC.mu)
+            .padding(.top, -10)
+            .accessibilityHidden(true)
+        }
+    }
+
+    // MARK: The chart
+
     private var chart: some View {
-        let ys = p.ys, lo0 = min(0, ys.min() ?? 0), hi0 = max(0, ys.max() ?? 0), yp = (hi0 - lo0) * 0.12 == 0 ? 1 : (hi0 - lo0) * 0.12
-        let lo = lo0 - yp, hi = hi0 + yp, inner = H - 16
+        let ys = p.ys, yp = (p.yHi - p.yLo) * 0.12 == 0 ? 1 : (p.yHi - p.yLo) * 0.12
+        let lo = p.yLo - yp, hi = p.yHi + yp, inner = H - 16
         let fy = { (v: Double) in 8 + CGFloat((hi - v) / (hi - lo)) * inner }
-        let xp = { (x: Double) in CGFloat((x / S0 - 0.88) / 0.24) }
         return GeometryReader { g in
             let w = g.size.width, zy = fy(0)
             let line = Path { path in
@@ -380,30 +449,93 @@ struct PosPayoffView: View {
                     Path { path in path.move(to: CGPoint(x: xp(pk) * w, y: 8)); path.addLine(to: CGPoint(x: xp(pk) * w, y: H - 8)) }
                         .stroke(PC.orange, style: StrokeStyle(lineWidth: 1.5, dash: [1.5, 2.5]))
                 }
+                if let tg = target, xp(tg) >= 0, xp(tg) <= 1 {
+                    let tx = xp(tg) * w, tv = PosPayoffHead.plAt(p, S0, tg)
+                    Path { path in path.move(to: CGPoint(x: tx, y: 8)); path.addLine(to: CGPoint(x: tx, y: H - 8)) }
+                        .stroke(PC.ink.opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    Circle().stroke(PC.ink, lineWidth: 2).frame(width: 12, height: 12).position(x: tx, y: fy(tv))
+                    Text("Target \(PosFmt.price(tg))").sType(PT.t(11, 14, 600), tabular: true).foregroundStyle(PC.ink)
+                        .padding(.horizontal, 7).frame(height: 20)
+                        .background(Capsule().fill(PC.pillSold))
+                        .fixedSize()
+                        .position(x: min(max(tx, 46), w - 46), y: 10)
+                }
                 Circle().fill(PC.dot).frame(width: 12, height: 12).overlay(Circle().stroke(PC.dotRing, lineWidth: 3).padding(-1.5))
                     .offset(x: w / 2 - 6, y: fy(p.v0) - 6)
                 PosPayoffScrub(scrub: scrub, w: w, H: H, fy: fy, at: { PosPayoffHead.lerp(p.ys, $0) })
             }
         }
+        .animation(nil, value: p.ys)
         .accessibilityHidden(true)
     }
-
-
 
     private var axis: some View {
         GeometryReader { g in
             let w = g.size.width
             ZStack(alignment: .topLeading) {
                 Rectangle().fill(PC.rule).frame(height: 1)
-                ForEach([-12, -6, 0, 6, 12], id: \.self) { pc in
-                    let x = CGFloat(pc + 12) / 24 * w
-                    Text(PosFmt.price(S0 * (1 + Double(pc) / 100))).sType(PT.t(11, 13)).foregroundStyle(PC.mu).fixedSize()
-                        .frame(width: 80, alignment: pc == -12 ? .leading : pc == 12 ? .trailing : .center)
-                        .offset(x: pc == -12 ? 0 : pc == 12 ? w - 80 : x - 40, y: 3)
+                ForEach([-1.0, -0.5, 0, 0.5, 1.0], id: \.self) { f in
+                    let x = CGFloat(f + 1) / 2 * w
+                    Text(PosFmt.price(S0 * (1 + f * r))).sType(PT.t(11, 13)).foregroundStyle(PC.mu).fixedSize()
+                        .frame(width: 80, alignment: f == -1 ? .leading : f == 1 ? .trailing : .center)
+                        .offset(x: f == -1 ? 0 : f == 1 ? w - 80 : x - 40, y: 3)
                 }
             }
         }
         .accessibilityHidden(true)
+    }
+}
+
+/// The Payoff's sliders (168b, as the web's): a 4 pt track, the filled part white, a 34 × 22 capsule thumb, white at
+/// rest and glass while it is dragged (it grows a little on a spring). A sideways drag moves it (an up or down drag still
+/// scrolls the page), a tap jumps to that step, VoiceOver adjusts it a step at a time. One selection tick per step.
+struct PosSlider: View {
+    @Binding var value: Int
+    let lo: Int, hi: Int
+    let label: String
+    let said: (Int) -> String
+    @State private var dragging = false
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    var body: some View {
+        GeometryReader { g in
+            let w = g.size.width, span = max(1, hi - lo)
+            let f = CGFloat(value - lo) / CGFloat(span), x = 17 + (w - 34) * f
+            let step = { (lx: CGFloat) -> Int in lo + Int((max(0, min(1, (lx - 17) / max(1, w - 34))) * CGFloat(span)).rounded()) }
+            ZStack(alignment: .topLeading) {
+                Capsule().fill(Color(.sRGB, red: 118 / 255, green: 118 / 255, blue: 128 / 255, opacity: 0.32)).frame(height: 4).offset(y: 20)
+                Capsule().fill(PC.ink).frame(width: max(0, x), height: 4).offset(y: 20)
+                Group {
+                    if dragging {
+                        Capsule().fill(.clear).glassEffect(.regular, in: .capsule)
+                    } else {
+                        Capsule().fill(Color.white).shadow(color: .black.opacity(0.3), radius: 1, y: 1).shadow(color: .black.opacity(0.35), radius: 5, y: 3)
+                    }
+                }
+                .frame(width: 34, height: 22)
+                .scaleEffect(dragging ? 1.16 : 1)
+                .position(x: x, y: 22)
+                .animation(reduce ? nil : .timingCurve(0.34, 1.36, 0.64, 1, duration: 0.22), value: dragging)
+                Color.clear.contentShape(Rectangle())
+                    .onTapGesture(coordinateSpace: .local) { pt in value = step(pt.x) }
+                    .gesture(PosScrubPan(moved: { lx in
+                        if !dragging { dragging = true }
+                        let v = step(lx); if v != value { value = v }
+                    }, ended: { dragging = false }))
+            }
+        }
+        .frame(height: 44)
+        .sensoryFeedback(.selection, trigger: value)
+        .accessibilityElement()
+        .accessibilityLabel(label)
+        .accessibilityValue(said(value))
+        .accessibilityAdjustableAction { d in
+            switch d {
+            case .increment: value = min(hi, value + 1)
+            case .decrement: value = max(lo, value - 1)
+            @unknown default: break
+            }
+        }
     }
 }
 
@@ -418,7 +550,7 @@ private struct PosPayoffHead: View {
     let t: String, S0: Double, p: PosName.Payoff, privacy: Bool
     let scrub: PosScrubAt
     var body: some View {
-        let at = scrub.f.map { f in (x: S0 * (0.88 + 0.24 * f), v: Self.lerp(p.ys, f)) }
+        let at = scrub.f.map { f in (x: S0 * (1 - p.range + 2 * p.range * f), v: Self.lerp(p.ys, f)) }
         let v0 = at?.v ?? p.v0, x0 = at?.x ?? S0
         let move = at.map { a -> String in
             let m = a.x / S0 - 1
@@ -433,7 +565,11 @@ private struct PosPayoffHead: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(PosSay.words("\(PosSay.signed(v0, privacy)) if \(t) is at \(PosFmt.price(x0)) \(p.byT), from today’s marks"))
     }
-    /// The P&L at a fraction across the ±12% grid, read on the straight line between its two points.
+    /// The P&L at a price on the curve (a target), read off its points; nil off the chart is clamped to its ends.
+    static func plAt(_ p: PosName.Payoff, _ S0: Double, _ x: Double) -> Double {
+        lerp(p.ys, (x / S0 - (1 - p.range)) / (2 * p.range))
+    }
+    /// The P&L at a fraction across the chart's range, read on the straight line between its two points.
     static func lerp(_ ys: [Double], _ f: Double) -> Double {
         let n = ys.count
         guard n > 1 else { return ys.first ?? 0 }

@@ -204,6 +204,11 @@ nonisolated enum PE {
         if st == 2 { return .red }
         return rows.contains { $0.l.t == t && ($0.itm || $0.a < 0.5) } ? .orange : nil
     }
+    /// The phone strip's dot (handoff 2026-11-18 §2.2): red when a strike sold for this week (expiring by `friday`)
+    /// sits within 0.5 SD or in the money; nothing else. The web's strip keeps nameDot's red and orange.
+    static func phoneDot(_ rows: [SoldRow], _ t: String, friday: String?) -> Tone? {
+        rows.contains { r in r.l.t == t && (friday.map { r.l.ex <= $0 } ?? true) && (r.itm || r.a < 0.5) } ? .red : nil
+    }
 
     // MARK: §3.9.5 The lanes' maths: Held
 

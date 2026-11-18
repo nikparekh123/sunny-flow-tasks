@@ -54,7 +54,7 @@ extension YourPositionModel {
         countColor = j["countColor"].string ?? "secondary"
         rows = j["rows"].array.map { r in
             Row(id: r["id"].string ?? "", name: r["name"].string ?? "", line: r["line"].string ?? "", lineColor: r["lineColor"].string ?? "secondary",
-                right: r["right"].string ?? "", rightColor: r["rightColor"].string ?? "ink", at: r["at"].string ?? "", st: Int(r["st"].double ?? 0))
+                right: r["right"].string ?? "", rightColor: r["rightColor"].string ?? "ink", at: r["at"].string ?? "", st: Int(r["st"].double ?? 0), curve: r["curve"].array.compactMap(\.double))
         }
         aria = j["aria"].string ?? ""
         guard grid.count == friday.count, grid.count == today.count else { return nil }
