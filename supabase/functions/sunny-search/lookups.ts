@@ -52,7 +52,11 @@ export async function context(book: string, owner = false): Promise<Ctx> {
      home_search. flow_profile for every member; plan, what to trade, for owners only, as it always was. */
   const e = (x?.payload ?? {}) as Row;
   if (e.flow_profile) p = { ...p, flow_profile: e.flow_profile };
+  if (e.risk) p = { ...p, risk: e.risk };
   if (owner && e.plan) p = { ...p, plan: e.plan };
+  // writes left the snapshot slim (18 Nov 2026): the whole of it for owners, the copy without orders for viewers.
+  const wr = owner ? e.writes : e.writes_open;
+  if (wr) p = { ...p, writes: wr };
   return { p, at: String(p.built_at), book, today: String(p.today) };
 }
 /* sunny-home's owner part laid over the snapshot: objects merge, anything else replaces, names by ticker

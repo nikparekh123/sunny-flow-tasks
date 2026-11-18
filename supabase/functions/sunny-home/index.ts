@@ -30,7 +30,7 @@ import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { buildTogether, type Side, type SideEvent, type SideLeg } from './together.ts';
 import { type ActEvent, type ActName, activityEvents, levelsOf } from './activity.ts';
 import { bsDelta, bsValue, fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-18.15';
+const BUILD = '2026-11-18.16';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -3597,7 +3597,18 @@ const OWNER_TOP = ['this_week', 'todo', 'ways', 'plan', 'overview', 'together'];
    Pieces no screen reads any more (the old app's tabs and Home, retired in October and on 13 Nov) leave both rows;
    Search still answers from plan and flow_profile, so those go to home_search, which only sunny-search reads. */
 const NO_SCREEN = ['daily', 'ways', 'payback', 'this_week', 'insights_all', 'last_week', 'plan', 'flow_profile'];
-const FOR_SEARCH = ['plan', 'flow_profile'];
+const FOR_SEARCH = ['plan', 'flow_profile', 'risk'];
+/* ⚠ SPEED, the leftovers (18 Nov 2026): pieces the app's decoder still asks for (3.0 (32) and older) but no screen
+   reads go out hollow: their shape kept (objects and numbers), every list empty, so every build still decodes them.
+   `writes` keeps per name only what the web's Every name reads (the next earnings and ex-dividend); Search has the
+   whole of it in home_search. */
+const HOLLOW = ['inventory', 'yield', 'history', 'risk', 'sold_vs_bought', 'allocation'];
+const hollow = (v: unknown): unknown => Array.isArray(v) ? [] : v && typeof v === 'object'
+  ? Object.fromEntries(Object.entries(v as Row).map(([k, x]) => [k, hollow(x)])) : v;
+const slimWrites = (w: Row | undefined): Row | undefined => w && { ...w, names: ((w.names ?? []) as Row[]).map((n) => ({
+  // ticker, expiry, already and collected are what the app's decoder requires (HomeModels Writes.Name).
+  ticker: n.ticker, expiry: n.expiry, already: [], collected: n.collected ?? 0, spot: n.spot ?? null, sd: n.sd ?? null, next_earnings: n.next_earnings ?? null,
+  thesis: { reads: { inputs: { next_earnings: n.thesis?.reads?.inputs?.next_earnings ?? null, ex_div: n.thesis?.reads?.inputs?.ex_div ?? null } } } })) };
 const OWNER_NAME = ['plan', 'expected', 'calls', 'puts', 'written', 'delta', 'bar', 'split', 'thesis', 'read_rule'];
 const OWNER_V2 = ['verdict', 'chips', 'orders', 'acts'];
 /* A point or row that names an order: the thin hedge's "Buying N calls ... It is in To do." */
@@ -3727,7 +3738,11 @@ Deno.serve(async (req) => {
       const { payload: whole, ms, steps } = await build(body.mode ?? 'tick', { dry: body.dry, price: body.price, book });
       const search: Row = {}, payload: Row = { ...whole };
       for (const k of FOR_SEARCH) if (k in whole) search[k] = whole[k];
+      // Search's writes: the whole for owners, the copy without orders for everyone (as forOwners splits it).
+      if (whole.writes) { search.writes = whole.writes; search.writes_open = forOwners(whole as Row).open.writes; }
       for (const k of NO_SCREEN) delete payload[k];
+      for (const k of HOLLOW) if (k in payload) payload[k] = hollow(payload[k]);
+      if (payload.writes) payload.writes = slimWrites(payload.writes as Row);
       const { open, owner } = forOwners(payload);
       /* Search's part, then the owners' part, so a phone that reads between the writes never lays an older plan
          over a newer snapshot for long; all carry built_at. A failed Search write never fails the build. */
