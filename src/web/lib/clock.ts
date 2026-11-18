@@ -26,6 +26,13 @@ export const shortDate = (iso: string) => {
   const d = new Date(iso + 'T12:00:00Z');
   return `${WD[d.getUTCDay()]} ${MO[d.getUTCMonth()]} ${d.getUTCDate()}`;
 };
+/** "Pre-market est. · 8:31 AM ET" (or "After hours est. · Fri 7:59 PM ET" from an earlier day) while sunny-home prices
+    the book from pre-market or after-hours trades (payload.prices_est, 18 Nov 2026); null in the session. */
+export function estWords(e: { session?: string; at?: string } | null | undefined): string | null {
+  if (!e?.at) return null;
+  const n = ny(new Date(e.at)), day = n.date === ny().date ? '' : `${n.wd} `;
+  return `${e.session === 'pre' ? 'Pre-market' : 'After hours'} est. · ${day}${clock12(n)} ET`;
+}
 /** "Oct 27" from an ISO date. */
 export const monthDay = (iso: string) => {
   const d = new Date(iso + 'T12:00:00Z');

@@ -16,7 +16,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { nameDot, soldInSd, stepOf } from '../../../supabase/functions/_shared/positions-engine.ts';
 import { BOOK_NAME } from '../components/AccountMenu';
-import { clock12, ny, shortDate } from '../lib/clock';
+import { clock12, estWords, ny, shortDate } from '../lib/clock';
 import { useHome, usePositions, usePrefetchPositions, useSd, useSdMany, useTicker, type J } from '../lib/data';
 import { arrow, pct, price } from '../lib/format';
 import { useWeb } from '../lib/state';
@@ -85,7 +85,9 @@ export default function Positions() {
     requestIntelScroll();
     if (x !== t) go(x);
   };
-  const subtitle = book ? `${BOOK_NAME[book]}’s book${payload ? ' · ' + asOf(payload.fresh?.marks) : ''}` : '';
+  // Before the open and after the close the marks are estimates from pre-market or after-hours trades (18 Nov 2026).
+  const est = estWords(payload?.brief_inputs?.prices_est ?? payload?.prices_est);
+  const subtitle = book ? `${BOOK_NAME[book]}’s book${payload ? ' · ' + (est ?? asOf(payload.fresh?.marks)) : ''}` : '';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PosStyles />

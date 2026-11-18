@@ -27,8 +27,8 @@ import { buildDoc, type NameDay } from './doc.ts';
 import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
-import { fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-17.1';
+import { bsDelta, bsValue, fK } from '../_shared/book-engine.ts';
+const BUILD = '2026-11-18.2';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -379,7 +379,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   type Leg = { ticker: string; type: 'call' | 'put'; side: 'sold' | 'bought'; strike: number; expiry: string;
     n: number; avg: number; opened: string; mark: number | null; iv: number | null; delta: number | null;
     theta: number | null; gamma: number | null; vega: number | null; underlying: number | null; marked_at: string | null;
-    mark_wk?: number | null };
+    mark_wk?: number | null; mark_close?: number | null };
   const legs: Leg[] = [];
   for (const rows of groups.values()) {
     const opens = rows.filter((r) => r.action === 'open').sort((a, b) => (a.id < b.id ? -1 : 1));
@@ -551,6 +551,91 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   /* Yahoo's 'name' rows carry pre-market and after-hours prices for New Home's words; never a spot. */
   for (const m of market) if (m.price != null && m.kind !== 'name' && !spotOf.has(String(m.symbol))) spotOf.set(String(m.symbol), Number(m.price));
 
+  /* ⚠ OUT-OF-HOURS PRICES ARE ESTIMATES (Nik, 18 Nov 2026: "B, build it and push"). Every spot and mark above comes
+     from option quotes, and options trade only 9:30 to the close, so the account stood still before the open and
+     after the close while the shares kept trading. Outside the regular session each name takes Yahoo's latest
+     pre-market or after-hours trade (market_live, kind 'name', every 30 s) when it is newer than the last regular
+     close, and each of its options is repriced from that move at the IV it was marked with: mark + BS(new price)
+     - BS(price it was marked at), at the same time to expiry so only the stock's move counts (no overnight decay),
+     never below intrinsic. Delta and gamma move the same way. As IBKR's app does, the last after-hours trade
+     stands overnight and over a weekend, and the first real quotes take over at 9:30.
+     Tick builds only, and in this build's payload only: option_greeks, ticker_quotes and leg_marks_daily keep the
+     real closing marks, and a report saved this build keeps them (unrealized_close, mark_close). `prices_est` tells
+     the app which names are estimated; a name Yahoo has no extended trade for (SPCX) keeps its close. */
+  const spotClose = new Map(spotOf);
+  const estOf = new Map<string, { price: number; close: number; at: string; session: 'pre' | 'post' }>();
+  {
+    const closeAt = cal.find((c) => String(c.date) === today && c.kind === 'early_close')?.closes;
+    const closeMins = closeAt ? Number(String(closeAt).slice(0, 2)) * 60 + Number(String(closeAt).slice(3, 5)) : 16 * 60;
+    const regular = isTrading(today) && now.mins >= 9 * 60 + 30 && now.mins < closeMins;
+    if (mode === 'tick' && !pinned && !regular) {
+      for (const m of market) {
+        if (m.kind !== 'name') continue;
+        const t = String(m.symbol).toUpperCase(), state = String(m.market_state ?? '');
+        const pre = state.startsWith('PRE') ? num(m.pre_price) : null, post = num(m.post_price);
+        const price = pre ?? post, reg = num(m.regular_price);
+        if (!(price && price > 0) || !reg || !m.ext_time || !m.regular_time) continue;
+        if (Date.parse(String(m.ext_time)) <= Date.parse(String(m.regular_time))) continue;
+        estOf.set(t, { price, close: reg, at: String(m.ext_time), session: pre != null ? 'pre' : 'post' });
+      }
+    }
+  }
+  if (estOf.size) {
+    const yrsTo = (e: string) => Math.max(1 / (365 * 24), (Date.parse(`${e}T21:00:00Z`) - Date.now()) / (365 * 864e5));
+    const gam = (S: number, K: number, T: number, v: number, put: boolean) =>
+      (bsDelta(S * 1.001, K, T, v, put) - bsDelta(S * 0.999, K, T, v, put)) / (0.002 * S);
+    const est = (l: Leg, S1: number) => {
+      const S0 = l.underlying ?? spotOf.get(l.ticker) ?? null, m0 = l.mark;
+      if (m0 == null || S0 == null || !(S0 > 0)) return null;
+      const put = l.type === 'put', K = l.strike, T = yrsTo(l.expiry), dS = S1 - S0;
+      const intrinsic = Math.max(0, put ? K - S1 : S1 - K);
+      if (l.iv != null && l.iv > 0) {
+        const mark = Math.max(intrinsic, m0 + bsValue(S1, K, T, l.iv, put) - bsValue(S0, K, T, l.iv, put));
+        const delta = l.delta == null ? bsDelta(S1, K, T, l.iv, put)
+          : Math.max(put ? -1 : 0, Math.min(put ? 0 : 1, l.delta + bsDelta(S1, K, T, l.iv, put) - bsDelta(S0, K, T, l.iv, put)));
+        const gamma = l.gamma == null ? null : Math.max(0, l.gamma + gam(S1, K, T, l.iv, put) - gam(S0, K, T, l.iv, put));
+        return { mark, delta, gamma };
+      }
+      if (l.delta != null) {
+        const g = l.gamma ?? 0;
+        return { mark: Math.max(intrinsic, m0 + l.delta * dS + 0.5 * g * dS * dS),
+                 delta: Math.max(put ? -1 : 0, Math.min(put ? 0 : 1, l.delta + g * dS)), gamma: l.gamma };
+      }
+      return null;
+    };
+    for (const l of legs) {
+      const e = estOf.get(l.ticker); if (!e) continue;
+      const x = est(l, e.price);
+      l.mark_close = l.mark;
+      if (x) {
+        l.mark = Math.round(x.mark * 10000) / 10000; l.delta = x.delta; l.gamma = x.gamma;
+        /* IBKR's positions are valued through markOf: the same contract, the same estimate. */
+        const k = `${l.ticker}|${l.type}|${l.strike}|${l.expiry}`, cur = markOf.get(k);
+        if (cur) markOf.set(k, { mark: l.mark, at: cur.at });
+      }
+      l.underlying = e.price;
+    }
+    for (const [t, e] of estOf) {
+      if (!spotOf.has(t)) continue;
+      spotOf.set(t, e.price);
+      /* The day's move, as Home's Today reads it: before the open against the last close, after it (and over a
+         weekend) against the close before the last session. */
+      const q = quotes.find((x) => String(x.ticker).toUpperCase() === t);
+      const m = market.find((x) => String(x.symbol).toUpperCase() === t && x.kind === 'name');
+      const base = e.session === 'pre' && isTrading(today) ? e.close : num(m?.prev_close);
+      if (q) { q.spot = e.price; if (base) q.day_change_pct = (e.price / base - 1) * 100; }
+    }
+  }
+  /* Only this book's names: its open legs and the shares in IBKR's latest positions. */
+  const heldHere = new Set([...legs.map((l) => l.ticker), ...posAll.filter((p) => p.asset_category === 'STK'
+    && Number(p.position) !== 0 && String(p.report_date) === String(posAll.at(-1)?.report_date)).map((p) => String(p.symbol).toUpperCase())]);
+  const estHere = [...estOf].filter(([t]) => spotOf.has(t) && heldHere.has(t));
+  const pricesEst = estHere.length
+    ? { session: estHere.some(([, e]) => e.session === 'pre') ? 'pre' : 'post',
+        at: estHere.map(([, e]) => e.at).sort().at(-1),
+        names: Object.fromEntries(estHere.map(([t, e]) => [t, { price: e.price, close: e.close, at: e.at, session: e.session }])) }
+    : null;
+
   step('legs+realized');
   // ── Account: IBKR's last close, moved by today's prices and fills ──
   const anchor = acctDays.find((d) => Number(d.accounts) >= accountsN) ?? null;
@@ -607,10 +692,11 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
        mark against their average cost; sold legs at minus their mark (the
        premium on an open short is NOT in it, it is PREMIUM_UNREALIZED);
        shares at spot against IBKR's cost basis. */
-    let unrealized = 0, tvSold = 0, premiumOpen = 0;
+    let unrealized = 0, tvSold = 0, premiumOpen = 0, unrealClose = 0;
     for (const l of legs) {
-      const m = l.mark ?? 0;
+      const m = l.mark ?? 0, mc = l.mark_close !== undefined ? (l.mark_close ?? 0) : m;
       unrealized += l.side === 'bought' ? (m - l.avg) * l.n * 100 : -m * l.n * 100;
+      unrealClose += l.side === 'bought' ? (mc - l.avg) * l.n * 100 : -mc * l.n * 100;
       if (l.side === 'sold') premiumOpen += l.avg * l.n * 100;
       if (l.side === 'sold') {
         const S = spotOf.get(l.ticker) ?? l.underlying ?? 0;
@@ -622,6 +708,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       if (p.asset_category !== 'STK') continue;
       const spot = spotOf.get(String(p.symbol).toUpperCase()) ?? Number(p.mark_price);
       unrealized += Number(p.position) * spot - Number(p.cost_basis_money ?? 0);
+      unrealClose += Number(p.position) * (spotClose.get(String(p.symbol).toUpperCase()) ?? Number(p.mark_price))
+        - Number(p.cost_basis_money ?? 0);
     }
     account = {
       ok: true,
@@ -639,6 +727,10 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
          Unrealized = paper P&L now (the same in both periods); Time value =
          what is left in the options he sold. */
       unrealized: r2(unrealized),
+      /* Before or after the session, with any name estimated (prices_est): the same at the real closing marks,
+         for what is saved (a report keeps the close, never an estimate). */
+      unrealized_close: r2(unrealClose),
+      estimated: pricesEst != null,
       /* OPEN P&L (Nik, 17 Nov 2026, replaces Unrealized in Home's stat row, phone and web): what the open
          positions are up or down since they were opened, the premium of an open sale included. Unrealized
          counted a sale just made as a loss of its whole mark (book N: -$26K on the day it sold $28K of puts). */
@@ -1308,7 +1400,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   // ── Freshness, for the Updated pill and the live glow ──
   const maxAt = (rows: Row[], f = 'captured_at') => rows.reduce((m, r) => (String(r[f] ?? '') > m ? String(r[f]) : m), '');
   const fresh = { marks: maxAt(greeks) || null, quotes: maxAt(quotes) || null, market: maxAt(market) || null,
-                  trades: runs[0]?.finished_at ?? null, account_close: anchor?.report_date ?? null };
+                  trades: runs[0]?.finished_at ?? null, account_close: anchor?.report_date ?? null,
+                  /* The newest pre-market or after-hours trade the estimates use (prices_est), else null. */
+                  est: pricesEst?.at ?? null };
 
   step('deck');
   // ════════════════════════════════════════════════════════════════════════
@@ -1378,7 +1472,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       realized: realizedTotal, lines,
       commission, trades: fills, commission_each: fills ? r2(commission / fills) : null,
       interest,
-      unrealized_now: account.ok ? account.unrealized : null,
+      unrealized_now: account.ok ? (account.unrealized_close ?? account.unrealized) : null,
       best: best ? { leg: best.leg, amount: r2(best.amt), how: best.how, exp: best.exp,
                      kept_pct: best.basis > 0 ? Math.round(best.amt / best.basis * 100) : null } : null,
       coming_up: {
@@ -1397,7 +1491,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         longs: legs.filter((l) => l.side === 'bought').map((l) => ({
           leg: `${l.ticker} ${l.expiry.slice(0, 7)} ${l.strike}${l.type === 'call' ? 'C' : 'P'}`, expiry: l.expiry,
           months: Math.max(0, Math.round((Date.parse(l.expiry) - Date.parse(today)) / (30.44 * 864e5))),
-          since_bought_pct: l.mark != null && l.avg > 0 ? Math.round((l.mark / l.avg - 1) * 100) : null })),
+          since_bought_pct: (l.mark_close ?? l.mark) != null && l.avg > 0 ? Math.round(((l.mark_close ?? l.mark)! / l.avg - 1) * 100) : null })),
       },
       built_from: { ibkr_close: lastDay },
     };
@@ -3059,7 +3153,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const t = String(n.t);
       n.walls = wallsFor(t, pctx); n.tech = techFor(t, pctx); n.ended = endedFor(t, eDay, pctx);
     }
-    if (briefInputs) briefInputs.ended_day = eDay;
+    if (briefInputs) { briefInputs.ended_day = eDay; briefInputs.prices_est = pricesEst; }
   } catch (e) { brief = { v: 1, error: String((e as Error)?.message ?? e) }; }
   step('brief');
   /* ── NEW HOME'S PAGE (doc.ts): the sections and cards for the moment, from the same reads. The whole page
@@ -3182,7 +3276,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     trade_to_415: TRADE_TO_415.filter((t) => book.includes(t)),
     /* `up`: a hedge call (the quarterly calls under the call rule), apart from the LEAPs in the
        Positions totals (handoff 30). */
-    fresh, account, indices, overnight, futures, watchlist, portfolio, hours, risk,
+    fresh, prices_est: pricesEst, account, indices, overnight, futures, watchlist, portfolio, hours, risk,
     legs: legs.map((l) => (upside.has(l) ? { ...l, up: true } : l)),
     chart, history, payback, yield: yieldOut, inventory, sold_vs_bought: soldVsBought, performance, allocation,
     deck: { earnings, season: seasonOut, reports: reportsOut, theta_checks: thetaChecks.filter((c) => c.card_today) },

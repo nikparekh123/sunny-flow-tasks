@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { CountUp } from '../../components/CountUp';
 import type { J } from '../../lib/data';
 import { C, dollars, money } from '../../lib/format';
+import { estWords } from '../../lib/clock';
 import { useWeb } from '../../lib/state';
 import { changeText, chartModel, RANGES, rangeView, stats, WORDS, type Line, type Range } from './model';
 
@@ -19,6 +20,7 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
   const shown = RANGES.filter((r) => (m ? m.available(r) : r === 'All'));
   const v = useMemo(() => (m ? rangeView(m, range) : null), [m, range]);
   const value = payload?.account?.value ?? (m ? m.nav(m.n - 1) : 0);
+  const est = estWords(payload?.prices_est);
   const LC = v ? v.color : C.green;
 
   // The lines under the value: the range's change (deposits out), money paid in or out, then the moment's lines.
@@ -95,6 +97,8 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
               <span style={{ fontWeight: 600, color: x.c }}>{mask(x.v)}</span> <span style={{ color: C.ink2 }}>{x.l}</span>
             </span>
           ))}
+          {/* Before the open and after the close: the value is priced from pre-market or after-hours trades. */}
+          {est && <span style={{ fontSize: 13, lineHeight: '18px', color: C.ink3 }}>{est}</span>}
         </div>
       </div>
 
