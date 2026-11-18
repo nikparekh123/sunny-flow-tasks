@@ -176,6 +176,9 @@ final class BriefState {
 
     /// When the book's prices and IBKR's trades last landed (payload.fresh), for README 9.4's "IBKR down" state.
     var fresh: (marks: Date?, trades: Date?) = (nil, nil)
+    /// Before the open and after the close: prices are estimates from pre-market ("pre") or after-hours ("post")
+    /// trades, newest at `at` (payload.prices_est, 18 Nov 2026). Nil in the session.
+    var est: (session: String, at: Date?)? = nil
     /// README 9.4: IBKR down in market hours (prices over 10 min old or trades over 20): Positions shows the last
     /// values "As of 3:58 PM" and no makes-the-most line. Nil while the data is fresh, outside the session, or pinned.
     func asOf() -> Date? {

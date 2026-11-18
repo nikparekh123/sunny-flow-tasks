@@ -222,6 +222,11 @@ struct UpdatedPill: View {
         }
         // Closed or not yet open: the last time prices moved.
         let t = MarketClock.ny(now)
+        /* Priced from pre-market or after-hours trades (18 Nov 2026): say so, with the newest trade's time. */
+        if let e = store.home?.pricesEst, let at = e.at.flatMap(Self.iso) {
+            let w = e.session == "pre" ? "Pre-market est." : "After hours est."
+            return (MarketClock.ny(at).date == t.date ? "\(w) · \(fmt(at, "H:mm"))" : "\(w) · \(fmt(at, "EEE H:mm"))", S.muted)
+        }
         let pre = t.minutes >= 4 * 60 && t.minutes < 9 * 60 + 30
             && MarketClock.isTradingDay(t.date, weekday: t.weekday, store.home?.calendar ?? [])
         let last = pre ? g : (store.home?.fresh.marks.flatMap(Self.iso) ?? g)

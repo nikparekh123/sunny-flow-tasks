@@ -283,6 +283,13 @@ struct PositionsTab: View {
     /// "Sunny’s book · Fri Nov 13 · 12:40 PM ET" (the web's asOf).
     private var subtitle: String {
         let who = "\(pageBook.name)’s book"
+        /* Before the open and after the close the marks are estimates from pre-market or after-hours trades. */
+        if let e = brief.est {
+            let w = e.session == "pre" ? "pre-market est." : "after hours est."
+            guard let at = e.at else { return "\(who) · \(w)" }
+            let f = DateFormatter(); f.timeZone = MarketClock.ny; f.dateFormat = "h:mm a"
+            return "\(who) · \(w) · \(f.string(from: at)) ET"
+        }
         guard let d = brief.fresh.marks else { return who }
         let n = MarketClock.ny(d), today = MarketClock.ny(SClock.now())
         if n.date < today.date || n.minutes >= 16 * 60 { return "\(who) · \(PosFmt.dmd(n.date)) close" }

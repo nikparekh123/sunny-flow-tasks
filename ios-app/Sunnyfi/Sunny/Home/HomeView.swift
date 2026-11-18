@@ -180,6 +180,7 @@ struct HomeView: View {
         // The server's brief, decoded once per build (memoized; HomeStore ticks every 15 to 30 s).
         .onChange(of: home.builtAt, initial: true) { _, _ in
             brief.fresh = (SXClient.parseDate(home.fresh.marks ?? ""), SXClient.parseDate(home.fresh.trades ?? ""))
+            brief.est = home.pricesEst.map { ($0.session, SXClient.parseDate($0.at ?? "")) }
             brief.ingest(home.brief, key: home.builtAt, book: store.bookIDNow, overview: home.overview, books: store.books, inputs: home.briefInputs)
             brief.calendar = home.calendar   // early closes move the moments (Audit 7)
         }

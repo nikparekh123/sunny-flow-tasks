@@ -18,6 +18,9 @@ nonisolated struct HomePayload: Decodable {
     let calendar: [CalendarDay]
     let tradeTo415: [String]
     let fresh: Fresh
+    /// Before the open and after the close (18 Nov 2026): the book priced from pre-market or after-hours trades.
+    /// Nil in the session, or when no held name has traded since the close. Optional: older servers send none.
+    let pricesEst: PricesEst?
     let account: Account
     let indices: [Tape]
     let overnight: [Tape]
@@ -317,6 +320,13 @@ nonisolated struct Fresh: Decodable {
     let market: String?
     let trades: String?
     let accountClose: String?
+}
+
+nonisolated struct PricesEst: Decodable {
+    /// "pre" or "post".
+    let session: String
+    /// The newest pre-market or after-hours trade the estimates use.
+    let at: String?
 }
 
 nonisolated struct Account: Decodable {
