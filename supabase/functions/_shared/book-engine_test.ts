@@ -4,7 +4,7 @@
 // the engine must give the numbers the design rendered (engine-notes.md "Expected values"), and the README 12
 // invariants must hold. The real book runs the same code with each leg's IV, a 4% rate and dividends.
 
-import { assert, assertEquals } from 'jsr:@std/assert@1';
+import { assert, assertAlmostEquals, assertEquals } from 'jsr:@std/assert@1';
 import { fK, fn, holdings, type Leg, NameBook, otmStrike, positionsGrid, type Stop, yourPosition } from './book-engine.ts';
 
 // ── The design's sample book (reference/sunny-web-data.js, Tue Oct 27) ───────
@@ -190,3 +190,22 @@ Deno.test('Rate and dividends', () => {
 });
 
 const f$ = (x: number) => '$' + Math.round(Math.abs(x)).toLocaleString('en-US');
+
+// Earnings in the payoff (18 Nov 2026, Nik): a leg's IV carries the report until it happens, then loses it.
+Deno.test('earnings: a leg keeps its IV now, loses the report after it, and one expiring before is untouched', () => {
+  const after: Leg = { k: 'a', kind: 'sp', ty: 'P', K: 86, q: -10, days: 9, iv: 0.64, ex: '2026-11-27', label: '' };
+  const before: Leg = { k: 'b', kind: 'sc', ty: 'C', K: 96, q: -10, days: 0.5, iv: 1.0, ex: '2026-11-18', label: '' };
+  const v = 0.07 ** 2, nb = new NameBook({ t: 'BABA', S0: 86, iv: 1.07, legs: [after, before], earn: { days: 0.8, v } });
+  assertAlmostEquals(nb.ivAt(after, 0), 0.64, 1e-9);
+  const base = Math.sqrt(0.64 ** 2 - v / (9 / 365));
+  assertAlmostEquals(nb.ivAt(after, 1), base, 1e-9);
+  assertAlmostEquals(nb.ivAt(after, 5), base, 1e-9);
+  if (!(nb.ivAt(after, 0.5) > 0.64)) throw new Error('before the report the IV should rise as time runs out');
+  assertAlmostEquals(nb.ivAt(before, 0.3), 1.0, 1e-12);
+  // The sold put is worth less the day after the report than with the old flat IV.
+  const flat = new NameBook({ t: 'BABA', S0: 86, iv: 1.07, legs: [after] });
+  if (!(nb.val(after, 86, 1) > flat.val(after, 86, 1))) throw new Error('a sold leg (q < 0) should cost less to close after the report');
+  // No report, or one already past: nothing changes.
+  const past = new NameBook({ t: 'BABA', S0: 86, iv: 1.07, legs: [after], earn: { days: -1, v } });
+  assertAlmostEquals(past.ivAt(after, 3), 0.64, 1e-12);
+});

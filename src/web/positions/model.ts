@@ -10,7 +10,7 @@
 //
 // P&L is "from today" (the design's plf): what each leg is worth at that price and date, less what it is worth now.
 // No em dashes in any words this file writes.
-import { NameBook, type Div, type Kind, type Leg } from '../../../supabase/functions/_shared/book-engine.ts';
+import { NameBook, type Div, type Earn, type Kind, type Leg } from '../../../supabase/functions/_shared/book-engine.ts';
 import { count, money } from '../lib/format';
 import { ny } from '../lib/clock';
 
@@ -27,7 +27,9 @@ export interface GridW {
   turnsShort: (number | null)[]; fridayStop: number; walls: ChainW[]; tech: { sma20: number | null; hi: number | null; lo: number | null } | null;
   built_at: string; priced_at?: string | null;
 }
-export interface InputName { t: string; S0: number; P0: number; iv: number; legs: Leg[]; divs: Div[]; otm?: { K: number; ex: string; days: number; label: string } | null; noIv?: boolean }
+export interface InputName { t: string; S0: number; P0: number; iv: number; legs: Leg[]; divs: Div[]; otm?: { K: number; ex: string; days: number; label: string } | null; noIv?: boolean;
+  /** An earnings report ahead (sunny-home, 18 Nov 2026): the payoff takes its premium out of the legs on the day. */
+  earn?: Earn | null }
 export interface Inputs { built_at: string; r: number; names: InputName[] }
 
 /** A What if trade (README State: side, type, strike, expiry, count, on). `ex` is the ISO expiry. `src` 'sd': the SD
@@ -91,6 +93,8 @@ export class PosModel {
   r: number; divs: Div[];
   /** The IV a What if trade is priced on: the name's (the chain's IV at the strike nearest the price). */
   tradeIv: number;
+  /** The report ahead, its days counted from when the grid was priced. */
+  earn: Earn | null = null;
   /** Each leg's grid, and the same legs in the engine (for dates the grid has no row for). */
   readonly g = new Map<string, GridLegW>();
   local: NameBook | null = null;
@@ -105,12 +109,13 @@ export class PosModel {
     const gone = inp ? (this.pricedAt - Date.parse(inp.built_at)) / 864e5 : 0;
     this.r = inp?.r ?? 0.04;
     this.divs = (iname?.divs ?? []).map((d) => ({ ...d, days: d.days - gone }));
+    this.earn = iname?.earn ? { ...iname.earn, days: iname.earn.days - gone } : null;
     const ivs = (iname?.legs ?? []).filter((l) => l.ty !== 'S' && l.iv > 0.03).map((l) => l.iv);
     this.tradeIv = w.iv > 0 ? w.iv : ivs.length ? ivs.reduce((a, b) => a + b, 0) / ivs.length : 1e-4;
     const inLeg = new Map((iname?.legs ?? []).map((l) => [l.k, l]));
     if (iname) {
       const legs = iname.legs.map((l) => (l.ty === 'S' ? l : { ...l, days: l.days - gone }));
-      this.local = new NameBook({ t: w.t, S0: w.S0, P0: w.P0, iv: w.iv, legs, divs: this.divs, r: this.r, noIv: !!iname.noIv });
+      this.local = new NameBook({ t: w.t, S0: w.S0, P0: w.P0, iv: w.iv, legs, divs: this.divs, r: this.r, noIv: !!iname.noIv, earn: this.earn });
       for (const l of legs) this.localLeg.set(l.k, l);
     }
     this.legs = w.legs.map((l) => {
@@ -186,7 +191,7 @@ export class Pricer {
   constructor(m: PosModel, trades: Trade[]) {
     this.m = m;
     const legs: Leg[] = trades.map((u) => this.engineLeg(u));
-    if (legs.length) this.tnb = new NameBook({ t: m.t, S0: m.S0, P0: m.P0, iv: m.tradeIv, legs, divs: m.divs, r: m.r });
+    if (legs.length) this.tnb = new NameBook({ t: m.t, S0: m.S0, P0: m.P0, iv: m.tradeIv, legs, divs: m.divs, r: m.r, earn: m.earn });
     legs.forEach((l, i) => {
       this.tleg.set(l.k, l);
       const p = trades[i].pr;
@@ -209,7 +214,7 @@ export class Pricer {
   /** A trade not yet added: its price a share, delta and cash today (the summary line). */
   quote(u: Omit<Trade, 'id' | 'on'>) {
     const l = this.engineLeg({ ...u, id: -1, on: true });
-    const nb = new NameBook({ t: this.m.t, S0: this.m.S0, P0: this.m.P0, iv: this.m.tradeIv, legs: [l], divs: this.m.divs, r: this.m.r });
+    const nb = new NameBook({ t: this.m.t, S0: this.m.S0, P0: this.m.P0, iv: this.m.tradeIv, legs: [l], divs: this.m.divs, r: this.m.r, earn: this.m.earn });
     const per = nb.val(l, this.m.S0, 0) / (l.q * 100);
     return { per, delta: nb.dl(l, this.m.S0, 0), cash: -l.q * 100 * per };
   }

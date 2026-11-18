@@ -7,7 +7,7 @@
 //
 // No em dashes in any words written here (Nik).
 
-import { bsValue, type Div, holdings, type Holdings, type Kind, type Leg, NameBook, otmStrike, type Stop, yourPosition } from '../_shared/book-engine.ts';
+import { bsValue, type Div, type Earn, holdings, type Holdings, type Kind, type Leg, NameBook, otmStrike, type Stop, yourPosition } from '../_shared/book-engine.ts';
 
 type Row = Record<string, any>;
 export type Moment = 'futures' | 'pre' | 'bell' | 'open' | 'last20' | 'last5' | 'post' | 'weekend';
@@ -27,6 +27,8 @@ export interface BriefIn {
   shares: Map<string, number>; shareAvg: Map<string, number>;
   spot: Map<string, number>; closes: Row[];   // daily_closes (ticker, date, close_price), oldest first
   chain: Row[];                            // option_chain_next (ticker, expiry, side, strike, iv)
+  /** earnings_events rows ahead (ticker, report_date, report_time bmo | amc): the payoff's earnings drop. */
+  earnings?: Row[];
   divRows: Row[];                          // dividends (ticker, ex_date, cash_amount, frequency), oldest first
   strategies: Record<string, string>;
   /** IBKR's daily positions (account_positions_daily: report_date, asset_category, underlying, put_call, strike, expiry,
@@ -74,6 +76,8 @@ export const company = (t: string) => CO[t] ?? t;
 
 export interface NameInput { t: string; S0: number; P0: number; iv: number; legs: Leg[]; divs: Div[]; stops: Stop[]; fridayStop: number;
   otm: { K: number; ex: string; days: number; label: string } | null; noIv?: boolean;
+  /** An earnings report ahead, priced into the legs' IV now (book-engine Earn): the payoff takes it out on the day. */
+  earn?: Earn;
   /** The share price at the rail's base close (P0 on a weekday; the last close before this week on the weekend). */
   Pb?: number }
 
@@ -179,6 +183,28 @@ export function buildBrief(x: BriefIn) {
     const imp = ls.map((l) => impliedOf(l, S0)).filter((v): v is number => v != null);
     return imp.length ? imp.reduce((a, b) => a + b, 0) / imp.length : null;
   };
+  // ── Earnings in the payoff (18 Nov 2026, Nik): the report before a leg's expiry is in its IV now. The chain's first
+  //    two expiries after the report give the name's IV without it (b) and the report's variance (v), from
+  //    σ1²T1 = b·T1 + v and σ2²T2 = b·T2 + v (at-the-money IVs). No report ahead, or no clear premium: none. ──
+  const earnOf = (t: string, S0: number): Earn | null => {
+    const r = (x.earnings ?? []).find((e) => String(e.ticker).toUpperCase() === t && String(e.report_date) >= today);
+    if (!r) return null;
+    const on = String(r.report_date), amc = String(r.report_time ?? '').toLowerCase() === 'amc';
+    // bmo (or unknown): before the open, 7 hours before that day's close; amc: just after the close.
+    const days = daysTo(on) + (amc ? 0.5 / 24 : -7 / 24);
+    if (!(days > 0)) return null;
+    const rows = x.chain.filter((c) => String(c.ticker).toUpperCase() === t && good(Number(c.iv)) && !ended(String(c.expiry)));
+    const atm = [...new Set(rows.map((c) => String(c.expiry)))].sort().map((ex) => {
+      const at = rows.filter((c) => String(c.expiry) === ex);
+      const k = at.reduce((a, c) => (Math.abs(Number(c.strike) - S0) < Math.abs(a - S0) ? Number(c.strike) : a), Number(at[0].strike));
+      const ivs = at.filter((c) => Number(c.strike) === k).map((c) => Number(c.iv));
+      return { T: daysTo(ex) / 365, iv: ivs.reduce((a, b) => a + b, 0) / ivs.length };
+    }).filter((e) => e.T * 365 > days && e.iv > 0);
+    if (atm.length < 2) return null;
+    const [a, b2] = atm, base = (b2.iv ** 2 * b2.T - a.iv ** 2 * a.T) / (b2.T - a.T), v = a.iv ** 2 * a.T - base * a.T;
+    if (!(base > 0) || !(v > 0)) return null;
+    return { days: +days.toFixed(4), v: +v.toFixed(6), on, move: +(Math.sqrt(v) * 100).toFixed(1) };
+  };
   /** The IV a leg's mark implies (bisection on the same Black-Scholes), when it has a mark and time left. */
   const impliedOf = (l: BriefLeg, S0: number): number | null => {
     const T = Math.max(0, daysTo(l.expiry)) / 365;
@@ -253,10 +279,11 @@ export function buildBrief(x: BriefIn) {
     }
     if (!legs.length) continue;
     const divs = divsOf(t), { stops, fri } = stopsFor(ls);
-    const nb = new NameBook({ t, S0, P0, iv: ivN, legs, divs, r: RATE, noIv });
+    const earn = earnOf(t, S0);
+    const nb = new NameBook({ t, S0, P0, iv: ivN, legs, divs, r: RATE, noIv, earn });
     books.push(nb);
     const Pb = railWeek ? (closeAt(t, railBase0) ?? stkAt.get(t) ?? P0) : P0;
-    inputs.push({ t, S0, P0, iv: ivN, legs, divs, stops, fridayStop: fri, otm: otmFor(S0), ...(noIv ? { noIv } : {}), ...(Pb ? { Pb } : {}) });
+    inputs.push({ t, S0, P0, iv: ivN, legs, divs, stops, fridayStop: fri, otm: otmFor(S0), ...(noIv ? { noIv } : {}), ...(Pb ? { Pb } : {}), ...(earn ? { earn } : {}) });
   }
 
   // ── Your position ──

@@ -30,7 +30,7 @@ import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { buildTogether, type Side, type SideEvent, type SideLeg } from './together.ts';
 import { type ActEvent, type ActName, activityEvents, levelsOf } from './activity.ts';
 import { bsDelta, bsValue, fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-18.13';
+const BUILD = '2026-11-18.14';
 /* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
    names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
    by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
@@ -3295,7 +3295,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const shareAvg = new Map<string, number>();
     for (const [t, n] of sharesNow) if (n > 0 && (shareCost.get(t) ?? 0) > 0) shareAvg.set(t, (shareCost.get(t) ?? 0) / n);
     const out = buildBrief({ today, wd: now.wd, mins: now.mins, isTrading, addDays, cal, legs, isLeap: (l) => isLeap(l as Leg),
-      shares: sharesHeld, shareAvg, spot: spotOf, closes, chain: chainRows, divRows: divHist, strategies, posDaily: posAll,
+      shares: sharesHeld, shareAvg, spot: spotOf, closes, chain: chainRows, earnings: earn as Row[], divRows: divHist, strategies, posDaily: posAll,
       dayPct: new Map(quotes.filter((q) => q.day_change_pct != null).map((q) => [String(q.ticker).toUpperCase(), Number(q.day_change_pct)])) });
     brief = out.brief; briefInputs = out.inputs;
     /* Positions (positions.ts): each name's walls by chain, its 20-day line and month's range, and on the

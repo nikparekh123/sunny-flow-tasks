@@ -53,7 +53,7 @@ export function nameTotals(p: J): Map<string, Row> {
     const t = String(n.t), legs: Leg[] = n.legs ?? [], divs: Div[] = n.divs ?? [];
     const S0 = Number(n.S0), P0 = Number(n.P0 ?? n.S0);
     if (!(S0 > 0) || !legs.length) continue;
-    const nb = new NameBook({ t, S0, P0, iv: Number(n.iv ?? 0), legs, divs, r, noIv: !!n.noIv });
+    const nb = new NameBook({ t, S0, P0, iv: Number(n.iv ?? 0), legs, divs, r, noIv: !!n.noIv, earn: n.earn ?? null });
     const h = holdings(nb);
     const has = new Set(legs.map(pieceOf).filter((k): k is GKey => !!k));
     const fig = (k: 'sh' | 'lp' | 'oc' | 'ip' | 'sc' | 'sp'): Fig => ({ paid: h.paid[k], now: h[k][0], tv: k === 'sh' ? null : h.tv[k] });

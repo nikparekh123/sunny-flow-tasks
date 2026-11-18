@@ -66,7 +66,7 @@ export function checkInvariants(x: CheckIn): Check[] {
     for (const n of x.inputs.names as Row[]) {
       const r = rows.find((y) => y.id === n.t); if (!r || r.fp == null || r.fp === n.S0) continue;
       const st = n.stops?.[n.fridayStop]; if (!st) continue;
-      const nb = new NameBook({ t: n.t, S0: n.S0, P0: n.P0, iv: n.iv, legs: n.legs as Leg[], divs: n.divs, r: x.inputs.r, noIv: !!n.noIv });
+      const nb = new NameBook({ t: n.t, S0: n.S0, P0: n.P0, iv: n.iv, legs: n.legs as Leg[], divs: n.divs, r: x.inputs.r, noIv: !!n.noIv, earn: n.earn ?? null });
       const hi = n.S0 * 1.12 * 1.05;
       if (r.fp > hi) continue;   // past the Positions chart's search: it shows no line there
       const p = nb.turnsShort(st.tt, hi)?.price ?? null;

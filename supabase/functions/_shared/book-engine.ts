@@ -50,7 +50,13 @@ export interface NameIn {
   r?: number;         // rate (4% in the app; 0 reproduces the prototype)
   t0?: number;        // days into today the "now" values sit at (the prototype's moment offset; 0 in the app)
   noIv?: boolean;     // no IV anywhere (no chain, no leg IV, no option mark): no priced move, never short or thin
+  earn?: Earn | null; // an earnings report before some legs' expiry, priced into their IV now (see NameBook.ivAt)
 }
+
+/** An earnings report ahead (18 Nov 2026, Nik: the payoff kept BABA's earnings premium in its options after the
+ *  report). `days`: from now to the report (the open before a bmo report, just after the close for amc); `v`: the
+ *  report's own variance (its priced move squared, as a fraction), from the chain's first two expiries after it. */
+export interface Earn { days: number; v: number; on?: string; move?: number }
 
 // ── Black-Scholes, as the prototype writes it (Abramowitz-Stegun 7.1.26) ────
 const erf = (x: number) => {
@@ -77,10 +83,23 @@ export interface Opt { off?: Set<string>; extra?: Leg[]; earned?: boolean }
 
 /** One name's book: every leg, valued at any price S and any time tt days on. */
 export class NameBook {
-  t: string; S0: number; P0: number; iv: number; legs: Leg[]; divs: Div[]; r: number; t0: number; noIv: boolean;
+  t: string; S0: number; P0: number; iv: number; legs: Leg[]; divs: Div[]; r: number; t0: number; noIv: boolean; earn: Earn | null;
   constructor(x: NameIn) {
     this.t = x.t; this.S0 = x.S0; this.P0 = x.P0 ?? x.S0; this.iv = x.iv; this.legs = x.legs;
     this.divs = x.divs ?? []; this.r = x.r ?? 0; this.t0 = x.t0 ?? 0; this.noIv = !!x.noIv;
+    this.earn = x.earn && x.earn.v > 0 && x.earn.days > this.t0 ? x.earn : null;
+  }
+  /** A leg's IV tt days on. Its IV now carries the report's variance when it expires after the report: total variance
+   *  to expiry = base × T + v. Before the report the v stays in (and weighs more as time runs out); from the report
+   *  on it is gone, so the option loses its earnings premium the way it does in the market. Exactly the leg's IV now
+   *  at tt = t0. Base never under a third of the IV (a v too big for a leg is cut to fit). */
+  ivAt(l: Leg, tt: number): number {
+    const e = this.earn;
+    if (!e || !(l.iv > 0) || !(l.days > e.days)) return l.iv;
+    const T = Math.max(l.days - this.t0, 1e-6) / 365, Tr = Math.max(l.days - tt, 0) / 365;
+    if (!(Tr > 0)) return l.iv;
+    const v = Math.min(e.v, (l.iv * l.iv - (l.iv / 3) ** 2) * T), base = l.iv * l.iv - v / T;
+    return Math.sqrt((base * Tr + (tt < e.days ? v : 0)) / Tr);
   }
   /** The weekly priced move in %: IV × √(5/252) (Nik: one weekly SD all week). None without an IV (never a stand-in;
    *  Nik, 8 Nov 2026: a made-up 35% gave a made-up "at ↑4.9%"). */
@@ -94,12 +113,12 @@ export class NameBook {
   /** What a leg is worth at S, tt days on (dv bumps its IV, for vega). */
   val(l: Leg, S: number, tt: number, dv = 0): number {
     if (l.ty === 'S') return l.q * S;
-    return l.q * 100 * bsValue(S, l.K, this.T(l, tt), l.iv + dv, l.ty === 'P', this.r, this.dpv(l, tt));
+    return l.q * 100 * bsValue(S, l.K, this.T(l, tt), this.ivAt(l, tt) + dv, l.ty === 'P', this.r, this.dpv(l, tt));
   }
   /** A leg's delta in shares. */
   dl(l: Leg, S: number, tt: number): number {
     if (l.ty === 'S') return l.q;
-    return l.q * 100 * bsDelta(S, l.K, this.T(l, tt), l.iv, l.ty === 'P', this.r, this.dpv(l, tt));
+    return l.q * 100 * bsDelta(S, l.K, this.T(l, tt), this.ivAt(l, tt), l.ty === 'P', this.r, this.dpv(l, tt));
   }
   /** A leg's P&L from now: its value at (S, tt) less its value now. */
   lpl(l: Leg, S: number, tt: number): number { return this.val(l, S, tt) - this.val(l, this.S0, this.t0); }
