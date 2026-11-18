@@ -12,13 +12,19 @@ import { G, GLASS, K, MU, O, R, Segmented, kicker, tnum } from './ui';
 
 const field = { height: 34, border: 'none', borderRadius: 10, padding: '0 6px', background: 'rgba(118,118,128,.24)', color: K, fontSize: 13, width: '100%' } as const;
 
-export function WhatIf({ pr, base, off, trades, draft, strikes, expiries, expL, nCh, cashC, mask, setDraft, add, remove, reset }: {
-  pr: Pricer; base: PLeg[]; off: Set<string>; trades: Trade[]; draft: Required<Draft>; strikes: number[]; expiries: string[]; expL: (iso: string) => string;
+export function WhatIf({ pr, base, off, trades, draft, ivOf, strikes, expiries, expL, nCh, cashC, mask, setDraft, add, remove, reset }: {
+  pr: Pricer; base: PLeg[]; off: Set<string>; trades: Trade[]; draft: Required<Draft>;
+  /** The market's IV for a strike and expiry (the chain's), so a trade is priced as the market prices it. */
+  ivOf: (ex: string, K: number) => number | undefined;
+  strikes: number[]; expiries: string[]; expL: (iso: string) => string;
   nCh: number; cashC: number; mask: (s: string) => string;
   setDraft: (d: Draft) => void; add: (u: Omit<Trade, 'id' | 'on'>) => void; remove: (id: number) => void; reset: () => void;
 }) {
   const m = pr.m, S0 = m.S0;
-  const q = pr.quote({ side: draft.side, ty: draft.ty, K: draft.K, ex: draft.ex, n: draft.n });
+  // Priced on the chain's IV at this strike and expiry (18 Nov 2026: the name's one IV, this week's with BABA's earnings
+  // in it, priced the Nov 27 95 calls at $2.70 against $0.75 in the market).
+  const iv = ivOf(draft.ex, draft.K);
+  const q = pr.quote({ side: draft.side, ty: draft.ty, K: draft.K, ex: draft.ex, n: draft.n, iv });
   const wi = [...base.filter((l) => !off.has(l.k)), ...pr.trades.filter((l) => trades.find((u) => u.id === l.trade)?.on)];
   const d0 = pr.delta(base, S0, m.today), d1 = pr.delta(wi, S0, m.today), chg = nCh > 0;
   const dTx = (d: number) => (d < 0 ? 'Short ' : 'Long ') + count(d);
@@ -60,7 +66,7 @@ export function WhatIf({ pr, base, off, trades, draft, strikes, expiries, expL, 
             {price(q.per)} each · Δ {dTx(q.delta).toLowerCase()} · <span style={{ fontWeight: 600, color: q.cash >= 0 ? G : R }}>{mask(money(q.cash))} {q.cash >= 0 ? 'in' : 'out'}</span>
           </span>
         </span>
-        <button type="button" className="bare swp-add" onClick={() => add({ side: draft.side, ty: draft.ty, K: draft.K, ex: draft.ex, n: draft.n })}
+        <button type="button" className="bare swp-add" onClick={() => add({ side: draft.side, ty: draft.ty, K: draft.K, ex: draft.ex, n: draft.n, iv })}
           style={{ flex: 'none', padding: '8px 20px', borderRadius: 999, background: K, color: '#000000', fontSize: 14, fontWeight: 600 }}>Add</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, borderTop: '1px solid rgba(255,255,255,.14)', paddingTop: 10 }}>

@@ -12,7 +12,7 @@
 //   sunny-sd (useSd): the name's chain, the rule and the levels for Intelligence; the other names' replies only once
 //     Sold in SD is opened (their SD when sold).
 // The maths is supabase/functions/_shared/positions-engine.ts (shared with the phone), book-engine.ts and sd-engine.ts.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { nameDot, soldInSd, stepOf } from '../../../supabase/functions/_shared/positions-engine.ts';
 import { BOOK_NAME } from '../components/AccountMenu';
@@ -25,7 +25,7 @@ import { ConeSwitch, Payoff, PriceChart, XR0, rangeWords, useCone } from '../pos
 import { BookTotals } from '../positions/BookTotals';
 import { EveryLeg, type LegFilter } from '../positions/EveryLeg';
 import { Intelligence } from '../positions/Intelligence';
-import { pickExpiry, requestIntelScroll, setIntelOpen, useIntelOpen, type SdReply } from '../positions/intel';
+import { ivAtStrike, pickExpiry, requestIntelScroll, setIntelOpen, useIntelOpen, type SdReply } from '../positions/intel';
 import { PosModel, Pricer, expLabel, type GridW, type Inputs, type PLeg } from '../positions/model';
 import { SoldCapsule, SoldCard, closedDays, soldLegs } from '../positions/SoldInSd';
 import { bookTotals, nameTotals } from '../positions/totals';
@@ -188,7 +188,6 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
   const inputs: Inputs | null = payload?.brief_inputs ?? null;
   const m = useMemo(() => new PosModel(grid, inputs), [grid, inputs]);
   const wf = useWhatIf(book, t);
-  const pr = useMemo(() => new Pricer(m, wf.trades), [m, wf.trades]);
   const S0 = m.S0;
   const [view, setView] = usePageState('view');
   const [tab, setTab] = usePageState('tab');
@@ -201,6 +200,21 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
   const chart = useTicker(t, book);
   const sdQ = useSd(book, t);
   const sd = sdQ.data as SdReply | undefined;
+  // A trade's IV, as the market prices it (18 Nov 2026): the chain's IV at that strike and expiry, as Intelligence
+  // prices its sale. Past the chain (it reads about 75 days): the leg held at that expiry nearest the strike, else the
+  // chain's last expiry at that strike. Never the name's one IV, which is this week's and carries any earnings.
+  const ivOf = useCallback((ex: string, K: number): number | undefined => {
+    const exps = sd?.t === t ? [...sd.exps].sort((a, b) => a.ex.localeCompare(b.ex)) : [];
+    const e = exps.find((x) => x.ex === ex);
+    if (e) return ivAtStrike(e, K);
+    const held = (inputs?.names.find((n) => n.t === t)?.legs ?? []).filter((l) => l.ty !== 'S' && l.ex === ex && l.iv > 0.03)
+      .sort((a, b) => Math.abs(a.K - K) - Math.abs(b.K - K));
+    if (held[0]) return held[0].iv;
+    const last = exps.filter((x) => x.ex < ex).pop();
+    return last ? ivAtStrike(last, K) : undefined;
+  }, [sd, t, inputs]);
+  // Trades added before the chain's IV came in (or before 18 Nov 2026) take it now, so their payoff is the market's too.
+  const pr = useMemo(() => new Pricer(m, wf.trades.map((u) => (u.iv && u.iv > 0.03 ? u : { ...u, iv: ivOf(u.ex, u.K) }))), [m, wf.trades, ivOf]);
   const intelOpen = useIntelOpen();
 
   // The grid's dates (What if's default expiry reads this Friday from them).
@@ -262,7 +276,7 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
             : <Payoff t={t} pr={pr} base={start} wi={wi} chg={viewChg} tab={tab} mask={mask} iv={m.iv} closed={closed} day={day} setDay={setDay} xr={xr} setXr={setXr}
                 tg={target.tg} setTg={target.set} />}
         </div>
-        <WhatIf pr={pr} base={base} off={shut} trades={wf.trades} draft={draft} strikes={strikeList} expiries={expiries} expL={expL} nCh={nCh} cashC={cashC} mask={mask}
+        <WhatIf pr={pr} base={base} off={shut} trades={wf.trades} draft={draft} ivOf={ivOf} strikes={strikeList} expiries={expiries} expL={expL} nCh={nCh} cashC={cashC} mask={mask}
           setDraft={wf.setDraft} add={wf.add} remove={wf.remove} reset={wf.reset} />
       </div>
       <EveryLeg t={t} pr={pr} base={base} off={viewOff} note={viewChg ? 'with your changes' : 'income only'} trades={wf.trades} toggleLeg={wf.toggleLeg} toggleTrade={wf.toggleTrade} filter={lf} setFilter={setLf} mask={mask} />
