@@ -223,9 +223,13 @@ struct PosName {
     let payoff: Payoff?
     /// Some leg is switched away from how they start (Income on, the rest off).
     let changed: Bool
-    /// The Payoff's date slider (handoff 2026-11-17 round 168b, 2026-11-18): the server's stops from today (or Monday
-    /// over a weekend) to the day the nearest sold legs expire, the first expiry of any leg when nothing is sold.
+    /// The Payoff's date slider (handoff 2026-11-17 round 168b, 2026-11-18; Nik, 20 Nov 2026, option 1: the full picture
+    /// past the first expiry): the server's stops from today (or Monday over a weekend) to the day the LAST sold legs
+    /// expire, the first expiry of any leg when nothing is sold. Past an expiry the legs that ended there are worth what
+    /// they were at that close and the rest keep their time value: the "do nothing" path.
     let dates: [DateStop]
+    /// Where the slider opens: the nearest sold expiry (where it ended before 20 Nov), as the Friday stop did.
+    var dateOpen = 0
     struct DateStop: Hashable {
         /// The stop's index in the model; "Fri Nov 20", "Wed Nov 18"; calendar days from today.
         let i: Int; let full: String; let tick: String; let days: Int; let friday: Bool
@@ -234,8 +238,8 @@ struct PosName {
         /// The legs that expire at this stop ("Sold calls and puts, hedge puts expire").
         let ends: String
     }
-    /// Where the slider opens: its end (the expiry), as the Friday stop did.
-    var dateEnd: Int { dates.count - 1 }
+    /// The slider's last stop.
+    var dateEnd: Int { max(0, dates.count - 1) }
 
     /// `flip`: the legs switched away from the start.
     /// The legs switched off: sold legs start on, the rest off; `flip` turns a leg the other way.
@@ -295,22 +299,33 @@ struct PosName {
         }
         let live = legs.filter(\.on)
         let dates = dateStops(m)
+        let open = openStop(m, dates.count)
         return PosName(t: m.t, S0: m.S0, legs: legs, soFar: live.reduce(0) { $0 + $1.soFar }, delta: live.reduce(0) { $0 + $1.delta },
                        cashIn: live.reduce(0) { $0 + $1.cashIn }, cashOut: live.reduce(0) { $0 + $1.cashOut },
-                       strikes: strikes, payoff: payoff(m, off: off, stop: dates.last?.i ?? m.fridayStop, range: 0.12, hold: dates.map(\.i)),
-                       changed: !flip.isEmpty, dates: dates)
+                       strikes: strikes, payoff: payoff(m, off: off, stop: dates.isEmpty ? m.fridayStop : dates[open].i, range: 0.12, hold: dates.map(\.i)),
+                       changed: !flip.isEmpty, dates: dates, dateOpen: open)
     }
 
-    /// The slider's stops: from the first to the stop nearest the nearest sold expiry (any leg's when nothing is sold).
+    /// The stop nearest `T` (calendar days on).
+    private static func stopNear(_ m: PositionsModel, _ T: Double) -> Int? {
+        m.stops.indices.min { abs(m.stops[$0].tt - T) < abs(m.stops[$1].tt - T) }
+    }
+    /// Where the slider opens: the stop nearest the nearest sold expiry (any leg's when nothing is sold), on the slider.
+    static func openStop(_ m: PositionsModel, _ count: Int) -> Int {
+        let opts = m.legs.filter { $0.ty != .shares }, sold = opts.filter { $0.q < 0 }
+        guard count > 0, let T = (sold.isEmpty ? opts : sold).map(\.T).min(), let i = stopNear(m, T) else { return max(0, count - 1) }
+        return min(i, count - 1)
+    }
+
+    /// The slider's stops: from the first to the stop nearest the LAST sold expiry (the first of any leg's when nothing
+    /// is sold).
     static func dateStops(_ m: PositionsModel) -> [DateStop] {
         guard !m.stops.isEmpty else { return [] }
         let opts = m.legs.filter { $0.ty != .shares }
         let sold = opts.filter { $0.q < 0 }
-        let endT = (sold.isEmpty ? opts : sold).map(\.T).min()
+        let endT = sold.isEmpty ? opts.map(\.T).min() : sold.map(\.T).max()
         var end = m.fridayStop
-        if let T = endT {
-            end = m.stops.indices.min { abs(m.stops[$0].tt - T) < abs(m.stops[$1].tt - T) } ?? m.fridayStop
-        }
+        if let T = endT { end = stopNear(m, T) ?? m.fridayStop }
         let mins = Double(MarketClock.ny(SClock.now()).minutes)
         let names = { (ls: [PositionsModel.Leg]) in Set(ls.map { $0.ty == .put ? "puts" : "calls" }).sorted().joined(separator: " and ") }
         return (0...end).map { i in
@@ -325,6 +340,26 @@ struct PosName {
             return DateStop(i: i, full: full, tick: i == 0 ? "Today" : s.short, days: days, friday: s.friday,
                             date: date, wd: String(date.prefix(3)), ends: ends.isEmpty ? "" : ends + " expire")
         }
+    }
+
+    /// What has expired by a stop (Nik, 20 Nov 2026, option 1; the web's goneWords): "Nov 20: 20 sold calls and 10 sold
+    /// puts expired", "Nov 20 and Nov 27: ...", "Nov 20 to Dec 4, 3 expiries: ...". Legs switched off drop out; empty
+    /// before the first expiry.
+    static func gone(_ m: PositionsModel, off: Set<String>, stop: Int) -> String {
+        guard m.stops.indices.contains(stop) else { return "" }
+        let tt = m.stops[stop].tt
+        let past = m.legs.filter { $0.ty != .shares && !off.contains($0.id) && !$0.iso.isEmpty && $0.T < tt - 0.5 }
+        let days = Array(Set(past.map(\.iso))).sorted()
+        guard let first = days.first, let last = days.last else { return "" }
+        let md = { (iso: String) in PositionsModel.md(iso) }
+        let kinds: [(SampleEngine.Ty, Bool, String)] = [(.call, true, "sold calls"), (.put, true, "sold puts"), (.call, false, "hedge calls"), (.put, false, "hedge puts")]
+        let parts = kinds.compactMap { ty, sold, w -> String? in
+            let n = past.filter { $0.ty == ty && ($0.q < 0) == sold }.reduce(0) { $0 + abs($1.q) }
+            return n > 0 ? "\(PosFmt.count(n)) \(w)" : nil
+        }
+        let what = parts.count < 2 ? parts.joined() : parts.dropLast().joined(separator: ", ") + " and " + parts.last!
+        let when = days.count == 1 ? md(first) : days.count == 2 ? "\(md(first)) and \(md(last))" : "\(md(first)) to \(md(last)), \(days.count) expiries"
+        return "\(when): \(what) expired"
     }
 
     /// README §3.5 at a stop's date: Σ q × mul × (value then − mark now) from the server's grid (no premium already

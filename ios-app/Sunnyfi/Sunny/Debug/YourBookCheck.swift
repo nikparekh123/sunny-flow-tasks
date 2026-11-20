@@ -71,7 +71,7 @@ struct PayoffCheck: View {
             if let wire, let j {
                 let m = PositionsModel(wire: wire, name: j["name"])
                 let nm = PosName.build(m, inputs: j["inputs"])
-                let ai = min(at ?? nm.dateEnd, nm.dateEnd)
+                let ai = min(at ?? nm.dateOpen, nm.dateEnd)
                 if let p = PosName.payoff(m, off: PosName.offs(m, flip: []), stop: nm.dates[ai].i, range: Double(range) / 100, hold: nm.dates.map(\.i)) {
                     PosPayoffView(t: m.t, S0: m.S0, p: p, privacy: false, changed: false, dates: nm.dates,
                                   at: Binding(get: { ai }, set: { at = $0 }), rangePct: $range, target: target)

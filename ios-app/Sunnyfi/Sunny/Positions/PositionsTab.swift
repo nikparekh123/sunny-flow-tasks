@@ -38,7 +38,8 @@ struct PositionsTab: View {
     @State private var memo = PositionsMemo()
 
     @State private var name: String = BriefDebug.name ?? ""
-    @State private var view: Band = .price
+    /// Payoff first and open on it, Price second (Nik, 20 Nov 2026).
+    @State private var view: Band = .payoff
     /// Legs switched away from how they start in Every leg (Income on, the rest off), per "book|TICKER".
     @State private var flip: [String: Set<String>] = [:]
     /// The open box ("lane|box"): one at a time across the lanes.
@@ -87,10 +88,10 @@ struct PositionsTab: View {
             .task {
                 #if DEBUG && targetEnvironment(simulator)
                 // Screens checked in the simulator: `-posOpen Hedge` opens a Your book group; `-posBox w|ce` opens a
-                // box's detail; `-posAt intel` scrolls to Intelligence; `-posView payoff` shows Payoff.
+                // box's detail; `-posAt intel` scrolls to Intelligence; `-posView price` shows Price.
                 let a = ProcessInfo.processInfo.arguments
                 func arg(_ k: String) -> String? { a.firstIndex(of: k).flatMap { a.indices.contains($0 + 1) ? a[$0 + 1] : nil } }
-                if arg("-posView") == "payoff" { view = .payoff }
+                if let v = arg("-posView") { view = v == "price" ? .price : .payoff }
                 if let g = arg("-posOpen") { bookOpen = [g] }
                 if let b = arg("-posBox") { box = b }
                 if let at = arg("-posAt") { try? await Task.sleep(for: .milliseconds(1400)); proxy.scrollTo(at, anchor: .top) }
@@ -201,9 +202,9 @@ struct PositionsTab: View {
                 .padding(.top, -4)
         }
         VStack(alignment: .leading, spacing: 12) {
-            Picker("Price or payoff", selection: $view) {
-                Text("Price").tag(Band.price)
+            Picker("Payoff or price", selection: $view) {
                 Text("Payoff").tag(Band.payoff)
+                Text("Price").tag(Band.price)
             }
             .pickerStyle(.segmented)
             .controlSize(.large)
@@ -222,12 +223,13 @@ struct PositionsTab: View {
                     }
                     PosPriceChart(price: pr, failed: charts.hasFailed(b, n.t), cone: $cone)
                 } else if let mm = m, let nm, !nm.dates.isEmpty {
-                    let ai = min(payAt ?? nm.dateEnd, nm.dateEnd), stop = nm.dates[ai].i
+                    let ai = min(payAt ?? nm.dateOpen, nm.dateEnd), stop = nm.dates[ai].i
                     if let p = memo.payoff(key: "\(b)|\(n.t)|\(built)|\(brief.built ?? "")|\(offs.sorted().joined(separator: ","))|\(stop)|\(payRange)", {
                         PosName.payoff(mm, off: PosName.offs(mm, flip: offs), stop: stop, range: Double(payRange) / 100, hold: nm.dates.map(\.i))
                     }) {
                         PosPayoffView(t: n.t, S0: S0, p: p, privacy: privacy, changed: nm.changed, dates: nm.dates,
-                                      at: Binding(get: { ai }, set: { payAt = $0 }), rangePct: $payRange, target: targets.price(b, n.t))
+                                      at: Binding(get: { ai }, set: { payAt = $0 }), rangePct: $payRange, target: targets.price(b, n.t),
+                                      gone: PosName.gone(mm, off: PosName.offs(mm, flip: offs), stop: stop))
                     } else {
                         loadingBox(error: brief.positions.error(b, n.t), height: 300)
                     }

@@ -260,7 +260,8 @@ private struct PosPriceScrub: View {
 
 /// README §3.5 with rounds 168b and Nov 18 (phone): the P&L by price from today's marks, the priced move shaded, where
 /// it peaks ("Makes the most at $41.69 by Fri Nov 13"), the dot at today's price; under it a date slider (each trading
-/// day from today to the day the nearest sold legs expire: "At expiration" at its end, "N days to expiration" before)
+/// day from today to the day the last sold legs expire, each expiry a taller labelled tick: Nik, 20 Nov 2026, option 1;
+/// what has expired by then is said to VoiceOver only, "No need to write the text underneath")
 /// and a range slider (±5% to ±50%, opens ±12%, Reset once moved), then the Greeks at that date. The P&L scale holds
 /// across the dates so the curve is seen to change. A target set on the web shows as a dashed line, a ring and a pill.
 struct PosPayoffView: View {
@@ -275,6 +276,9 @@ struct PosPayoffView: View {
     @Binding var rangePct: Int
     /// A target price set on the web (payoff_targets), or nil.
     var target: Double? = nil
+    /// What has expired by the date on the slider ("Nov 20: 20 sold calls expired"), "" before the first expiry;
+    /// VoiceOver only.
+    var gone = ""
     private let H: CGFloat = 180
     /// How far across the chart the finger is while it scrubs sideways (0 to 1). Held in a reference only the headline
     /// and the scrub layer read, so a drag redraws those two and never the shaded curve or the Greeks (Nik, 13 Nov
@@ -351,11 +355,13 @@ struct PosPayoffView: View {
                 Spacer(minLength: 0)
             }
             PosSlider(value: $at, lo: 0, hi: N, label: "Date the curve is drawn for",
-                      said: { i in let d = dates[min(max(0, i), N)]; return (d.days == 0 && d.i == 0 ? "Today, now" : "\(d.full) close, in \(d.days) \(d.days == 1 ? "day" : "days")") + (i >= N ? ". At expiration\(d.ends.isEmpty ? "" : ", " + d.ends.lowercased())" : "") })
+                      said: { i in let d = dates[min(max(0, i), N)]; return (d.days == 0 && d.i == 0 ? "Today, now" : "\(d.full) close, in \(d.days) \(d.days == 1 ? "day" : "days")") + (!d.ends.isEmpty && i > 0 ? ". At expiration, " + d.ends.lowercased() : "") + (i == at && !gone.isEmpty ? ". " + gone : "") })
             GeometryReader { g in
                 let w = g.size.width, ax = { (i: Int) in 17 + (w - 34) * CGFloat(i) / CGFloat(max(1, N)) }
                 let few = N <= 8
-                let picked = few ? Array(0...N) : [0] + { let fr = (1..<N).filter { dates[$0].friday }; return fr.count > 2 ? [fr[fr.count / 2]] : [] }() + [N]
+                // Labels: Today, the end, and each expiry between (a middle Friday when none ends between).
+                let exs = N > 1 ? (1..<N).filter { !dates[$0].ends.isEmpty } : []
+                let picked = few ? Array(0...N) : [0] + (exs.isEmpty ? { let fr = (1..<N).filter { dates[$0].friday }; return fr.count > 2 ? [fr[fr.count / 2]] : [] }() : exs) + [N]
                 // No two labels touch (Nik, 18 Nov 2026: "Wed" ran into "Fri Nov 27" at a larger text size): each is measured
                 // at the size it is drawn, and a middle label that would touch its neighbour or the last one is left out.
                 let fs = UIFontMetrics(forTextStyle: .caption1).scaledValue(for: 11)
@@ -375,9 +381,10 @@ struct PosPayoffView: View {
                 }()
                 ZStack(alignment: .topLeading) {
                     ForEach(0...N, id: \.self) { i in
-                        if few || dates[i].friday || i == N {
-                            Rectangle().fill(i == N ? PC.ink.opacity(0.7) : Color.white.opacity(0.22))
-                                .frame(width: 1, height: i == N ? 8 : dates[i].friday ? 6 : 4).offset(x: ax(i))
+                        let ex = i == N || (i > 0 && !dates[i].ends.isEmpty)
+                        if few || dates[i].friday || ex {
+                            Rectangle().fill(ex ? PC.ink.opacity(0.7) : Color.white.opacity(0.22))
+                                .frame(width: 1, height: ex ? 8 : dates[i].friday ? 6 : 4).offset(x: ax(i))
                         }
                     }
                     ForEach(shown, id: \.self) { i in
