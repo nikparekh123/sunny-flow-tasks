@@ -23,6 +23,8 @@ export interface SdExp {
   rows: { c: SdRow[]; p: SdRow[] };
   sig: SdSig[];
   ivK?: [number, number][];
+  /** The strikes the chain lists for this expiry, half to one and a half times the price (sunny-sd 20 Nov 2026). */
+  ks?: number[];
   gamma?: { day: string; flip: number | null; walls: { K: number; kind: GammaWall['kind']; gex: number; conf: 1 | 2 | 3 }[] };
 }
 export interface SdSold { put: boolean; K: number; n: number; ex: string; be: number | null; got?: number | null; iv?: number | null; z0?: number | null;

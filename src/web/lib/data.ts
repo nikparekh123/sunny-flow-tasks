@@ -260,6 +260,19 @@ export function useSd(book: BookId | null | undefined, t: string | null | undefi
   });
 }
 
+/** One expiry's listed strikes (sunny-sd { ks }, 20 Nov 2026), for an expiry the name's sunny-sd reply does not carry
+    (a LEAP, the monthly): Try a trade offers only strikes the chain lists. */
+export function useStrikes(book: BookId | null | undefined, t: string | null | undefined, ex: string | null | undefined, on: boolean) {
+  return useQuery({
+    queryKey: ['sw', 'ks', t, ex],
+    enabled: on && !!book && !!t && !!ex && !FX,
+    staleTime: 6 * 3600_000,
+    gcTime: 6 * 3600_000,
+    retry: 1,
+    queryFn: () => callFn('sunny-sd', { book, t, ks: ex }) as Promise<{ ok: boolean; ks: number[] }>,
+  });
+}
+
 /** Several names' sunny-sd replies at once (Positions' Sold in SD reads each sold leg's SD when sold from them), only
     while `on`; the same cache as useSd, so the name on screen is never asked twice. No refresh on a timer. */
 export function useSdMany(book: BookId | null | undefined, ts: string[], on: boolean): Map<string, J> {

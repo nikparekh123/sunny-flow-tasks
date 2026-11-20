@@ -17,7 +17,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { nameDot, soldInSd, stepOf } from '../../../supabase/functions/_shared/positions-engine.ts';
 import { BOOK_NAME } from '../components/AccountMenu';
 import { clock12, estWords, ny, shortDate } from '../lib/clock';
-import { useHome, usePositions, usePrefetchPositions, useSd, useSdMany, useTicker, type J } from '../lib/data';
+import { useHome, usePositions, usePrefetchPositions, useSd, useSdMany, useStrikes, useTicker, type J } from '../lib/data';
 import { arrow, pct, price } from '../lib/format';
 import { useWeb } from '../lib/state';
 import type { PCRange } from '../../../supabase/functions/_shared/price-chart.ts';
@@ -238,18 +238,38 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
   const nCh = shut.size + tradesOn.length, viewChg = flip.size + tradesOn.length > 0;
   const cashC = base.filter((l) => shut.has(l.k)).reduce((a, l) => a + l.value, 0) + tradesOn.reduce((a, l) => a - l.value, 0);
 
-  // Try a trade: strikes 85% to 120% of the price on the chain's step, the name's expiries, 10 (3 on Nicolay's book).
+  // Try a trade: the strikes the chain lists for the expiry picked, 85% to 120% of the price (Nik, 20 Nov 2026: "show
+  // the real strikes for each ticker, not just assume 1 dollar increment"), the name's expiries, 10 (3 on Nicolay's
+  // book). An expiry sunny-sd's reply does not carry asks for its own list; the step guess stands in only when no
+  // list comes back.
   const stp = stepOf(S0);
-  const strikes = useMemo(() => { const o: number[] = []; for (let x = Math.ceil((S0 * 0.85) / stp) * stp; x <= S0 * 1.2 + 1e-9; x = +(x + stp).toFixed(2)) o.push(x); return o; }, [S0, stp]);
   const expiries = useMemo(() => {
     const d0 = m.isoAt(0), otm = inputs?.names.find((n) => n.t === t)?.otm?.ex;
     const all = new Set<string>([...(sd?.t === t ? sd.exps.map((e) => e.ex) : []), ...m.walls.map((c) => c.ex), ...m.legs.filter((l) => l.ty !== 'S').map((l) => l.ex), ...(otm ? [otm] : [])]);
     return [...all].filter((x) => x >= d0 && m.daysTo(x) > 0).sort();
   }, [m, inputs, t, sd]);
   const fri = segs.find((s) => s.i === m.fridayStop)?.iso ?? payload?.brief?.friday ?? '';
-  const draft: Required<Draft> = { side: 's', ty: 'c', K: Math.ceil((S0 * 1.03) / stp) * stp, ex: expiries.find((x) => x > fri) ?? expiries[0] ?? fri, n: book === 'N' ? 3 : 10, ...wf.draft } as Required<Draft>;
+  const draft: Required<Draft> = { side: 's', ty: 'c', K: NaN, ex: expiries.find((x) => x > fri) ?? expiries[0] ?? fri, n: book === 'N' ? 3 : 10, ...wf.draft } as Required<Draft>;
   if (!expiries.includes(draft.ex) && expiries.length) draft.ex = expiries.find((x) => x > fri) ?? expiries[0];
-  const strikeList = strikes.includes(draft.K) ? strikes : [...strikes, draft.K].sort((a, b) => a - b);
+  const sdKs = sd?.t === t ? sd.exps.find((e) => e.ex === draft.ex)?.ks : undefined;
+  const need = sd?.t === t && !sdKs?.length;
+  const ksQ = useStrikes(book, t, draft.ex, need);
+  const listed = sdKs?.length ? sdKs : ksQ.data?.ok ? ksQ.data.ks : null;
+  // While an expiry's list is on its way: only the strike already picked, so no guessed strike shows.
+  const hold = need && ksQ.isPending && Number.isFinite(draft.K) ? draft.K : null;
+  const strikes = useMemo(() => {
+    const lo = S0 * 0.85, hi = S0 * 1.2 + 1e-9;
+    if (listed?.length) { const o = listed.filter((k) => k >= lo && k <= hi); if (o.length) return o; }
+    if (hold != null) return [hold];
+    const o: number[] = [];
+    for (let x = Math.ceil(lo / stp) * stp; x <= hi; x = +(x + stp).toFixed(2)) o.push(x);
+    return o;
+  }, [listed, S0, stp, hold]);
+  // The strike: the one picked when this expiry lists it, else the listed strike nearest it; to start, the first
+  // listed about 3% out.
+  if (!Number.isFinite(draft.K)) draft.K = strikes.find((k) => k >= S0 * 1.03) ?? strikes[strikes.length - 1] ?? Math.ceil((S0 * 1.03) / stp) * stp;
+  else if (strikes.length && !strikes.includes(draft.K)) draft.K = strikes.reduce((a, b) => (Math.abs(b - draft.K) < Math.abs(a - draft.K) ? b : a));
+  const strikeList = strikes;
   const expL = (iso: string) => expLabel(iso, m.wholeDays(iso));
   const closed = useMemo(() => closedDays(payload?.calendar), [payload?.calendar]);
   // The Price chart's SD and the 1 SD cone read this week's IV: the name's IV on the Friday chain at the strike nearest

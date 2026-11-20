@@ -28,6 +28,10 @@
  *                  Accelerator or Unclear, gex in dollars per 1% move, conf 1 to 3 dots as gex-walls gamma.ts
  *                  dots() grades them) with its Flip and regime; else that expiry's gex_walls open-interest walls
  *                  (Ceiling above, Floor below, conf 1, src 'oi').
+ *   exps[i].ks     the strikes the chain lists for that expiry, half to one and a half times the price (Nik, 20 Nov
+ *                  2026: Try a trade offers the real strikes, not a guessed $1 step).
+ *   POST { t, book, ks: 'YYYY-MM-DD' } answers only { ok, t, ex, ks } for any other expiry (a LEAP, the monthly):
+ *                  the listed strikes from Theta's quote snapshot, else Polygon's contract list.
  *   sold[i].z0, sold[i].fill   where the strike sat when sold (option_fill_context, one row per opening sale, written
  *                  by option-fill-context): contract-weighted over the open lots of that leg in this book.
  *
@@ -39,7 +43,7 @@
  */
 import { calc, cover, CFG, dir, f1, f2, fk, heldPair, ITM, KS, netDelta, pc, row, won, bs as bsQ, type Expiry, type Fx, type Leg, type Name, type Quote, type Row } from '../_shared/sd-engine.ts';
 
-const BUILD = '2026-11-13.1';
+const BUILD = '2026-11-20.1';
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -228,6 +232,30 @@ Deno.serve(async (req) => {
   const useTheta = String(body.source ?? Deno.env.get('MARKS_SOURCE') ?? 'polygon').toLowerCase() === 'theta' && !!THETA_URL && !!THETA_KEY;
   const t0 = Date.now(), { day: today, mins } = nyParts();
 
+  // One expiry's listed strikes (Try a trade on the web, 20 Nov 2026), for an expiry past the six below.
+  if (typeof body.ks === 'string') {
+    const ex = body.ks;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ex)) return json(400, { error: 'ks is an expiry, YYYY-MM-DD' });
+    try {
+      let ks: number[] = [];
+      if (useTheta) ks = (await thetaGet(`/v3/option/snapshot/quote?symbol=${t}&expiration=${ex.replaceAll('-', '')}`)).map((r) => Number(r.contract?.strike));
+      if (!ks.filter((K) => K > 0).length) {
+        let url: string | null = `https://api.polygon.io/v3/reference/options/contracts?underlying_ticker=${t}&expiration_date=${ex}&limit=1000&apiKey=${POLY}`;
+        for (let i = 0; url && i < 3; i++) {
+          const r: Response = await fetch(url, { signal: AbortSignal.timeout(12_000) });
+          if (!r.ok) break;
+          const j = await r.json();
+          for (const c of j.results ?? []) if (typeof c.strike_price === 'number') ks.push(c.strike_price);
+          url = j.next_url ? `${j.next_url}&apiKey=${POLY}` : null;
+        }
+      }
+      const out = [...new Set(ks.filter((K) => Number.isFinite(K) && K > 0))].sort((a, b) => a - b);
+      return json(200, { ok: out.length > 0, build: BUILD, t, ex, ks: out });
+    } catch (e) {
+      return json(200, { ok: false, build: BUILD, t, ex, ks: [], error: String(e) });
+    }
+  }
+
   try {
     const [hist, ivRows, earn, divs, cal, snap, quote, allEx, gex, techRows, dcl, chainNext, gvRows, myTrades, mlive, calToday] = await Promise.all([
       bars(t),
@@ -415,6 +443,7 @@ Deno.serve(async (req) => {
       return { e, R, H, sig, data: {
         ex, label: e.label, long: e.long, td: e.td, cd: e.cd, T: +T.toFixed(6), iv: +iv.toFixed(4), m: +m.toFixed(5), earn: e.earnB,
         ...(ik ? { ivK: ik.ivK, ivKsrc: ik.src } : {}), ...(gm ? { gamma: gm } : {}),
+        ks: e.strikes.filter((K) => K >= S * 0.5 && K <= S * 1.5),
         band: [+(S * Math.exp(-m)).toFixed(4), +(S * Math.exp(m)).toFixed(4)],
         sug: { kc: R.kc, kp: R.kp, mvC: R.mvC, mvP: R.mvP, capC: R.capC, capP: R.capP, C: out(R.C, false), P: out(R.P, true) },
         rows: { c: KS.map((k) => out(row(name, e, k, false), false)), p: KS.map((k) => out(row(name, e, k, true), true)) },
