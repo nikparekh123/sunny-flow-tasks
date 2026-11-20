@@ -181,7 +181,7 @@ function Name({ book, t, name, payload }: { book: 'S' | 'N'; t: string; name: J;
 
 // The page's own state, kept across names and rebuilds: the Payoff date ('now', an ISO day, or null for this Friday)
 // and range (±%), Price or Payoff, Chart or Table, the Price chart's range, the Every leg filter.
-const pageState = { day: null as string | null, xr: XR0 as number, view: 'price' as 'price' | 'pay', tab: 'chart' as 'chart' | 'table', rg: '1W' as PCRange, lf: 'all' as LegFilter };
+const pageState = { day: null as string | null, xr: XR0 as number, view: 'pay' as 'price' | 'pay', tab: 'chart' as 'chart' | 'table', rg: '1W' as PCRange, lf: 'all' as LegFilter };
 function usePageState<K extends keyof typeof pageState>(k: K): [(typeof pageState)[K], (v: (typeof pageState)[K]) => void] {
   const [v, setV] = useState(pageState[k]);
   return [v, (x) => { pageState[k] = x; setV(x); }];
@@ -266,7 +266,8 @@ function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; 
       <div style={{ display: 'flex', gap: 36, alignItems: 'stretch' }}>
         <div style={{ flex: '4 1 560px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, minHeight: 34 }}>
-            <Segmented label="Price or payoff" items={[['price', 'Price'], ['pay', 'Payoff']]} value={view} onPick={setView} width={184} />
+            {/* Payoff first and open on it, Price second (Nik, 20 Nov 2026). */}
+            <Segmented label="Payoff or price" items={[['pay', 'Payoff'], ['price', 'Price']]} value={view} onPick={setView} width={184} />
             {view === 'price' ? (rw && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                 <span style={{ fontSize: 13, color: MU }}>{rw.l} <span style={{ fontWeight: 600, color: rw.c }}>{rw.v}</span></span>

@@ -258,15 +258,18 @@ const fromToday = (x: number, S0: number) => { const ch = x / S0 - 1, a = Math.a
 /** One stop on the date slider: the day, how it is priced (the grid's row for it, else the engine), calendar days from
     today, and the legs that expire at its close. Index 0 is now. */
 export interface PayDay { iso: string; D: DPt; cd: number; fri: boolean; ends: PLeg[] }
-/** The slider's days (round 168, Nik 17 Nov: like OptionStrat, the date runs to the day the nearest sold legs expire;
-    past it the sold legs earn nothing more and the long legs keep decaying): now, then each trading day (weekends and
-    the calendar's closed days skipped) to that expiry, or to the first expiry of any leg when nothing is sold; at most
-    a year out. `exp` is that expiry (null: no option on). */
-export function payDays(m: PosModel, wi: PLeg[], closed: Set<string>): { pts: PayDay[]; exp: string | null } {
+/** The slider's days: now, then each trading day (weekends and the calendar's closed days skipped) to the day the
+    LAST sold legs expire (Nik, 20 Nov 2026, option 1: the full picture past the first expiry; it had stopped at the
+    nearest, round 168), or to the first expiry of any leg when nothing is sold; at most a year out. Past an expiry
+    the legs that ended there are worth what they were at that close and the rest keep their time value: the "do
+    nothing" path. `exp` is the end (null: no option on); `near` the nearest sold expiry (where the slider opens when
+    this Friday is not on it). */
+export function payDays(m: PosModel, wi: PLeg[], closed: Set<string>): { pts: PayDay[]; exp: string | null; near: string | null } {
   const d0 = m.isoAt(0);
   const opts = wi.filter((l) => l.ty !== 'S' && !!l.ex && l.ex >= d0);
-  const first = (a: PLeg[]) => a.map((l) => l.ex).sort()[0] ?? null;
-  const exp = first(opts.filter((l) => l.q < 0)) ?? first(opts);
+  const ex = (a: PLeg[]) => a.map((l) => l.ex).sort();
+  const sold = opts.filter((l) => l.q < 0);
+  const exp = ex(sold).at(-1) ?? ex(opts)[0] ?? null, near = ex(sold)[0] ?? ex(opts)[0] ?? null;
   const cap = isoAdd(d0, 366), end = exp ? (exp < cap ? exp : cap) : d0;
   const rowOf = new Map<string, number>();
   m.stops.forEach((s, i) => { if (s.tt > 0.01) { const iso = m.isoAt(s.tt); if (!rowOf.has(iso)) rowOf.set(iso, i); } });
@@ -280,7 +283,22 @@ export function payDays(m: PosModel, wi: PLeg[], closed: Set<string>): { pts: Pa
     if (w === 0 || w === 6 || closed.has(d)) continue;
     pts.push({ iso: d, D: at(d), cd: daysBetween(d0, d), fri: w === 5, ends: ends(d) });
   }
-  return { pts, exp };
+  return { pts, exp, near };
+}
+/** "a, b and c". */
+const andList = (a: string[]) => (a.length < 2 ? a.join('') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`);
+/** What has expired by a date (Nik, 20 Nov 2026, option 1): "Nov 20: 20 sold calls and 10 sold puts expired",
+    "Nov 20 and Nov 27: ...", "Nov 20 to Dec 4, 3 expiries: ...". Empty before the first expiry. */
+export function goneWords(wi: PLeg[], iso: string): string {
+  const by = new Map<string, PLeg[]>();
+  for (const l of wi) if (l.ty !== 'S' && l.ex && l.ex < iso) by.set(l.ex, [...(by.get(l.ex) ?? []), l]);
+  const what = (ls: PLeg[]) => andList(([['C', -1, 'sold calls'], ['P', -1, 'sold puts'], ['C', 1, 'hedge calls'], ['P', 1, 'hedge puts']] as const)
+    .map(([ty, sg, w]) => { const n = ls.filter((l) => l.ty === ty && Math.sign(l.q) === sg).reduce((a, l) => a + Math.abs(l.q), 0); return n > 0 ? `${count(n)} ${w}` : ''; })
+    .filter(Boolean));
+  const days = [...by.keys()].sort();
+  if (!days.length) return '';
+  const when = days.length === 1 ? mdDay(days[0]) : days.length === 2 ? `${mdDay(days[0])} and ${mdDay(days[1])}` : `${mdDay(days[0])} to ${mdDay(days[days.length - 1])}, ${days.length} expiries`;
+  return `${when}: ${what(days.flatMap((d) => by.get(d)!))} expired`;
 }
 /** "Sold puts, hedge calls expire". */
 const endsWords = (ls: PLeg[]) => {
@@ -302,13 +320,17 @@ export interface PayoffProps {
 }
 export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDay, xr, setXr, tg, setTg }: PayoffProps) {
   const m = pr.m, S0 = m.S0;
-  const { pts, exp } = useMemo(() => payDays(m, wi, closed), [m, wi, closed]);
+  const { pts, exp, near } = useMemo(() => payDays(m, wi, closed), [m, wi, closed]);
   const N = pts.length - 1;
-  // The day on screen: the one picked, the end when the pick is past it, else this Friday, else the end.
+  // The day on screen: the one picked, the end when the pick is past it, else this Friday, else the nearest sold
+  // expiry (where the slider used to end), else the end.
   const fIso = m.stops[m.fridayStop] && m.stops[m.fridayStop].tt > 0.01 ? m.isoAt(m.stops[m.fridayStop].tt) : null;
   let ti = day === 'now' ? 0 : day ? pts.findIndex((p, i) => i > 0 && p.iso === day) : -1;
   if (ti < 0 && day && day !== 'now' && N > 0 && day > pts[N].iso) ti = N;
-  if (ti < 0) { const f = fIso ? pts.findIndex((p, i) => i > 0 && p.iso === fIso) : -1; ti = f >= 0 ? f : N; }
+  if (ti < 0) {
+    const f = fIso ? pts.findIndex((p, i) => i > 0 && p.iso === fIso) : -1, ne = near ? pts.findIndex((p, i) => i > 0 && p.iso === near) : -1;
+    ti = f >= 0 ? f : ne >= 0 ? ne : N;
+  }
   const P = pts[ti], D = P.D, X = Math.max(XMIN, Math.min(XMAX, xr)) / 100;
   const full = fullDay(P.iso), sh8 = ti === 0 ? 'Today' : P.cd < 3 ? WD3[dowOf(P.iso)] : mdDay(P.iso), byT = ti === 0 ? 'today' : 'by ' + full;
   const pick = (i: number) => setDay(i <= 0 ? 'now' : pts[i].iso);
@@ -353,7 +375,8 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
   };
   const zy = v.zy;
   const exD = exp ? daysBetween(P.iso, exp) : 0, atExp = !!exp && P.iso === exp && (ti > 0 || N === 0);
-  const ew = endsWords(P.ends);
+  // What has expired by then: screen readers only (Nik, 20 Nov 2026: "No need to write the text underneath").
+  const ew = endsWords(P.ends), gone = ti > 0 ? goneWords(wi, P.iso) : '';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
@@ -445,7 +468,7 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
                   sliders sit level. Screen readers still hear it in the slider's text. */}
             </div>
             <Slider label="Date the curve is drawn for" min={0} max={N} value={ti} onPick={pick}
-              text={(ti === 0 ? 'Today, now' : `${full} close, in ${dayWords(P.cd)}`) + (atExp ? `. At expiration${ew ? ', ' + ew.toLowerCase() : ''}` : ew ? `. ${ew}` : '')} />
+              text={(ti === 0 ? 'Today, now' : `${full} close, in ${dayWords(P.cd)}`) + (atExp ? `. At expiration${ew ? ', ' + ew.toLowerCase() : ''}` : ew ? `. ${ew}` : '') + (gone ? `. ${gone}` : '')} />
             <DateTicks pts={pts} ti={ti} />
           </div>
         ) : <div />}
@@ -464,24 +487,35 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
 }
 
 /** The ticks under the date slider: each Friday, taller and brighter where legs expire; every day when there are 8 or
-    fewer; the labels Today, a middle Friday and the end (each day when 8 or fewer). */
+    fewer. Labels: Today, the end, and between them each expiry (Nik, 20 Nov 2026, option 1; a middle Friday when no
+    leg ends between), measured so no two touch (a label that would is left out; its tall tick stays). */
 function DateTicks({ pts, ti }: { pts: PayDay[]; ti: number }) {
+  const [ref, W] = useWidth<HTMLDivElement>(true);
   const N = pts.length - 1, at = (i: number) => `calc(17px + (100% - 34px) * ${(i / N).toFixed(4)})`, few = N <= 8;
-  const lbs = few ? pts.map((_, i) => i) : (() => { const fr = pts.map((p, i) => (p.fri && i > 0 && i < N ? i : -1)).filter((i) => i > 0); return [0, ...(fr.length > 2 ? [fr[Math.floor(fr.length / 2)]] : []), N]; })();
+  const word = (i: number) => { const p = pts[i]; return i === 0 ? 'Today' : i === N ? (N <= 4 ? fullDay(p.iso) : mdDay(p.iso)) : few ? WD3[dowOf(p.iso)] : mdDay(p.iso); };
+  const lbs = (() => {
+    const exs = pts.map((p, i) => (i > 0 && i < N && p.ends.length > 0 ? i : -1)).filter((i) => i > 0);
+    const fr = pts.map((p, i) => (p.fri && i > 0 && i < N ? i : -1)).filter((i) => i > 0);
+    const mid = few ? pts.map((_, i) => i).slice(1, N) : exs.length ? exs : fr.length > 2 ? [fr[Math.floor(fr.length / 2)]] : [];
+    // 12px labels: about 6.6px a character, 6px between.
+    const wd = (i: number) => word(i).length * 6.6, x = (i: number) => 17 + (W - 34) * (i / N);
+    const out = [0];
+    let right = wd(0);
+    const end = W - wd(N);
+    for (const i of mid) { const a = x(i) - wd(i) / 2, b = x(i) + wd(i) / 2; if (a >= right + 6 && b <= end - 6) { out.push(i); right = b; } }
+    return N > 0 ? [...out, N] : out;
+  })();
   return (
-    <div aria-hidden="true" style={{ position: 'relative', height: 28, marginTop: -6 }}>
+    <div ref={ref} aria-hidden="true" style={{ position: 'relative', height: 28, marginTop: -6 }}>
       {pts.map((p, i) => {
         const ex = p.ends.length > 0;
         if (!few && !p.fri && !ex && i !== N) return null;
         return <span key={'k' + i} style={{ position: 'absolute', top: 0, left: at(i), width: 1, height: ex ? 8 : p.fri ? 6 : 4, background: ex ? 'rgba(245,245,247,.7)' : 'rgba(255,255,255,.22)' }} />;
       })}
-      {lbs.map((i) => {
-        const p = pts[i], t = i === 0 ? 'Today' : i === N ? (N <= 4 ? fullDay(p.iso) : mdDay(p.iso)) : few ? WD3[dowOf(p.iso)] : mdDay(p.iso);
-        return (
-          <span key={'b' + i} className="tnum" style={{ position: 'absolute', top: 11, left: i === 0 ? 0 : i === N ? '100%' : at(i), transform: `translateX(${i === 0 ? '0' : i === N ? '-100%' : '-50%'})`,
-            fontSize: 12, lineHeight: '14px', color: i === ti ? K : MU, whiteSpace: 'nowrap' }}>{t}</span>
-        );
-      })}
+      {lbs.map((i) => (
+        <span key={'b' + i} className="tnum" style={{ position: 'absolute', top: 11, left: i === 0 ? 0 : i === N ? '100%' : at(i), transform: `translateX(${i === 0 ? '0' : i === N ? '-100%' : '-50%'})`,
+          fontSize: 12, lineHeight: '14px', color: i === ti ? K : MU, whiteSpace: 'nowrap' }}>{word(i)}</span>
+      ))}
     </div>
   );
 }
