@@ -61,14 +61,24 @@ enum Moment: String, CaseIterable, Identifiable {
 
 // MARK: - Accounts
 
-/// The account strip (block 33): Overview · Sunny · Nicolay for an owner of both books; a login with one
-/// book sees no strip. Names come from the account settings, never "Niket" or "N" (answer 13).
+/// The account strip (handoff 2026-11-24 §2.2): Together · Sunny · Nicolay for an owner of every book, Together first
+/// (it replaces Overview); a login with one book sees no strip. Together is book T on the server, every account added
+/// up (Nik, 24 Nov 2026: "the default view for me will always be Together"). Names never "Niket" or "N" (answer 13).
 enum BriefAccount: String, CaseIterable, Identifiable, Hashable {
-    case overview, sunny, nicolay
+    case together, sunny, nicolay
     var id: String { rawValue }
     var name: String {
-        switch self { case .overview: "Overview"; case .sunny: "Sunny"; case .nicolay: "Nicolay" }
+        switch self { case .together: "Together"; case .sunny: "Sunny"; case .nicolay: "Nicolay" }
     }
+    /// The server's book: T, S or N.
+    var book: String {
+        switch self { case .together: "T"; case .sunny: "S"; case .nicolay: "N" }
+    }
+    init?(book: String?) {
+        switch book { case "T": self = .together; case "S": self = .sunny; case "N": self = .nicolay; default: return nil }
+    }
+    /// "Sunny’s book", "Sunny and Nicolay’s book" (Together, the design's title).
+    var bookTitle: String { self == .together ? "Sunny and Nicolay’s book" : "\(name)’s book" }
     /// The sample book's key (sunny-web-data.js: a = Nik, b = his cousin).
     var sampleKey: String { self == .nicolay ? "b" : "a" }
 }
@@ -78,7 +88,7 @@ enum BriefAccount: String, CaseIterable, Identifiable, Hashable {
 /// `-sample` reads the design's sample book (Brief/Sample/*.json) instead of the server, so every screen can
 /// be checked against the handoff before real data goes in (README 2, Pass 1). With it:
 ///   -moment pre|open|post|weekend|futures|bell|last20|last5   pins the moment (else `-now` or the clock)
-///   -acct sunny|nicolay|overview                              the account on screen
+///   -acct together|sunny|nicolay                              the account on screen
 ///   -privacy                                                  privacy on
 ///   -tab positions                                            opens on Positions
 ///   -pname NKE                                                Positions on that name
@@ -119,7 +129,7 @@ enum BriefDebug {
 
 enum BriefSheetKind: String, Identifiable { case timeValue, economy, todo; var id: String { rawValue } }
 
-// MARK: - State shared by Home, Positions and Overview
+// MARK: - State shared by Home and Positions
 
 @MainActor
 @Observable
@@ -127,8 +137,6 @@ final class BriefState {
     /// The accounts this login sees, strip order. One account: no strip.
     var accounts: [BriefAccount] = [.sunny]
     var account: BriefAccount = .sunny
-    /// The last book on screen before Overview (a tab tap on Overview returns to it).
-    var lastBook: BriefAccount = .sunny
     /// The direction of the last switch, for the 28 pt slide (block 33).
     var switchDir: CGFloat = 0
     /// Positions: the name to open on (from Your position).
@@ -146,18 +154,16 @@ final class BriefState {
     private var liveKey: String?
     /// The legs the brief was priced on (payload.brief_inputs), for Positions: set with each new build.
     private(set) var inputs: JSONValue?
-    /// The book the brief is for ("S", "N") and its build: Positions asks sunny-positions for that book.
+    /// The book the brief is for ("T", "S", "N") and its build: Positions asks sunny-positions for that book.
     private(set) var book: String?
     var built: String? { liveKey }
     /// Positions on the real book: one model per name and build, fetched when a name opens.
     let positions = PositionsSource()
 
-    /// Called on each new Home payload: decodes the brief only when the build is new.
-    /// Overview (block 32): both books, from book S's last build (owners only). Kept while another book is on screen.
-    private(set) var liveOverview: JSONValue?
-    /// The new Overview's data (payload.together, book S's build): kept like liveOverview, so Overview stays on S's
-    /// last build while N is on screen.
-    private(set) var liveTogether: JSONValue?
+    /// Together's split (payload.split): each account's value and today, for the line under the account value.
+    private(set) var split: [(name: String, value: Double, today: Double)] = []
+    /// Together: each account's Your book parts (payload.split[i].parts), for S and N under every total.
+    private(set) var splitParts: [(name: String, parts: JSONValue)] = []
 
     // MARK: Pinned (the debug menu, Pass 3)
     /// A moment pinned from the debug menu: its page replaces the live one until Back to live.
@@ -171,10 +177,9 @@ final class BriefState {
     private var realLive: BriefLive?
     /// The time the brief screens draw: the pinned one, else the app's clock.
     func now() -> Date { pinnedAt ?? SClock.now() }
-    func setPinned(_ p: BriefPin, live l: BriefLive, at: Date?, overview: JSONValue?) {
+    func setPinned(_ p: BriefPin, live l: BriefLive, at: Date?) {
         if pin == nil { realLive = live }
         pin = p; pinnedAt = at; live = l
-        if let o = overview, case .object = o, o["error"].isNull { liveOverview = o }
     }
     func unpin() {
         guard pin != nil else { return }
@@ -197,20 +202,25 @@ final class BriefState {
 
     private var debugAccountApplied = false
 
-    func ingest(_ brief: JSONValue?, key: String?, book: String? = nil, overview: JSONValue? = nil, books: [String] = [], inputs: JSONValue? = nil,
-                together: JSONValue? = nil) {
+    func ingest(_ brief: JSONValue?, key: String?, book: String? = nil, books: [String] = [], inputs: JSONValue? = nil,
+                split: JSONValue? = nil) {
         guard key != liveKey || book != self.book else { return }
-        if let g = together, case .object = g { liveTogether = g }
         liveKey = key
         self.book = book
         self.inputs = inputs
+        self.split = (split?.array ?? []).compactMap { p in
+            guard let n = p["name"].string, let v = p["value"].double else { return nil }
+            return (n, v, p["today"].double ?? 0)
+        }
+        self.splitParts = (split?.array ?? []).compactMap { p in
+            guard let n = p["name"].string, case .object = p["parts"] else { return nil }
+            return (n, p["parts"])
+        }
         if !BriefDebug.sample {
-            // The strip on the real books: Overview (when S's build carried one), then each book this login is in.
-            if let o = overview, case .object = o, o["error"].isNull { liveOverview = o }
-            // Sunny always before Nicolay (Nik, 8 Nov 2026), whatever order the memberships come in.
-            let accts: [BriefAccount] = [(BriefAccount.sunny, "S"), (.nicolay, "N")].filter { books.contains($0.1) }.map(\.0)
-            accounts = (liveOverview != nil && accts.contains(.sunny) ? [.overview] : []) + accts
-            if account != .overview { account = book == "N" ? .nicolay : .sunny }
+            // The strip on the real books: Together first, then Sunny before Nicolay (Nik, 8 and 24 Nov 2026), whatever
+            // order the memberships come in.
+            accounts = BriefAccount.allCases.filter { books.contains($0.book) }
+            account = BriefAccount(book: book) ?? .sunny
             if accounts.isEmpty { accounts = [account] }
             // A test run's -acct opens that account once the real books are in (simulator only).
             if let a = BriefDebug.account, !debugAccountApplied, accounts.contains(a) { account = a; debugAccountApplied = true }
@@ -226,15 +236,13 @@ final class BriefState {
     }
 
     var showsStrip: Bool { accounts.count > 1 }
-    var onOverview: Bool { account == .overview }
 
     func pick(_ a: BriefAccount) {
         guard a != account, accounts.contains(a) else { return }
         let from = accounts.firstIndex(of: account) ?? 0, to = accounts.firstIndex(of: a) ?? 0
         switchDir = to > from ? 1 : -1
-        if account != .overview { lastBook = account }
-        // A pinned page is one book's: switching book drops the pin (Overview keeps it).
-        if pin != nil && a != .overview { unpin() }
+        // A pinned page is one book's: switching book drops the pin.
+        if pin != nil { unpin() }
         account = a
     }
 

@@ -11,7 +11,6 @@ const Login = lazy(() => import('./web/pages/Login'));
 const WebLayout = lazy(() => import('./web/WebLayout'));
 const Home = lazy(page.Home);
 const Positions = lazy(page.Positions);
-const Overview = lazy(page.Overview);
 const Ticker = lazy(page.Ticker);
 
 const queryClient = new QueryClient({
@@ -33,7 +32,7 @@ export default function App() {
               <Route path="/home" element={<Home />} />
               <Route path="/positions" element={<Positions />} />
               <Route path="/positions/:t" element={<Positions />} />
-              <Route path="/overview" element={<Overview />} />
+              <Route path="/overview" element={<Navigate to="/home" replace />} />
               <Route path="/t/:ticker" element={<Ticker />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

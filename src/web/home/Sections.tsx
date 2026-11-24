@@ -15,6 +15,8 @@ import { FullRow, Grid, More } from './blocks/Card';
 import { gridCards, type Ctx, type GridItem } from './blocks/cards';
 import Economy, { OutToday, readings } from './blocks/Economy';
 import EveryName from './blocks/EveryName';
+import { RealizedPL } from '../overview/RealizedPL';
+import { readTogether } from '../overview/together';
 import Levels from './blocks/Levels';
 import Overnight from './blocks/Overnight';
 import ShareAvg from './blocks/ShareAvg';
@@ -118,6 +120,9 @@ export default function Sections({ doc, payload, book }: { doc: J; payload: J; b
   const holds = ((payload?.brief_inputs?.names ?? []) as J[]).some((n) => +n?.S0 > 0 && Array.isArray(n?.legs) && n.legs.length > 0);
 
   const cx: Ctx = { mo, mask, position: payload?.brief?.position, company };
+  /* Together's Realized P&L (handoff 2026-11-24 §3: after Your book; this month, year to date, by month as vertical
+     bars, each account, dividends apart), from the Together build's both-accounts piece. */
+  const tog = useMemo(() => (book === 'T' ? readTogether(payload) : null), [book, payload]);
   const secs = (doc?.sections ?? [])
     .map((s: J, i: number) => ({ s, book: i === bookAt, cards: (s.cards ?? []).filter((c: J) => c && !INDEX.has(c.type)) }))
     .filter((x: { cards: J[] }) => x.cards.length);
@@ -187,6 +192,8 @@ export default function Sections({ doc, payload, book }: { doc: J; payload: J; b
               grid.push(...gridCards(c, cx, key));
           }
         });
+        if (isBook && tog) full(<div className="tnum" style={{ borderRadius: 20, background: 'rgba(255,255,255,.04)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.08)',
+          padding: '20px 24px 22px', minWidth: 0 }}><RealizedPL t={tog} /></div>);
         flush();
         return (
           <section key={si} data-sec={'s' + si} data-kicker={clean(s.kicker)} aria-label={clean(s.kicker)} style={{ display: 'flex', flexDirection: 'column', gap: 22, paddingTop: 64 }}>

@@ -61,7 +61,7 @@ export function Header() {
   const onPositions = loc.pathname.startsWith('/positions') || (loc.pathname.startsWith('/t/') && from === 'positions');
   const tabs = [
     // Overview (Both accounts) selects neither tab, as the design draws it.
-    { k: 'home', l: 'Home', on: !onPositions && !loc.pathname.startsWith('/overview'), go: () => nav('/home') },
+    { k: 'home', l: 'Home', on: !onPositions, go: () => nav('/home') },
     { k: 'positions', l: 'Positions', on: onPositions, go: () => nav('/positions') },
   ];
   const pvL = privacy ? 'Show amounts' : 'Hide amounts';

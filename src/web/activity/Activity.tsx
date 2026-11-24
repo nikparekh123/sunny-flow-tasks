@@ -11,7 +11,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKey } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { BOOK_NAME } from '../components/AccountMenu';
+import { bookTitle } from '../components/AccountMenu';
 import { clock12, shortDate, useNY } from '../lib/clock';
 import { useHome, type BookId } from '../lib/data';
 import { C } from '../lib/format';
@@ -219,7 +219,7 @@ function Panel({ act, book, open, focus, read, mark, filter, setFilter, onClose,
         <div style={{ flex: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '0 4px' }}>
           <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
             <span role="heading" aria-level={2} style={{ fontSize: 28, lineHeight: '34px', fontWeight: 700, letterSpacing: '-.03em' }}>Activity</span>
-            <span style={{ fontSize: 14, lineHeight: '18px', color: SUB }}>{BOOK_NAME[book]}’s book · {shortDate(now.date)}, {clock12(now)}</span>
+            <span style={{ fontSize: 14, lineHeight: '18px', color: SUB }}>{bookTitle(book)} · {shortDate(now.date)}, {clock12(now)}</span>
           </span>
           <button ref={xRef} type="button" onClick={onClose} aria-label="Close Activity" className="xbtn"
             style={{ flex: 'none', width: 32, height: 32, fontSize: 13 }}>✕</button>

@@ -25,13 +25,15 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
   const v = useMemo(() => (m ? rangeView(m, range) : null), [m, range]);
   const value = payload?.account?.value ?? (m ? m.nav(m.n - 1) : 0);
   const est = estWords(payload?.prices_est);
+  /* Together (handoff 2026-11-24 §2.2): each account's value under the number, "Sunny $73.5K · Nicolay $108.9K". */
+  const split = (Array.isArray(payload?.split) ? payload.split : []).filter((p: J) => p?.value != null) as { name: string; value: number }[];
   const LC = v ? v.color : C.green;
 
   // The lines under the value: the range's change (deposits out), money paid in or out, then the moment's lines.
   const lines: Line[] = [];
   if (v) {
-    lines.push({ k: 'r', v: changeText(v.change, v.Sv), c: LC, l: WORDS[range] });
     const dep = v.deps[v.deps.length - 1];
+    lines.push({ k: 'r', v: changeText(v.change, v.Sv, dep), c: LC, l: WORDS[range] });
     // The phone's deposit line (AccountChart.depositLine): a deposit is not a gain, so it is named on its own.
     if (Math.abs(dep) >= 1) lines.push({ k: 'd', v: money(dep), c: C.ink, l: `${dep > 0 ? 'deposited' : 'withdrawn'} ${WORDS[range]}` });
   }
@@ -71,7 +73,7 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
     const hl = hlEl.current;
     if (hl) {
       const a = hl.firstElementChild as HTMLSpanElement | null, b2 = hl.lastElementChild as HTMLSpanElement | null;
-      if (a) { a.textContent = mk(changeText(ch, r.Sv)); a.style.color = ch >= 0 ? C.green : C.red; }
+      if (a) { a.textContent = mk(changeText(ch, r.Sv, r.deps[j])); a.style.color = ch >= 0 ? C.green : C.red; }
       if (b2) b2.textContent = r.labs[j];
       hl.style.display = 'block';
     }
@@ -147,6 +149,9 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
           <span style={{ fontWeight: 600 }} /> <span style={{ color: C.ink2 }} />
         </span>
         <div ref={linesEl} className="tnum" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {split.length > 1 && (
+            <span style={{ fontSize: 15, color: C.ink2 }}>{split.map((p) => `${p.name} ${mask(money(p.value))}`).join(' · ')}</span>
+          )}
           {lines.map((x) => (
             <span key={x.k} style={{ fontSize: 15 }}>
               <span style={{ fontWeight: 600, color: x.c }}>{mask(x.v)}</span> <span style={{ color: C.ink2 }}>{x.l}</span>

@@ -313,6 +313,15 @@ struct AccountChart: View {
                 }
             }
             .frame(minHeight: 34)
+            // Together (handoff 2026-11-24 §2.2): each account's part under the number, "Sunny $73.4K · Nicolay $109K".
+            // At rest only (a scrub reads a past day); it keeps its room while scrubbing, so nothing below moves.
+            if !pnl, let sp = splitWords {
+                Text(sp).sType(Self.changeWords, tabular: true).foregroundStyle(S.mutedOnPage)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .blur(radius: hidden ? 9 : 0)
+                    .opacity(scrubbing ? 0 : 1)
+                    .accessibilityLabel(hidden ? "hidden" : sp)
+            }
             // The change line, and To do on its row at the right margin (handoff 2026-11-10-todo).
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 changeLine.layoutPriority(1)
@@ -326,6 +335,15 @@ struct AccountChart: View {
     }
 
     private var bigValue: Double { value(at) }
+
+    /// "Sunny $73.4K · Nicolay $109K" on Together (payload.split); nil on one account.
+    private var splitWords: String? {
+        let ps = (home.split?.array ?? []).compactMap { p -> String? in
+            guard let n = p["name"].string, let v = p["value"].double else { return nil }
+            return "\(n) \(SampleEngine.fK(v))"
+        }
+        return ps.count > 1 ? ps.joined(separator: " · ") : nil
+    }
 
     /// The big number on day i: the account value, or the P&L from the range start when comparing.
     private func value(_ i: Int) -> Double {
@@ -356,7 +374,7 @@ struct AccountChart: View {
                         .sType(Self.changeWords, tabular: false).foregroundStyle(S.mutedOnPage)
                 } else {
                     let first = m.nav(s), d = bigValue - first - m.deposited(s, i)
-                    let p = first != 0 ? d / abs(first) * 100 : 0
+                    let p = Self.pctOn(d, first, m.deposited(s, i))
                     Text("\(SampleEngine.fK(d)) · \(F.pct(p, places: 1))")
                         .sType(Self.changeValue)
                         .foregroundStyle(S.signed(d.rounded()))
@@ -391,7 +409,15 @@ struct AccountChart: View {
             return "\(Self.way(roc)) \(Self.percent(roc)) on capital" + words
         }
         let first = m.nav(s), d = bigValue - first - m.deposited(s, i)
-        return change(d, pct: first != 0 ? d / abs(first) * 100 : 0) + words
+        return change(d, pct: Self.pctOn(d, first, m.deposited(s, i))) + words
+    }
+
+    /// A change as a share of the capital at work: the range's first close plus any money paid in since (Nik, 24 Nov
+    /// 2026, Together: $149K paid into Nicolay's account in the month had read as a 62.8% loss on the $90.9K held a
+    /// month before). Money taken out never shrinks the base.
+    static func pctOn(_ d: Double, _ first: Double, _ paidIn: Double) -> Double {
+        let base = abs(first) + max(0, paidIn)
+        return base != 0 ? d / base * 100 : 0
     }
 
     /// "up 571 dollars, 0.6 percent"; privacy "hidden, up 0.6 percent" (the percentage stays).
@@ -616,7 +642,7 @@ struct AccountChart: View {
             return "\(pillTitle), \(range.words), " + change(v, pct: cap > 0 ? v / cap * 100 : 0) + (v.rounded() == 0 ? "" : " on capital")
         }
         let first = m.nav(s), d = m.nav(e) - first - m.deposited(s, e)
-        return "Account value, \(range.words), " + change(d, pct: first != 0 ? d / abs(first) * 100 : 0)
+        return "Account value, \(range.words), " + change(d, pct: Self.pctOn(d, first, m.deposited(s, e)))
     }
 
     /// The day under the scrub (else the last close) and its number: "Oct 5, 1,234,567 dollars"; privacy "Oct 5, hidden".

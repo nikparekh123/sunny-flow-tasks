@@ -6,7 +6,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useBooks, type BookId } from './data';
 import { maskMoney } from './format';
 
-export type Account = BookId | 'both';
+export type Account = BookId;
 /** The Home rail: What you hold or By name (handoff 2026-11-18, SunnyRail pills), remembered per computer; opens on
     What you hold. */
 export type RailView = 'hold' | 'name';
@@ -15,9 +15,9 @@ const read = (k: string) => { try { return localStorage.getItem(k); } catch { re
 const write = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private window */ } };
 
 interface WebState {
-  /** The book open now: S or N. On Overview it is the book the page came from. */
+  /** The book open now: S, N or T (Together). */
   book: BookId | null;
-  /** Every book this login holds, S first. */
+  /** Every book this login holds, menu order: Sunny, Nicolay, Together. */
   books: BookId[];
   account: Account;
   pickAccount: (a: Account) => void;
@@ -45,24 +45,22 @@ export function WebStateProvider({ children }: { children: ReactNode }) {
   const { data: members } = useBooks();
   const books = useMemo<BookId[]>(() => {
     const ids = (members ?? []).map((m) => m.book_id);
-    return (['S', 'N'] as BookId[]).filter((b) => ids.includes(b));
+    return (['S', 'N', 'T'] as BookId[]).filter((b) => ids.includes(b));
   }, [members]);
 
-  const [account, setAccount] = useState<Account>(() => (read('sw-acct') as Account) || 'S');
-  const [lastBook, setLastBook] = useState<BookId>(() => ((read('sw-acct') === 'N') ? 'N' : 'S'));
-  // A login that does not hold the remembered book opens on S when held, else its first book.
-  useEffect(() => {
-    if (!books.length) return;
-    if (account === 'both' && books.length < 2) setAccount(books[0]);
-    else if (account !== 'both' && !books.includes(account)) setAccount(books.includes('S') ? 'S' : books[0]);
-  }, [books, account]);
+  /* ⚠ TOGETHER FIRST (Nik, 24 Nov 2026: "the default view for me will always be Together"): a new visit opens on
+     Together when the login holds it; a pick lasts for the tab (sessionStorage), so a reload keeps it but the next
+     visit opens on Together again. A login without Together opens on S when held, else its first book. */
+  const [account, setAccount] = useState<Account | null>(() => { try { return sessionStorage.getItem('sw-acct') as Account | null; } catch { return null; } });
+  const pick = (a: Account | null): Account | null => (!books.length ? null : a && books.includes(a) ? a
+    : books.includes('T') ? 'T' : books.includes('S') ? 'S' : books[0]);
+  const book: BookId | null = pick(account);
+  useEffect(() => { if (onOverview) navigate('/home', { replace: true }); }, [onOverview, navigate]);
 
   const pickAccount = useCallback((a: Account) => {
     setAccount(a);
-    write('sw-acct', a);
-    if (a !== 'both') setLastBook(a);
-    navigate(a === 'both' ? '/overview' : '/home');
-  }, [navigate]);
+    try { sessionStorage.setItem('sw-acct', a); } catch { /* private window */ }
+  }, []);
 
   const [privacy, setPrivacyS] = useState(() => read('sw-privacy') === '1');
   const setPrivacy = useCallback((on: boolean) => { setPrivacyS(on); write('sw-privacy', on ? '1' : '0'); }, []);
@@ -77,15 +75,11 @@ export function WebStateProvider({ children }: { children: ReactNode }) {
   }, []);
   const closeActivity = useCallback(() => setActOpen(false), []);
 
-  const book: BookId | null = !books.length ? null : account === 'both' ? (books.includes(lastBook) ? lastBook : books[0]) : account;
-  // The page decides what the menu says: Overview is always "Both accounts" (even opened by its address), and any
-  // other page shows the book it is drawing.
-  const shown: Account = onOverview && books.length > 1 ? 'both' : account === 'both' ? (book ?? 'S') : account;
   const mask = useCallback((s: string) => (privacy ? maskMoney(s) : s), [privacy]);
 
-  const value = useMemo(() => ({ book, books, account: shown, pickAccount, privacy, setPrivacy, mask, railView, setRailView, tvOpen, setTvOpen,
+  const value = useMemo(() => ({ book, books, account: book ?? 'S', pickAccount, privacy, setPrivacy, mask, railView, setRailView, tvOpen, setTvOpen,
     actOpen, actFocus, openActivity, closeActivity }),
-  [book, books, shown, pickAccount, privacy, setPrivacy, mask, railView, setRailView, tvOpen, actOpen, actFocus, openActivity, closeActivity]);
+  [book, books, pickAccount, privacy, setPrivacy, mask, railView, setRailView, tvOpen, actOpen, actFocus, openActivity, closeActivity]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

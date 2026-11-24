@@ -16,7 +16,8 @@ import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { liveHours, regularHours } from './clock';
 
-export type BookId = 'S' | 'N';
+/** S Sunny, N Nicolay, T Together (every account added up, 24 Nov 2026). */
+export type BookId = 'S' | 'N' | 'T';
 export type J = any;
 export interface HomeRow { payload: J; built_at: string; book_id: BookId }
 export interface Member { book_id: BookId; role: 'owner' | 'viewer' | string }
@@ -66,7 +67,7 @@ export function useBooks() {
     staleTime: 180_000,
     refetchInterval: 180_000,
     queryFn: async (): Promise<Member[]> => {
-      if (FX) return [{ book_id: 'S', role: 'owner' }, { book_id: 'N', role: 'owner' }];
+      if (FX) return [{ book_id: 'S', role: 'owner' }, { book_id: 'N', role: 'owner' }, { book_id: 'T', role: 'owner' }];
       const { data, error } = await supabase.from('book_members' as never).select('book_id,role');
       if (error) throw error;
       const ms = (data ?? []) as unknown as Member[];

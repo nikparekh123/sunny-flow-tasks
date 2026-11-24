@@ -42,10 +42,10 @@ struct BriefHomeScreen: View {
     @State private var settling: Task<Void, Never>?
 
     /// The book this page shows. Overview keeps the last book under it, so going to or from it is no switch.
-    private var pageBook: BriefAccount { brief.account == .overview ? brief.lastBook : brief.account }
+    private var pageBook: BriefAccount { brief.account }
     /// The page's numbers are pageBook's: the sample books swap at once, a real one once its brief has landed.
     private var pageReady: Bool {
-        BriefDebug.sample || brief.book == nil || brief.book == (pageBook == .nicolay ? "N" : "S")
+        BriefDebug.sample || brief.book == nil || brief.book == pageBook.book
     }
 
     var body: some View {
@@ -111,7 +111,6 @@ struct BriefHomeScreen: View {
         .onChange(of: router.topTick[.home]) { _, _ in withAnimation(S.moving(S.page, reduce)) { pos.scrollTo(edge: .top) } }
         .onChange(of: pageBook) { _, _ in dip() }
         // Back from Overview, even to the same account, Home plays the same move (handoff 2026-11-18 §1.2).
-        .onChange(of: brief.onOverview) { was, now in if was && !now && pageBook == brief.account { dip() } }
         .onChange(of: pageReady) { _, ready in if ready && faded { settle(wait: false) } }
         .sheet(isPresented: Binding(get: { brief.debugOpen }, set: { brief.debugOpen = $0 })) {
             BriefDebugMenu().presentationDetents([.large])

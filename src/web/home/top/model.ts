@@ -112,7 +112,13 @@ export function rangeView(m: ChartModel, r: Range): RangeView {
 }
 
 /** "▼ $2.6K · 2.7%" for a change from a start value. */
-export const changeText = (d: number, from: number) => `${arrow(d)} ${money(d)} · ${pct(from ? (Math.abs(d) / Math.abs(from)) * 100 : 0)}`;
+/** "▼ $57.1K · 23.8%": the change and its share of the capital at work, the range's first close plus any money paid in
+    since (Nik, 24 Nov 2026, Together: $149K paid into Nicolay's account in the month had read as a 62.8% loss on the
+    $90.9K the two held a month ago). Money taken out never shrinks the base. */
+export const changeText = (d: number, from: number, paidIn = 0) => {
+  const base = Math.abs(from) + Math.max(0, paidIn);
+  return `${arrow(d)} ${money(d)} · ${pct(base ? (Math.abs(d) / base) * 100 : 0)}`;
+};
 
 /** The day's change in account value on the brief's day (open and post): the live figure for the current brief,
     else that day's close against the one before. */

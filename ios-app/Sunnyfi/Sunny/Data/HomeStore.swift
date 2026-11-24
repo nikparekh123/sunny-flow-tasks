@@ -67,7 +67,7 @@ final class HomeStore {
     var bookIDNow: String? {
         #if DEBUG && targetEnvironment(simulator)
         let a = ProcessInfo.processInfo.arguments
-        if a.contains("-fixture") { return picked ?? a.firstIndex(of: "-fixtureBook").flatMap { a.indices.contains($0 + 1) ? a[$0 + 1] : nil } ?? "S" }
+        if a.contains("-fixture") { return picked ?? a.firstIndex(of: "-fixtureBook").flatMap { a.indices.contains($0 + 1) ? a[$0 + 1] : nil } ?? (a.contains("-fixtureT") ? "T" : "S") }
         #endif
         return book?.id
     }
@@ -262,7 +262,8 @@ final class HomeStore {
     private func bookID() async throws -> String {
         #if DEBUG && targetEnvironment(simulator)
         let a = ProcessInfo.processInfo.arguments
-        if a.contains("-fixture") { books = a.contains("-fixtureN") ? ["S", "N"] : [bookIDNow ?? "S"]; return bookIDNow ?? "S" }
+        // `-fixtureT <path>`: book T's saved row (Together), with S and N when `-fixtureN` is given too.
+        if a.contains("-fixture") { books = (a.contains("-fixtureT") ? ["T"] : []) + (a.contains("-fixtureN") ? ["S", "N"] : [bookIDNow ?? "S"]); return bookIDNow ?? "S" }
         #endif
         let user = try await SupabaseService.client.auth.session.user.id
         // Another login on this phone: the kept books were the last one's.
@@ -277,7 +278,9 @@ final class HomeStore {
         books = sorted
         booksReadAt = Date()
         if let b = book, b.user == user, sorted.contains(b.id) { return b.id }
-        let id = picked.flatMap { sorted.contains($0) ? $0 : nil } ?? (sorted.contains("S") ? "S" : first)
+        // ⚠ TOGETHER FIRST (Nik, 24 Nov 2026: "the default view for me will always be Together"): a login that holds
+        // book T opens on it; else S when held, else its first owned book.
+        let id = picked.flatMap { sorted.contains($0) ? $0 : nil } ?? (sorted.contains("T") ? "T" : sorted.contains("S") ? "S" : first)
         book = (user, id)
         return id
     }
@@ -294,6 +297,7 @@ final class HomeStore {
         let a = ProcessInfo.processInfo.arguments
         // `-fixtureN <path>`: book N's saved row, for the account strip without signing in.
         if book == "N", let i = a.firstIndex(of: "-fixtureN"), i + 1 < a.count { return try Data(contentsOf: URL(fileURLWithPath: a[i + 1])) }
+        if book == "T", let i = a.firstIndex(of: "-fixtureT"), i + 1 < a.count { return try Data(contentsOf: URL(fileURLWithPath: a[i + 1])) }
         // `-fixturePartial <path>` (per-screen loading check): the first read is `-fixture` whole, each tick after it the saved
         // partial row (x_ keys) laid over it by the same Kept.merge the live reads use.
         if let j = a.firstIndex(of: "-fixturePartial"), j + 1 < a.count, let i = a.firstIndex(of: "-fixture"), i + 1 < a.count {
@@ -331,7 +335,7 @@ final class HomeStore {
     // MARK: Per-screen loading
 
     /// The parts beyond Home a screen on show needs, counted (two views asking keep it until both have gone).
-    enum Part: CaseIterable { case inputs, together, activity }
+    enum Part: CaseIterable { case inputs, activity }
     private static var needs: [Part: Int] = [:]
     /// The store on screen, so a part asked for is read at once.
     static weak var current: HomeStore?
@@ -344,12 +348,11 @@ final class HomeStore {
     private static let core = ["build", "built_at", "today", "trading_today", "calendar", "trade_to_415", "fresh", "prices_est", "share_avg",
         "account", "indices", "overnight", "futures", "chart", "deck", "last_week", "portfolio", "watchlist", "legs", "hours", "inventory",
         "writes", "yield", "history", "risk", "sold_vs_bought", "performance", "allocation", "theta_checks", "aftershock", "strategies",
-        "todo", "brief", "overview"]
+        "todo", "brief", "split"]
     private static func keys() -> [(String, String)] {
         var k = core.map { ($0, $0) }
         k.append(("activity", needs[.activity, default: 0] > 0 ? "activity" : "activity_lite"))
         if needs[.inputs, default: 0] > 0 { k.append(("brief_inputs", "brief_inputs")) }
-        if needs[.together, default: 0] > 0 { k.append(("together", "together")) }
         return k
     }
     /// The last whole payload per login and book, each update's keys laid in. Off the main thread, behind a lock.

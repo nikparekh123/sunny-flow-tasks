@@ -41,9 +41,10 @@
  * close the quotes are the closing ones, so premiums are the closing mid (Nik A3).
  * No em dashes in any words written here (Nik).
  */
+import { bookQ } from '../_shared/books.ts';
 import { calc, cover, CFG, dir, f1, f2, fk, heldPair, ITM, KS, netDelta, pc, row, won, bs as bsQ, type Expiry, type Fx, type Leg, type Name, type Quote, type Row } from '../_shared/sd-engine.ts';
 
-const BUILD = '2026-11-20.1';
+const BUILD = '2026-11-24.1';
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -274,7 +275,7 @@ Deno.serve(async (req) => {
       db(`daily_closes?ticker=eq.${t}&date=gte.${addDays(today, -70)}&date=lte.${today}&order=date.asc&select=date,close_price`),
       dbPage(`option_chain_next?ticker=eq.${t}&iv=gt.0&order=expiry.asc,side.asc,strike.asc&select=expiry,side,strike,iv`),
       dbPage(`gamma_view_day?ticker=eq.${t}&day=gte.${addDays(today, -5)}&view=like.20*&order=day.desc,view.asc&select=day,view,flip:data->flip,regime:data->regime,walls:data->walls`),
-      dbPage(`option_trades?book_id=eq.${book}&ticker=eq.${t}&voided_at=is.null&expiry=gte.${today}&order=id.asc&select=id,action,option_type,direction,contracts,strike,expiry,trade_date`, who),
+      dbPage(`option_trades?book_id=${bookQ(book)}&ticker=eq.${t}&voided_at=is.null&expiry=gte.${today}&order=id.asc&select=id,book_id,action,option_type,direction,contracts,strike,expiry,trade_date`, who),
       db(`market_live?symbol=eq.${t}&select=prev_close,captured_at`),
       db(`market_calendar?date=eq.${today}&select=kind,closes`),
     ]);
@@ -466,7 +467,7 @@ Deno.serve(async (req) => {
     const lotsBy = new Map<string, { id: string; n: number; d: string }[]>();
     {
       const groups = new Map<string, Row_[]>();
-      for (const x of myTrades) { const k = `${x.option_type}|${x.direction}|${Number(x.strike)}|${x.expiry}`; (groups.get(k) ?? groups.set(k, []).get(k)!).push(x); }
+      for (const x of myTrades) { const k = `${x.option_type}|${x.direction}|${Number(x.strike)}|${x.expiry}|${x.book_id ?? ''}`; (groups.get(k) ?? groups.set(k, []).get(k)!).push(x); }
       for (const [k, rows] of groups) {
         if (!k.split('|')[1].startsWith('short')) continue;
         let closeQty = rows.filter((x) => x.action === 'close').reduce((a, x) => a + Number(x.contracts), 0);
@@ -475,8 +476,9 @@ Deno.serve(async (req) => {
           const take = Math.min(closeQty, Number(o.contracts)); closeQty -= take;
           if (Number(o.contracts) - take > 0) live.push({ id: String(o.id), n: Number(o.contracts) - take, d: String(o.trade_date) });
         }
-        const [ty, , K, ex] = k.split('|');
-        if (live.length) lotsBy.set(`${ty}|${Number(K)}|${ex}`, live);
+        // Together (24 Nov 2026): each book's lots match on their own, then the same contract's lots sit together.
+        const [ty, , K, ex] = k.split('|'), kk = `${ty}|${Number(K)}|${ex}`;
+        if (live.length) lotsBy.set(kk, [...(lotsBy.get(kk) ?? []), ...live]);
       }
     }
     const lotIds = [...lotsBy.values()].flat().map((x) => x.id);

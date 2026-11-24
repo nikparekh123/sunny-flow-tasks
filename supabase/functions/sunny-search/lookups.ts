@@ -1,3 +1,4 @@
+import { bookQ } from '../_shared/books.ts';
 /**
  * The search card menu's lookups (Sunny search, Nik 27 Oct 2026): one per card, each returning its card's data
  * on its own as { type, tag, source: { kind, at }, data }. Reads what Sunny already works out (home_snapshot,
@@ -30,7 +31,8 @@ export async function caller(req: Request): Promise<{ book: string; owner: boole
   /* Nik owns his book S and his cousin's N (8 Nov 2026): Search reads S, as the app opens on S, never whichever row
      comes first; a request may name another book the caller belongs to (`body.book`, checked in index.ts). */
   const owned = m.filter((x) => x.role === 'owner');
-  const own = owned.find((x) => x.book_id === 'S') ?? owned[0] ?? m[0];
+  // Together first (Nik, 24 Nov 2026: "the default view for me will always be Together"), else S, else the first.
+  const own = owned.find((x) => x.book_id === 'T') ?? owned.find((x) => x.book_id === 'S') ?? owned[0] ?? m[0];
   return own ? { book: String(own.book_id), owner: own.role === 'owner', system: false, user: String(u.id),
     books: m.map((x) => ({ book: String(x.book_id), owner: x.role === 'owner' })) } : null;
 }
@@ -813,11 +815,11 @@ const usd0 = money;
 async function yourName(c: Ctx, t: string, ch: Row) {
   const from = BOOK_FROM[c.book] ?? BOOK_FROM.S, today = c.today, spot = spotOf(c, t), fri = fridayFrom(today);
   const [trades, sells, lots, pos, closes, po] = await Promise.all([
-    dbAll(`option_trades?book_id=eq.${c.book}&ticker=eq.${t}&voided_at=is.null&select=id,trade_date,executed_at,action,direction,` +
+    dbAll(`option_trades?book_id=${bookQ(c.book)}&ticker=eq.${t}&voided_at=is.null&select=id,book_id,trade_date,executed_at,action,direction,` +
       'option_type,strike,expiry,contracts,premium,realized_pl,realized_pl_source,note&order=trade_date.asc,executed_at.asc,id.asc'),
-    db(`share_sells?book_id=eq.${c.book}&ticker=eq.${t}&voided_at=is.null&trade_date=gte.${from}&select=trade_date,realized_pl`).catch(() => [] as Row[]),
-    db(`share_lots?book_id=eq.${c.book}&ticker=eq.${t}&voided_at=is.null&acquired_date=gte.${from}&select=acquired_date,realized_pl`).catch(() => [] as Row[]),
-    dbAll(`account_positions_daily?book_id=eq.${c.book}&underlying=eq.${t}&report_date=gte.${from}` +
+    db(`share_sells?book_id=${bookQ(c.book)}&ticker=eq.${t}&voided_at=is.null&trade_date=gte.${from}&select=trade_date,realized_pl`).catch(() => [] as Row[]),
+    db(`share_lots?book_id=${bookQ(c.book)}&ticker=eq.${t}&voided_at=is.null&acquired_date=gte.${from}&select=acquired_date,realized_pl`).catch(() => [] as Row[]),
+    dbAll(`account_positions_daily?book_id=${bookQ(c.book)}&underlying=eq.${t}&report_date=gte.${from}` +
       '&select=report_date,position_value,fifo_pnl_unrealized&order=report_date.asc,account_id.asc,conid.asc'),
     db(`daily_closes?ticker=eq.${t}&date=gte.${addDays(from, -7)}&select=date,close_price&order=date.asc`).catch(() => [] as Row[]),
     payoff(c, t, false).catch(() => null),
@@ -833,7 +835,8 @@ async function yourName(c: Ctx, t: string, ch: Row) {
   };
   const groups = new Map<string, Row[]>();
   for (const x of trades) {
-    const k = `${x.option_type}|${x.direction}|${Number(x.strike)}|${x.expiry}`;
+    // Each book's fills match on their own (Together, 24 Nov 2026).
+    const k = `${x.option_type}|${x.direction}|${Number(x.strike)}|${x.expiry}|${x.book_id ?? ''}`;
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k)!.push(x);
   }

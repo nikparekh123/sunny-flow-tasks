@@ -15,9 +15,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { nameDot, soldInSd, stepOf } from '../../../supabase/functions/_shared/positions-engine.ts';
-import { BOOK_NAME } from '../components/AccountMenu';
+import { bookTitle } from '../components/AccountMenu';
 import { clock12, estWords, ny, shortDate } from '../lib/clock';
-import { useHome, usePositions, usePrefetchPositions, useSd, useSdMany, useStrikes, useTicker, type J } from '../lib/data';
+import { useHome, usePositions, usePrefetchPositions, useSd, useSdMany, useStrikes, useTicker, type BookId, type J } from '../lib/data';
 import { arrow, pct, price } from '../lib/format';
 import { useWeb } from '../lib/state';
 import type { PCRange } from '../../../supabase/functions/_shared/price-chart.ts';
@@ -97,7 +97,7 @@ export default function Positions() {
   };
   // Before the open and after the close the marks are estimates from pre-market or after-hours trades (18 Nov 2026).
   const est = estWords(payload?.brief_inputs?.prices_est ?? payload?.prices_est);
-  const subtitle = book ? `${BOOK_NAME[book]}’s book${payload ? ' · ' + (est ?? asOf(payload.fresh?.marks)) : ''}` : '';
+  const subtitle = book ? `${bookTitle(book)}${payload ? ' · ' + (est ?? asOf(payload.fresh?.marks)) : ''}` : '';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <PosStyles />
@@ -144,7 +144,7 @@ export default function Positions() {
 }
 
 /* ── One name: the header, then everything that reads its grid ──────────── */
-function Name({ book, t, name, payload }: { book: 'S' | 'N'; t: string; name: J; payload: J }) {
+function Name({ book, t, name, payload }: { book: BookId; t: string; name: J; payload: J }) {
   const { mask } = useWeb();
   // The legs as the grid lists them (key and count), so a trade picked up asks for the grid at once.
   const legSig = ((payload?.brief_inputs?.names ?? []).find((n: J) => n.t === t)?.legs ?? []).map((l: J) => `${l.k}:${l.q}`).sort().join(',');
@@ -187,7 +187,7 @@ function usePageState<K extends keyof typeof pageState>(k: K): [(typeof pageStat
   return [v, (x) => { pageState[k] = x; setV(x); }];
 }
 
-function Detail({ book, t, grid, payload, mask }: { book: 'S' | 'N'; t: string; grid: GridW; payload: J; mask: (s: string) => string }) {
+function Detail({ book, t, grid, payload, mask }: { book: BookId; t: string; grid: GridW; payload: J; mask: (s: string) => string }) {
   const inputs: Inputs | null = payload?.brief_inputs ?? null;
   const m = useMemo(() => new PosModel(grid, inputs), [grid, inputs]);
   const wf = useWhatIf(book, t);

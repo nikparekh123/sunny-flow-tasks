@@ -30,19 +30,8 @@ import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { buildTogether, type Side, type SideEvent, type SideLeg } from './together.ts';
 import { type ActEvent, type ActName, activityEvents, levelsOf } from './activity.ts';
 import { bsDelta, bsValue, fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-18.17';
-/* ⚠ ONE HOME PER BOOK (31 Oct 2026, step 4 of the cousin's book). A build is one book's: every ledger read
-   names it, its side rows (reports, account_history, theta_checks) carry it, and its row lands in home_snapshot
-   by book_id. start: the book's first day (BOOK_START in build); chart: the first day its charts show; id: its
-   home_snapshot id; accounts: how many IBKR accounts make a full day (a day counts once all have reported).
-   Book N is the cousin's account (U29584055): $1,000 from 20 Oct 2026, funded with $49,000 on 29 Oct, so it
-   starts on 29 Oct (the change line is value less the range's first close, so a deposit inside it reads as a gain). */
-const BOOKS: Record<string, { start: string; chart: string; id: number; accounts: number }> = {
-  S: { start: '2026-08-31', chart: '2026-09-01', id: 1, accounts: 2 },   // PNL_GLOSSARY: the stock-replacement shift
-  N: { start: '2026-10-29', chart: '2026-10-29', id: 2, accounts: 1 },
-  // The demo book D (2 Nov 2026) was deleted on 6 Nov with its rows, crons and demo_book_roll(); the cousin's
-  // login owns book N again. Don't reuse home_snapshot id 3 for anything that expects the old demo rows.
-};
+const BUILD = '2026-11-24.2';
+import { BOOKS, partsOf } from '../_shared/books.ts';
 /* A book's heartbeat feed: book S keeps the old names, others add theirs (sunny-home-N). */
 const feedOf = (feed: string, book: string) => (book === 'S' ? feed : `${feed}-${book}`);
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
@@ -286,6 +275,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
                      opts: { dry?: boolean; price?: string; book?: string; clock?: { wd: string; mins: number; date: string };
                              holiday?: 'week' | 'early' | null } = {}): Promise<{ payload: Row; ms: number; steps: Record<string, number> }> {
   const bookId = opts.book ?? 'S', BOOK_START = BOOKS[bookId].start, accountsN = BOOKS[bookId].accounts;
+  /* The ledgers' filter: this book, or every real book for Together. */
+  const PARTS = partsOf(bookId), group = PARTS.length > 1 || PARTS[0] !== bookId;
+  const BQ = group ? `in.(${PARTS.join(',')})` : `eq.${bookId}`;
   let checkSummary: Row[] | null = null;
   /* Where the build's time goes, returned with the timings (no data). */
   const steps: Record<string, number> = {};
@@ -308,32 +300,32 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   /* ⚠ THIS BOOK ONLY (31 Oct 2026). Book N (Nik's cousin) syncs into the same ledgers as book S, tagged book_id;
      every ledger read here names the book being built, or one book's trades land in the other's Home. Greeks and
      marks follow option_trades by id; quotes, chains, closes and the calendar are everyone's. */
-  const [trades, greeks, quotes, market, acctDays, cal, earn, seasons, closes, runs, sells, lots, savedReports, macro,
+  const [trades, greeks, quotes, market, acctRows, cal, earn, seasons, closes, runs, sells, lots, savedReports, macro,
          openChecks, divs, posAll, lmd, chainRows, savedHistory, divPast, upQuotes, rungQuotes] = await Promise.all([
-    page(`option_trades?voided_at=is.null&book_id=eq.${bookId}&order=id.asc&select=id,ticker,trade_date,action,option_type,`
+    page(`option_trades?voided_at=is.null&book_id=${BQ}&order=id.asc&select=id,book_id,ticker,trade_date,action,option_type,`
       + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl,realized_pl_source,note,created_at'),
     /* One row per leg ever marked: grows with every trade, so paged. */
     page('option_greeks_live?order=option_trade_id.asc&select=option_trade_id,last_mark,iv,delta,gamma,theta,vega,underlying,captured_at'),
     get('ticker_quotes_live?select=ticker,spot,day_change_pct,captured_at'),
     get('market_live?select=*'),
-    get(`account_value_daily?book_id=eq.${bookId}&report_date=gte.${addDays(BOOK_START, -5)}&order=report_date.desc`),
+    get(`account_value_daily?book_id=${BQ}&report_date=gte.${addDays(BOOK_START, -5)}&order=report_date.desc`),
     get(`market_calendar?date=gte.${addDays(BOOK_START, -40)}&date=lte.${addDays(today, 120)}&order=date.asc`),
     get(`earnings_events?report_date=gte.${addDays(today, -1)}&report_date=lte.${addDays(today, 70)}`
       + '&select=ticker,report_date,report_time,date_estimated,source&order=report_date.asc'),
     get('earnings_season?select=*&order=starts.desc&limit=6'),
     page(`daily_closes?date=gte.${[addDays(today, -45), addDays(BOOK_START, -7)].sort()[0]}&order=date.asc,ticker.asc&select=ticker,date,close_price`),
-    get(`ibkr_sync_runs?status=eq.success&book_id=eq.${bookId}&order=finished_at.desc&limit=1&select=finished_at`),
-    get(`share_sells?voided_at=is.null&book_id=eq.${bookId}&trade_date=gte.${BOOK_START}&select=ticker,trade_date,quantity,price,realized_pl`),
-    get(`share_lots?voided_at=is.null&book_id=eq.${bookId}&acquired_date=gte.${BOOK_START}&select=ticker,acquired_date,qty_original,cost_per_share,realized_pl`),
+    get(`ibkr_sync_runs?status=eq.success&book_id=${BQ}&order=finished_at.desc&limit=${group ? 40 : 1}&select=finished_at,book_id`),
+    get(`share_sells?voided_at=is.null&book_id=${BQ}&trade_date=gte.${BOOK_START}&select=ticker,trade_date,quantity,price,realized_pl`),
+    get(`share_lots?voided_at=is.null&book_id=${BQ}&acquired_date=gte.${BOOK_START}&select=ticker,acquired_date,qty_original,cost_per_share,realized_pl`),
     get(`reports?book_id=eq.${bookId}&shown_on=gte.${addDays(today, -1)}&select=kind,period_start,payload`),
     get(`macro_events?event_date=gte.${today}&event_date=lte.${addDays(today, 21)}&importance=gte.3`
       + '&category=in.(inflation,jobs,rates)&order=event_date.asc&select=event_date,event_time,name'),
-    get(`theta_checks?book_id=eq.${bookId}&status=eq.open&select=*&order=found_on.asc`),
+    get(`theta_checks?book_id=${BQ}&status=eq.open&select=*&order=found_on.asc`),
     get(`dividends?ex_date=gte.${today}&ex_date=lte.${addDays(today, 45)}&select=ticker,ex_date,pay_date,cash_amount&order=ex_date.asc`),
     /* ⚠ ONE ROUND TRIP (audit, 13 Oct 2026). These used to wait their turn
        mid-build and cost ~0.3 s of a 0.55 s build. IBKR's daily positions
        cover both the live value's anchor and the value side's history. */
-    page(`account_positions_daily?book_id=eq.${bookId}&report_date=gte.${[addDays(winStart, -10), addDays(BOOK_START, -3)].sort()[0]}&order=report_date.asc,account_id.asc,conid.asc`
+    page(`account_positions_daily?book_id=${BQ}&report_date=gte.${[addDays(winStart, -10), addDays(BOOK_START, -3)].sort()[0]}&order=report_date.asc,account_id.asc,conid.asc`
       + '&select=report_date,account_id,conid,symbol,underlying,asset_category,put_call,strike,expiry,multiplier,position,'
       + 'mark_price,position_value,cost_basis_money'),
     page(`leg_marks_daily?day=gte.${marksFrom}&order=day.asc,option_trade_id.asc`
@@ -351,6 +343,28 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   ]);
 
   step('reads');
+  /* Together: IBKR's daily values add up by day (each book is one row a day in account_value_daily); a day is whole
+     (accounts 1) once every book that had started had reported in full. The latest IBKR pickup is the oldest of the
+     books' latest, so Home never reads fresher than its stalest account. */
+  const acctDays: Row[] = !group ? acctRows : (() => {
+    const first = new Map<string, string>();
+    for (const r of acctRows) { const b = String(r.book_id), d = String(r.report_date); if (!first.has(b) || d < first.get(b)!) first.set(b, d); }
+    const byDay = new Map<string, Row[]>();
+    for (const r of acctRows) (byDay.get(String(r.report_date)) ?? byDay.set(String(r.report_date), []).get(String(r.report_date))!).push(r);
+    const NUM = ['nav', 'cash', 'stock', 'options', 'interest_accruals', 'mtm', 'deposits_withdrawals', 'interest', 'interest_accrued',
+      'commissions', 'other_fees', 'commissions_mtd', 'broker_interest_mtd', 'dividends'];
+    return [...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([d, rs]) => {
+      const whole = PARTS.every((b) => { const r = rs.find((x) => String(x.book_id) === b);
+        return r ? Number(r.accounts) >= BOOKS[b].accounts : !first.has(b) || d < first.get(b)!; });
+      const o: Row = { report_date: d, book_id: bookId, accounts: whole ? 1 : 0 };
+      for (const k of NUM) o[k] = rs.some((x) => x[k] != null) ? rs.reduce((a, x) => a + Number(x[k] ?? 0), 0) : null;
+      return o;
+    });
+  })();
+  if (group && runs.length) {
+    const latest = PARTS.map((b) => runs.find((r) => String(r.book_id) === b)?.finished_at ?? null);
+    runs.splice(0, runs.length, { finished_at: latest.some((x) => !x) ? latest.filter(Boolean).sort()[0] ?? null : latest.sort()[0] });
+  }
   // ── Trading days (calendar-aware) ──
   if (opts.holiday) {
     /* The pinned holiday: an early close today at 1:00 PM, or a closed day this week (the first weekday after today,
@@ -374,7 +388,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   const nextTrading = (d: string) => { let x = addDays(d, 1); while (!isTrading(x)) x = addDays(x, 1); return x; };
 
   // ── Open legs: pooled FIFO per contract, as mp-refresh and the iOS app ──
-  const keyOf = (t: Row) => `${String(t.ticker).toUpperCase()}|${t.option_type}|${t.direction}|${Number(t.strike)}|${t.expiry}`;
+  /* Each book's trades match on their own (book_id in the key): a close in one account never takes another's open. */
+  const keyOf = (t: Row) => `${t.book_id ?? ''}|${String(t.ticker).toUpperCase()}|${t.option_type}|${t.direction}|${Number(t.strike)}|${t.expiry}`;
   const groups = new Map<string, Row[]>();
   for (const t of trades) { const k = keyOf(t); (groups.get(k) ?? groups.set(k, []).get(k)!).push(t); }
   const gBy = new Map(greeks.map((g) => [String(g.option_trade_id), g]));
@@ -402,6 +417,21 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       mark: num(g?.last_mark), iv: num(g?.iv), delta: num(g?.delta), theta: num(g?.theta),
       gamma: num(g?.gamma), vega: num(g?.vega), underlying: num(g?.underlying), marked_at: g?.captured_at ?? null,
     });
+  }
+  /* Together: the same contract held in two books is one leg, its counts added, its price the contracts' average, its
+     mark the newest (the same contract marks the same). */
+  if (group) {
+    const one = new Map<string, Leg>();
+    for (const l of legs) {
+      const k = `${l.ticker}|${l.type}|${l.side}|${l.strike}|${l.expiry}`, o = one.get(k);
+      if (!o) { one.set(k, { ...l }); continue; }
+      const n = o.n + l.n;
+      o.avg = r2((o.avg * o.n + l.avg * l.n) / n * 10000) / 10000;
+      o.n = n; if (l.opened < o.opened) o.opened = l.opened;
+      if (String(l.marked_at ?? '') > String(o.marked_at ?? '')) Object.assign(o, { mark: l.mark, iv: l.iv, delta: l.delta, theta: l.theta,
+        gamma: l.gamma, vega: l.vega, underlying: l.underlying, marked_at: l.marked_at });
+    }
+    legs.splice(0, legs.length, ...one.values());
   }
   legs.sort((a, b) => a.ticker.localeCompare(b.ticker) || a.expiry.localeCompare(b.expiry) || a.strike - b.strike);
   const book = [...new Set(legs.map((l) => l.ticker))].sort();
@@ -1745,7 +1775,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   /* DONE FOR THIS WEEK (Nik, 26 Oct 2026): a name whose week's call sale he finished on purpose with fewer calls
      than one per LEAPS (the app's button, sale_done). That week sells nothing more and the hedge is sized on what
      is sold. */
-  const saleDone = new Set((await get(`sale_done?book_id=eq.${bookId}&week=gte.${addDays(today, -7)}&select=ticker,week`))
+  const saleDone = new Set((await get(`sale_done?book_id=${BQ}&week=gte.${addDays(today, -7)}&select=ticker,week`))
     .map((r) => `${r.ticker}|${r.week}`));
   const flowProfile: Record<string, Row> = {};
   for (const r of await get('flow_profile?select=ticker,asof,sessions,universe,retail,profile,inputs')) {
@@ -3204,7 +3234,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     get('crash_universe?select=ticker'),
     get('crash_scans?order=day.desc&limit=3&select=day,scanned_at,universe,crashes'),
     get(`crash_events?day=gte.${addDays(today, -14)}&order=day.desc,drop_pct.asc&select=ticker,day,prev_close,close,drop_pct,entry_day,day2_close,day2_pct`),
-    get(`crash_events?taken=eq.true&book_id=eq.${bookId}&select=ticker,entry_day&order=entry_day.desc`),
+    get(`crash_events?taken=eq.true&book_id=${BQ}&select=ticker,entry_day&order=entry_day.desc`),
   ]);
   const aftershock = {
     universe: aUni.length,
@@ -3317,7 +3347,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const since = addDays(today, -8);
     const held = [...new Set([...legs.map((l) => l.ticker), ...[...sharesNow].filter(([, n]) => n > 0).map(([t]) => t)])].sort();
     const [runsW, techs, saved] = await Promise.all([
-      get(`ibkr_sync_runs?book_id=eq.${bookId}&status=eq.success&rows_inserted=gt.0&started_at=gte.${since}&order=started_at.desc&select=id,started_at,finished_at,rows_inserted`),
+      get(`ibkr_sync_runs?book_id=${BQ}&status=eq.success&rows_inserted=gt.0&started_at=gte.${since}&order=started_at.desc&select=id,started_at,finished_at,rows_inserted`),
       held.length ? get(`ticker_technicals?ticker=in.(${held.join(',')})&day=gte.${addDays(today, -10)}&order=day.desc&select=ticker,day,sma20,sma50,sma200`) : Promise.resolve([]),
       get(`activity_events?book_id=eq.${bookId}&day=gte.${since}&order=at.desc&select=key,day,at,kind,t,title,body,opens,data`),
     ]);
@@ -3493,7 +3523,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     for (const m of macro) evs.push({ d: String(m.event_date), kind: 'macro', title: String(m.name), time: m.event_time ?? null });
     for (const c of cal) if (c.kind === 'closed' && String(c.date) >= today && String(c.date) <= addDays(today, 45)) evs.push({ d: String(c.date), kind: 'market', title: String(c.name ?? 'Market holiday') });
     side = {
-      id: bookId, name: bookId === 'S' ? 'Sunny' : 'Nicolay', start: BOOK_START,
+      id: bookId, name: BOOKS[bookId].name, start: BOOK_START,
       nav: (savedHistory as Row[]).filter((h) => h.nav != null).map((h) => [String(h.day), Number(h.nav), depOf.get(String(h.day)) ?? 0] as [string, number, number]),
       live: account.ok ? { d: today, v: Number(account.value), today: Number(account.today?.amount ?? 0) } : null,
       legs: [...legParts.values()].filter((l) => l.n > 0 || Math.abs(l.today) >= 0.5)
@@ -3526,6 +3556,25 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       if (side) together = buildTogether(sideN ? [side, sideN] : [side], today, companyOf);
     } catch (e) { overview = { v: 1, error: String((e as Error)?.message ?? e) }; }
   }
+  /* ⚠ TOGETHER'S SPLIT (handoff 2026-11-24 §2.2: "the account chart is both added, with Sunny $X · Nicolay $Y under the
+     number"; headings add up with each account's part in a muted line). Each book's own latest build gives its part:
+     its value and today (Home's own), and its side for the both-accounts pieces (the value line by book, realized
+     P&L by month by book, coming up). Never breaks the build. */
+  let split: Row[] | null = null;
+  if (group) {
+    try {
+      const snaps = await get(`home_snapshot?book_id=${BQ}&select=book_id,built_at,account:payload->account,side:payload->side,parts:payload->brief_inputs->parts->book`);
+      const by = new Map(snaps.map((r) => [String(r.book_id), r]));
+      split = PARTS.map((b) => { const r = by.get(b), a = (r?.account ?? {}) as Row;
+        return { id: b, name: BOOKS[b].name, value: a.ok ? num(a.value) : null, today: a.ok ? num(a.today?.amount) : null,
+          pct: a.ok ? num(a.today?.pct) : null, built_at: r?.built_at ?? null,
+          /* Your book's parts on that account (brief_inputs.parts.book): the phone's Your book puts S and N under every
+             total on Together (handoff 2026-11-24 §2.2). */
+          parts: r?.parts ?? null }; });
+      const sidesP = PARTS.map((b) => by.get(b)?.side as Side | null).filter(Boolean) as Side[];
+      if (sidesP.length) together = buildTogether(sidesP, today, companyOf);
+    } catch (e) { console.warn('sunny-home together split', String((e as Error)?.message ?? e)); }
+  }
   step('overview');
   const payload = {
     build: BUILD, built_at: new Date().toISOString(), today, trading_today: isTrading(today),
@@ -3534,7 +3583,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     trade_to_415: TRADE_TO_415.filter((t) => book.includes(t)),
     /* `up`: a hedge call (the quarterly calls under the call rule), apart from the LEAPs in the
        Positions totals (handoff 30). */
-    fresh, prices_est: pricesEst, account, side, together, share_avg: shareAvg, activity,
+    fresh, prices_est: pricesEst, account, side, together, split, book_of: { id: bookId, name: BOOKS[bookId].name, parts: group ? PARTS : null },
+    share_avg: shareAvg, activity,
     /* Per-screen loading (18 Nov 2026): Home's own Activity, the sync line, the Levels figures and each event's title,
        without bodies or the trades inside a pickup; the phones and the web read `activity` whole only with the page
        open. */

@@ -1,5 +1,6 @@
-// The account menu on Home and Overview (README "Account menu"): Sunny, Nicolay, Both accounts, then Sign out.
-// Each row's value is that book's account value from its own Home snapshot.
+// The account menu (handoff 2026-11-24 §3): Sunny, Nicolay, Together, then Sign out. Together is every account added
+// up ("Together $125,120 · Sunny and Nicolay"); Overview is off the menu. Each row's value is that book's account
+// value from its own Home snapshot.
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from '../lib/auth';
@@ -7,8 +8,10 @@ import { useHome, type BookId } from '../lib/data';
 import { dollars } from '../lib/format';
 import { useWeb, type Account } from '../lib/state';
 
-export const BOOK_NAME: Record<BookId, string> = { S: 'Sunny', N: 'Nicolay' };
-export const accountTitle = (a: Account) => (a === 'both' ? 'Both accounts' : BOOK_NAME[a]);
+export const BOOK_NAME: Record<BookId, string> = { S: 'Sunny', N: 'Nicolay', T: 'Together' };
+export const accountTitle = (a: Account) => BOOK_NAME[a];
+/** "Sunny’s book", "Sunny and Nicolay’s book" (Together, as the design's page titles). */
+export const bookTitle = (b: BookId) => (b === 'T' ? 'Sunny and Nicolay’s book' : `${BOOK_NAME[b]}’s book`);
 
 export function AccountMenu() {
   const { account, books, pickAccount, mask } = useWeb();
@@ -16,6 +19,7 @@ export function AccountMenu() {
   const [open, setOpen] = useState(false);
   const s = useHome(books.includes('S') ? 'S' : null).data?.payload?.account?.value as number | undefined;
   const n = useHome(books.includes('N') ? 'N' : null).data?.payload?.account?.value as number | undefined;
+  const t = useHome(books.includes('T') ? 'T' : null).data?.payload?.account?.value as number | undefined;
 
   useEffect(() => {
     if (!open) return;
@@ -27,7 +31,7 @@ export function AccountMenu() {
   const rows: { k: Account; mono: string; l: string; v: string }[] = [];
   if (books.includes('S')) rows.push({ k: 'S', mono: 'S', l: 'Sunny', v: s != null ? `${dollars(s)} total balance` : '' });
   if (books.includes('N')) rows.push({ k: 'N', mono: 'N', l: 'Nicolay', v: n != null ? `${dollars(n)} total balance` : '' });
-  if (books.length > 1) rows.push({ k: 'both', mono: 'S N', l: 'Both accounts', v: s != null && n != null ? `${dollars(s + n)} together` : '' });
+  if (books.includes('T')) rows.push({ k: 'T', mono: 'S N', l: 'Together', v: t != null ? `${dollars(t)} · Sunny and Nicolay` : '' });
 
   return (
     <div style={{ position: 'relative' }}>

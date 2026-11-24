@@ -136,18 +136,12 @@ struct HomeView: View {
                     .modifier(OwnTabBar())
                 }
             }
-            if brief.onOverview {
-                // Every switch on the strip moves the same way (handoff 2026-11-18 §1.2): Overview's content fades up
-                // from .15 and slides 28 pt from the side it comes from (OverviewScreen); its background stays put.
-                OverviewScreen()
-                    .accessibilityAddTraits(.isModal)   // VoiceOver stays on Overview, not the page under it
-                    .transition(.opacity)
-                    .zIndex(1)
-            }
             if brief.activityOpen {
                 ActivityPage(activity: brief.activity, book: brief.book ?? "S", today: brief.today,
-                             books: ([brief.book ?? "S"] + store.books.filter { $0 != (brief.book ?? "S") }).map { b in
-                                 (name: b == "N" ? "Nicolay" : "Sunny", act: b == (brief.book ?? "S") ? brief.activity : store.payload(b)?.activity)
+                             // The IBKR card names real accounts: on Together each of them, else this one first.
+                             books: (brief.book == "T" ? store.books.filter { $0 != "T" }
+                                     : [brief.book ?? "S"] + store.books.filter { $0 != (brief.book ?? "S") && $0 != "T" }).map { b in
+                                 (name: BriefAccount(book: b)?.name ?? b, act: b == (brief.book ?? "S") ? brief.activity : store.payload(b)?.activity)
                              },
                              close: { withAnimation(reduce ? nil : S.standard(0.45)) { brief.activityOpen = false } },
                              openName: { t in
@@ -171,7 +165,6 @@ struct HomeView: View {
         .environment(\.homeWords, store.words ?? home)
         // To do (10 Nov 2026): the quiet "7 to do" on Home and Positions; each login sees its own list (Nik: his, shared by his two logins).
         .environment(\.todoTap, todo.allowed ? { brief.sheet = .todo } : nil)
-        .animation(reduce ? S.fade : S.page, value: brief.onOverview)
         .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.45), value: brief.ticker)
         .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.45), value: brief.activityOpen)
         .sheet(item: Binding(get: { brief.sheet }, set: { brief.sheet = $0 })) { k in
@@ -203,8 +196,7 @@ struct HomeView: View {
             brief.est = home.pricesEst.map { ($0.session, SXClient.parseDate($0.at ?? "")) }
             brief.activity = home.activity
             brief.today = home.today
-            brief.ingest(home.brief, key: home.builtAt, book: store.bookIDNow, overview: home.overview, books: store.books, inputs: home.briefInputs,
-                         together: home.together)
+            brief.ingest(home.brief, key: home.builtAt, book: store.bookIDNow, books: store.books, inputs: home.briefInputs, split: home.split)
             brief.calendar = home.calendar   // early closes move the moments (Audit 7)
             // Positions made ready in the background, once, about 0.9 s after Home first shows (handoff 2026-11-18 §1.3).
             if !positionsReady {
@@ -212,10 +204,10 @@ struct HomeView: View {
                 Task { try? await Task.sleep(for: .milliseconds(900)); if router.tab != .positions { PositionsTab.prefetch(brief) } }
             }
         }
-        // The strip picked a book: read its Home (Overview stays on S's last build).
+        // The strip picked a book: read its Home.
         .onChange(of: brief.account) { _, a in
-            guard !BriefDebug.sample, a != .overview else { return }
-            Task { await store.show(book: a == .nicolay ? "N" : "S") }
+            guard !BriefDebug.sample else { return }
+            Task { await store.show(book: a.book) }
         }
     }
 
@@ -238,7 +230,7 @@ struct HomeView: View {
             }
         }
         guard BriefDebug.sample else { return }
-        brief.accounts = [.overview, .sunny, .nicolay]
+        brief.accounts = [.together, .sunny, .nicolay]
         brief.account = BriefDebug.account ?? .sunny
         UserDefaults.standard.set(BriefDebug.privacy, forKey: BriefPrivacy.key)
     }
@@ -486,10 +478,9 @@ private struct TabBarHost: View {
     let search: (_ listening: Bool) -> Void
     var body: some View {
         SunnyTabBar(tab: router.tab, pick: pick, search: search)
-            .offset(y: barDown || brief.onOverview || brief.ticker != nil || brief.activityOpen ? 120 : 0)
-            .opacity(barGone || brief.onOverview || brief.ticker != nil || brief.activityOpen ? 0 : 1)
-            .allowsHitTesting(!router.searchOpen && !brief.onOverview && brief.ticker == nil && !brief.activityOpen)
-            .animation(reduce ? S.fade : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: brief.onOverview)
+            .offset(y: barDown || brief.ticker != nil || brief.activityOpen ? 120 : 0)
+            .opacity(barGone || brief.ticker != nil || brief.activityOpen ? 0 : 1)
+            .allowsHitTesting(!router.searchOpen && brief.ticker == nil && !brief.activityOpen)
             // A ticker chart pushed from a tile: the bar leaves with it (it used to vanish at once).
             .animation(reduce ? S.fade : .timingCurve(0.32, 0.72, 0, 1, duration: 0.45), value: brief.ticker != nil)
     }

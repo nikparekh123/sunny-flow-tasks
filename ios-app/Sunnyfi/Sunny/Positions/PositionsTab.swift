@@ -62,8 +62,8 @@ struct PositionsTab: View {
     private static let margin: CGFloat = 16
 
     private var bookID: String? { brief.book }
-    private var pageBook: BriefAccount { brief.account == .overview ? brief.lastBook : brief.account }
-    private var pageReady: Bool { brief.book == nil || brief.book == (pageBook == .nicolay ? "N" : "S") }
+    private var pageBook: BriefAccount { brief.account }
+    private var pageReady: Bool { brief.book == nil || brief.book == pageBook.book }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -135,7 +135,6 @@ struct PositionsTab: View {
         }
         .onChange(of: pageBook) { _, _ in bookOpen = []; box = nil; dip() }
         // Back from Overview, even to the same account, the page plays the same move (handoff 2026-11-18 §1.2).
-        .onChange(of: brief.onOverview) { was, now in if was && !now && router.tab == .positions { dip() } }
         .onChange(of: pageReady) { _, ready in if ready && faded { settle(wait: false) } }
     }
 
@@ -169,7 +168,8 @@ struct PositionsTab: View {
         }
         let n = book.names.first { $0.t == name } ?? book.names.first
         if !book.groups.isEmpty {
-            PosYourBook(groups: book.groups, open: $bookOpen, privacy: privacy, reduce: reduce)
+            PosYourBook(groups: book.groups, open: $bookOpen, privacy: privacy, reduce: reduce,
+                        accts: brief.account == .together ? brief.splitParts.map { ($0.name, PosBook.groups($0.parts)) } : [])
                 .padding(.horizontal, Self.margin)
         }
         PosStrip(names: book.names, selected: n?.t ?? "") { t in
@@ -298,7 +298,7 @@ struct PositionsTab: View {
     /// "Sunny’s book · Fri Nov 13 close" for marks taken at or after the close (or an earlier day), else
     /// "Sunny’s book · Fri Nov 13 · 12:40 PM ET" (the web's asOf).
     private var subtitle: String {
-        let who = "\(pageBook.name)’s book"
+        let who = pageBook.bookTitle
         /* Before the open and after the close the marks are estimates from pre-market or after-hours trades. */
         if let e = brief.est {
             let w = e.session == "pre" ? "pre-market est." : "after hours est."
@@ -404,6 +404,9 @@ struct PosYourBook: View {
     @Binding var open: Set<String>
     let privacy: Bool
     let reduce: Bool
+    /// Together (handoff 2026-11-24 §2.2): each account's groups, so every total carries its S and N parts ("S $940K ·
+    /// N $318K" under the value, "S $5.1K" and "N $3.7K" under Today and All time). Empty on one account.
+    var accts: [(name: String, groups: [PosBook.Group])] = []
 
     private static let label = PC.say                          // #C7C7CC
     private static let chevron = S.dyn(0x8E8E93, 0x636366)
@@ -442,10 +445,22 @@ struct PosYourBook: View {
                             .sType(PT.t(15, 20, 600), tabular: false)
                         Text(money(x.value)).sType(PT.t(24, 28, 700, tr: -0.02)).foregroundStyle(PC.ink)
                             .lineLimit(1).minimumScaleFactor(0.7)
+                        if let ps = partsOf(g.title) {
+                            Text(ps.map { "\($0.ini) \(money($0.x.value))" }.joined(separator: " · "))
+                                .sType(PT.t(12, 16, 500), tabular: true).foregroundStyle(PC.mu).lineLimit(1).minimumScaleFactor(0.8)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    figure(x.today, x.todayPct, big: true).frame(width: 74, alignment: .trailing)
-                    figure(x.all, x.allPct, big: true).frame(width: 74, alignment: .trailing)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        figure(x.today, x.todayPct, big: true)
+                        if let ps = partsOf(g.title) { ForEach(ps, id: \.ini) { acctLine($0.ini, $0.x.today) } }
+                    }
+                    .frame(width: 74, alignment: .trailing)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        figure(x.all, x.allPct, big: true)
+                        if let ps = partsOf(g.title) { ForEach(ps, id: \.ini) { acctLine($0.ini, $0.x.all) } }
+                    }
+                    .frame(width: 74, alignment: .trailing)
                     Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Self.chevron)
                         .rotationEffect(.degrees(isOpen ? 90 : 0))
                         .frame(width: 12)
@@ -484,6 +499,19 @@ struct PosYourBook: View {
             }
         }
         .overlay(alignment: .top) { Rectangle().fill(PC.rule).frame(height: 1) }
+    }
+
+    /// Each account's part of a group (Together only): "S", "N" and the group's sums on that account; nil on one account.
+    private func partsOf(_ title: String) -> [(ini: String, x: PosBook.Part)]? {
+        guard accts.count > 1 else { return nil }
+        let ps = accts.map { a in (ini: String(a.name.prefix(1)), x: a.groups.first { $0.title == title }?.sum ?? PosBook.Part(key: title, label: title)) }
+        return ps
+    }
+    /// "S $5.1K", green up, red down, grey neither (12/16 600).
+    private func acctLine(_ ini: String, _ v: Double) -> some View {
+        Text("\(ini) \(money(v))").sType(PT.t(12, 16, 600), tabular: true)
+            .foregroundStyle(v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.mu)
+            .lineLimit(1).minimumScaleFactor(0.8)
     }
 
     /// $ over %, green when up or kept, red when down; no sign.

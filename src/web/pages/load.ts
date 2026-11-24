@@ -3,7 +3,6 @@
 export const page = {
   Home: () => import('./Home'),
   Positions: () => import('./Positions'),
-  Overview: () => import('./Overview'),
   Ticker: () => import('./Ticker'),
   TimeValue: () => import('../sheets/TimeValueSheet'),
 };

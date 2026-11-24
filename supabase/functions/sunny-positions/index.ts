@@ -28,14 +28,17 @@ type NameInput = { t: string; S0: number; P0: number; iv: number; legs: Leg[]; d
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
-  const auth = req.headers.get('Authorization') ?? '';
+  /* A signed-in user (their token: RLS gives their own books), or the scheduler's key for checks (x-admin-key, as
+     sunny-sd), which reads with the service key (24 Nov 2026, for checking Together's grids). */
+  const cron = Deno.env.get('CRON_SECRET'), admin = !!cron && req.headers.get('x-admin-key') === cron;
+  const auth = admin ? `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}` : req.headers.get('Authorization') ?? '';
   if (!auth.startsWith('Bearer ')) return json(401, { error: 'sign in' });
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
   const book = String(body.book ?? 'S').toUpperCase(), t = String(body.t ?? '').toUpperCase();
   if (!/^[A-Z]$/.test(book) || !/^[A-Z.]{1,8}$/.test(t)) return json(400, { error: 'send book and t' });
 
   const r = await fetch(`${URL_}/rest/v1/home_snapshot?book_id=eq.${book}&select=built_at,inputs:payload->brief_inputs`,
-    { headers: { apikey: ANON, Authorization: auth } });
+    { headers: { apikey: admin ? (Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ANON) : ANON, Authorization: auth } });
   if (!r.ok) return json(r.status === 401 ? 401 : 502, { error: 'could not read the book' });
   const rows = await r.json() as { built_at: string; inputs: { built_at: string; r: number; names: NameInput[]; ended_day?: string | null } | null }[];
   const inp = rows[0]?.inputs;

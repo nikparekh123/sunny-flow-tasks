@@ -62,7 +62,7 @@ struct ShareAvgCard: View {
                 BLogo(ticker: t, size: 32)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(t).sType(SType(size: 17, weight: 700, line: 22, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                    Text(privacy ? "•,••• shares" : "\(OverviewTogether.n0(sh)) shares").sType(SType(size: 13, weight: 500, line: 17, tracking: 0)).foregroundStyle(S.secondary)
+                    Text(privacy ? "•,••• shares" : "\(Int(sh.rounded()).formatted(.number.grouping(.automatic))) shares").sType(SType(size: 13, weight: 500, line: 17, tracking: 0)).foregroundStyle(S.secondary)
                 }
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 0) {
@@ -159,8 +159,8 @@ struct ShareAvgCard: View {
                     .offset(x: pw + 10, y: cs[i] - 9)
                 }
                 if days.count > 1 {
-                    Text(OverviewTogether.md(days[0])).font(.inter(11, 500)).foregroundStyle(S.secondary).fixedSize().offset(x: 0, y: H + 2)
-                    Text(OverviewTogether.md(days[days.count - 1])).font(.inter(11, 500)).foregroundStyle(S.secondary).fixedSize()
+                    Text(PositionsModel.md(days[0])).font(.inter(11, 500)).foregroundStyle(S.secondary).fixedSize().offset(x: 0, y: H + 2)
+                    Text(PositionsModel.md(days[days.count - 1])).font(.inter(11, 500)).foregroundStyle(S.secondary).fixedSize()
                         .frame(width: pw, alignment: .trailing).offset(y: H + 2)
                 }
             }

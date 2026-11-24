@@ -74,10 +74,10 @@ extension BriefState {
         pinLoading = true; pinError = nil
         defer { pinLoading = false }
         do {
-            // The book from the account on screen (Overview reads Sunny's), so a switch just made counts at once.
-            let b = account == .nicolay ? "N" : accounts.contains(.sunny) ? "S" : (book ?? "S")
+            // The book from the account on screen, so a switch just made counts at once.
+            let b = account.book
             let r = try await BriefPinClient.fetch(book: b, pin: p)
-            setPinned(p, live: BriefLive(r.brief), at: BriefPinClient.date(r.pinned.date, r.pinned.mins), overview: r.overview)
+            setPinned(p, live: BriefLive(r.brief), at: BriefPinClient.date(r.pinned.date, r.pinned.mins))
             if p.moment == .bell { OpeningBell.ring() }   // the prototype rings on that moment
         } catch {
             pinError = "Could not build that moment. Try again."
