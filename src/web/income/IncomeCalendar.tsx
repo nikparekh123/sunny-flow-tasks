@@ -175,6 +175,9 @@ function Cell({ x, label, week, ct, open }: { x: Day; label: string; week: boole
                 <span style={{ fontSize: 13, lineHeight: '18px', color: MU }}>{l.bw}</span>
               </span>
             )}
+            <span aria-hidden="true" style={{ fontSize: 12, lineHeight: '16px', color: MU, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <span style={{ fontWeight: 600, color: W }}>{l.prem[0]}</span> premium · <span style={{ fontWeight: 600, color: W }}>{l.prem[1]}</span> to collect
+            </span>
             {l.act && <span style={{ paddingTop: 2, fontSize: 13, lineHeight: '18px', fontWeight: 600, color: l.bc, ...WRAP }}>{l.act}</span>}
             {l.sub && <span style={{ fontSize: 12, lineHeight: '16px', color: MU, ...WRAP }}>{l.sub}</span>}
           </div>

@@ -217,11 +217,32 @@ export function buildBrief(x: BriefIn) {
     return good(v) ? v : null;
   };
 
-  // ── Date-slider stops: now, then each session's close to the last sold expiry (at least the Friday) ──
+  // ── Date-slider stops: now, then each session's close to the last sold expiry (at least the Friday); past it to the
+  //    last expiry of ANY leg (Nik, 25 Nov 2026: "Can we show till the last expiry?", picked "days, then weeks,
+  //    months"): each Friday for two months, then each monthly expiry, and every leg's own expiry. ──
+  const thirdFriday = (y: number, m: number) => {
+    const wd1 = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
+    return new Date(Date.UTC(y, m - 1, 1 + ((5 - wd1 + 7) % 7) + 14)).toISOString().slice(0, 10);
+  };
   const stopsFor = (ls: BriefLeg[]): { stops: Stop[]; fri: number } => {
     const lastSold = ls.filter((l) => l.side === 'sold').map((l) => l.expiry).sort().at(-1);
     const end = lastSold && lastSold > F ? lastSold : F;
     const exps = new Set(ls.filter((l) => l.side === 'sold').map((l) => l.expiry));
+    const lastAny = ls.map((l) => l.expiry).filter((e) => !!e).sort().at(-1);
+    const far = new Set<string>();
+    if (lastAny && lastAny > end) {
+      const weeksTo = addDays(end, 61);
+      for (let d = addDays(end, 1); d <= weeksTo && d <= lastAny; d = addDays(d, 1)) if (ymd(d).wd === 5) far.add(lastTradingOnOrBefore(d));
+      let { y, m } = ymd(weeksTo);
+      for (let i = 0; i < 40; i++) {
+        const tf = lastTradingOnOrBefore(thirdFriday(y, m));
+        if (tf > lastAny) break;
+        if (tf > weeksTo) far.add(tf);
+        m += 1; if (m > 12) { m = 1; y += 1; }
+      }
+      for (const l of ls) if (l.expiry && l.expiry > end) far.add(l.expiry);
+    }
+    const thisYear = ymd(today).y;
     /* Mon to Thu, and Friday until its close: Today (now) first. Friday after the close and the weekend: the
        slider runs Monday to Friday of next week (answer 3), so there is no Today stop. Today's own close is a
        stop only on an expiry day (Friday's close is the stop Home opens on). */
@@ -234,6 +255,12 @@ export function buildBrief(x: BriefIn) {
       const lbl = `${MON[ymd(d).m - 1]} ${ymd(d).d}`;
       stops.push({ tt: +daysTo(d).toFixed(4), short: isFri ? lbl : DOW[ymd(d).wd], phrase: isFri ? `at the ${lbl} close` : `on ${DAYNAME[ymd(d).wd]}`,
         long: `${longDay(d)}${isFri ? ' close' : ''}`, friday: isFri });
+    }
+    // Past the daily run: dated stops, the year added when it is not this one ("Jun 17 '27").
+    for (const d of [...far].filter((e) => e > end).sort()) {
+      const x = ymd(d), yy = x.y !== thisYear ? ` '${String(x.y).slice(2)}` : '';
+      const lbl = `${MON[x.m - 1]} ${x.d}${yy}`;
+      stops.push({ tt: +daysTo(d).toFixed(4), short: lbl, phrase: `at the ${lbl} close`, long: `${longDay(d)}${yy} close`, friday: true });
     }
     if (!stops.length) stops.push({ tt: 0, short: 'Today', phrase: 'today', long: longDay(today), friday: false });
     const fri = Math.max(0, stops.findIndex((s) => s.tt >= th - 0.001));

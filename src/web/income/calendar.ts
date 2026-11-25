@@ -54,7 +54,11 @@ export function closedDays(payload: J, inc: Income): Set<string> {
 export interface Tile {
   k: string; st: St; rank: number; kp: number; nm: string; big: string; bw: string; bc: string;
   act: string; sub: string; ring: string; word: string; aria: string;
+  /** "$1K premium · $130 to collect" (Nik, 25 Nov 2026, "both"): what it was sold for, and what is still to come. */
+  prem: [string, string];
 }
+/** Whole K and M, no decimals (Nik, 25 Nov 2026). */
+const m0 = (v: number) => { const a = Math.abs(v); return a >= 999_500 ? `$${Math.round(a / 1e6)}M` : a >= 999.5 ? `$${Math.round(a / 1e3)}K` : `$${Math.round(a)}`; };
 export const RING: Record<St, string> = { itm: `inset 0 0 0 1.5px ${RED}`, act: 'inset 0 0 0 1px rgba(101,196,102,.65)', run: 'inset 0 0 0 1px rgba(255,255,255,.06)' };
 
 /** "Roll to Dec 7 157.5 · 7.50"; no strike (and so no premium) when the server has none for that day. */
@@ -82,10 +86,11 @@ export function tileOf(n: IncName, r: Rung, why: boolean): Tile {
     : st === 'act' ? rollWhy(r)
     : [lo && r.mk != null ? `Down ${f2(r.mk - r.at)} a share` : r.kp != null ? `${90 - r.kp}% to the roll` : '', `sold at ${f2(r.at)}`].filter(Boolean).join(' · ');
   const big = r.kp == null ? '' : `${Math.abs(r.kp)}%`, bw = r.kp == null ? '' : lo ? 'lost' : 'kept';
+  const prem: [string, string] = [m0(r.at * r.q * 100), m0((r.mk ?? r.at) * r.q * 100)];
   return {
-    k: r.k, st, rank: st === 'itm' ? 0 : st === 'act' ? 1 : 2, kp, nm, big, bw, bc, act, sub, ring: RING[st],
+    k: r.k, st, rank: st === 'itm' ? 0 : st === 'act' ? 1 : 2, kp, nm, big, bw, bc, act, sub, ring: RING[st], prem,
     word: st === 'itm' ? 'In the money' : st === 'act' ? 'Roll' : big,
-    aria: `${n.t} ${nm}${big ? `, ${big} ${bw}` : ''}${act ? `. ${act}` : ''}`,
+    aria: `${n.t} ${nm}${big ? `, ${big} ${bw}` : ''}, ${prem[0]} premium, ${prem[1]} to collect${act ? `. ${act}` : ''}`,
   };
 }
 

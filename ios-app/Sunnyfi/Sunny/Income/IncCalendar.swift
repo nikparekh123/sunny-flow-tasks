@@ -289,6 +289,10 @@ struct IncCalView: View {
                 }
                 Text(l.bw).sType(IncT.t(13, 18), tabular: false).foregroundStyle(IncC.mu)
             }
+            // Inter is one variable font: the semibold is its own font (fontWeight cannot reach the weight axis).
+            (Text(l.premSold).font(.inter(12, 600, tabular: true)).foregroundStyle(IncC.ink) + Text(" premium · ")
+             + Text(l.premLeft).font(.inter(12, 600, tabular: true)).foregroundStyle(IncC.ink) + Text(" to collect"))
+                .sType(IncT.t(12, 16)).foregroundStyle(IncC.mu).lineLimit(1).minimumScaleFactor(0.85)
             if let a = l.act {
                 Text(a).sType(IncT.t(13, 18, 600)).foregroundStyle(IncC.of(l.tone))
                     .fixedSize(horizontal: false, vertical: true)

@@ -42,6 +42,9 @@ nonisolated struct IncCal: Hashable {
         let tone: IncTone
         let act: String?
         let sub: String?
+        /// "$1K premium · $130 to collect" (Nik, 25 Nov 2026, "both"): what it was sold for, and what is still to come.
+        let premSold: String
+        let premLeft: String
         let ring: Ring
         let rank: Int
         let kp: Int
@@ -225,6 +228,14 @@ nonisolated struct IncCal: Hashable {
                       all: Scope(boxes: allBoxes, status: status(rungs, one: false)), by: by)
     }
 
+    /// Whole K and M, no decimals (Nik, 25 Nov 2026).
+    private static func m0(_ v: Double) -> String {
+        let a = abs(v)
+        if a >= 999_500 { return "$\(Int((a / 1_000_000).rounded()))M" }
+        if a >= 999.5 { return "$\(Int((a / 1_000).rounded()))K" }
+        return "$\(Int(a.rounded()))"
+    }
+
     /// SunnyIncomeCal leg(): the big % kept (red in the money or at a loss, green at 90% to roll, grey running), the
     /// action only when it needs you, the grey line (the phone's open days always have room for it).
     private static func leg(_ r: IncRung) -> Leg {
@@ -269,9 +280,11 @@ nonisolated struct IncCal: Hashable {
         let word = ring == .itm ? "In the money" : ring == .act ? "Roll" : big
         let short = ring == .itm ? "ITM" : ring == .act ? "Roll" : big
         let kept = kp.map { lo ? "\(abs($0)) percent lost" : "\($0) percent kept" } ?? "no mark"
-        return Leg(id: r.id, lab: nm, big: big, bw: bw, tone: tone, act: act, sub: sub, ring: ring,
+        let premSold = m0(r.at * Double(r.q) * 100), premLeft = m0((r.mk ?? r.at) * Double(r.q) * 100)
+        return Leg(id: r.id, lab: nm, big: big, bw: bw, tone: tone, act: act, sub: sub, premSold: premSold, premLeft: premLeft, ring: ring,
                    rank: ring == .itm ? 0 : ring == .act ? 1 : 2, kp: kp ?? 0, nm: nm, word: word, short: short,
-                   speech: IncSay.words("\(r.t) \(nm), \(kept)" + (act.map { ". \($0)" } ?? "") + (sub.map { ". \($0)" } ?? "")))
+                   speech: IncSay.words("\(r.t) \(nm), \(kept), \(premSold) premium, \(premLeft) to collect"
+                                        + (act.map { ". \($0)" } ?? "") + (sub.map { ". \($0)" } ?? "")))
     }
 
     /// The status: how many need you (red when any is in the money, else green), or All quiet with the nearest roll.

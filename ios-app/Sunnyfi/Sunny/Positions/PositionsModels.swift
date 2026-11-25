@@ -307,13 +307,13 @@ struct PosName {
         return min(i, count - 1)
     }
 
-    /// The slider's stops: from the first to the stop nearest the LAST sold expiry (the first of any leg's when nothing
-    /// is sold).
+    /// The slider's stops: from the first to the stop nearest the last expiry of any leg.
     static func dateStops(_ m: PositionsModel) -> [DateStop] {
         guard !m.stops.isEmpty else { return [] }
         let opts = m.legs.filter { $0.ty != .shares }
-        let sold = opts.filter { $0.q < 0 }
-        let endT = sold.isEmpty ? opts.map(\.T).min() : sold.map(\.T).max()
+        // To the last expiry of any leg (Nik, 25 Nov 2026: "Can we show till the last expiry?"); the server's stops run
+        // daily to the last sold expiry, then Fridays for two months, then each monthly and every leg's own expiry.
+        let endT = opts.map(\.T).max()
         var end = m.fridayStop
         if let T = endT { end = stopNear(m, T) ?? m.fridayStop }
         let mins = Double(MarketClock.ny(SClock.now()).minutes)
