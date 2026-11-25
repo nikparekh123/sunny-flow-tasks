@@ -28,18 +28,21 @@ function Block({ k, p, mask, who }: { k: PKey; p: Part; mask: (s: string) => str
   const word = def.sold ? (ok ? 'kept' : 'lost') : ok ? 'gain' : 'loss';
   const now = def.sold ? p.value - a : p.value;
   const x = def.sold ? (p.value > 0 ? (a / p.value) * 100 : 0) : p.abase > 0 ? (a / p.abase) * 100 : 0;
-  const xw = def.sold ? 'captured' : 'return';
   const big = mask(money0(a)), nowS = mask(money0(now)), tvS = p.tv != null ? mask(money0(p.tv)) : null;
   const aria = [`${who}${def.l}, ${word} ${big}`, `${nowS} now`,
     def.sold ? `${pct(x)} ${ok ? 'captured' : 'lost'}` : `return ${ok ? 'up' : 'down'} ${pct(x)}`,
     tvS ? `${tvS} time value` : ''].filter(Boolean).join(', ');
   // The sub line wraps between its pieces, never inside one; each piece leads with its dot, and the dot that would
   // start a line sits left of the clip, so no line starts or ends on a dot.
-  const segs: [string, string, string][] = [[nowS, 'now', K], [pct(x), xw, c], ...(tvS ? [[tvS, 'TV', K] as [string, string, string]] : [])];
+  // Condensed (Nik, 25 Nov 2026): the % by the big figure, then "$96K now · $92K TV".
+  const segs: [string, string, string][] = [[nowS, 'now', K], ...(tvS ? [[tvS, 'TV', K] as [string, string, string]] : [])];
   return (
     <div role="group" aria-label={aria} style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <span aria-hidden="true" style={{ fontSize: 14, lineHeight: '18px', color: MU, whiteSpace: 'nowrap' }}>{def.l} · {word}</span>
-      <span aria-hidden="true" style={{ marginTop: 2, fontSize: 30, lineHeight: '36px', fontWeight: 700, letterSpacing: '-0.02em', color: c, whiteSpace: 'nowrap' }}>{big}</span>
+      <span aria-hidden="true" style={{ marginTop: 2, display: 'flex', alignItems: 'baseline', gap: 8, color: c, whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 30, lineHeight: '36px', fontWeight: 700, letterSpacing: '-0.02em' }}>{big}</span>
+        <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 600 }}>{pct(x)}</span>
+      </span>
       <span aria-hidden="true" style={{ marginTop: 4, display: 'block', overflow: 'hidden' }}>
         <span style={{ display: 'flex', flexWrap: 'wrap', marginLeft: -SEP, fontSize: 14, lineHeight: '18px', fontWeight: 400, color: MU }}>
           {segs.map(([v, w, col]) => (

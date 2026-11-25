@@ -519,11 +519,11 @@ struct PosPartCards: View {
             HStack(alignment: .top, spacing: 10) {
                 ForEach(parts) { p in
                     // Its own height, never squeezed: a card's lines keep 14 pt whatever the tallest card is.
-                    // 275 x 100 pt (Nik, 25 Nov 2026): the bottom line on one line, the next card peeking about 90 pt.
+                    // 250 x 100 pt (Nik, 25 Nov 2026): the condensed line fits with room, the next card peeks about 115 pt.
                     PosPartBlock(p: p, privacy: privacy)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 14).padding(.vertical, 11)
-                        .frame(width: 275, height: 100, alignment: .topLeading)
+                        .frame(width: 250, height: 100, alignment: .topLeading)
                         .glassEffect(.regular, in: .rect(cornerRadius: 20))
                 }
             }
@@ -552,9 +552,15 @@ struct PosPartBlock: View {
         let pctWord = p.sold ? "captured" : "return"
         VStack(alignment: .leading, spacing: 0) {
             Text("\(p.label) · \(word)").sType(PT.t(14, 18), tabular: false).foregroundStyle(PC.mu).lineLimit(1)
-            Text(money(p.all)).sType(PT.t(30, 36, 700, tr: -0.02)).foregroundStyle(c)
-                .lineLimit(1).minimumScaleFactor(0.6)
-                .padding(.top, 2)
+            // "$43K  31%": the % is the size of the gain or loss (on cost; sold: of what was collected), so it sits
+            // by the figure (Nik, 25 Nov 2026, picked over "$96K (31%)").
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(money(p.all)).sType(PT.t(30, 36, 700, tr: -0.02))
+                Text(pc0(p.pct)).sType(PT.t(17, 22, 600))
+            }
+            .foregroundStyle(c)
+            .lineLimit(1).minimumScaleFactor(0.6)
+            .padding(.top, 2)
             sub(c, pctWord: pctWord)
                 .sType(PT.t(14, 18), tabular: true).foregroundStyle(PC.mu)
                 .lineLimit(1).minimumScaleFactor(0.85)
@@ -565,13 +571,12 @@ struct PosPartBlock: View {
         .accessibilityLabel(said(word, pctWord))
     }
 
-    /// "$92K now · 33% return · $91K TV": figures semibold in ink, the % in its colour, words muted (Nik, 25 Nov 2026:
-    /// whole K and M, whole %, "TV" for time value; VoiceOver still says "time value").
+    /// "$96K now · $92K TV": figures semibold in ink, words muted (Nik, 25 Nov 2026: condensed, whole K and M, "TV" for
+    /// time value; VoiceOver still says "time value"). Shares: "$756K now".
     /// Inter is one variable font, so the semibold is its own font (fontWeight cannot reach the wght axis).
     private func sub(_ c: Color, pctWord: String) -> Text {
         let semi = Font.inter(scales ? SDynamic.scaled(14, dts) : 14, 600, tabular: true)
-        var t = Text(money(p.now)).font(semi).foregroundStyle(PC.ink) + Text(" now · ")
-            + Text(pc0(p.pct)).font(semi).foregroundStyle(c) + Text(" \(pctWord)")
+        var t = Text(money(p.now)).font(semi).foregroundStyle(PC.ink) + Text(" now")
         if let tv = p.tv {
             t = t + Text(" · ") + Text(money(tv)).font(semi).foregroundStyle(PC.ink) + Text(" TV")
         }
