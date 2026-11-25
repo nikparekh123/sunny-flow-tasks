@@ -509,40 +509,47 @@ struct PosYourBook: View {
 }
 
 /// The legs side by side, one Liquid Glass card each (.glassEffect, the system's own: clear over the page, solid with
-/// Reduce Transparency), swiped sideways, snapping to a card; the row runs to the screen edges and the next card peeks.
+/// Reduce Transparency), swiped sideways freely; the row runs to the screen edges and the next card peeks.
 /// Every card is as tall as the tallest, so the row reads as one band.
 struct PosPartCards: View {
     let parts: [PosBook.Part]
     let privacy: Bool
+    /// Tap any card and every card's change reads in dollars instead of %, and stays that way (Nik, 25 Nov 2026).
+    @AppStorage("pos.changeInDollars") private var inDollars = false
+    @State private var taps = 0
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 10) {
                 ForEach(parts) { p in
                     // Its own height, never squeezed: a card's lines keep 14 pt whatever the tallest card is.
-                    // 250 x 100 pt (Nik, 25 Nov 2026): the condensed line fits with room, the next card peeks about 115 pt.
+                    // 250 wide (Nik, 25 Nov 2026), the next card peeks about 115 pt; one line under the label, so 80 tall.
                     PosPartBlock(p: p, privacy: privacy)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 14).padding(.vertical, 11)
-                        .frame(width: 250, height: 100, alignment: .topLeading)
-                        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+                        .frame(width: 250, height: 80, alignment: .topLeading)
+                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 20))
+                        .contentShape(.rect(cornerRadius: 20))
+                        .onTapGesture { taps += 1; withAnimation(.snappy) { inDollars.toggle() } }
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
-            .scrollTargetLayout()
         }
+        // Free flowing, no snap to a card (Nik, 25 Nov 2026).
+        .sensoryFeedback(.selection, trigger: taps)
         .contentMargins(.horizontal, PositionsTab.margin, for: .scrollContent)
-        .scrollTargetBehavior(.viewAligned)
         .scrollClipDisabled()
         .padding(.horizontal, -PositionsTab.margin)
     }
 }
 
-/// One leg of a book (Your book and the name's own book): "Calls bought · loss", the all-time figure big (green
-/// gained or kept, red lost, never a sign), then what it is worth now (sold: to buy back), the return on cost (sold: the
-/// share captured) and the time value left (options only).
+/// One leg of a book (Your book and the name's own book), one line under the label (Nik, 25 Nov 2026: "Now (change %),
+/// on tap change dollars, TV", kept on one line): what it is worth now big in ink (sold: what it costs to buy back),
+/// then the all-time change in brackets, green gained or kept, red lost, never a sign: the % (on cost; sold: the share
+/// of what was collected) or, after a tap on any card, the dollars; options end the line with their time value.
 struct PosPartBlock: View {
     let p: PosBook.Part
     let privacy: Bool
+    @AppStorage("pos.changeInDollars") private var inDollars = false
     @Environment(\.dynamicTypeSize) private var dts
     @Environment(\.sTypeScales) private var scales
 
@@ -551,43 +558,42 @@ struct PosPartBlock: View {
         let word = p.sold ? (up ? "kept" : "lost") : (up ? "gain" : "loss")
         let pctWord = p.sold ? "captured" : "return"
         VStack(alignment: .leading, spacing: 0) {
-            Text("\(p.label) · \(word)").sType(PT.t(14, 18), tabular: false).foregroundStyle(PC.mu).lineLimit(1)
-            // "$43K  31%": the % is the size of the gain or loss (on cost; sold: of what was collected), so it sits
-            // by the figure (Nik, 25 Nov 2026, picked over "$96K (31%)").
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(money(p.all)).sType(PT.t(30, 36, 700, tr: -0.02))
-                Text(pc0(p.pct)).sType(PT.t(17, 22, 600))
+            Text(p.label).sType(PT.t(14, 18), tabular: false).foregroundStyle(PC.mu).lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                // The figures hold their size on every card; a tight card shrinks the TV first.
+                Text(money(p.now)).sType(PT.t(30, 36, 700, tr: -0.02)).foregroundStyle(PC.ink).layoutPriority(2)
+                Text("(\(inDollars ? money(p.all) : pc0(p.pct)))").sType(PT.t(17, 22, 600)).foregroundStyle(c)
+                    .contentTransition(.numericText()).layoutPriority(2)
+                Spacer(minLength: 6)
+                if let tv = p.tv {
+                    tvLine(tv).sType(PT.t(14, 18), tabular: true).foregroundStyle(PC.mu).layoutPriority(1)
+                }
             }
-            .foregroundStyle(c)
             .lineLimit(1).minimumScaleFactor(0.6)
             .padding(.top, 2)
-            sub(c, pctWord: pctWord)
-                .sType(PT.t(14, 18), tabular: true).foregroundStyle(PC.mu)
-                .lineLimit(1).minimumScaleFactor(0.85)
-                .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(said(word, pctWord))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { withAnimation(.snappy) { inDollars.toggle() } }
     }
 
-    /// "$96K now · $92K TV": figures semibold in ink, words muted (Nik, 25 Nov 2026: condensed, whole K and M, "TV" for
-    /// time value; VoiceOver still says "time value"). Shares: "$756K now".
+    /// A clock, then "$92K": time value (Nik, 25 Nov 2026: "Instead of TV can we use a time icon?"), the clock muted,
+    /// the figure semibold in ink; VoiceOver still says "time value".
     /// Inter is one variable font, so the semibold is its own font (fontWeight cannot reach the wght axis).
-    private func sub(_ c: Color, pctWord: String) -> Text {
-        let semi = Font.inter(scales ? SDynamic.scaled(14, dts) : 14, 600, tabular: true)
-        var t = Text(money(p.now)).font(semi).foregroundStyle(PC.ink) + Text(" now")
-        if let tv = p.tv {
-            t = t + Text(" · ") + Text(money(tv)).font(semi).foregroundStyle(PC.ink) + Text(" TV")
-        }
-        return t
+    private func tvLine(_ tv: Double) -> Text {
+        let size = scales ? SDynamic.scaled(14, dts) : 14
+        let semi = Font.inter(size, 600, tabular: true)
+        return Text(Image(systemName: "clock")).font(.system(size: size - 1, weight: .medium)) + Text(" ")
+            + Text(money(tv)).font(semi).foregroundStyle(PC.ink)
     }
 
-    /// "Calls bought, loss 46 thousand dollars, 92.3 thousand now, 33.3 percent return, 91.3 thousand time value".
+    /// "Calls bought, 92 thousand now, loss 46 thousand dollars, 33 percent return, 91 thousand time value".
     private func said(_ word: String, _ pctWord: String) -> String {
         let fig = { (v: Double) in PosSay.money(v, privacy).replacingOccurrences(of: " dollars", with: "") }
         let tv = p.tv.map { ", \(fig($0)) time value" } ?? ""
-        return PosSay.words("\(p.label), \(word) \(PosSay.money(p.all, privacy)), \(fig(p.now)) now, \(pc0(p.pct)) \(pctWord)\(tv)")
+        return PosSay.words("\(p.label), \(fig(p.now)) now, \(word) \(PosSay.money(p.all, privacy)), \(pc0(p.pct)) \(pctWord)\(tv)")
     }
 
     private func tone(_ v: Double) -> Color { v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink }

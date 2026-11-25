@@ -1,13 +1,15 @@
 // Your book (Nik, 24 Nov 2026: "No need for Today and All time, just all time"): each leg, not Long, Hedge and Income.
 // Header: Your book, and on the right how many tickers and legs. Then one block per part the book holds, in this
 // order: Shares, Calls bought, Calls sold, Puts bought, Puts sold, in a grid that fills the width on a wide screen and
-// is one column on a phone. Each block:
-//   "Shares · gain" (or loss; sold parts read kept or lost), muted.
-//   The all time gain, loss or kept, big, green or red, never a minus sign.
-//   Bought: "$613K now · 1.3% return" (calls and puts bought add "· $91.3K time value").
-//   Sold:   "$8.8K now · 68.4% captured · $8.8K time value" (now = the cost to buy back, collected less kept).
+// is one column on a phone. Each block (Nik, 25 Nov 2026: "Now (change %), on tap change dollars, TV", one line):
+//   The part's name, muted.
+//   What it is worth now big in ink (sold: what it costs to buy back), then the all-time change in brackets, green
+//   gained or kept, red lost, never a minus sign: the % (on cost; sold: the share of what was collected) or, after a
+//   click on any block, the dollars. Options end the line with a clock and their time value.
 // The picked name's own book follows in the same blocks, only the parts it holds.
 // Every figure is sunny-home's (payload.brief_inputs.parts, totals.ts), the same numbers the phone reads.
+
+import { useState } from 'react';
 
 /** A whole-number percent, no sign (Nik, 25 Nov 2026: "Use no decimal in %"). */
 const pct = (x: number) => `${Math.round(Math.abs(x))}%`;
@@ -19,41 +21,43 @@ const money0 = (v: number) => {
 import { PARTS, legsIn, type PKey, type Part, type Parts } from './totals';
 import { G, K, MU, R } from './ui';
 
-const RULE = '1px solid rgba(255,255,255,.08)', SEP = 18;
+const RULE = '1px solid rgba(255,255,255,.08)';
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
-function Block({ k, p, mask, who }: { k: PKey; p: Part; mask: (s: string) => string; who: string }) {
+/** Time value (Nik, 25 Nov 2026: "Instead of TV can we use a time icon?"): the phone's clock. */
+function Clock() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: 'none', alignSelf: 'center' }}>
+      <circle cx="8" cy="8" r="6.6" />
+      <path d="M8 4.4V8H5.2" />
+    </svg>
+  );
+}
+
+function Block({ k, p, mask, who, usd, flip }: { k: PKey; p: Part; mask: (s: string) => string; who: string; usd: boolean; flip: () => void }) {
   const def = PARTS.find((x) => x.k === k)!;
   const a = p.all, ok = a >= -0.5, c = a > 0.5 ? G : a < -0.5 ? R : K;
   const word = def.sold ? (ok ? 'kept' : 'lost') : ok ? 'gain' : 'loss';
   const now = def.sold ? p.value - a : p.value;
   const x = def.sold ? (p.value > 0 ? (a / p.value) * 100 : 0) : p.abase > 0 ? (a / p.abase) * 100 : 0;
-  const big = mask(money0(a)), nowS = mask(money0(now)), tvS = p.tv != null ? mask(money0(p.tv)) : null;
-  const aria = [`${who}${def.l}, ${word} ${big}`, `${nowS} now`,
+  const allS = mask(money0(a)), nowS = mask(money0(now)), tvS = p.tv != null ? mask(money0(p.tv)) : null;
+  const aria = [`${who}${def.l}, ${nowS} now`, `${word} ${allS}`,
     def.sold ? `${pct(x)} ${ok ? 'captured' : 'lost'}` : `return ${ok ? 'up' : 'down'} ${pct(x)}`,
     tvS ? `${tvS} time value` : ''].filter(Boolean).join(', ');
-  // The sub line wraps between its pieces, never inside one; each piece leads with its dot, and the dot that would
-  // start a line sits left of the clip, so no line starts or ends on a dot.
-  // Condensed (Nik, 25 Nov 2026): the % by the big figure, then "$96K now · $92K TV".
-  const segs: [string, string, string][] = [[nowS, 'now', K], ...(tvS ? [[tvS, 'TV', K] as [string, string, string]] : [])];
   return (
-    <div role="group" aria-label={aria} style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-      <span aria-hidden="true" style={{ fontSize: 14, lineHeight: '18px', color: MU, whiteSpace: 'nowrap' }}>{def.l} · {word}</span>
-      <span aria-hidden="true" style={{ marginTop: 2, display: 'flex', alignItems: 'baseline', gap: 8, color: c, whiteSpace: 'nowrap' }}>
-        <span style={{ fontSize: 30, lineHeight: '36px', fontWeight: 700, letterSpacing: '-0.02em' }}>{big}</span>
-        <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 600 }}>{pct(x)}</span>
+    <button type="button" onClick={flip} aria-label={aria} aria-pressed={usd}
+      style={{ display: 'flex', flexDirection: 'column', minWidth: 0, width: '100%', padding: 0, margin: 0, border: 0, background: 'none', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
+      <span aria-hidden="true" style={{ fontSize: 14, lineHeight: '18px', color: MU, whiteSpace: 'nowrap' }}>{def.l}</span>
+      <span aria-hidden="true" style={{ marginTop: 2, display: 'flex', alignItems: 'baseline', gap: 6, width: '100%', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 30, lineHeight: '36px', fontWeight: 700, letterSpacing: '-0.02em', color: K }}>{nowS}</span>
+        <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 600, color: c }}>({usd ? allS : pct(x)})</span>
+        {tvS && (
+          <span style={{ marginLeft: 'auto', paddingLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 14, lineHeight: '18px', color: MU }}>
+            <Clock /><span style={{ fontWeight: 600, color: K }}>{tvS}</span>
+          </span>
+        )}
       </span>
-      <span aria-hidden="true" style={{ marginTop: 4, display: 'block', overflow: 'hidden' }}>
-        <span style={{ display: 'flex', flexWrap: 'wrap', marginLeft: -SEP, fontSize: 14, lineHeight: '18px', fontWeight: 400, color: MU }}>
-          {segs.map(([v, w, col]) => (
-            <span key={w} style={{ whiteSpace: 'nowrap' }}>
-              <span style={{ display: 'inline-block', width: SEP, textAlign: 'center', userSelect: 'none' }}>·</span>
-              <span style={{ fontWeight: 600, color: col }}>{v}</span> {w}
-            </span>
-          ))}
-        </span>
-      </span>
-    </div>
+    </button>
   );
 }
 
@@ -66,11 +70,11 @@ function Head({ l, r }: { l: string; r: string }) {
   );
 }
 
-function Grid({ ps, mask, who, label }: { ps: Parts; mask: (s: string) => string; who: string; label: string }) {
+function Grid({ ps, mask, who, label, usd, flip }: { ps: Parts; mask: (s: string) => string; who: string; label: string; usd: boolean; flip: () => void }) {
   return (
     <div role="list" aria-label={label} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(min(100%,236px),1fr))', gap: '20px 28px' }}>
       {PARTS.filter((x) => ps[x.k]).map((x) => (
-        <div key={x.k} role="listitem" style={{ minWidth: 0 }}><Block k={x.k} p={ps[x.k]!} mask={mask} who={who} /></div>
+        <div key={x.k} role="listitem" style={{ minWidth: 0 }}><Block k={x.k} p={ps[x.k]!} mask={mask} who={who} usd={usd} flip={flip} /></div>
       ))}
     </div>
   );
@@ -78,15 +82,18 @@ function Grid({ ps, mask, who, label }: { ps: Parts; mask: (s: string) => string
 
 export function BookTotals({ book, nNames, name, t, mask }: { book: Parts; nNames: number; name: Parts | null; t: string | null; mask: (s: string) => string }) {
   const nl = legsIn(book), nn = name ? legsIn(name) : 0;
+  // Click any block and every block's change reads in dollars instead of %, remembered on this browser.
+  const [usd, setUsd] = useState(() => { try { return localStorage.getItem('sw-pos-usd') === '1'; } catch { return false; } });
+  const flip = () => setUsd((u) => { try { localStorage.setItem('sw-pos-usd', u ? '0' : '1'); } catch { /* private window */ } return !u; });
   return (
     <section aria-label="Your book" className="tnum" style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '16px 0 20px', borderTop: '1px solid rgba(255,255,255,.14)', borderBottom: RULE }}>
       <Head l="Your book" r={`${plural(nNames, 'ticker')} · ${plural(nl, 'leg')}`} />
-      <Grid ps={book} mask={mask} who="" label="Your book, each part" />
+      <Grid ps={book} mask={mask} who="" label="Your book, each part" usd={usd} flip={flip} />
       {t && name && nn > 0 && (
         <>
           <span aria-hidden="true" style={{ height: 1, background: 'rgba(255,255,255,.08)', margin: '4px 0 0' }} />
           <Head l={t} r={plural(nn, 'leg')} />
-          <Grid ps={name} mask={mask} who={`${t} `} label={`${t}, each part`} />
+          <Grid ps={name} mask={mask} who={`${t} `} label={`${t}, each part`} usd={usd} flip={flip} />
         </>
       )}
     </section>
