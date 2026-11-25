@@ -68,24 +68,6 @@ enum PC {
     static let dot = S.dyn(0x1D1D1F, 0xFFFFFF)
     static let dotRing = S.dynA(0xFFFFFF, 0.9, 0x000000, 0.6)
 
-    /// A colour role from the model.
-    static func of(_ t: PTone) -> Color {
-        switch t {
-        case .ink: ink
-        case .mu: mu
-        case .muT: muT
-        case .quiet: quiet
-        case .green: green
-        case .red: red
-        case .orange: orange
-        case .touched: touched
-        case .ceiling: ceiling
-        case .floor: floor
-        case .teal: teal
-        case .teal2: teal2
-        case .sd(let i): ramp[max(0, min(ramp.count - 1, i))]
-        }
-    }
     static func tone(_ t: PE.Tone) -> Color { t == .red ? red : t == .orange ? orange : muT }
 
     /// oklch to sRGB (CSS Color 4), for the SD ramp and the IV strip.
@@ -144,59 +126,6 @@ struct PosSoftCard: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         content.background(shape.fill(fill)).overlay(shape.strokeBorder(PC.cardEdge, lineWidth: 1))
-    }
-}
-
-/// The wall icons on a 20 pt box (Lanes.tsx WallIcon): ceiling ⇥, floor ⇤, flip ◐, accelerator «.
-struct WallGlyph: View {
-    enum Kind { case ceiling, floor, flip, accelerator }
-    let kind: Kind
-    var size: CGFloat = 12
-    var body: some View {
-        Canvas { ctx, sz in
-            let k = sz.width / 20
-            func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * k, y: y * k) }
-            let style = StrokeStyle(lineWidth: 2 * k, lineCap: .round, lineJoin: .round)
-            let ink = GraphicsContext.Shading.foreground
-            switch kind {
-            case .ceiling, .floor:
-                let r = kind == .floor
-                let X = { (x: CGFloat) in r ? 20 - x : x }
-                var a = Path(); a.move(to: p(X(2.5), 10)); a.addLine(to: p(X(12), 10))
-                a.move(to: p(X(8.5), 6)); a.addLine(to: p(X(12.5), 10)); a.addLine(to: p(X(8.5), 14))
-                ctx.stroke(a, with: ink, style: style)
-                var b = Path(); b.move(to: p(X(16.5), 3)); b.addLine(to: p(X(16.5), 17))
-                ctx.stroke(b, with: ink, style: StrokeStyle(lineWidth: 2.6 * k, lineCap: .round))
-            case .flip:
-                ctx.stroke(Path(ellipseIn: CGRect(x: 3 * k, y: 3 * k, width: 14 * k, height: 14 * k)), with: ink, lineWidth: 2 * k)
-                var h = Path(); h.addArc(center: p(10, 10), radius: 7 * k, startAngle: .degrees(90), endAngle: .degrees(270), clockwise: false); h.closeSubpath()
-                ctx.fill(h, with: ink)
-            case .accelerator:
-                var a = Path()
-                a.move(to: p(9.5, 5)); a.addLine(to: p(4.5, 10)); a.addLine(to: p(9.5, 15))
-                a.move(to: p(16, 5)); a.addLine(to: p(11, 10)); a.addLine(to: p(16, 15))
-                ctx.stroke(a, with: ink, style: style)
-            }
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
-    }
-}
-
-/// Stripes at 135° (2 pt on, 3 pt off) in a colour: resistance and the averages still ahead.
-struct PosHatch: View {
-    let color: Color
-    var body: some View {
-        Canvas { ctx, size in
-            let step: CGFloat = 5 * 2.squareRoot()
-            var p = Path(), x = -size.height
-            while x < size.width + size.height {
-                p.move(to: CGPoint(x: x, y: size.height)); p.addLine(to: CGPoint(x: x + size.height, y: 0))
-                x += step
-            }
-            ctx.stroke(p, with: .color(color), lineWidth: 2 / 2.squareRoot() * 1.4)
-        }
-        .accessibilityHidden(true)
     }
 }
 

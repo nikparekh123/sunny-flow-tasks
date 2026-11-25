@@ -33,20 +33,47 @@ function readName(x: J): SA | null {
     days, cl, s2: LG.map((_, i) => s2[i] ?? 0), w: [w[0], w[1]], wk: num(x.wk) };
 }
 
-export default function ShareAvg({ card }: { card: J }) {
+/** Together (handoff 2026-11-24 §3: "Share average is a grid per account"; Current Web: a header per account, its
+    initial in a small disc and its name, then that account's grid). On one account, one grid. */
+export default function ShareAvg({ card, payload }: { card: J; payload?: J }) {
   const names = ((card?.names ?? []) as J[]).map(readName).filter((x): x is SA => !!x);
   const note = clean(card?.note);
   if (!names.length && !note) return null;
+  const sp: J[] = Array.isArray(payload?.split) ? payload.split : [];
+  const groups = sp.length > 1 ? accountGroups(names, sp) : [{ k: 'all', ini: '', nm: '', names }];
   return (
-    <div className="tnum" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      {names.length > 0 && (
-        <div role="region" aria-label="Share averages" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 16 }}>
-          {names.map((b) => <Box key={b.t} b={b} />)}
+    <div className="tnum" style={{ display: 'flex', flexDirection: 'column', gap: 22, minWidth: 0 }}>
+      {groups.filter((g) => g.names.length).map((g) => (
+        <div key={g.k} style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+          {g.nm && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, lineHeight: '20px', fontWeight: 600 }}>
+              <span aria-hidden="true" style={{ flex: 'none', width: 22, height: 22, borderRadius: '50%', background: '#2C2C2E', boxShadow: 'inset 0 0 0 .5px rgba(255,255,255,.22)',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10.5, lineHeight: 1, fontWeight: 700 }}>{g.ini}</span>
+              {g.nm}
+            </span>
+          )}
+          <div role="region" aria-label={g.nm ? `Share averages, ${g.nm}` : 'Share averages'} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 16 }}>
+            {g.names.map((b) => <Box key={b.t} b={b} />)}
+          </div>
         </div>
-      )}
-      {note && <span style={{ fontSize: 13, lineHeight: '18px', color: SUB, textWrap: 'pretty' } as CSSProperties}>{note}</span>}
+      ))}
+      {note && <span style={{ marginTop: -10, fontSize: 13, lineHeight: '18px', color: SUB, textWrap: 'pretty' } as CSSProperties}>{note}</span>}
     </div>
   );
+}
+
+/** Each account's names (payload.split[].names); a name both hold sits under both names together. */
+function accountGroups(names: SA[], sp: J[]) {
+  const sets = sp.map((s) => ({ id: String(s?.id ?? ''), nm: String(s?.name ?? s?.id ?? ''), ts: new Set<string>((s?.names ?? []).map(String)) }));
+  const out = sets.map((x) => ({ k: x.id, ini: x.id, nm: x.nm, names: [] as SA[] }));
+  const both = { k: 'both', ini: sets.map((x) => x.id).join(''), nm: sets.map((x) => x.nm).join(' and '), names: [] as SA[] };
+  // A name neither holds now (every share sold this week): its own grid, no header.
+  const rest = { k: 'rest', ini: '', nm: '', names: [] as SA[] };
+  for (const b of names) {
+    const at = sets.map((x, i) => (x.ts.has(b.t) ? i : -1)).filter((i) => i >= 0);
+    (at.length === 1 ? out[at[0]] : at.length ? both : rest).names.push(b);
+  }
+  return [...out, both, rest];
 }
 
 function Box({ b }: { b: SA }) {

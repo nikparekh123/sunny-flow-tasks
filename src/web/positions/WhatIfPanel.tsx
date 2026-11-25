@@ -1,31 +1,35 @@
 // What if (handoff 2026-11-13-positions §3.6; D10: it replaces 144c, the switches live in Every leg).
 //   Try a trade: Sell | Buy, Call | Put, a strike 85% to 120% of the price on the chain's step, the expiry, the count,
 //   then "Sell 10 × 36.5 calls · Nov 6", "$0.48 each · Δ short 320 · $481 in", and Add.
-//   Your changes: the trades added (from here or the SD calculator), and the legs switched off in Every leg.
+//   Your changes: the trades added (from here or the SD calculator), the strikes tried from Intelligence (kept on the
+//   server, public.payoff_tries: each with its switch and ✕, 24 Nov 2026), and the legs switched off in Every leg.
 //   Net Δ: the whole name with the changes. Cash today: premium in less premium out. Back to the book clears all.
-// Every price is the book engine's (Pricer.quote, on the IV a trade is priced on). Nothing is ever sent anywhere.
+// Every price is the book engine's (Pricer.quote, on the IV a trade is priced on). Only the tries are kept on the server.
 import { shortDate } from '../lib/clock';
 import { count, money, price } from '../lib/format';
 import type { Draft } from './whatif';
 import { tradeName, type PLeg, type Pricer, type Trade } from './model';
-import { G, GLASS, K, MU, O, R, Segmented, kicker, tnum } from './ui';
+import { G, GLASS, K, MU, O, R, Segmented, Switch, kicker, tnum } from './ui';
 
 const field = { height: 34, border: 'none', borderRadius: 10, padding: '0 6px', background: 'rgba(118,118,128,.24)', color: K, fontSize: 13, width: '100%' } as const;
 
-export function WhatIf({ pr, base, off, trades, draft, ivOf, strikes, expiries, expL, nCh, cashC, mask, setDraft, add, remove, reset }: {
-  pr: Pricer; base: PLeg[]; off: Set<string>; trades: Trade[]; draft: Required<Draft>;
+export function WhatIf({ pr, base, off, trades, effOn, draft, ivOf, strikes, expiries, expL, nCh, dirty, cashC, mask, setDraft, add, remove, toggle, reset }: {
+  /** `trades`: every trade with its own switch; `effOn`: the ones that count (their switch and Every leg's chips). */
+  pr: Pricer; base: PLeg[]; off: Set<string>; trades: Trade[]; effOn: Set<number>; draft: Required<Draft>;
   /** The market's IV for a strike and expiry (the chain's), so a trade is priced as the market prices it. */
   ivOf: (ex: string, K: number) => number | undefined;
   strikes: number[]; expiries: string[]; expL: (iso: string) => string;
   nCh: number; cashC: number; mask: (s: string) => string;
-  setDraft: (d: Draft) => void; add: (u: Omit<Trade, 'id' | 'on'>) => void; remove: (id: number) => void; reset: () => void;
+  /** Anything away from the book as it starts (a leg or chip switched, a trade, a try): Back to the book can act. */
+  dirty: boolean;
+  setDraft: (d: Draft) => void; add: (u: Omit<Trade, 'id' | 'on'>) => void; remove: (u: Trade) => void; toggle: (u: Trade) => void; reset: () => void;
 }) {
   const m = pr.m, S0 = m.S0;
   // Priced on the chain's IV at this strike and expiry (18 Nov 2026: the name's one IV, this week's with BABA's earnings
   // in it, priced the Nov 27 95 calls at $2.70 against $0.75 in the market).
   const iv = ivOf(draft.ex, draft.K);
   const q = pr.quote({ side: draft.side, ty: draft.ty, K: draft.K, ex: draft.ex, n: draft.n, iv });
-  const wi = [...base.filter((l) => !off.has(l.k)), ...pr.trades.filter((l) => trades.find((u) => u.id === l.trade)?.on)];
+  const wi = [...base.filter((l) => !off.has(l.k)), ...pr.trades.filter((l) => effOn.has(l.trade!))];
   const d0 = pr.delta(base, S0, m.today), d1 = pr.delta(wi, S0, m.today), chg = nCh > 0;
   const dTx = (d: number) => (d < 0 ? 'Short ' : 'Long ') + count(d);
   const nOff = base.filter((l) => off.has(l.k)).length;
@@ -74,15 +78,17 @@ export function WhatIf({ pr, base, off, trades, draft, ivOf, strikes, expiries, 
         {pr.trades.map((l) => {
           const u = trades.find((x) => x.id === l.trade);
           if (!u) return null;
-          const cash = -l.q * 100 * (l.at ?? 0);
+          const cash = -l.q * 100 * (l.at ?? 0), on = effOn.has(u.id), tried = u.src === 'try';
+          // A strike tried from Intelligence carries its own switch here (the same one Every leg shows).
           return (
-            <div key={l.k} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto 26px', gap: 8, alignItems: 'center', padding: '6px 0', opacity: u.on ? 1 : 0.45 }}>
-              <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <div key={l.k} style={{ display: 'grid', gridTemplateColumns: tried ? '40px minmax(0,1fr) auto 26px' : 'minmax(0,1fr) auto 26px', gap: 8, alignItems: 'center', padding: '6px 0' }}>
+              {tried && <Switch on={u.on} label={`${u.on ? 'Switch off' : 'Switch on'} ${l.lb}`} onToggle={() => toggle(u)} />}
+              <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, opacity: on ? 1 : 0.45 }}>
                 <span style={{ fontSize: 14, lineHeight: '18px', fontWeight: 600 }}>{l.lb}</span>
-                <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>{u.src === 'sd' ? 'from the SD calculator' : 'tried here'}{u.on ? '' : ' · switched off'}</span>
+                <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>{tried ? 'from Intelligence' : u.src === 'sd' ? 'from the SD calculator' : 'tried here'}{on ? '' : ' · switched off'}</span>
               </span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: cash >= 0 ? G : R, whiteSpace: 'nowrap' }}>{mask(money(cash))} {cash >= 0 ? 'in' : 'out'}</span>
-              <button type="button" className="xbtn" onClick={() => remove(u.id)} aria-label={`Take off ${l.lb}`} style={{ width: 26, height: 26, fontSize: 11 }}>✕</button>
+              <span style={{ fontSize: 13, fontWeight: 600, color: cash >= 0 ? G : R, whiteSpace: 'nowrap', opacity: on ? 1 : 0.45 }}>{mask(money(cash))} {cash >= 0 ? 'in' : 'out'}</span>
+              <button type="button" className="xbtn" onClick={() => remove(u)} aria-label={`Take off ${l.lb}`} style={{ width: 26, height: 26, fontSize: 11 }}>✕</button>
             </div>
           );
         })}
@@ -101,8 +107,8 @@ export function WhatIf({ pr, base, off, trades, draft, ivOf, strikes, expiries, 
           <span style={{ fontSize: 12, color: MU }}>Cash today</span>
           <span style={{ fontSize: 18, fontWeight: 600, color: cashC >= 0 ? G : R }}>{mask(money(cashC))}</span>
         </span>
-        <button type="button" className="bare" onClick={reset} disabled={!chg}
-          style={{ padding: '7px 16px', borderRadius: 999, background: 'rgba(118,118,128,.24)', fontSize: 14, fontWeight: 500, opacity: chg ? 1 : 0.4, cursor: chg ? 'pointer' : 'default' }}>Back to the book</button>
+        <button type="button" className="bare" onClick={reset} disabled={!dirty}
+          style={{ padding: '7px 16px', borderRadius: 999, background: 'rgba(118,118,128,.24)', fontSize: 14, fontWeight: 500, opacity: dirty ? 1 : 0.4, cursor: dirty ? 'pointer' : 'default' }}>Back to the book</button>
       </div>
     </div>
   );

@@ -127,6 +127,13 @@ struct HomeView: View {
                     }
                     .modifier(OwnTabBar())
                 }
+                // Income (handoff 2026-11-24 §2.1): the Income page, its own scroll; Equatable (always equal) as Positions.
+                Tab("Income", systemImage: "calendar", value: HomeRouter.Tab.income) {
+                    NavigationStack {
+                        IncomeTab().equatable().toolbar(.hidden, for: .navigationBar)
+                    }
+                    .modifier(OwnTabBar())
+                }
                 Tab("Positions", systemImage: "rectangle.stack.fill", value: HomeRouter.Tab.positions) {
                     // App Explorations 154a (13 Nov 2026), view only. It handles its own loading, empty and error states.
                     // Equatable (always equal): Positions redraws from its own state and data, not when Home's parent does.
@@ -195,13 +202,20 @@ struct HomeView: View {
             brief.fresh = (SXClient.parseDate(home.fresh.marks ?? ""), SXClient.parseDate(home.fresh.trades ?? ""))
             brief.est = home.pricesEst.map { ($0.session, SXClient.parseDate($0.at ?? "")) }
             brief.activity = home.activity
+            brief.setIncome(home.income, key: "\(store.bookIDNow ?? "")|\(home.builtAt)")
             brief.today = home.today
             brief.ingest(home.brief, key: home.builtAt, book: store.bookIDNow, books: store.books, inputs: home.briefInputs, split: home.split)
             brief.calendar = home.calendar   // early closes move the moments (Audit 7)
-            // Positions made ready in the background, once, about 0.9 s after Home first shows (handoff 2026-11-18 §1.3).
+            // Income and Positions made ready in the background, once, about 0.9 s after Home first shows (handoff
+            // 2026-11-24 §2.1): Positions' first name is fetched; Income's model is built with each build (setIncome)
+            // and here its logos are loaded, so the first tap on either has nothing to wait for.
             if !positionsReady {
                 positionsReady = true
-                Task { try? await Task.sleep(for: .milliseconds(900)); if router.tab != .positions { PositionsTab.prefetch(brief) } }
+                Task {
+                    try? await Task.sleep(for: .milliseconds(900))
+                    if router.tab != .positions { PositionsTab.prefetch(brief) }
+                    for n in brief.incomeModel?.names ?? [] { _ = UIImage(named: "logo-\(n.t)") }
+                }
             }
         }
         // The strip picked a book: read its Home.
@@ -216,6 +230,7 @@ struct HomeView: View {
     private func briefSetup() {
         // Debug runs (simulator only): open on a tab or an overlay, privacy on, on the sample or the real book.
         if BriefDebug.tab == "positions" { router.tab = .positions }
+        if BriefDebug.tab == "income" { router.tab = .income }
         if BriefDebug.privacy { UserDefaults.standard.set(true, forKey: BriefPrivacy.key) }
         #if DEBUG && targetEnvironment(simulator)
         // A saved-data run (-fixture) sets privacy from its own flag every time, so one run never leaks into the next.
@@ -388,7 +403,7 @@ struct HomeView: View {
             else if v.hasPrefix("at:") { router.scrollID = String(v.dropFirst(3)) }
             else if v.hasPrefix("tab:") {
                 let x = v.dropFirst(4)
-                router.tab = x == "positions" ? .positions : x == "gamma" ? .gamma : x == "insights" ? .insights : .home
+                router.tab = x == "positions" ? .positions : x == "income" ? .income : x == "gamma" ? .gamma : x == "insights" ? .insights : .home
             }
             else if v.hasPrefix("gamma:") { let p = v.dropFirst(6).split(separator: ":").map(String.init); router.openGamma(p[0], view: p.count > 1 ? p[1] : nil, wall: nil) }
             else if v.hasPrefix("itab:") { let t = String(v.dropFirst(5)); router.tab = .insights; if t != "All" { router.insightsAll = false; router.focus = t } }

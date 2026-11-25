@@ -7,7 +7,8 @@
 //   Payoff (round 168a, Nov 17): P&L by price at a date from today's marks, summed from the server's grid (Pricer; a
 //          date the grid has no row for is priced with the engine), on a date slider (each trading day from today to
 //          the day the nearest sold legs expire) and a range slider (±5% to ±50%), with a hover read, a target and
-//          the Greeks at that date. The table follows the slider.
+//          the Greeks at that date. The table follows the slider. The hover reads the Greeks at the cursor (24 Nov 2026,
+//          r150x hv8): the top label adds the delta there and the Greeks row follows the hovered price, back on leave.
 //   The maths is supabase/functions/_shared/price-chart.ts (the Price chart, shared with the phone) and model.ts.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { CountUp } from '../components/CountUp';
@@ -357,8 +358,15 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
   const sh = useMemo(() => pr.shortAt(wi, D, !chg), [pr, wi, chg, D.tt, D.row]); // eslint-disable-line react-hooks/exhaustive-deps
   const mv = iv > 0 ? iv * Math.sqrt(Math.max(D.tt, 1) / 365) : 0;
   const bL = Math.max(0, xp(S0 * Math.exp(-mv))), bR = Math.min(100, xp(S0 * Math.exp(mv)));
-  const gk = useMemo(() => pr.greeks(wi, S0, D), [pr, wi, S0, D.tt, D.row]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The hover (0 to 1 across the chart, null off it): the Greeks row reads the hovered price (Nik, 24 Nov 2026: "the
+  // delta should move when I scrub Payoff"), back to today's price on leave.
+  const [hf, setHf] = useState<number | null>(null);
+  useEffect(() => { if (tab !== 'chart') setHf(null); }, [tab]);
+  const xH = hf == null ? null : S0 * (1 - X + 2 * X * hf);
+  const gk0 = useMemo(() => pr.greeks(wi, S0, D), [pr, wi, S0, D.tt, D.row]); // eslint-disable-line react-hooks/exhaustive-deps
+  const gk = useMemo(() => (xH == null ? gk0 : pr.greeks(wi, xH, D)), [gk0, xH, pr, wi, D.tt, D.row]); // eslint-disable-line react-hooks/exhaustive-deps
   const peakPast = sh != null && sh <= S0 * 1.0005, top = m.topPct;
+  const gkAt = xH == null ? sh8 : `at ${xH.toFixed(2)}`;
   const gks = [
     { l: 'Delta', v: (gk.d < 0 ? 'Short ' : 'Long ') + count(gk.d), c: gk.d < 0 ? O : K },
     { l: 'Theta a day', v: mask(money(gk.th)), c: cl(gk.th) },
@@ -439,10 +447,12 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
               <span style={{ position: 'absolute', left: '50%', top: `${v.fy(v0).toFixed(2)}%`, width: 14, height: 14, margin: '-7px 0 0 -7px', borderRadius: '50%',
                 background: '#FFFFFF', boxShadow: '0 0 0 3px rgba(0,0,0,.6),0 0 14px rgba(255,255,255,.45)' }} />
             </div>
-            <PayHover read={(f) => {
+            <PayHover f={hf} setF={setHf} read={(f, full) => {
               const k = f * (NP - 1), i = Math.min(NP - 2, Math.floor(k)), w = k - i, val = v.vW[i] + (v.vW[i + 1] - v.vW[i]) * w;
               const x = S0 * (1 - X + 2 * X * f);
-              return { y: Math.max(0, Math.min(100, v.fy(val))), top: `${price(x)} · ${fromToday(x, S0)}`, val: mask(money(val)), c: cl(val) };
+              // The top label adds the delta at that price (r150x hv8): "$155.20 · ↑1.9% · Δ long 300".
+              const dl = full ? pr.delta(wi, x, D) : 0;
+              return { y: Math.max(0, Math.min(100, v.fy(val))), top: `${price(x)} · ${fromToday(x, S0)}${full ? ` · Δ ${dl < 0 ? 'short' : 'long'} ${count(dl)}` : ''}`, val: mask(money(val)), c: cl(val) };
             }} />
           </div>
           <div className="tnum" style={{ position: 'relative', height: 18, borderTop: '1px solid rgba(255,255,255,.08)' }}>
@@ -474,10 +484,10 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
         ) : <div />}
         <RangeBox S0={S0} xr={xr} setXr={setXr} tg={tg} setTarget={setTarget} />
       </div>
-      <div className="tnum" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', paddingTop: 10, borderTop: '1px solid rgba(255,255,255,.08)' }}>
+      <div className="tnum" aria-live="off" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', paddingTop: 10, borderTop: '1px solid rgba(255,255,255,.08)' }}>
         {gks.map((g) => (
           <span key={g.l} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-            <span style={{ fontSize: 12, lineHeight: '16px', color: MU, whiteSpace: 'nowrap' }}>{g.l} · {sh8}</span>
+            <span style={{ fontSize: 12, lineHeight: '16px', color: MU, whiteSpace: 'nowrap' }}>{g.l} · {gkAt}</span>
             <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 600, color: g.c, whiteSpace: 'nowrap' }}>{g.v}</span>
           </span>
         ))}
@@ -647,16 +657,15 @@ function Slider({ label, min, max, value, onPick, text }: { label: string; min: 
 /** The Payoff hover (round 168, OptionStrat's crosshair): a line at that price starting under the price and % from
     today on top, a dot on the curve, the P&L beside it on the curve's open side (green or red, a dark halo, no box).
     A finger reads while it is down. A move with no movement (the page scrolled under a still mouse) is ignored. */
-function PayHover({ read }: { read: (f: number) => { y: number; top: string; val: string; c: string } }) {
-  const [f, setF] = useState<number | null>(null);
+function PayHover({ f, setF, read }: { f: number | null; setF: (f: number | null) => void; read: (f: number, full: boolean) => { y: number; top: string; val: string; c: string } }) {
   const touch = useRef(false);
   const at = (e: React.PointerEvent<HTMLDivElement>) => { const r = e.currentTarget.getBoundingClientRect(); if (r.width) setF(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))); };
   const off = () => { touch.current = false; setF(null); };
-  const h = f == null ? null : read(f);
+  const h = f == null ? null : read(f, true);
   let vt = 'none';
   if (h && f != null) {
     // Below the dot when the curve climbs that way, or when the dot is up under the price read on top.
-    const nb = read(Math.max(0, Math.min(1, f + (f > 0.6 ? -0.08 : 0.08)))), below = nb.y < h.y || h.y < 18;
+    const nb = read(Math.max(0, Math.min(1, f + (f > 0.6 ? -0.08 : 0.08))), false), below = nb.y < h.y || h.y < 18;
     vt = `translate(${f > 0.6 ? 'calc(-100% - 10px)' : '10px'},${below ? '6px' : 'calc(-100% - 6px)'})`;
   }
   const x = f == null ? '0%' : `${(f * 100).toFixed(2)}%`;

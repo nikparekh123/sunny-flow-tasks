@@ -494,9 +494,8 @@ struct SunnyAftershockPage: View {
             }
             .padding(.top, 20).padding(.horizontal, 20).padding(.bottom, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(.regular, in: .rect(cornerRadius: S.rDeck))
-            .shadow(color: .black.opacity(scheme == .dark ? 0.2 : 0.04), radius: 1.5, y: 1)
-            .shadow(color: .black.opacity(scheme == .dark ? 0.4 : 0.10), radius: 12, y: 10)
+            // Flat, as every content card (handoff 2026-11-24 §2.3: Aftershock keeps glass on its buttons only).
+            .sunnyGlass(radius: S.rDeck)
             .onChange(of: m.mode) { old, new in
                 seen = new
                 if old == .scan, new == .done || new == .none, !reduce { reveal = now }

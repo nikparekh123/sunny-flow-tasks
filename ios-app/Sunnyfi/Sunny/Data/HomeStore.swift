@@ -348,7 +348,7 @@ final class HomeStore {
     private static let core = ["build", "built_at", "today", "trading_today", "calendar", "trade_to_415", "fresh", "prices_est", "share_avg",
         "account", "indices", "overnight", "futures", "chart", "deck", "last_week", "portfolio", "watchlist", "legs", "hours", "inventory",
         "writes", "yield", "history", "risk", "sold_vs_bought", "performance", "allocation", "theta_checks", "aftershock", "strategies",
-        "todo", "brief", "split"]
+        "todo", "brief", "split", "income"]
     private static func keys() -> [(String, String)] {
         var k = core.map { ($0, $0) }
         k.append(("activity", needs[.activity, default: 0] > 0 ? "activity" : "activity_lite"))

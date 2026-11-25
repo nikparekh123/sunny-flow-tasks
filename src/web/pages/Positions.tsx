@@ -1,35 +1,38 @@
-// Positions (handoff 2026-11-13-positions, Web Dark v2's Positions page), top to bottom:
+// Positions (handoff 2026-11-13-positions, Web Dark v2's Positions page; handoff 2026-11-24 §4), top to bottom:
 //   1 the title and the book on screen · 2 Book totals (five cells, D7; whole book and the name) · 3 the name strip
-//   with the Sold, in SD box · 4 Sold, in SD (folded) · 5 the name header · 6 the band: Price | Payoff and What if,
-//   one height · 7 Every leg · 8 Intelligence (a capsule that opens into the full window).
+//   (on Together, Sunny's names, a hairline, then Nicolay's) · 4 the name header and its share average · 5 the band:
+//   Payoff | Price and What if, one height · 6 Every leg (SunnyBook, Rows | List) · 7 Intelligence (a capsule that
+//   opens into the full window). Sold, in SD is off (24 Nov 2026: its content lives in Every leg).
 // /positions opens the name that needs a look first (Home's position rows), /positions/:t opens that name.
 //
 // Data, real only:
 //   Home's snapshot (useHome): the names (brief.names: the strip, st for the red dot), the legs Home priced
-//     (brief_inputs: Book totals, Sold in SD), the calendar and the marks' time.
+//     (brief_inputs: Book totals, each leg's IV), the share averages (share_avg), the calendar and the marks' time.
 //   sunny-positions (usePositions): the name's grid of P&L by price and date (Payoff, Greeks, Every leg, What if).
 //   sunny-chart (useTicker): the name's daily closes for the Price chart.
-//   sunny-sd (useSd): the name's chain, the rule and the levels for Intelligence; the other names' replies only once
-//     Sold in SD is opened (their SD when sold).
+//   sunny-sd (useSd): the name's chain, the rule and the levels for Intelligence, and each sold leg's SD when sold
+//     (sold[].z0) for Every leg.
+//   payoff_tries (useTries): the strikes tried from Intelligence, legs in What if, Payoff and Every leg.
 // The maths is supabase/functions/_shared/positions-engine.ts (shared with the phone), book-engine.ts and sd-engine.ts.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { nameDot, soldInSd, stepOf } from '../../../supabase/functions/_shared/positions-engine.ts';
+import { nameDot, sdMove, soldInSd, stepOf, tradingDays, zOf } from '../../../supabase/functions/_shared/positions-engine.ts';
 import { bookTitle } from '../components/AccountMenu';
 import { clock12, estWords, ny, shortDate } from '../lib/clock';
-import { useHome, usePositions, usePrefetchPositions, useSd, useSdMany, useStrikes, useTicker, type BookId, type J } from '../lib/data';
+import { useHome, usePositions, usePrefetchPositions, useSd, useStrikes, useTicker, type BookId, type J } from '../lib/data';
 import { arrow, pct, price } from '../lib/format';
 import { useWeb } from '../lib/state';
 import type { PCRange } from '../../../supabase/functions/_shared/price-chart.ts';
 import { ConeSwitch, Payoff, PriceChart, XR0, rangeWords, useCone } from '../positions/Band';
 import { BookTotals } from '../positions/BookTotals';
-import { EveryLeg, type LegFilter } from '../positions/EveryLeg';
+import { Book, chipIds, exShort, type BookChip, type BookItem } from '../positions/Book';
 import { Intelligence } from '../positions/Intelligence';
-import { ivAtStrike, pickExpiry, requestIntelScroll, setIntelOpen, useIntelOpen, type SdReply } from '../positions/intel';
-import { PosModel, Pricer, expLabel, type GridW, type Inputs, type PLeg } from '../positions/model';
-import { SoldCapsule, SoldCard, closedDays, soldLegs } from '../positions/SoldInSd';
+import { ivAtStrike, setIntelOpen, useIntelOpen, type SdReply } from '../positions/intel';
+import { PosModel, Pricer, expLabel, type GridW, type Inputs, type PLeg, type Trade } from '../positions/model';
+import { closedDays, soldLegs } from '../positions/sold';
 import { bookTotals, nameTotals } from '../positions/totals';
 import { useTarget } from '../positions/target';
+import { tryNum, useTries } from '../positions/tries';
 import { G, K, MU, O, PosStyles, R, Segmented, useReducedMotion } from '../positions/ui';
 import { WhatIf } from '../positions/WhatIfPanel';
 import { useWhatIf, type Draft } from '../positions/whatif';
@@ -76,25 +79,17 @@ export default function Positions() {
   const nt = useMemo(() => nameTotals(payload), [payload]);
   const bt = useMemo(() => bookTotals(nt), [nt]);
 
-  // Sold, in SD: rows from Home's legs at once; each name's SD when sold once the card is opened.
-  const [sdo, setSdo] = useState(false);
-  const soldNames = useMemo(() => [...new Set(soldLegs(payload, new Map()).map((l) => l.t))], [payload]);
-  const sdMany = useSdMany(book, soldNames, sdo) as Map<string, SdReply | undefined>;
-  const sold = useMemo(() => soldInSd(soldLegs(payload, sdMany)), [payload, sdMany]);
-  useEffect(() => {
-    if (!sdo) return;
-    const f = (ev: KeyboardEvent) => { if (ev.key === 'Escape') setSdo(false); };
-    window.addEventListener('keydown', f);
-    return () => window.removeEventListener('keydown', f);
-  }, [sdo]);
+  // The strip's dot: a sold leg in the money or within 0.5 SD (Home's legs, read at once).
+  const sold = useMemo(() => soldInSd(soldLegs(payload, new Map())), [payload]);
   const go = (x: string) => nav(`/positions/${x}${loc.search}`);
-  // A row tap: that name, Intelligence open on that expiry, scrolled into view.
-  const onPick = (x: string, ex: string) => {
-    if (book) pickExpiry(book, x, ex);
-    setIntelOpen(true);
-    requestIntelScroll();
-    if (x !== t) go(x);
-  };
+  // Together (handoff 2026-11-24 §4 and Current Web p.sgs): Sunny's names, a hairline, then Nicolay's.
+  const strip = useMemo(() => {
+    const split: J[] = book === 'T' && Array.isArray(payload?.split) ? payload.split : [];
+    if (split.length < 2) return [names];
+    const gs = split.map((p) => names.filter((n) => (p?.names ?? []).includes(n.t)));
+    const rest = names.filter((n) => !gs.some((g) => g.includes(n)));
+    return [...gs, ...(rest.length ? [rest] : [])].filter((g) => g.length);
+  }, [book, payload, names]);
   // Before the open and after the close the marks are estimates from pre-market or after-hours trades (18 Nov 2026).
   const est = estWords(payload?.brief_inputs?.prices_est ?? payload?.prices_est);
   const subtitle = book ? `${bookTitle(book)}${payload ? ' · ' + (est ?? asOf(payload.fresh?.marks)) : ''}` : '';
@@ -113,31 +108,31 @@ export default function Positions() {
       )}
       {names.length > 0 && <BookTotals book={bt} name={t ? nt.get(t) ?? null : null} t={t} mask={mask} />}
       {names.length > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {names.map((n) => {
-              const on = n.t === t, dot = nameDot(n.st, sold.rows, n.t);
-              return (
-                <button key={n.t} type="button" className="bare" onClick={() => go(n.t)} aria-current={on ? 'true' : undefined}
-                  aria-label={`${n.name ?? n.t}${dot === 'red' ? ', short at the priced move by Friday' : dot === 'orange' ? ', a sold leg within 0.5 SD' : ''}`}
-                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, width: 70 }}>
-                  {/* Handoff 2026-11-18 §3.2: a white disc with the logo at 60%; the ring is an inset shadow, so the dot
-                      (pinned to the top right) never moves when a name is picked. */}
-                  <span style={{ position: 'relative', width: 50, height: 50, boxSizing: 'border-box', borderRadius: '50%', background: '#FFFFFF',
-                    boxShadow: on ? 'inset 0 0 0 3px #F5F5F7' : 'inset 0 0 0 1.5px rgba(255,255,255,.2)', transition: rm ? 'none' : 'box-shadow .2s ease',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Logo t={n.t} />
-                    {dot && <span style={{ position: 'absolute', right: 0, top: 0, width: 11, height: 11, borderRadius: '50%', background: dot === 'red' ? R : O, boxShadow: '0 0 0 2px #050706' }} />}
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: on ? 700 : 400, color: on ? K : MU }}>{n.t}</span>
-                </button>
-              );
-            })}
-          </div>
-          <SoldCapsule rows={sold.rows} open={sdo} toggle={() => setSdo(!sdo)} />
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px 18px', flexWrap: 'wrap' }}>
+          {strip.map((g, gi) => (
+            <div key={gi} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingLeft: gi ? 18 : 0, borderLeft: gi ? '1px solid rgba(255,255,255,.16)' : 'none' }}>
+              {g.map((n) => {
+                const on = n.t === t, dot = nameDot(n.st, sold.rows, n.t);
+                return (
+                  <button key={n.t} type="button" className="bare" onClick={() => go(n.t)} aria-current={on ? 'true' : undefined}
+                    aria-label={`${n.name ?? n.t}${dot === 'red' ? ', short at the priced move by Friday' : dot === 'orange' ? ', a sold leg within 0.5 SD' : ''}`}
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, width: 70 }}>
+                    {/* Handoff 2026-11-18 §3.2: a white disc with the logo at 60%; the ring is an inset shadow, so the dot
+                        (pinned to the top right) never moves when a name is picked. */}
+                    <span style={{ position: 'relative', width: 50, height: 50, boxSizing: 'border-box', borderRadius: '50%', background: '#FFFFFF',
+                      boxShadow: on ? 'inset 0 0 0 3px #F5F5F7' : 'inset 0 0 0 1.5px rgba(255,255,255,.2)', transition: rm ? 'none' : 'box-shadow .2s ease',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Logo t={n.t} />
+                      {dot && <span style={{ position: 'absolute', right: 0, top: 0, width: 11, height: 11, borderRadius: '50%', background: dot === 'red' ? R : O, boxShadow: '0 0 0 2px #050706' }} />}
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: on ? 700 : 400, color: on ? K : MU }}>{n.t}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
-      {sold.rows.length > 0 && <SoldCard rows={sold.rows} within={sold.within} inTheMoney={sold.inTheMoney} open={sdo} close={() => setSdo(false)} onPick={onPick} />}
       {t && book && <Name key={book} book={book} t={t} name={names.find((n) => n.t === t)} payload={payload} />}
     </div>
   );
@@ -159,6 +154,9 @@ function Name({ book, t, name, payload }: { book: BookId; t: string; name: J; pa
   // The header reads Home's price (every 15 s), not the grid's: the grid now refreshes on a real move or each minute.
   const S0 = +name?.S0 || (ready ? grid!.S0 : 0), P0 = +name?.P0 || (ready ? grid!.P0 : S0), mv = P0 ? (S0 / P0 - 1) * 100 : 0;
   const strat = String(name?.strategy ?? ''), company = String(name?.name ?? t);
+  // Share average (handoff 2026-11-24 §4, Current Web sa189): what was paid less every premium kept on the name, a
+  // share (sunny-home share_avg w[1]); Together's row already weighs both accounts by shares. Only names that have one.
+  const sa = ((payload?.share_avg ?? []) as J[]).find((r) => r?.t === t && +r?.sh > 0 && Array.isArray(r?.w) && Number.isFinite(+r.w[1]) && +r?.paid > 0);
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, paddingTop: 4, flexWrap: 'wrap' }}>
@@ -169,6 +167,12 @@ function Name({ book, t, name, payload }: { book: BookId; t: string; name: J; pa
         </span>
         <span style={{ fontSize: 15, color: MU }}>{company}{strat ? ' · ' + strat.charAt(0).toUpperCase() + strat.slice(1) : ''}</span>
       </div>
+      {sa && (
+        <div className="tnum" style={{ display: 'flex', alignItems: 'baseline', gap: '4px 14px', flexWrap: 'wrap', marginTop: -18, fontSize: 14, lineHeight: '20px', color: MU }}>
+          <span style={{ fontWeight: 600, color: K }}>Share average {price(Math.max(0, +sa.w[1]))}</span>
+          <span>Paid {price(+sa.paid)}</span>
+        </div>
+      )}
       {shown ? (
         <div aria-busy={!ready} style={{ display: 'flex', flexDirection: 'column', gap: 28, opacity: ready ? 1 : 0.55, transition: 'opacity .2s', pointerEvents: ready ? 'auto' : 'none' }}>
           {!ready && q.isError && <span style={{ fontSize: 13, color: MU }}>Could not load {t}.</span>}
@@ -180,8 +184,8 @@ function Name({ book, t, name, payload }: { book: BookId; t: string; name: J; pa
 }
 
 // The page's own state, kept across names and rebuilds: the Payoff date ('now', an ISO day, or null for this Friday)
-// and range (±%), Price or Payoff, Chart or Table, the Price chart's range, the Every leg filter.
-const pageState = { day: null as string | null, xr: XR0 as number, view: 'pay' as 'price' | 'pay', tab: 'chart' as 'chart' | 'table', rg: '1W' as PCRange, lf: 'all' as LegFilter };
+// and range (±%), Price or Payoff, Chart or Table, the Price chart's range. (Every leg keeps Rows | List itself.)
+const pageState = { day: null as string | null, xr: XR0 as number, view: 'pay' as 'price' | 'pay', tab: 'chart' as 'chart' | 'table', rg: '1W' as PCRange };
 function usePageState<K extends keyof typeof pageState>(k: K): [(typeof pageState)[K], (v: (typeof pageState)[K]) => void] {
   const [v, setV] = useState(pageState[k]);
   return [v, (x) => { pageState[k] = x; setV(x); }];
@@ -195,7 +199,6 @@ function Detail({ book, t, grid, payload, mask }: { book: BookId; t: string; gri
   const [view, setView] = usePageState('view');
   const [tab, setTab] = usePageState('tab');
   const [rg, setRg] = usePageState('rg');
-  const [lf, setLf] = usePageState('lf');
   const [day, setDay] = usePageState('day');
   const [xr, setXr] = usePageState('xr');
   const [cone, toggleCone] = useCone();
@@ -216,27 +219,40 @@ function Detail({ book, t, grid, payload, mask }: { book: BookId; t: string; gri
     const last = exps.filter((x) => x.ex < ex).pop();
     return last ? ivAtStrike(last, K) : undefined;
   }, [sd, t, inputs]);
+  // Try in Payoff (handoff 2026-11-24 §4): the strikes tried from Intelligence, kept on the server, are legs here too,
+  // priced as a What if trade (the chain's IV at that strike and expiry). Past their expiry they drop out.
+  const tries = useTries(book, t);
+  const d0 = m.isoAt(0);
+  const tryTrades: Trade[] = useMemo(() => tries.list.filter((x) => x.ex >= d0).map((x) => ({ id: tryNum(x.id), side: x.side, ty: x.ty, K: x.K, ex: x.ex, n: x.n, on: x.on, src: 'try' as const, tid: x.id })), [tries.list, d0]);
+  const allTrades = useMemo(() => [...wf.trades, ...tryTrades], [wf.trades, tryTrades]);
   // Trades added before the chain's IV came in (or before 18 Nov 2026) take it now, so their payoff is the market's too.
-  const pr = useMemo(() => new Pricer(m, wf.trades.map((u) => (u.iv && u.iv > 0.03 ? u : { ...u, iv: ivOf(u.ex, u.K) }))), [m, wf.trades, ivOf]);
+  const pr = useMemo(() => new Pricer(m, allTrades.map((u) => (u.iv && u.iv > 0.03 ? u : { ...u, iv: ivOf(u.ex, u.K) }))), [m, allTrades, ivOf]);
   const intelOpen = useIntelOpen();
 
   // The grid's dates (What if's default expiry reads this Friday from them).
   const segs = useMemo(() => m.segments(), [m]);
 
   // The switches (Nik, 13 Nov 2026: "by default only keep income on and rest off", every name): a leg sold starts on,
-  // shares and legs bought start off; `flip` holds the legs switched away from that. Payoff, its Greeks and Every leg
-  // follow the switches. What if and Intelligence count only real changes (Nik: "Only what I flip"): an income leg
-  // switched off is closed there (bought back); a leg bought or the shares switched on is already held, no change.
+  // shares and legs bought start off; `flip` holds the legs switched away from that. Every leg's chips (24 Nov 2026)
+  // each switch their legs off on their own: a leg counts when its own switch and each of its chips are on. Payoff,
+  // its Greeks and Every leg follow. What if and Intelligence count only real changes (Nik: "Only what I flip"): an
+  // income leg that no longer counts is closed there (bought back); a leg bought or the shares switched on is already
+  // held, no change.
   const base = m.legs;
   const flip = useMemo(() => new Set(wf.flip.filter((k) => base.some((l) => l.k === k))), [wf.flip, base]);
+  const cf = useMemo(() => new Set(wf.cf), [wf.cf]);
   const startsOn = (l: PLeg) => l.q < 0;
-  const viewOff = useMemo(() => new Set(base.filter((l) => startsOn(l) === flip.has(l.k)).map((l) => l.k)), [base, flip]);
-  const shut = useMemo(() => new Set(base.filter((l) => startsOn(l) && flip.has(l.k)).map((l) => l.k)), [base, flip]);
-  const tradesOn = useMemo(() => pr.trades.filter((l) => wf.trades.find((u) => u.id === l.trade)?.on), [pr, wf.trades]);
-  const wi: PLeg[] = useMemo(() => [...base.filter((l) => !viewOff.has(l.k)), ...tradesOn], [base, viewOff, tradesOn]);
+  const ownOn = useCallback((l: PLeg) => (l.trade != null ? !!allTrades.find((u) => u.id === l.trade)?.on : (l.q < 0) !== flip.has(l.k)), [allTrades, flip]);
+  const eff = useCallback((l: PLeg) => ownOn(l) && !chipIds(l).some((id) => cf.has(id)), [ownOn, cf]);
+  const shut = useMemo(() => new Set(base.filter((l) => startsOn(l) && !eff(l)).map((l) => l.k)), [base, eff]);
+  const tradesOn = useMemo(() => pr.trades.filter(eff), [pr, eff]);
+  const effIds = useMemo(() => new Set(tradesOn.map((l) => l.trade!)), [tradesOn]);
+  const wi: PLeg[] = useMemo(() => [...base.filter(eff), ...tradesOn], [base, eff, tradesOn]);
   const start: PLeg[] = useMemo(() => base.filter(startsOn), [base]);
-  const nCh = shut.size + tradesOn.length, viewChg = flip.size + tradesOn.length > 0;
+  const nCh = shut.size + tradesOn.length, viewChg = base.some((l) => eff(l) !== startsOn(l)) || tradesOn.length > 0;
   const cashC = base.filter((l) => shut.has(l.k)).reduce((a, l) => a + l.value, 0) + tradesOn.reduce((a, l) => a - l.value, 0);
+  // What if and Intelligence read each trade as it counts (its switch and its chips).
+  const tradesEff = useMemo(() => allTrades.map((u) => ({ ...u, on: effIds.has(u.id) })), [allTrades, effIds]);
 
   // Try a trade: the strikes the chain lists for the expiry picked, 85% to 120% of the price (Nik, 20 Nov 2026: "show
   // the real strikes for each ticker, not just assume 1 dollar increment"), the name's expiries, 10 (3 on Nicolay's
@@ -277,9 +293,57 @@ function Detail({ book, t, grid, payload, mask }: { book: BookId; t: string; gri
   const rw = view === 'price' ? rangeWords(chart.data, S0, closed, rg, m.iv) : null;
   // The Price chart keeps every strike held, whatever the switches (Nik, 13 Nov 2026).
   const optLegs = base.filter((l) => l.ty !== 'S');
-  // This name's Sold in SD rows: the Price chart's sold tags wear their closeness (Nik, 14 Nov 2026).
-  // (Closeness needs only the SD now, so no sunny-sd replies here.)
+  // The name's sold legs, by SD now: the Price chart's sold tags wear their closeness (Nik, 14 Nov 2026).
   const soldHere = useMemo(() => soldInSd(soldLegs(payload, new Map())).rows.filter((r) => r.t === t), [payload, t]);
+
+  // ── Every leg (SunnyBook): each leg's SD sold → now, its switch, its chips ──
+  const legIv = useMemo(() => new Map((inputs?.names.find((n) => n.t === t)?.legs ?? []).map((l) => [l.k, l.iv] as [string, number])), [inputs, t]);
+  const tradeOf = useCallback((l: PLeg) => allTrades.find((u) => u.id === l.trade), [allTrades]);
+  const chipName = useCallback((id: string) => {
+    const [b, v] = id.split(':');
+    if (b === 'ex') return exShort(v, m.wholeDays(v));
+    if (b === 'kind') return v === 'C' ? 'Calls' : v === 'P' ? 'Puts' : 'Shares';
+    return v === 'income' ? 'Income' : v === 'hedge' ? 'Hedges' : 'Long';
+  }, [m]);
+  const items: BookItem[] = useMemo(() => {
+    const n0 = ny();
+    const sdNow = (l: PLeg, iv: number) => { const z = zOf(l.K, S0, sdMove(iv, tradingDays(n0.date, l.ex, closed, n0.mins))); return l.ty === 'C' ? z : -z; };
+    const sold0 = sd?.t === t ? sd.sold : [];
+    const one = (l: PLeg): BookItem => {
+      const u = l.trade != null ? tradeOf(l) : undefined, opt = l.ty !== 'S';
+      const iv = u ? (u.iv && u.iv > 0.03 ? u.iv : ivOf(u.ex, u.K) ?? m.tradeIv) : (legIv.get(l.k) ?? 0) > 0.03 ? legIv.get(l.k)! : m.iv;
+      const z0 = !u && opt && l.q < 0 ? sold0.find((x) => x.put === (l.ty === 'P') && Math.abs(x.K - l.K) < 1e-6 && x.ex === l.ex)?.z0 : null;
+      const tg = !u ? () => wf.toggleLeg(l.k) : u.src === 'try' ? () => tries.toggle(u.tid!) : () => wf.toggleTrade(u.id);
+      return { l, on: ownOn(l), eff: eff(l), added: !!u, tried: u?.src === 'try', tg, s0: z0 == null || !Number.isFinite(z0) ? null : l.ty === 'C' ? z0 : -z0,
+        sN: opt ? sdNow(l, iv) : 0, offBy: chipIds(l).filter((id) => cf.has(id)).map(chipName) };
+    };
+    return [...base.map(one), ...pr.trades.map(one)];
+  }, [base, pr, S0, closed, sd, t, tradeOf, ivOf, m, legIv, wf, tries, ownOn, eff, cf, chipName]);
+  const chips: BookChip[][] = useMemo(() => {
+    const ls = [...base, ...pr.trades], has = (id: string) => ls.some((l) => chipIds(l).includes(id));
+    const chip = (id: string): BookChip => ({ k: id, l: chipName(id), on: !cf.has(id), go: () => wf.toggleChip(id) });
+    const exs = [...new Set(ls.filter((l) => l.ty !== 'S').map((l) => l.ex))].sort();
+    return [exs.map((x) => chip('ex:' + x)), ['kind:C', 'kind:P', 'kind:S'].filter(has).map(chip), ['role:income', 'role:hedge', 'role:long'].filter(has).map(chip)].filter((r) => r.length);
+  }, [base, pr, cf, chipName, wf]);
+  // A group's switch, Switch on all: each leg's own switch to `v` (held legs as flips from where they start, What if
+  // trades, the tries on the server).
+  const setL = useCallback((xs: BookItem[], v: boolean) => {
+    const held = xs.filter((x) => !x.added).map((x) => ({ k: x.l.k, flip: startsOn(x.l) !== v }));
+    const mine = xs.map((x) => tradeOf(x.l)).filter((u): u is Trade => !!u && u.src !== 'try').map((u) => u.id);
+    const tids = xs.map((x) => tradeOf(x.l)).filter((u): u is Trade => !!u && u.src === 'try').map((u) => u.tid!);
+    wf.setMany(held, mine, v);
+    if (tids.length) tries.setOn(tids, v);
+  }, [tradeOf, wf, tries]);
+  // Switch off all: every expiry chip and the Shares chip off (the View by row, Current Web); Switch on all: every
+  // chip and every leg back on.
+  const nOn = items.filter((x) => x.eff).length;
+  const allGo = () => {
+    if (nOn) { const exs = chips[0]?.filter((c) => c.k.startsWith('ex:')).map((c) => c.k) ?? []; wf.setChips([...new Set([...wf.cf, ...exs, 'kind:S'])]); return; }
+    wf.setChips([]);
+    setL(items, true);
+  };
+  // Back to the book: every leg as it starts, every trade and chip gone, and the name's tries taken off.
+  const backToBook = () => { wf.reset(); if (tries.list.length) tries.remove(tries.list.map((x) => x.id)); };
 
   return (
     <>
@@ -300,12 +364,15 @@ function Detail({ book, t, grid, payload, mask }: { book: BookId; t: string; gri
             : <Payoff t={t} pr={pr} base={start} wi={wi} chg={viewChg} tab={tab} mask={mask} iv={m.iv} closed={closed} day={day} setDay={setDay} xr={xr} setXr={setXr}
                 tg={target.tg} setTg={target.set} />}
         </div>
-        <WhatIf pr={pr} base={base} off={shut} trades={wf.trades} draft={draft} ivOf={ivOf} strikes={strikeList} expiries={expiries} expL={expL} nCh={nCh} cashC={cashC} mask={mask}
-          setDraft={wf.setDraft} add={wf.add} remove={wf.remove} reset={wf.reset} />
+        <WhatIf pr={pr} base={base} off={shut} trades={allTrades} effOn={effIds} draft={draft} ivOf={ivOf} strikes={strikeList} expiries={expiries} expL={expL} nCh={nCh} dirty={nCh > 0 || viewChg || flip.size > 0 || cf.size > 0 || allTrades.length > 0} cashC={cashC} mask={mask}
+          setDraft={wf.setDraft} add={wf.add}
+          remove={(u) => (u.src === 'try' ? tries.remove([u.tid!]) : wf.remove(u.id))}
+          toggle={(u) => (u.src === 'try' ? tries.toggle(u.tid!) : wf.toggleTrade(u.id))} reset={backToBook} />
       </div>
-      <EveryLeg t={t} pr={pr} base={base} off={viewOff} note={viewChg ? 'with your changes' : 'income only'} trades={wf.trades} toggleLeg={wf.toggleLeg} toggleTrade={wf.toggleTrade} filter={lf} setFilter={setLf} mask={mask} />
+      <Book t={t} S0={S0} P0={+payload?.brief?.names?.find((n: J) => n.t === t)?.P0 || m.P0} pr={pr} items={items} chips={chips}
+        mL={nOn ? 'Switch off all' : 'Switch on all'} mGo={allGo} reset={cf.size ? () => wf.setChips([]) : null} setL={setL} mask={mask} />
       <Intelligence book={book} t={t} d={sd?.t === t ? sd : undefined} busy={sdQ.isFetching} failed={sdQ.isError} friday={payload?.brief?.friday ?? fri} chains={m.walls}
-        pr={pr} base={base} off={shut} trades={wf.trades} setSd={wf.setSd} open={intelOpen} setOpen={setIntelOpen} mask={mask} />
+        pr={pr} base={base} off={shut} trades={tradesEff} setSd={wf.setSd} open={intelOpen} setOpen={setIntelOpen} mask={mask} />
     </>
   );
 }

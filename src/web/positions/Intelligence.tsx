@@ -4,8 +4,8 @@
 //   the read (D4: only the sale being picked), then the lanes on one price scale.
 // Data: the name's sunny-sd reply (useSd), the book's legs for Net Δ and Try in What if (Pricer, the What if store).
 // Escape closes it. No em dashes in any words here.
-import { useEffect, useMemo, useRef } from 'react';
-import { sdColour } from '../../../supabase/functions/_shared/positions-engine.ts';
+import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
+import { sdColour, stepOf } from '../../../supabase/functions/_shared/positions-engine.ts';
 import { count, money, price } from '../lib/format';
 import { intelModel, ivAtStrike, ladder, rowAt, sdl, useIntelScroll, usePick, type IntelModel, type SdReply } from './intel';
 import { Lanes } from './Lanes';
@@ -148,19 +148,30 @@ function Body({ t, d, M, pick, setPick, pr, base, off, trades, setSd, mask }: In
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
           <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>How far out · the strike</span>
-          <div className="swp-scroll" style={{ display: 'flex', gap: 6, overflowX: 'auto', margin: -2, padding: 2 }}>
+          {/* Bigger and calmer (handoff 2026-11-24 §4, Nik: too condensed): 124 px at least, 10 apart, 14 by 16, radius 16;
+              the SD, the strike and its % from today, then a hairline, the win rate (the chance it ends out of the money,
+              from the expiry's IV: 1 less the row's in-the-money odds), the open interest and the level it meets. */}
+          <div className="swp-scroll" style={{ display: 'flex', gap: 10, overflowX: 'auto', margin: -2, padding: 2 }}>
             {tiles.map((kk) => {
               const r = rowAt(e, kk, put)!, on = sel != null && Math.abs(sel - kk) < 1e-9, isRule = Math.abs(kk - rule) < 1e-9, pk = r.K / S - 1;
+              const fc = on ? '#000000' : K, sc = on ? '#3A3A3C' : MT, wr = Math.round((1 - r.itm) * 100), lv = levelAt(M, r.K, put), oi = oiText(r.oi);
               return (
                 <button key={kk} type="button" className="bare" aria-pressed={on} onClick={() => setPick(put ? { selP: on ? null : kk } : { selC: on ? null : kk })}
-                  aria-label={`${sdl(kk)}, strike ${fmtK(r.K)}, ${(Math.abs(pk) * 100).toFixed(1)}% ${pk >= 0 ? 'above' : 'below'} today${isRule ? ', the rule' : ''}`}
-                  style={{ flex: '1 0 74px', display: 'flex', flexDirection: 'column', gap: 1, padding: '7px 10px', borderRadius: 12, background: on ? K : 'rgba(118,118,128,.24)', transition: 'background .2s',
+                  aria-label={`${sdl(kk)}, strike ${fmtK(r.K)}, ${(Math.abs(pk) * 100).toFixed(1)}% ${pk >= 0 ? 'above' : 'below'} today, ${wr}% chance it finishes out of the money${oi ? ', open interest ' + oi.replace('OI ', '') : ''}${lv ? ', ' + lv : ''}${isRule ? ', the rule' : ''}`}
+                  style={{ flex: '1 0 124px', display: 'flex', flexDirection: 'column', gap: 6, padding: '14px 16px', borderRadius: 16, background: on ? K : 'rgba(118,118,128,.24)', transition: 'background .2s',
                     boxShadow: !on && sel == null && isRule ? 'inset 0 0 0 1.5px rgba(245,245,247,.45)' : 'none' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, lineHeight: '16px', fontWeight: 500, color: on ? '#3A3A3C' : MT, whiteSpace: 'nowrap' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, lineHeight: '18px', fontWeight: 500, color: sc, whiteSpace: 'nowrap' }}>
                     <span style={{ flex: 'none', width: 8, height: 8, borderRadius: '50%', background: sdColour(Math.max(0.25, Math.abs(kk))) }} />{sdl(kk)}{isRule ? ' · rule' : ''}
                   </span>
-                  <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600, color: on ? '#000000' : K, whiteSpace: 'nowrap' }}>{fmtK(r.K)}</span>
-                  <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 500, color: on ? '#3A3A3C' : MT, whiteSpace: 'nowrap' }}>{pk >= 0 ? '↑' : '↓'}{(Math.abs(pk) * 100).toFixed(1)}%</span>
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <span style={{ fontSize: 22, lineHeight: '26px', fontWeight: 700, letterSpacing: '-.01em', color: fc, whiteSpace: 'nowrap' }}>{fmtK(r.K)}</span>
+                    <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 500, color: sc, whiteSpace: 'nowrap' }}>{pk >= 0 ? '↑' : '↓'}{(Math.abs(pk) * 100).toFixed(1)}%</span>
+                  </span>
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 8, borderTop: `1px solid ${on ? 'rgba(0,0,0,.12)' : 'rgba(255,255,255,.08)'}` }}>
+                    <span title="Chance it finishes out of the money, from this expiry’s IV" style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600, color: fc, whiteSpace: 'nowrap' }}>{wr}% win</span>
+                    {oi && <span title="Open interest, contracts" style={{ fontSize: 13, lineHeight: '18px', fontWeight: 500, color: sc, whiteSpace: 'nowrap' }}>{oi}</span>}
+                    {lv && <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 600, color: fc, textWrap: 'balance' } as CSSProperties}>{lv}</span>}
+                  </span>
                 </button>
               );
             })}
@@ -182,7 +193,7 @@ function Body({ t, d, M, pick, setPick, pr, base, off, trades, setSd, mask }: In
           <span style={{ fontSize: 12, color: MU }}>Cover</span>
           <span style={{ fontWeight: 600, color: cv.uncovered > 0 ? O : G }}>{cv.uncovered > 0 ? `${cv.uncovered} uncovered` : 'Covered'}</span>
           <span style={{ color: MT }}>
-            {cv.sold} calls sold{cv.open && cv.sale ? ` (${cv.open} open, ${cv.sale} new)` : ''}, {cv.byShares + cv.byOtm} covered · {cv.byShares} from shares + {cv.byOtm} OTM calls
+            {cv.sold} calls sold{cv.open && cv.sale ? ` (${cv.open} open, ${cv.sale} new)` : ''}, {cv.byShares + cv.byOtm} covered · {cv.byShares} from shares + {cv.byOtm} hedge calls
           </span>
         </div>
       )}
@@ -230,3 +241,18 @@ function Body({ t, d, M, pick, setPick, pr, base, off, trades, setSd, mask }: In
   </>;
 }
 const fmtK = (K: number) => String(+K.toFixed(2));
+/** "OI 5.5K", "OI 840"; nothing when the chain sends none. */
+const oiText = (oi: number | null | undefined) => (oi == null || !Number.isFinite(+oi) ? '' : 'OI ' + (+oi >= 999.5 ? String(+(+oi / 1e3).toFixed(1)) + 'K' : String(Math.round(+oi))));
+/** The level a strike meets (Current Web calc, SunnyStrikes): "At 20-day" when one sits on the strike (within half a
+    strike step or 0.4%), else "Hits ceiling first" for the first one between today and the strike; nothing when the
+    way is clear. Levels: the gamma ceiling, floor and flip, the nearest resistance and support, the four averages. */
+function levelAt(M: IntelModel, K: number, put: boolean): string {
+  const lv = M.lv, S = M.S, tol = Math.max(stepOf(S) * 0.5, S * 0.004);
+  const L = ([['ceiling', lv.ceiling], ['floor', lv.floor], ['flip', lv.flip], ['resistance', lv.resistance], ['support', lv.support],
+    ['20-day', lv.sma20], ['50-day', lv.sma50], ['100-day', lv.sma100], ['200-day', lv.sma200]] as [string, number | null | undefined][])
+    .filter((z): z is [string, number] => z[1] != null && Number.isFinite(z[1]) && z[1] > 0);
+  const at = L.find((z) => Math.abs(z[1] - K) <= tol);
+  if (at) return 'At ' + at[0];
+  const way = L.filter((z) => (put ? z[1] < S && z[1] > K : z[1] > S && z[1] < K)).sort((a, b) => Math.abs(a[1] - S) - Math.abs(b[1] - S))[0];
+  return way ? `Hits ${way[0]} first` : '';
+}

@@ -35,8 +35,10 @@ export interface Inputs { built_at: string; r: number; names: InputName[] }
 /** A What if trade (README State: side, type, strike, expiry, count, on). `ex` is the ISO expiry. `src` 'sd': the SD
     calculator's sale (one at a time, handoff 2026-11-11-sd-whatif-totals 1.10); `pr`: opened at this premium a share
     instead of the model price; `iv`: priced on this IV (the calculator's sale: the chain's IV at that strike and
-    expiry) instead of the name's. */
-export interface Trade { id: number; side: 's' | 'b'; ty: 'c' | 'p'; K: number; ex: string; n: number; on: boolean; src?: 'sd'; pr?: number; iv?: number }
+    expiry) instead of the name's. `src` 'try': a strike tried from Intelligence (Try in Payoff, kept on the server). */
+export interface Trade { id: number; side: 's' | 'b'; ty: 'c' | 'p'; K: number; ex: string; n: number; on: boolean; src?: 'sd' | 'try'; pr?: number; iv?: number;
+  /** A strike tried from Intelligence (src 'try', public.payoff_tries): its row's id. */
+  tid?: string }
 
 /** A leg as the page lists it: lb and ct strike first ("36 call · Oct 30"; a trade's lb "Sell 10 × 36.5 calls · Nov 6"), qt ("Sold 72"). */
 export interface PLeg {

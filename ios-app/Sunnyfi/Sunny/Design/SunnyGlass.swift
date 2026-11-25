@@ -17,9 +17,32 @@ struct SunnyGlass: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var solid
     var radius: CGFloat = 20
 
+    /// ⚠ CARDS ARE FLAT (handoff 2026-11-24 §2.3; Nik: "readability suffers on glass"): every content card sits on a
+    /// solid surface, white with a hairline and a soft shadow in light, #1C1C1E with a 6% ring in dark; the page's three
+    /// glows show between cards. Liquid Glass stays only on what floats (tab bar, Search circle, account pill, the
+    /// blurred top edge, segmented and slider thumbs, back and close buttons, menus), which never use this modifier.
+    /// The 8 Nov glass below is kept for comparison only (`glass`, off).
+    static var glass = false
+
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         let dark = scheme == .dark
+        if !Self.glass {
+            // light: #FFFFFF, 0 0 0 .5px rgba(29,29,31,.08), 0 1px 2px rgba(0,0,0,.04), 0 8px 24px -12px rgba(0,0,0,.1)
+            // dark:  #1C1C1E, inset 0 0 0 1px rgba(255,255,255,.06), 0 8px 24px -12px rgba(0,0,0,.6)
+            content
+                .background {
+                    shape.fill(dark ? Color(red: 28 / 255, green: 28 / 255, blue: 30 / 255) : Color.white)
+                        .overlay(shape.strokeBorder(dark ? Color.white.opacity(0.06) : Color(red: 29 / 255, green: 29 / 255, blue: 31 / 255).opacity(0.08),
+                                                    lineWidth: dark ? 1 : 0.5))
+                }
+                .background {
+                    shape.fill(dark ? Color.black : Color.white)
+                        .shadow(color: .black.opacity(dark ? 0 : 0.04), radius: 1, y: 1)
+                        .shadow(color: .black.opacity(dark ? 0.6 : 0.10), radius: 12, y: 8)
+                        .padding(.horizontal, 6)
+                }
+        } else {
         content
             .background {
                 if solid {
@@ -62,6 +85,7 @@ struct SunnyGlass: ViewModifier {
                         .shadow(color: .black.opacity(dark ? 0.4 : 0.10), radius: 12, y: 10)
                 }
             }
+        }
     }
 }
 

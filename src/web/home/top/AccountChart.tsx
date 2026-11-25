@@ -12,6 +12,7 @@ import { C, dollars, money } from '../../lib/format';
 import { estWords } from '../../lib/clock';
 import { useWeb } from '../../lib/state';
 import { changeText, chartModel, RANGES, rangeView, stats, WORDS, type Line, type Range } from './model';
+import { acctParts, changeParts, startingOn, statPart, type StatPart } from './parts';
 
 const HAIR = '1px solid rgba(255,255,255,.08)';
 
@@ -28,12 +29,18 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
   /* Together (handoff 2026-11-24 §2.2): each account's value under the number, "Sunny $73.5K · Nicolay $108.9K". */
   const split = (Array.isArray(payload?.split) ? payload.split : []).filter((p: J) => p?.value != null) as { name: string; value: number }[];
   const LC = v ? v.color : C.green;
+  /* Together: each account's part of the range's change and of every stat, from that account's own chart and
+     figures, the range starting on the same close as the total's (Current Web `acct === 'tog'`). */
+  const parts = useMemo(() => acctParts(payload), [payload]);
+  const day0 = v && m ? m.days[v.s] : null;
+  const pm = useMemo(() => (day0 ? parts.map((p) => ({ p, m: p.m ? startingOn(p.m, day0) : null })) : []), [parts, day0]);
 
   // The lines under the value: the range's change (deposits out), money paid in or out, then the moment's lines.
   const lines: Line[] = [];
   if (v) {
     const dep = v.deps[v.deps.length - 1];
-    lines.push({ k: 'r', v: changeText(v.change, v.Sv, dep), c: LC, l: WORDS[range] });
+    const pt = changeParts(parts, (p) => { const x = pm.find((q) => q.p === p)?.m; return x ? rangeView(x, range).change : null; });
+    lines.push({ k: 'r', v: changeText(v.change, v.Sv, dep), c: LC, l: WORDS[range], pt });
     // No "$149K deposited past month" line (Nik, 24 Nov 2026: "Remove this"); the change % still counts money paid in.
   }
   lines.push(...moment);
@@ -136,6 +143,18 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
   const out = () => { dropFinger(); leave(); };
 
   const st = stats(payload, m, range);
+  // Under each stat on Together, each account by its full name, one a line ("Sunny $4.9K" over "Nicolay $1.8K"): Nik,
+  // 24 Nov 2026, did not read "S" and "N"; a column of 150 px holds a name and its figure, not both on one line.
+  const stParts = useMemo(() => {
+    const out = new Map<string, StatPart[]>();
+    if (!pm.length) return out;
+    const each = pm.map(({ p, m: x }) => ({ p, st: stats(p.payload, x, range) }));
+    for (const k of ['r', 'o', 'tv', 'm', 'i', 'f']) {
+      const ps = each.map(({ p, st: s2 }) => statPart(p.name, s2.find((y) => y.k === k)?.n ?? null));
+      if (ps.every(Boolean)) out.set(k, ps as StatPart[]);
+    }
+    return out;
+  }, [pm, range]);
 
   return (
     <>
@@ -153,7 +172,7 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
           )}
           {lines.map((x) => (
             <span key={x.k} style={{ fontSize: 15 }}>
-              <span style={{ fontWeight: 600, color: x.c }}>{mask(x.v)}</span> <span style={{ color: C.ink2 }}>{x.l}</span>
+              <span style={{ fontWeight: 600, color: x.c }}>{mask(x.v)}</span> <span style={{ color: C.ink2 }}>{x.l}{x.pt ? ' · ' + mask(x.pt) : ''}</span>
             </span>
           ))}
           {/* Before the open and after the close: the value is priced from pre-market or after-hours trades. */}
@@ -191,19 +210,27 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
         })}
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', rowGap: 14, padding: '18px 0', borderBottom: HAIR }}>
-        {st.map((x, i) => {
-          const style = { cursor: x.tv ? 'pointer' : 'default', display: 'flex', flexDirection: 'column' as const, gap: 2,
-            padding: `0 24px 0 ${i ? '24px' : '0'}`, borderLeft: i ? HAIR : 'none' };
+      {/* The stats row is a grid (handoff 2026-11-24 §3): when it wraps, the rows line up (Current Web: auto-fill
+          columns of at least 150, 16 by 24 apart). On Together each stat has its accounts' parts under it. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: '16px 24px', padding: '18px 0', borderBottom: HAIR }}>
+        {st.map((x) => {
+          const style = { cursor: x.tv ? 'pointer' : 'default', display: 'flex', flexDirection: 'column' as const, gap: 2, minWidth: 0, textAlign: 'left' as const };
+          const pt = stParts.get(x.k);
           const inner = (
             <>
               <span style={{ fontSize: 12, color: C.ink2, whiteSpace: 'nowrap' }}>{x.l}</span>
               <span className="tnum" style={{ fontSize: 19, lineHeight: '24px', fontWeight: 600, color: x.c }}>{mask(x.v)}</span>
+              {pt && (
+                <span className="tnum" style={{ display: 'flex', flexDirection: 'column', fontSize: 12, lineHeight: '16px', color: '#8E8E93', whiteSpace: 'nowrap' }}>
+                  {pt.map((p) => <span key={p.ini}>{p.ini} <span style={{ color: p.c }}>{mask(p.v)}</span></span>)}
+                </span>
+              )}
             </>
           );
+          const ptA = pt ? ', ' + pt.map((p) => `${p.ini} ${mask(p.v)}`).join(', ') : '';
           // Time value opens its receipt (README §3.5); its value is the receipt's time value left by Friday.
           return x.tv
-            ? <button key={x.k} type="button" className="bare" onClick={() => setTvOpen(true)} aria-label={`Time value, ${mask(x.v)} left by Friday, opens the receipt`} title="Left by Friday" style={style}>{inner}</button>
+            ? <button key={x.k} type="button" className="bare" onClick={() => setTvOpen(true)} aria-label={`Time value, ${mask(x.v)} left by Friday${ptA}, opens the receipt`} title="Left by Friday" style={style}>{inner}</button>
             : <div key={x.k} style={style}>{inner}</div>;
         })}
       </div>

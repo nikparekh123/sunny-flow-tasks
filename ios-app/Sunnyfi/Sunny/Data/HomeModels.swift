@@ -23,6 +23,9 @@ nonisolated struct HomePayload: Decodable {
     let pricesEst: PricesEst?
     /// Together (book T, 24 Nov 2026): each account's value and today, [{id, name, value, today, pct}]. Nil on S and N.
     let split: JSONValue?
+    /// Income (sunny-home income.ts, 24 Nov 2026): rungs, names (calendar, delta line), totals and the realized-income
+    /// banner. Older servers send none.
+    let income: JSONValue?
     /// Each name's share average (sunny-home share_avg, round 157a): Search draws it from here.
     let shareAvg: JSONValue?
     /// Activity (sunny-home activity.ts, round 161a): {sync: {at, stopped}, events, levels}. Older servers send none.

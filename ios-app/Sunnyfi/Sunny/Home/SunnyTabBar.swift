@@ -4,8 +4,8 @@
 //
 //  The tab bar, drawn by hand (Nik, 28 Oct 2026). iOS 27 puts the system's
 //  search tab inside the bar as a fifth tab, and the design keeps it apart
-//  (block 27). Four tabs in a glass capsule, 70 pt each, centred 35 pt left of
-//  the middle; the round 62 pt search button 8 pt to its right; both 28 pt from
+//  (block 27). Home · Income · Positions in a glass capsule, 70 pt each, centred 36 pt left of
+//  the middle; the round 62 pt search button 10 pt to its right; both 28 pt from
 //  the bottom of the screen. The open tab sits on a lighter thumb that slides
 //  with a little overshoot. Tap Search to open it; press and hold 0.45 s to
 //  open it listening.
@@ -22,19 +22,18 @@ struct SunnyTabBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
-        // Handoff 6 Nov (README 11.3): two tabs (148 pt with the padding) centred at 50% − 36 pt, the 62 pt
-        // Search circle from 50% + 48 pt, both 28 pt from the bottom.
-        // Tabs 80 wide (Nik, 8 Nov 2026: at 70 "Positions" touched the thumb's edge); the pair stays centred as one
-        // group, Search 10 to the right of the bar as before.
+        // Handoff 2026-11-24 §2.1: Home · Income · Positions, three 70 × 54 tabs in the glass bar (62 high, radius 31,
+        // 4 pt padding), the bar centred at 50% − 36 pt; the 62 pt Search circle from 50% + 83 pt (10 right of the
+        // bar); both 28 pt from the bottom.
         GeometryReader { g in
             let mid = g.size.width / 2, y = g.size.height - 28 - 31
             bar.position(x: mid - 36, y: y)
-            searchButton.position(x: mid - 36 + (2 * Self.tabW + 8) / 2 + 10 + 31, y: y)
+            searchButton.position(x: mid + 83 + 31, y: y)
         }
         .ignoresSafeArea()
     }
 
-    static let tabW: CGFloat = 80
+    static let tabW: CGFloat = 70
 
     private var index: Int { HomeRouter.Tab.bar.firstIndex(of: tab) ?? 0 }
 
@@ -44,7 +43,7 @@ struct SunnyTabBar: View {
                 Button { pick(t) } label: {
                     VStack(spacing: 1) {
                         SunnyTabIcon(tab: t).frame(width: 24, height: 24)
-                        Text(t.title).font(.system(size: 11, weight: .semibold))
+                        Text(t.title).font(.inter(11, 600)).tracking(0.11).lineLimit(1).fixedSize()
                     }
                     .foregroundStyle(t == tab ? S.ink : S.secondary)
                     .frame(width: Self.tabW, height: 54)
@@ -61,7 +60,7 @@ struct SunnyTabBar: View {
                 .overlay(Capsule().strokeBorder(Self.thumbEdge, lineWidth: 0.5))
                 .frame(width: Self.tabW, height: 54)
                 .offset(x: CGFloat(index) * Self.tabW)
-                .animation(S.moving(S.spring, reduce), value: index)   // README 11.4: the thumb spring, (.3,1.4,.5,1) 0.45 s
+                .animation(S.moving(Self.thumbMove, reduce), value: index)
         }
         .animation(S.fade, value: tab)
         .sensoryFeedback(.selection, trigger: tab)
@@ -88,6 +87,8 @@ struct SunnyTabBar: View {
         .accessibilityAction(named: "Ask by voice") { search(true) }
     }
 
+    /// The thumb slides 70 pt a tab: .45 s cubic-bezier(.3,1.5,.5,1) (handoff 2026-11-24 §5).
+    private static let thumbMove: Animation = .timingCurve(0.3, 1.5, 0.5, 1, duration: 0.45)
     /// The open tab's thumb: white over the glass in light, a soft lift in dark.
     private static let thumb = S.dynA(0xFFFFFF, 0.6, 0xFFFFFF, 0.14)
     private static let thumbEdge = S.dynA(0x000000, 0.04, 0xFFFFFF, 0.10)
@@ -110,6 +111,12 @@ struct SunnyTabIcon: View {
         ZStack(alignment: .topLeading) {
             switch tab {
             case .home: SunnyHouseGlyph()
+            case .income:
+                // A calendar: the header bar at 45%, the body solid, two rings on top.
+                part(3, 4.6, 18, 4.4, 2).opacity(0.45)
+                part(3, 10.4, 18, 10.8, 2.6)
+                part(6.8, 2.4, 2.2, 4.6, 1.1)
+                part(15, 2.4, 2.2, 4.6, 1.1)
             case .positions:
                 part(8, 2.6, 8, 1.8, 0.9).opacity(0.35)
                 part(5.5, 5.6, 13, 2, 1).opacity(0.6)

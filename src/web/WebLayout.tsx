@@ -72,5 +72,6 @@ export default function WebLayout() {
   );
 }
 
-/** Content width under 1180 px: the Positions rail leaves the side for the main column (README 1). */
+/** A window under 1276 px: the sector heat maps go two a row (Sectors.tsx). Home's Income rail reads the content width
+    instead (pages/Home.tsx, from 960 px). */
 export const NARROW_QUERY = '(max-width: 1275px)';

@@ -238,6 +238,7 @@ struct SentenceBox: ViewModifier {
 struct BriefSectionView: View {
     let section: BriefSection
     let privacy: Bool
+    @Environment(BriefState.self) private var brief
     @Environment(\.dynamicTypeSize) private var dts
     @Environment(\.sTypeScales) private var scales
     @State private var width: CGFloat = 0
@@ -245,6 +246,7 @@ struct BriefSectionView: View {
     var body: some View {
         // Thick and thin (Nov 8): the first sentence in the headline weight, the rest Regular.
         let headline = HeadlineWeight.split(privacy ? (section.headlinePrivacy ?? section.headline) : section.headline)
+        let parts = brief.account == .together ? Self.parts(brief.splitRaw, kicker: section.kicker, privacy: privacy) : nil
         VStack(alignment: .leading, spacing: 0) {
             // Kicker and headline are one heading (block 29): "Your book, Down $13,740, most of it Lululemon."
             // The section number is left out of speech.
@@ -261,11 +263,24 @@ struct BriefSectionView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, S.margin)
                     .padding(.top, 8)
+                // Together (handoff 2026-11-24 §2.2): each account's part of the headline's figure in a muted line,
+                // "Sunny $13.7K · Nicolay $4.2K" (15/20 medium, 4 under the headline).
+                if let parts {
+                    Text(parts).sType(SType(size: 15, weight: 500, line: 20, tracking: 0))
+                        .foregroundStyle(S.secondaryOnPage)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, S.margin)
+                        .padding(.top, 4)
+                }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(section.kicker), \(HomeSpeech.say(headline, privacy: privacy))")
+            .accessibilityLabel("\(section.kicker), \(HomeSpeech.say(headline, privacy: privacy))" + (parts.map { ". \(BriefMask.spoken($0))" } ?? ""))
             .accessibilityAddTraits(.isHeader)
             VStack(spacing: 20) {
+                // Income today (handoff 2026-11-24 §1.3): the first card in Your book, on every moment.
+                if section.kicker.caseInsensitiveCompare("Your book") == .orderedSame {
+                    IncTodayCard()
+                }
                 ForEach(Array(section.cards.enumerated()), id: \.offset) { _, card in
                     if !BriefHomeScreen.perfHide.contains("card-\(card["type"].string ?? "")") {
                         BriefCardView(card: card, privacy: privacy)
@@ -275,6 +290,18 @@ struct BriefSectionView: View {
             .padding(.top, 20)
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+    }
+
+    /// Together's parts for a section: each account's key figure of that section's headline (payload.split[i].heads,
+    /// by kicker), "Sunny $13.7K · Nicolay $4.2K". Privacy on: a dollar figure hides as the rest of Home does
+    /// (BriefMask), a percentage shows; nothing when no account has a figure or every one is hidden.
+    static func parts(_ split: JSONValue?, kicker: String, privacy: Bool) -> String? {
+        let ps = (split?.array ?? []).compactMap { a -> (String, String)? in
+            guard let n = a["name"].string, let f = a["heads"][kicker].string, !f.isEmpty else { return nil }
+            return (n, privacy ? BriefMask.mask(f) : f)
+        }
+        guard !ps.isEmpty, !ps.allSatisfy({ $0.1 == BriefMask.shown }) else { return nil }
+        return ps.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
     }
 
     /// 24/30, -.015em (New Home iPhone Preview h2): the first sentence 700 (`thick`, the runs marked bold), the rest 400.
@@ -417,9 +444,10 @@ enum SentenceWrap {
     }
 }
 
-// MARK: - The glass every Home card sits on
+// MARK: - The surface every Home card sits on
 
-/// Every Home card: the padding and width, on SunnyGlass (Design/SunnyGlass.swift, Nik's spec, 8 Nov 2026).
+/// Every Home card: the padding and width, on SunnyGlass (Design/SunnyGlass.swift), which draws the flat card since the
+/// 24 Nov handoff (§2.3: white / #1C1C1E, glass only on what floats).
 /// ⚠ Don't swap in .glassEffect(), a tint, or a drawn backdrop: all three were tried and rejected on 8 Nov.
 struct BriefCardChrome: ViewModifier {
     var radius: CGFloat = 20

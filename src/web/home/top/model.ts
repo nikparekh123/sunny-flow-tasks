@@ -39,7 +39,9 @@ export function dayLabel(day: string, r: Range): string {
   return `${WD[p.wd]} ${MO[p.m - 1]} ${p.d}` + (r === '1Y' || r === 'All' ? `, ${p.y}` : '');
 }
 
-export interface Line { k: string; v: string; c: string; l: string }
+/** A line under the account value: the figure in its colour, then its words in grey; on Together each account's
+    part after the words ("today · Sunny ▼ $13.7K · Nicolay ▼ $4.2K"). */
+export interface Line { k: string; v: string; c: string; l: string; pt?: string | null }
 
 export interface ChartModel {
   n: number;
@@ -142,7 +144,7 @@ export function weekChange(m: ChartModel | null, day: string | undefined): numbe
   return m.nav(e) - m.nav(b) - m.dep(b, e);
 }
 
-export interface Stat { k: string; l: string; v: string; c: string; tv?: boolean }
+export interface Stat { k: string; l: string; v: string; c: string; tv?: boolean; n?: number | null }
 
 /** The stats row (README 1, item 4): Realized · Open P&L · Time value › · Margin · Interest · Fees.
  *  Open P&L replaced Unrealized (Nik, 17 Nov 2026): the open positions against what they were opened at, an open
@@ -152,13 +154,14 @@ export function stats(payload: J, m: ChartModel | null, r: Range): Stat[] {
   const loss = (x: number) => (Math.round(x) < 0 ? C.red : C.ink);
   if (!m || !c) {
     const o = a.open_pl == null ? null : +a.open_pl;
+    const tv0 = tvLeftTotal(payload) ?? (a.time_value_sold == null ? null : +a.time_value_sold);
     return [
-      { k: 'r', l: 'Realized', v: money(0), c: C.ink },
-      { k: 'o', l: 'Open P&L', v: o == null ? '-' : money(o), c: o == null ? C.ink : loss(o) },
-      { k: 'tv', l: 'Time value ›', v: money(tvLeftTotal(payload) ?? a.time_value_sold), c: C.ink, tv: true },
-      { k: 'm', l: 'Margin', v: money(a.margin), c: C.ink },
-      { k: 'i', l: 'Interest', v: money(0), c: C.ink },
-      { k: 'f', l: 'Fees', v: money(0), c: C.ink },
+      { k: 'r', l: 'Realized', v: money(0), c: C.ink, n: null },
+      { k: 'o', l: 'Open P&L', v: o == null ? '-' : money(o), c: o == null ? C.ink : loss(o), n: o },
+      { k: 'tv', l: 'Time value ›', v: money(tv0), c: C.ink, tv: true, n: tv0 },
+      { k: 'm', l: 'Margin', v: money(a.margin), c: C.ink, n: a.margin == null ? null : +a.margin },
+      { k: 'i', l: 'Interest', v: money(0), c: C.ink, n: null },
+      { k: 'f', l: 'Fees', v: money(0), c: C.ink, n: null },
     ];
   }
   const e = m.n - 1, s = Math.min(m.start(r), e), live = !!c.live_last;
@@ -173,12 +176,12 @@ export function stats(payload: J, m: ChartModel | null, r: Range): Stat[] {
   const margin = live && a.margin != null ? +a.margin : +(c.margin?.[e] ?? 0);
   const interest = diff('interest_cum'), fees = diff('commission_cum');
   return [
-    { k: 'r', l: 'Realized', v: money(realized), c: loss(realized) },
-    { k: 'o', l: 'Open P&L', v: open == null ? '-' : money(open), c: open == null ? C.ink : loss(open) },
-    { k: 'tv', l: 'Time value ›', v: money(tv), c: C.ink, tv: true },
-    { k: 'm', l: 'Margin', v: money(margin), c: C.ink },
+    { k: 'r', l: 'Realized', v: money(realized), c: loss(realized), n: realized },
+    { k: 'o', l: 'Open P&L', v: open == null ? '-' : money(open), c: open == null ? C.ink : loss(open), n: open },
+    { k: 'tv', l: 'Time value ›', v: money(tv), c: C.ink, tv: true, n: tv },
+    { k: 'm', l: 'Margin', v: money(margin), c: C.ink, n: margin },
     // Red says negative (README): interest paid on margin is red, interest earned on cash ink.
-    { k: 'i', l: 'Interest', v: money(interest), c: loss(interest) },
-    { k: 'f', l: 'Fees', v: money(fees), c: loss(fees) },
+    { k: 'i', l: 'Interest', v: money(interest), c: loss(interest), n: interest },
+    { k: 'f', l: 'Fees', v: money(fees), c: loss(fees), n: fees },
   ];
 }

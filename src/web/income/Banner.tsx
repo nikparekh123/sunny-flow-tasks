@@ -1,0 +1,169 @@
+// The realized income banner on top of the Income tab (handoff-2026-11-24-income "The banner"; SunnyIncome
+// banner="bars"): what was kept on calls and puts sold, Weekly | Monthly. The chart is the hero: 12 weeks (or every
+// month), each bar calls (#86A8F0) and puts (#C8946A) stacked, dashed grid lines with a value scale on the right, tap
+// a bar to read it (a soft column behind it and its value on top). Everything else is small: the period and its total
+// (22 px), the yield in grey, the Calls and Puts amounts beside the switch, on Together each account's part, then By
+// ticker, 34 px rows ranked by total with the share average after every premium kept ("avg $").
+// A week or month that lost money draws below the baseline in red tones (Overview's Realized P&L), never a minus sign.
+// Under 600 px of content it takes the design's narrow sizes (8 weeks, every other label, 140 tall, the top 5 names).
+import { useMemo, useState, type CSSProperties } from 'react';
+import { money } from '../lib/format';
+import { useWeb } from '../lib/state';
+import { useContentWidth } from '../home/blocks/width';
+import { barsOf, CC, CC_LOSS, f2, ln, MU, PC, PC_LOSS, RED, scaleOf, W, yieldOf, type Banner as B } from './model';
+import { Disc } from './ui';
+
+const ROOM = 20;
+const WIDE = { pd: '18px 22px', g: 16, H: 200, bw: 40, gap: 10, AG: 40, xf: 11, top: 8, tg: 'repeat(auto-fill,minmax(220px,1fr))' };
+const NARROW = { pd: '16px', g: 14, H: 140, bw: 20, gap: 4, AG: 32, xf: 10, top: 5, tg: 'minmax(0,1fr)' };
+/** A figure's colour: red when it lost, else the text's own. */
+const red = (v: number) => (v < -0.5 ? RED : undefined);
+
+export function Banner({ b, today, accounts }: { b: B; today: string; accounts: string[] | null }) {
+  const { mask } = useWeb();
+  const cw = useContentWidth(), nw = cw > 0 && cw < 600, L = nw ? NARROW : WIDE, H = L.H, PH = H - ROOM, AG = L.AG;
+  const [vw, setVw] = useState<'w' | 'm'>('w');
+  const [pick, setPick] = useState<Record<string, string>>({});
+  const [all, setAll] = useState(false);
+  const { bars, def } = useMemo(() => barsOf(b, vw, today, nw), [b, vw, today, nw]);
+  const sc = useMemo(() => scaleOf(bars), [bars]);
+  const pi = bars.findIndex((x) => x.k === pick[vw]), si = pi >= 0 ? pi : def;
+  const sel = bars[si];
+  if (!sel) return null;
+
+  const span = sc.top + sc.bot || 1;
+  const y = (v: number) => ROOM + ((sc.top - v) / span) * PH;
+  const y0 = y(0);
+  const yl = yieldOf(sel.t, b.capital, sel.part, vw);
+
+  // By ticker: what each name realized in the period picked, biggest first, with its share average.
+  const rows = Object.keys(sel.by).map((t) => { const [c, p] = sel.by[t] ?? [0, 0]; return { t, c, p, tot: c + p, sh: b.shares[t] }; })
+    .filter((x) => Math.abs(x.tot) >= 0.5 || Math.abs(x.c) >= 0.5 || Math.abs(x.p) >= 0.5)
+    .sort((a, c) => c.tot - a.tot || a.t.localeCompare(c.t));
+  const shown = all ? rows : rows.slice(0, L.top);
+  const parts = accounts && accounts.length > 1 ? accounts.map((nm) => { const v = sel.bk[nm] ?? [0, 0]; return { nm, v: v[0] + v[1] }; }) : null;
+
+  const seg = (k: 'w' | 'm', l: string) => {
+    const on = vw === k;
+    return (
+      <button key={k} type="button" role="radio" aria-checked={on} className="bare" onClick={() => setVw(k)}
+        style={{ minWidth: 68, height: 28, padding: '0 10px', borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12,
+          fontWeight: on ? 600 : 500, color: on ? W : MU, background: on ? 'rgba(255,255,255,.2)' : 'transparent',
+          boxShadow: on ? 'inset 0 0 0 .5px rgba(255,255,255,.22),0 2px 8px rgba(0,0,0,.35)' : 'none', transition: 'background .2s,color .2s' }}>{l}</button>
+    );
+  };
+  const sw = (c: string, l: string, v: number) => (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+      <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 2, background: c }} />{l} <span style={{ color: red(v) }}>{mask(money(v))}</span>
+    </span>
+  );
+
+  return (
+    <section aria-label="Realized income" className="tnum"
+      style={{ display: 'flex', flexDirection: 'column', gap: L.g, padding: L.pd, borderRadius: 20, background: 'rgba(255,255,255,.04)', boxShadow: `inset 0 0 0 1px ${ln(0.08)}`, minWidth: 0 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px 16px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+          <span style={{ display: 'flex', flexWrap: 'wrap', gap: '0 6px', fontSize: 13, lineHeight: '18px', color: MU }}>
+            <span style={{ fontWeight: 600, color: W }}>Realized income</span><span>{sel.cap}</span>
+          </span>
+          <span style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: '2px 12px' }}>
+            <span style={{ fontSize: 22, lineHeight: '28px', fontWeight: 700, letterSpacing: '-.02em', whiteSpace: 'nowrap', color: red(sel.t) }}>{mask(money(sel.t))}</span>
+            {yl && (
+              <span title={`Yield: premium kept ÷ what the shares cost${sel.part ? '' : `. The yearly pace repeats this ${vw === 'w' ? 'week' : 'month'} all year`}`}
+                style={{ fontSize: 13, lineHeight: '18px', color: MU, whiteSpace: 'nowrap' }}>{yl.v} yield · {yl.a}</span>
+            )}
+            {parts && (
+              <span style={{ fontSize: 12, lineHeight: '16px', color: MU, whiteSpace: 'nowrap' }}>
+                {parts.map((p, i) => <span key={p.nm}>{i ? ' · ' : ''}{p.nm} <span style={{ color: red(p.v) }}>{mask(money(p.v))}</span></span>)}
+              </span>
+            )}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px 16px', flexWrap: 'wrap' }}>
+          <span style={{ display: 'flex', gap: 12, fontSize: 12, lineHeight: '16px', color: MU, whiteSpace: 'nowrap' }}>
+            {sw(sel.c < -0.5 ? CC_LOSS : CC, 'Calls', sel.c)}{sw(sel.p < -0.5 ? PC_LOSS : PC, 'Puts', sel.p)}
+          </span>
+          <div role="radiogroup" aria-label="Weekly or monthly" style={{ display: 'flex', padding: 2, borderRadius: 999, background: 'rgba(118,118,128,.24)' }}>
+            {seg('w', 'Weekly')}{seg('m', 'Monthly')}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ position: 'relative', paddingRight: AG }}>
+          {sc.lines.map((v) => (
+            <div key={v} aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: y(v), borderTop: `1px dashed ${ln(0.08)}` }}>
+              <span style={{ position: 'absolute', right: 0, top: -7, fontSize: 11, lineHeight: '14px', color: v < 0 ? 'rgba(255,105,97,.75)' : MU }}>{mask(money(v))}</span>
+            </div>
+          ))}
+          <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: AG, top: y0, borderTop: `1px solid ${ln(0.14)}` }} />
+          <div role="group" aria-label={`Realized by ${vw === 'w' ? 'week' : 'month'}, pick one to read it`} style={{ position: 'relative', display: 'flex', gap: L.gap, height: H }}>
+            {bars.map((x, i) => {
+              const on = i === si, up = Math.max(0, x.c) + Math.max(0, x.p), dn = Math.min(0, x.c) + Math.min(0, x.p);
+              const hc = (v: number) => (Math.abs(v) / span) * PH;
+              const both = (a: number, c: number) => (a !== 0 && c !== 0 ? 1 : 0);
+              const st: CSSProperties = { position: 'absolute', left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: L.bw, display: 'flex', overflow: 'hidden' };
+              const zero = up < 0.5 && dn > -0.5;
+              return (
+                <button key={x.k} type="button" className="bare sw-bn-b" aria-pressed={on} onClick={() => setPick((p) => ({ ...p, [vw]: x.k }))}
+                  aria-label={mask(`${x.pl}, ${x.t < -0.5 ? 'lost ' : ''}${money(x.t)} realized, calls ${x.c < -0.5 ? 'lost ' : ''}${money(x.c)}, puts ${x.p < -0.5 ? 'lost ' : ''}${money(x.p)}`)}
+                  style={{ position: 'relative', flex: '1 1 0', minWidth: 0, height: '100%', borderRadius: 8, background: on ? 'rgba(255,255,255,.08)' : 'transparent', transition: 'background .2s' }}>
+                  {on && !zero && (
+                    <span style={{ position: 'absolute', left: 0, right: 0, top: Math.max(0, y(up) - 20), textAlign: 'center', fontSize: 12, lineHeight: '14px', fontWeight: 700, whiteSpace: 'nowrap', color: red(x.t) ?? W }}>{mask(money(x.t))}</span>
+                  )}
+                  {zero && <span style={{ ...st, top: y0 - 2, height: 2, borderRadius: 1, background: '#2C2C2E' }} />}
+                  {up >= 0.5 && (
+                    <span style={{ ...st, top: y(up), height: y0 - y(up), flexDirection: 'column', gap: both(Math.max(0, x.c), Math.max(0, x.p)), borderRadius: '4px 4px 0 0' }}>
+                      {x.p > 0 && <span style={{ flex: 'none', height: hc(x.p), background: PC }} />}
+                      {x.c > 0 && <span style={{ flex: 'none', height: hc(x.c), background: CC }} />}
+                    </span>
+                  )}
+                  {dn <= -0.5 && (
+                    <span style={{ ...st, top: y0 + 1, height: y(dn) - y0, flexDirection: 'column', gap: both(Math.min(0, x.c), Math.min(0, x.p)), borderRadius: '0 0 4px 4px' }}>
+                      {x.c < 0 && <span style={{ flex: 'none', height: hc(x.c), background: CC_LOSS }} />}
+                      {x.p < 0 && <span style={{ flex: 'none', height: hc(x.p), background: PC_LOSS }} />}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div aria-hidden="true" style={{ display: 'flex', gap: L.gap, paddingRight: AG }}>
+          {bars.map((x, i) => (
+            <span key={x.k} style={{ flex: '1 1 0', minWidth: 0, textAlign: 'center', fontSize: L.xf, lineHeight: '14px', fontWeight: i === si ? 700 : 500, color: i === si ? W : MU, whiteSpace: 'nowrap' }}>{nw && i !== si && i % 2 ? '' : x.l}</span>
+          ))}
+        </div>
+      </div>
+
+      {rows.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div role="list" aria-label="Realized by ticker" style={{ display: 'grid', gridTemplateColumns: L.tg, gap: '0 28px' }}>
+            {shown.map((x) => {
+              const av = x.sh && x.sh.sh > 0 && x.sh.avg != null ? x.sh.avg : null;
+              const pd = x.sh && x.sh.paid != null ? x.sh.paid : null;
+              return (
+                <div key={x.t} role="listitem" title={av != null ? `Share average after every premium kept${pd != null ? ` · paid $${f2(pd)}` : ''}` : undefined}
+                  aria-label={mask(`${x.t}, ${x.tot < -0.5 ? 'lost ' : ''}${money(x.tot)} realized, calls ${money(x.c)}, puts ${money(x.p)}${av != null ? `, share average $${f2(av)}` : ''}`)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, height: 34, borderBottom: `1px solid ${ln(0.06)}`, fontSize: 13, lineHeight: '18px', whiteSpace: 'nowrap',
+                    opacity: Math.abs(x.tot) < 0.5 ? 0.5 : 1 }}>
+                  <Disc t={x.t} size={18} fs={5} pct={62} />
+                  <span style={{ fontWeight: 600 }}>{x.t}</span>
+                  <span style={{ marginLeft: 'auto', fontWeight: 600, color: red(x.tot) }}>{mask(money(x.tot))}</span>
+                  <span style={{ flex: 'none', minWidth: 76, textAlign: 'right', fontSize: 12, color: MU }}>{av != null ? `avg $${f2(av)}` : ''}</span>
+                </div>
+              );
+            })}
+          </div>
+          {rows.length > L.top && (
+            <button type="button" className="bare sw-bn-m" onClick={() => setAll(!all)} aria-expanded={all}
+              style={{ alignSelf: 'flex-start', minHeight: 32, display: 'flex', alignItems: 'center', fontSize: 12, lineHeight: '16px', fontWeight: 600, color: MU }}>
+              {all ? 'Fewer' : `All ${rows.length} names`}
+            </button>
+          )}
+        </div>
+      )}
+      <style>{'.sw .sw-bn-b:hover{opacity:.85}.sw .sw-bn-m:hover{opacity:.75}'}</style>
+    </section>
+  );
+}

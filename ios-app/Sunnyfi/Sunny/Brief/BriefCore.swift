@@ -90,7 +90,7 @@ enum BriefAccount: String, CaseIterable, Identifiable, Hashable {
 ///   -moment pre|open|post|weekend|futures|bell|last20|last5   pins the moment (else `-now` or the clock)
 ///   -acct together|sunny|nicolay                              the account on screen
 ///   -privacy                                                  privacy on
-///   -tab positions                                            opens on Positions
+///   -tab positions|income                                     opens on Positions or Income
 ///   -pname NKE                                                Positions on that name
 enum BriefDebug {
     static let sample: Bool = flag("-sample")
@@ -164,6 +164,20 @@ final class BriefState {
     private(set) var split: [(name: String, value: Double, today: Double)] = []
     /// Together: each account's Your book parts (payload.split[i].parts), for S and N under every total.
     private(set) var splitParts: [(name: String, parts: JSONValue)] = []
+    /// payload.split as it comes (Together only): [{id, name, value, today, pct, chart, open_pl, margin, tvLeft, heads
+    /// {kicker: "$13.7K"}, names [tickers], parts, nameParts}].
+    private(set) var splitRaw: JSONValue?
+    /// payload.income (24 Nov 2026): the Income tab and Income today read it.
+    private(set) var income: JSONValue?
+    /// payload.income in the words Income today and the Income tab draw, built once per build (never in a body).
+    private(set) var incomeModel: IncModel?
+    private var incomeKey: String?
+    func setIncome(_ j: JSONValue?, key: String) {
+        guard key != incomeKey else { return }
+        incomeKey = key
+        income = j
+        incomeModel = IncModel.build(j)
+    }
 
     // MARK: Pinned (the debug menu, Pass 3)
     /// A moment pinned from the debug menu: its page replaces the live one until Back to live.
@@ -212,6 +226,7 @@ final class BriefState {
             guard let n = p["name"].string, let v = p["value"].double else { return nil }
             return (n, v, p["today"].double ?? 0)
         }
+        self.splitRaw = split
         self.splitParts = (split?.array ?? []).compactMap { p in
             guard let n = p["name"].string, case .object = p["parts"] else { return nil }
             return (n, p["parts"])

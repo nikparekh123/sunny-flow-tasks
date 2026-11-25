@@ -2,7 +2,7 @@
 //  HomeRouter.swift
 //  Sunny
 //
-//  What the app has open: the tab (Home or Positions, handoff 30), a receipt
+//  What the app has open: the tab (Home, Income or Positions, handoff 2026-11-24), a receipt
 //  over the page (blocks 06 and 07), the Aftershock page (26), the name the
 //  Positions tab opens on, and where quick nav scrolls (08).
 //
@@ -21,16 +21,21 @@ final class HomeRouter {
         case book = "Book", risk = "Risk", income = "Income", results = "Results"
         var id: String { rawValue }
     }
-    /// The four tabs (block 12c, handoff 32) and Search, the round button right of them (block 27). Opens on Home.
+    /// The tabs and Search, the round button right of them (block 27). Opens on Home.
     enum Tab: Hashable {
-        case home, positions, gamma, insights, search
-        /// Two tabs since the 6 Nov handoff (answer 7): Gamma and Insights are gone; Walls on Positions and the
-        /// ticker chart do Gamma's job, Your position, To decide and the Thesis check do Insights'.
-        static let bar: [Tab] = [.home, .positions]
-        var title: String { switch self { case .home: "Home"; case .positions: "Positions"; case .gamma: "Gamma"; case .insights: "Insights"; case .search: "Search" } }
+        case home, income, positions, gamma, insights, search
+        /// Home · Income · Positions (handoff 2026-11-24 §2.1). Gamma and Insights went on 6 Nov (answer 7): Walls on
+        /// Positions and the ticker chart do Gamma's job, Your position, To decide and the Thesis check do Insights'.
+        static let bar: [Tab] = [.home, .income, .positions]
+        var title: String {
+            switch self {
+            case .home: "Home"; case .income: "Income"; case .positions: "Positions"; case .gamma: "Gamma"; case .insights: "Insights"
+            case .search: "Search"
+            }
+        }
         var icon: String {
             switch self {
-            case .home: "house.fill"; case .positions: "rectangle.stack.fill"; case .gamma: "chart.bar.doc.horizontal"
+            case .home: "house.fill"; case .income: "calendar"; case .positions: "rectangle.stack.fill"; case .gamma: "chart.bar.doc.horizontal"
             case .insights: "lightbulb"; case .search: "magnifyingglass"
             }
         }
@@ -45,6 +50,8 @@ final class HomeRouter {
     var listenTick = 0
     /// Tapping the open tab scrolls it to the top (block 12a): each tab watches its own count.
     var topTick: [Tab: Int] = [:]
+    /// Every rung on Income today opens the Income tab at its top (handoff 2026-11-24 §2.1), with no scroll to watch.
+    var incomeTop = 0
     var receipt: Receipt?
 
     // MARK: Positions (handoffs 28 and 30)

@@ -44,7 +44,7 @@
 import { bookQ } from '../_shared/books.ts';
 import { calc, cover, CFG, dir, f1, f2, fk, heldPair, ITM, KS, netDelta, pc, row, won, bs as bsQ, type Expiry, type Fx, type Leg, type Name, type Quote, type Row } from '../_shared/sd-engine.ts';
 
-const BUILD = '2026-11-24.1';
+const BUILD = '2026-11-25.1';
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -408,7 +408,9 @@ Deno.serve(async (req) => {
       const e: Expiry = { ex, label: md(ex), long: wmd(ex), td: tradingDays(ex), cd: calDays(ex), T, iv, strikes, quote: quoteK, earnB: before(ex) };
       const R = calc(name, e, { atm: true }), m = R.m, H = won(closes, ivDay, Math.max(1, e.td));
       const out = (rw: Row, put: boolean) => ({ k: rw.k, K: rw.K, pct: rw.x, kA: +rw.kA.toFixed(4), pr: +rw.pr.toFixed(4), be: +rw.be.toFixed(4), itm: +rw.itm.toFixed(4),
-        est: rw.est, liq: rw.liq, won: H.n ? +(put ? H.put(rw.kA) : H.call(rw.kA)).toFixed(4) : null });
+        est: rw.est, liq: rw.liq, won: H.n ? +(put ? H.put(rw.kA) : H.call(rw.kA)).toFixed(4) : null,
+        // Open interest at the strike (Theta's chain; 24 Nov 2026, the SD tiles and the phone's strike cards show it).
+        oi: e.quote(rw.K, put).oi ?? null });
       // The signals (card136): only what matters.
       const sig: Row_[] = [];
       const sg = (o: Row_) => sig.push({ tag: '', tagTone: 'mu', s: '', vTone: 'ink', fx: [] as Fx[], ...o });

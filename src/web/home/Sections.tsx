@@ -9,7 +9,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import type { BookId, J } from '../lib/data';
 import { useWeb } from '../lib/state';
-import { clean, named } from '../lib/format';
+import { C, clean, named } from '../lib/format';
 import './blocks/blocks.css';
 import { FullRow, Grid, More } from './blocks/Card';
 import { gridCards, type Ctx, type GridItem } from './blocks/cards';
@@ -22,6 +22,7 @@ import Overnight from './blocks/Overnight';
 import ShareAvg from './blocks/ShareAvg';
 import { SectorMaps, SectorTable, sectorsOf } from './blocks/Sectors';
 import { momentOf, scrollToSel, spans, tidy, type Mo, type Span } from './blocks/util';
+import { headParts } from './top/parts';
 
 const INDEX = new Set(['indexCards', 'futuresCards', 'theWeekIndexes']);
 const PERIOD: Record<Mo, string> = { pre: 'before the bell', open: 'today', post: 'today', weekend: 'the week' };
@@ -164,7 +165,7 @@ export default function Sections({ doc, payload, book }: { doc: J; payload: J; b
               break;
             // The weekend's Share average (handoff 2026-11-18): its own grid of boxes, at least 300 wide each.
             case 'shareAvg':
-              full(<ShareAvg card={c} />);
+              full(<ShareAvg card={c} payload={book === 'T' ? payload : undefined} />);
               break;
             // The Levels card (handoff 2026-11-18, 161c): two columns across the row, its figures from
             // payload.activity; an older payload without it draws nothing.
@@ -195,11 +196,19 @@ export default function Sections({ doc, payload, book }: { doc: J; payload: J; b
         if (isBook && tog) full(<div className="tnum" style={{ borderRadius: 20, background: 'rgba(255,255,255,.04)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.08)',
           padding: '20px 24px 22px', minWidth: 0 }}><RealizedPL t={tog} /></div>);
         flush();
+        /* Together: the headline adds up both accounts, each one's part in a muted line under it ("Sunny $13.7K ·
+           Nicolay $4.2K"), from each account's own headline for this section (payload.split[].heads). */
+        const hp = book === 'T' && /\$[\d,.]+[KM]?|[\d.]+%/.test(runs.map((r) => r.t).join('')) ? headParts(payload, String(s.kicker ?? '')) : [];
         return (
           <section key={si} data-sec={'s' + si} data-kicker={clean(s.kicker)} aria-label={clean(s.kicker)} style={{ display: 'flex', flexDirection: 'column', gap: 22, paddingTop: 64 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <span className="kicker">{si + 1} · {String(s.kicker ?? '').replace(/^\d+ · /, '')}</span>
               <Headline runs={runs} mask={mask} />
+              {hp.length > 1 && (
+                <span className="tnum" style={{ marginTop: -2, fontSize: 15, lineHeight: '20px', fontWeight: 500, color: C.ink2 }}>
+                  {hp.map((x) => `${x.name} ${mask(x.v)}`).join(' · ')}
+                </span>
+              )}
             </div>
             {blocks}
           </section>

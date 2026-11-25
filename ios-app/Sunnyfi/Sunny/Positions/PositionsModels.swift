@@ -366,10 +366,14 @@ struct PosName {
     /// earned: the web's Pricer), ±range of the price, the priced move, where it peaks, the Greeks then. The P&L scale
     /// is the widest over every stop in `hold`, so the curve moves against a fixed scale as the date slides (168).
     /// Legs switched off drop out (the web's What if set).
-    static func payoff(_ m: PositionsModel, off: Set<String>, stop: Int, range r: Double, hold: [Int]) -> Payoff? {
+    /// `extra`: legs tried from Intelligence (handoff 2026-11-24 §4), priced on the phone at the chain's IV for their own
+    /// strike and expiry; they add to the curve, where it peaks and the Greeks.
+    static func payoff(_ m: PositionsModel, off: Set<String>, stop: Int, range r: Double, hold: [Int], extra: [PosTryLeg] = []) -> Payoff? {
         guard m.stops.indices.contains(stop), m.S0 > 0 else { return nil }
         let st = m.stops[stop], tt = st.tt, S0 = m.S0
-        let plAt = { (x: Double, t: Double) in m.legs.reduce(0) { off.contains($1.id) ? $0 : $0 + m.legPL($1, x, t) } }
+        let plAt = { (x: Double, t: Double) in
+            m.legs.reduce(0) { off.contains($1.id) ? $0 : $0 + m.legPL($1, x, t) } + extra.reduce(0) { $0 + $1.pl(x, t) }
+        }
         let pl = { (x: Double) in plAt(x, tt) }
         let xs = (0...120).map { S0 * (1 - r + 2 * r * Double($0) / 120) }
         let ys = xs.map(pl)
@@ -378,14 +382,38 @@ struct PosName {
             let t = m.stops[i].tt
             for x in stride(from: 0, through: 120, by: 4).map({ xs[$0] }) { let v = plAt(x, t); lo = min(lo, v); hi = max(hi, v) }
         }
-        let peak = m.shortAt(stop, off: off)
-        let g = m.greeks(S0, tt, off: off)
+        let peak = shortAt(m, stop, off: off, extra: extra)
+        let g = greeks(m, S0, tt, off: off, extra: extra)
         let today = stop == 0 && tt < 0.01
         let byT = today ? "today" : "by " + st.long.replacingOccurrences(of: " close", with: "")
         let top = Int(PE.jsRound(min(50, ((m.gridTop ?? S0 * 1.5) / S0 - 1) * 100)))
         return Payoff(xs: xs, ys: ys, range: r, yLo: lo, yHi: hi, v0: pl(S0), byT: byT, dateLabel: st.short == "Today" ? "today" : st.short,
                       peak: peak, peakPast: peak.map { $0 <= S0 * 1.0005 } ?? false, top: top,
                       mv: m.v > 0 ? m.v * (max(tt, 1) / 365).squareRoot() : 0, d: g.d, th: g.th, g: g.g, vg: g.vg)
+    }
+
+    /// The Greeks at a price and date: the grid's legs that are on, plus the tried legs.
+    static func greeks(_ m: PositionsModel, _ x: Double, _ tt: Double, off: Set<String>, extra: [PosTryLeg]) -> (d: Double, g: Double, th: Double, vg: Double) {
+        var g = m.greeks(x, tt, off: off)
+        for e in extra { let q = e.greeks(x, tt); g.d += q.d; g.g += q.g; g.th += q.th; g.vg += q.vg }
+        return g
+    }
+    /// Where the book turns short at a stop: the grid's (to the cent) without tried legs; with them, the first price
+    /// above today where the net delta drops below zero (steps of 0.2%, read between them), as far as +50%.
+    static func shortAt(_ m: PositionsModel, _ stop: Int, off: Set<String>, extra: [PosTryLeg]) -> Double? {
+        guard !extra.isEmpty else { return m.shortAt(stop, off: off) }
+        guard m.stops.indices.contains(stop), m.S0 > 0 else { return nil }
+        let tt = m.stops[stop].tt, S0 = m.S0, top = min(S0 * 1.5, m.gridTop ?? S0 * 1.5)
+        let dAt = { (x: Double) in m.delta(x, tt, off: off) + extra.reduce(0) { $0 + $1.greeks(x, tt).d } }
+        var px = S0, pd = dAt(px)
+        if pd < 0 { return S0 }
+        var x = S0 * 1.002
+        while x <= top + 1e-9 {
+            let dx = dAt(x)
+            if dx < 0 { return ((px + (x - px) * pd / (pd - dx)) * 100 - 1e-9).rounded(.up) / 100 }
+            px = x; pd = dx; x *= 1.002
+        }
+        return nil
     }
 }
 
@@ -729,8 +757,10 @@ final class PositionsMemo {
     private var bookKey = "", bookV: PosBook?
     private var nameKey = "", nameV: PosName?
     private var priceKey = "", priceV: PosPrice?
-    private var intelKey = "", intelV: PosIntel?
     private var payKey = "", payV: PosName.Payoff?
+    private var everyKey = "", everyV: PosEvery?
+    private var strikesKey = "", strikesV: PosStrikes?
+    private var triesKey = "", triesV: [PosTryLeg] = []
 
     func book(key: String, _ make: () -> PosBook) -> PosBook {
         if key == bookKey, let v = bookV { return v }
@@ -748,8 +778,16 @@ final class PositionsMemo {
         if key == payKey { return payV }
         let v = make(); payKey = key; payV = v; return v
     }
-    func intel(key: String, _ make: () -> PosIntel?) -> PosIntel? {
-        if key == intelKey { return intelV }
-        let v = make(); intelKey = key; intelV = v; return v
+    func every(key: String, _ make: () -> PosEvery) -> PosEvery {
+        if key == everyKey, let v = everyV { return v }
+        let v = make(); everyKey = key; everyV = v; return v
+    }
+    func strikes(key: String, _ make: () -> PosStrikes?) -> PosStrikes? {
+        if key == strikesKey { return strikesV }
+        let v = make(); strikesKey = key; strikesV = v; return v
+    }
+    func tries(key: String, _ make: () -> [PosTryLeg]) -> [PosTryLeg] {
+        if key == triesKey { return triesV }
+        let v = make(); triesKey = key; triesV = v; return v
     }
 }

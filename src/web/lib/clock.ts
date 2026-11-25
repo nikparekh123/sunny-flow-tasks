@@ -33,6 +33,16 @@ export function estWords(e: { session?: string; at?: string } | null | undefined
   const n = ny(new Date(e.at)), day = n.date === ny().date ? '' : `${n.wd} `;
   return `${e.session === 'pre' ? 'Pre-market' : 'After hours'} est. · ${day}${clock12(n)} ET`;
 }
+/** When the marks were taken, as Positions and Income today say it: "Fri Nov 6 close" for marks at or after the close
+    (or on an earlier day), else "Mon Nov 9 · 11:42 AM ET". */
+export function asOfWords(iso: string | undefined | null): string {
+  if (!iso) return '';
+  const n = ny(new Date(iso)), today = ny();
+  return n.date < today.date || n.mins >= 16 * 60 ? `${shortDate(n.date)} close` : `${shortDate(n.date)} · ${clock12(n)} ET`;
+}
+/** The marks' time line: "After hours est. · 7:51 PM ET" out of the session, else asOfWords(payload.fresh.marks). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const marksWords = (payload: any): string => estWords(payload?.brief_inputs?.prices_est ?? payload?.prices_est) ?? asOfWords(payload?.fresh?.marks);
 /** "Oct 27" from an ISO date. */
 export const monthDay = (iso: string) => {
   const d = new Date(iso + 'T12:00:00Z');

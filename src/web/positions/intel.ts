@@ -14,7 +14,9 @@ import {
 } from '../../../supabase/functions/_shared/positions-engine.ts';
 import type { ChainW } from './model';
 
-export interface SdRow { k: number; K: number; pct: number; kA: number; pr: number; be: number; itm: number; est: boolean; liq: boolean; won: number | null }
+export interface SdRow { k: number; K: number; pct: number; kA: number; pr: number; be: number; itm: number; est: boolean; liq: boolean; won: number | null;
+  /** Open interest at the strike (sunny-sd, 24 Nov 2026); older replies have none. */
+  oi?: number | null }
 export interface SdSig { key: string; k: string; v: string; vTone: 'ink' | 'green' | 'red' | 'or'; tag: string; tagTone: 'mu' | 'or'; s: string; fx: [string, string][] }
 export interface GammaWall { K: number; kind: 'ceiling' | 'floor' | 'accelerator' | 'unclear'; gex: number; conf: 1 | 2 | 3 | null }
 export interface SdExp {

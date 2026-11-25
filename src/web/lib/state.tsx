@@ -1,5 +1,4 @@
-// The web's shared state (README "State"): which account is open, privacy, the rail view, the Time value sheet and the
-// Activity panel.
+// The web's shared state (README "State"): which account is open, privacy, the Time value sheet and the Activity panel.
 // Picking an account changes every card about a book; market cards stay the same.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -7,9 +6,6 @@ import { useBooks, type BookId } from './data';
 import { maskMoney } from './format';
 
 export type Account = BookId;
-/** The Home rail: What you hold or By name (handoff 2026-11-18, SunnyRail pills), remembered per computer; opens on
-    What you hold. */
-export type RailView = 'hold' | 'name';
 
 const read = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const write = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private window */ } };
@@ -25,8 +21,6 @@ interface WebState {
   setPrivacy: (on: boolean) => void;
   /** Hides book dollars when privacy is on (prices with two decimals stay). */
   mask: (s: string) => string;
-  railView: RailView;
-  setRailView: (v: RailView) => void;
   tvOpen: boolean;
   setTvOpen: (on: boolean) => void;
   /** The Activity panel (handoff 2026-11-18, 161a): open or not, and the line to show when a Levels row opened it
@@ -64,8 +58,6 @@ export function WebStateProvider({ children }: { children: ReactNode }) {
 
   const [privacy, setPrivacyS] = useState(() => read('sw-privacy') === '1');
   const setPrivacy = useCallback((on: boolean) => { setPrivacyS(on); write('sw-privacy', on ? '1' : '0'); }, []);
-  const [railView, setRailViewS] = useState<RailView>(() => (read('sw-rail-by') === 'name' ? 'name' : 'hold'));
-  const setRailView = useCallback((v: RailView) => { setRailViewS(v); write('sw-rail-by', v); }, []);
   const [tvOpen, setTvOpen] = useState(false);
   const [actOpen, setActOpen] = useState(false);
   const [actFocus, setActFocus] = useState<{ key: string; n: number } | null>(null);
@@ -77,9 +69,9 @@ export function WebStateProvider({ children }: { children: ReactNode }) {
 
   const mask = useCallback((s: string) => (privacy ? maskMoney(s) : s), [privacy]);
 
-  const value = useMemo(() => ({ book, books, account: book ?? 'S', pickAccount, privacy, setPrivacy, mask, railView, setRailView, tvOpen, setTvOpen,
+  const value = useMemo(() => ({ book, books, account: book ?? 'S', pickAccount, privacy, setPrivacy, mask, tvOpen, setTvOpen,
     actOpen, actFocus, openActivity, closeActivity }),
-  [book, books, pickAccount, privacy, setPrivacy, mask, railView, setRailView, tvOpen, actOpen, actFocus, openActivity, closeActivity]);
+  [book, books, pickAccount, privacy, setPrivacy, mask, tvOpen, actOpen, actFocus, openActivity, closeActivity]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

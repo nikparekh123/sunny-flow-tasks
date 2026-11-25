@@ -56,12 +56,15 @@ export function Header() {
   const loc = useLocation();
   const n = useNY(15_000);
   const { privacy, setPrivacy } = useWeb();
-  // The ticker page keeps the tab it came from selected (state.from: 'home' | 'positions').
+  // Home · Income · Positions (handoff 2026-11-24 §3). The ticker page keeps the tab it came from selected
+  // (state.from: 'home' | 'income' | 'positions').
   const from = (loc.state as { from?: string } | null)?.from;
-  const onPositions = loc.pathname.startsWith('/positions') || (loc.pathname.startsWith('/t/') && from === 'positions');
+  const tk = loc.pathname.startsWith('/t/');
+  const onPositions = loc.pathname.startsWith('/positions') || (tk && from === 'positions');
+  const onIncome = loc.pathname.startsWith('/income') || (tk && from === 'income');
   const tabs = [
-    // Overview (Both accounts) selects neither tab, as the design draws it.
-    { k: 'home', l: 'Home', on: !onPositions, go: () => nav('/home') },
+    { k: 'home', l: 'Home', on: !onPositions && !onIncome, go: () => nav('/home') },
+    { k: 'income', l: 'Income', on: onIncome, go: () => nav('/income') },
     { k: 'positions', l: 'Positions', on: onPositions, go: () => nav('/positions') },
   ];
   const pvL = privacy ? 'Show amounts' : 'Hide amounts';
@@ -94,8 +97,9 @@ export function Header() {
             {privacy && <path d="M4 4l16 16" />}
           </svg>
         </button>
-        {/* The clock never clips (handoff 2026-11-18): the whole line on a wide bar, the time alone under 720 px, and
-            under 480 px the bar's gaps close up and the time may wrap onto two lines ("11:00" over "AM ET"). */}
+        {/* The clock never clips (handoff 2026-11-18): the whole line on a wide bar, the time alone under 720 px; the
+            bar's gaps narrow under 760 px and close up under 640 px (three tabs since 24 Nov 2026), where the time may
+            wrap onto two lines ("11:00" over "AM ET"). */}
         <span style={{ flex: '0 1 auto', minWidth: 0, fontSize: 12, lineHeight: '14px', letterSpacing: '.04em', color: '#98989D', textAlign: 'right' }}>
           <span className="sw-clk-l" style={{ whiteSpace: 'nowrap' }}>{headerTime(n)}</span>
           <span className="sw-clk-s">{clock12(n)}{'\u00A0'}ET</span>
@@ -104,7 +108,8 @@ export function Header() {
       <style>{`.sw .sw-navtab:hover{color:#F5F5F7!important}.sw .sw-pv:hover{filter:brightness(1.3)}
 .sw .sw-clk-s{display:none}
 @media (max-width:720px){.sw .sw-clk-l{display:none}.sw .sw-clk-s{display:inline}}
-@media (max-width:480px){.sw .sw-hd{padding:0 16px!important;gap:10px!important}.sw .sw-hd-l{gap:14px!important}.sw .sw-hd-tabs{gap:18px!important}.sw .sw-hd .sw-todo{margin-right:0!important}.sw .sw-hd-sp{display:none}.sw .sw-hd-l{margin-right:auto}}
+@media (max-width:760px){.sw .sw-hd{padding:0 32px!important;gap:20px!important}.sw .sw-hd-l{gap:20px!important}.sw .sw-hd-tabs{gap:20px!important}}
+@media (max-width:640px){.sw .sw-hd{padding:0 16px!important;gap:10px!important}.sw .sw-hd-l{gap:14px!important}.sw .sw-hd-tabs{gap:18px!important}.sw .sw-hd .sw-todo{margin-right:0!important}.sw .sw-hd-sp{display:none}.sw .sw-hd-l{margin-right:auto}}
 @keyframes s138rise{from{transform:translateY(22px)}to{transform:translateY(0)}}
 @keyframes s138ray{from{opacity:0;stroke-dashoffset:8}to{opacity:1;stroke-dashoffset:0}}
 @keyframes s138glow{from{opacity:0;transform:scaleX(.3)}to{opacity:1;transform:scaleX(1)}}

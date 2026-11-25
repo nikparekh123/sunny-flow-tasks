@@ -28,9 +28,10 @@ import { endedDay, endedFor, techFor, wallsFor } from './positions.ts';
 import { checkInvariants, checkOverview } from './invariants.ts';
 import { type BookSide, buildOverview, comingIn } from './overview.ts';
 import { buildTogether, type Side, type SideEvent, type SideLeg } from './together.ts';
+import { buildIncome, chainKey, rollTargets, type Chain, type IncLeg, type IncReal } from './income.ts';
 import { type ActEvent, type ActName, activityEvents, levelsOf } from './activity.ts';
-import { bsDelta, bsValue, fK } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-24.2';
+import { bsDelta, bsValue, fK, NameBook } from '../_shared/book-engine.ts';
+const BUILD = '2026-11-25.3';
 import { BOOKS, partsOf } from '../_shared/books.ts';
 /* A book's heartbeat feed: book S keeps the old names, others add theirs (sunny-home-N). */
 const feedOf = (feed: string, book: string) => (book === 'S' ? feed : `${feed}-${book}`);
@@ -396,7 +397,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   type Leg = { ticker: string; type: 'call' | 'put'; side: 'sold' | 'bought'; strike: number; expiry: string;
     n: number; avg: number; opened: string; mark: number | null; iv: number | null; delta: number | null;
     theta: number | null; gamma: number | null; vega: number | null; underlying: number | null; marked_at: string | null;
-    mark_wk?: number | null; mark_close?: number | null };
+    mark_wk?: number | null; mark_close?: number | null;
+    /** The books that hold it (Together adds the same contract up) and its open lots (option_trades ids), for Income. */
+    books: string[]; lots: { id: string; n: number }[] };
   const legs: Leg[] = [];
   for (const rows of groups.values()) {
     const opens = rows.filter((r) => r.action === 'open').sort((a, b) => (a.id < b.id ? -1 : 1));
@@ -416,6 +419,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       opened: live.map((s) => String(s.o.trade_date)).sort()[0],
       mark: num(g?.last_mark), iv: num(g?.iv), delta: num(g?.delta), theta: num(g?.theta),
       gamma: num(g?.gamma), vega: num(g?.vega), underlying: num(g?.underlying), marked_at: g?.captured_at ?? null,
+      books: [String(f.book_id ?? bookId)], lots: live.map((s) => ({ id: String(s.o.id), n: s.n })),
     });
   }
   /* Together: the same contract held in two books is one leg, its counts added, its price the contracts' average, its
@@ -428,6 +432,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const n = o.n + l.n;
       o.avg = r2((o.avg * o.n + l.avg * l.n) / n * 10000) / 10000;
       o.n = n; if (l.opened < o.opened) o.opened = l.opened;
+      o.books = [...new Set([...o.books, ...l.books])]; o.lots = [...o.lots, ...l.lots];
       if (String(l.marked_at ?? '') > String(o.marked_at ?? '')) Object.assign(o, { mark: l.mark, iv: l.iv, delta: l.delta, theta: l.theta,
         gamma: l.gamma, vega: l.vega, underlying: l.underlying, marked_at: l.marked_at });
     }
@@ -500,7 +505,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   /* `leg` names the line on the report ("NKE 36C"), `how` says how it closed,
      `basis` is the credit (sold) or cost (bought) behind it, for "kept 92%". */
   type Ev = { d: string; ticker: string; kind: 'calls sold' | 'puts sold' | 'calls bought' | 'puts bought' | 'shares';
-              amt: number; leg: string; how: 'expired' | 'closed' | 'assigned' | 'exercised' | 'sold'; basis: number; exp?: string };
+              amt: number; leg: string; how: 'expired' | 'closed' | 'assigned' | 'exercised' | 'sold'; basis: number; exp?: string;
+              /** The book it was booked in (Together's Income banner splits by account). */
+              book?: string };
   const realized: Ev[] = [];
   /* Premium in hand on open shorts, as dated cash moves: the credit on the
      sale, taken back out when the leg closes or expires (its result is then in
@@ -531,14 +538,14 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const how = code === 'Ep' ? 'expired' : code === 'A' ? 'assigned' : code === 'Ex' ? 'exercised' : 'closed';
       if (!pre || String(t.trade_date) > BOOK_START) {
         realized.push({ d: String(t.trade_date), ticker: String(f0.ticker).toUpperCase(), kind, amt, leg, how,
-          basis: n * avg, exp });
+          basis: n * avg, exp, book: String(f0.book_id ?? bookId) });
       }
       cost -= n * avg; qty -= n;
     }
     if (qty > 0.0001 && String(f0.expiry) < today) {
       if (!pre || exp > BOOK_START) {
         realized.push({ d: exp, ticker: String(f0.ticker).toUpperCase(), kind, amt: short ? cost : -cost, leg,
-          how: 'expired', basis: cost, exp });
+          how: 'expired', basis: cost, exp, book: String(f0.book_id ?? bookId) });
       }
       if (short && !pre) heldFlows.push({ d: exp, amt: -cost });
     } else if (qty > 0.0001 && !pre) {
@@ -3339,6 +3346,84 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     if (briefInputs) { briefInputs.ended_day = eDay; briefInputs.prices_est = pricesEst; briefInputs.parts = bookParts; }
   } catch (e) { brief = { v: 1, error: String((e as Error)?.message ?? e) }; }
   step('brief');
+  /* ── INCOME (income.ts; handoff 2026-11-24 §1 and the Income handoff of the same day): every open call and put sold,
+     what it has kept, where a ready one rolls (on a strike the chain lists), the ladders' delta line, the calendars,
+     the totals and the realized-income banner. The chains a roll needs come from Theta, cached 10 minutes in
+     option_roll_cache (listed expiries 6 hours). Never breaks the build. ── */
+  let income: Row | null = null;
+  try {
+    const soldLegs: IncLeg[] = legs.filter((l) => l.side === 'sold' && l.expiry >= today && l.n > 0).map((l) => ({
+      t: l.ticker, ty: l.type, K: l.strike, ex: l.expiry, n: l.n, at: l.avg, mk: l.mark, iv: l.iv, books: l.books, lots: l.lots }));
+    // Where each open lot sat when sold (option_fill_context, written by option-fill-context).
+    const ids = soldLegs.flatMap((l) => l.lots.map((o) => o.id));
+    const z0 = new Map<string, number>();
+    for (let i = 0; i < ids.length; i += 80) {
+      for (const r of await get(`option_fill_context?option_trade_id=in.(${ids.slice(i, i + 80).join(',')})&select=option_trade_id,z0`)) {
+        if (r.z0 != null) z0.set(String(r.option_trade_id), Number(r.z0));
+      }
+    }
+    const cacheGet = async (key: string, maxMin: number, fetchIt: () => Promise<unknown>): Promise<unknown> => {
+      const [c] = await get(`option_roll_cache?key=eq.${encodeURIComponent(key)}&select=data,at`);
+      if (c && Date.now() - Date.parse(String(c.at)) < maxMin * 60_000) return c.data;
+      const data = await fetchIt();
+      if (!pinned && data != null) {
+        await fetch(`${URL_}/rest/v1/option_roll_cache?on_conflict=key`, { method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify([{ key, data, at: new Date().toISOString() }]) }).catch(() => null);
+      }
+      return data ?? c?.data ?? null;
+    };
+    const ladders = [...new Set(soldLegs.map((l) => l.t))].filter((t) => new Set(soldLegs.filter((l) => l.t === t).map((l) => l.ex)).size >= 3);
+    const kpOf = (l: IncLeg) => (l.at > 0 && l.mk != null ? Math.round((1 - l.mk / l.at) * 100) : null);
+    const itmOf = (l: IncLeg) => { const S = spotOf.get(l.t) ?? 0; return S > 0 && (l.ty === 'call' ? S > l.K : S < l.K); };
+    const readyT = [...new Set(soldLegs.filter((l) => (kpOf(l) ?? 0) >= 90 && !itmOf(l)).map((l) => l.t))];
+    const expiries = new Map<string, string[]>();
+    if (THETA) {
+      for (const t of [...new Set([...ladders, ...readyT])]) {
+        const xs = await cacheGet(`exp|${t}`, 360, async () => {
+          const rows = await thetaJson(`/v3/option/list/expirations?symbol=${t}`);
+          const out = rows.map((r) => String(r.expiration ?? r.date ?? '')).filter(Boolean)
+            .map((e) => (e.includes('-') ? e : `${e.slice(0, 4)}-${e.slice(4, 6)}-${e.slice(6, 8)}`)).sort();
+          return out.length ? out : null;
+        }) as string[] | null;
+        expiries.set(t, (xs ?? []).filter((e) => e > today));
+      }
+    }
+    const chains = new Map<string, Chain>();
+    if (THETA) {
+      for (const { t, ex } of rollTargets({ today, legs: soldLegs, expiries, addDays, kp: kpOf, itm: itmOf })) {
+        const rows = await cacheGet(`chain|${t}|${ex}`, 10, async () => {
+          const r = await thetaJson(`/v3/option/snapshot/quote?symbol=${t}&expiration=${ex.replaceAll('-', '')}`);
+          const out = r.map((q) => ({ s: String(q.contract?.right ?? '').toLowerCase() === 'call' ? 'c' : 'p', K: Number(q.contract?.strike),
+            b: Number(q.data?.[0]?.bid), a: Number(q.data?.[0]?.ask) })).filter((q) => q.K > 0);
+          return out.length ? out : null;
+        }) as { s: string; K: number; b: number; a: number }[] | null;
+        if (!rows) continue;
+        const mid = new Map<string, number>();
+        for (const q of rows) if (q.b > 0 && q.a > 0) mid.set(`${q.s}|${q.K}`, (q.b + q.a) / 2);
+        chains.set(chainKey(t, ex), { strikes: { c: rows.filter((q) => q.s === 'c' && mid.has(`c|${q.K}`)).map((q) => q.K).sort((a, b) => a - b),
+          p: rows.filter((q) => q.s === 'p' && mid.has(`p|${q.K}`)).map((q) => q.K).sort((a, b) => a - b) }, mid });
+      }
+    }
+    // The ladders' delta line: where the name's whole book turns short as the price rises, today.
+    const flips = new Map<string, { price: number; now: boolean } | null>();
+    for (const n of ((briefInputs?.names ?? []) as Row[]).filter((n) => ladders.includes(String(n.t)))) {
+      try {
+        const nb = new NameBook({ t: n.t, S0: n.S0, P0: n.P0, iv: n.iv, legs: n.legs, divs: n.divs, r: briefInputs?.r ?? 0.04, noIv: n.noIv, earn: n.earn });
+        flips.set(String(n.t), nb.turnsShort(0, Number(n.S0) * 1.4));
+      } catch { flips.set(String(n.t), null); }
+    }
+    const dayPct = new Map(quotes.filter((q) => q.day_change_pct != null).map((q) => [String(q.ticker).toUpperCase(), Number(q.day_change_pct)]));
+    const prev = new Map<string, number>();
+    for (const [t, S] of spotOf) { const pct = dayPct.get(t); if (pct != null && Number.isFinite(pct)) prev.set(t, S / (1 + pct / 100)); }
+    const sh = new Map<string, { sh: number; cost: number }>();
+    for (const [t, n] of sharesNow) sh.set(t, { sh: n, cost: shareCost.get(t) ?? 0 });
+    income = buildIncome({ today, start: BOOK_START, isTrading, addDays, legs: soldLegs, spot: spotOf, prev, company: companyOf,
+      bookName: Object.fromEntries(Object.entries(BOOKS).map(([k, v]) => [k, v.name])), z0, expiries, chains, flips,
+      realized: realized.filter((e) => e.kind === 'calls sold' || e.kind === 'puts sold')
+        .map((e) => ({ d: e.d, t: e.ticker, kind: e.kind as IncReal['kind'], amt: e.amt, book: e.book ?? bookId })),
+      shares: sh });
+  } catch (e) { income = { v: 1, error: String((e as Error)?.message ?? e) }; }
+  step('income');
   /* ── ACTIVITY (activity.ts; handoff 2026-11-18, round 161): the events as of now, written to activity_events (one row
      per key, updated when it changes the same day), then the last eight days, the sync state and the Levels card's
      figures in the payload. Tick builds only; a pinned build writes nothing. Never breaks the build. ── */
@@ -3563,14 +3648,32 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   let split: Row[] | null = null;
   if (group) {
     try {
-      const snaps = await get(`home_snapshot?book_id=${BQ}&select=book_id,built_at,account:payload->account,side:payload->side,parts:payload->brief_inputs->parts->book`);
+      const snaps = await get(`home_snapshot?book_id=${BQ}&select=book_id,built_at,account:payload->account,side:payload->side,`
+        + 'parts:payload->brief_inputs->parts,chart:payload->chart,tv:payload->brief->timeValue->tvLeft,secs:payload->brief->doc->sections,'
+        + 'names:payload->brief_inputs->names');
       const by = new Map(snaps.map((r) => [String(r.book_id), r]));
+      /* A section headline's key figure on that account ("$13.7K", "6.2%"): the first run that carries a dollar or a
+         percent. Together's headlines add a muted "Sunny $13.7K · Nicolay $4.2K" from these (handoff 2026-11-24 §2.2). */
+      const keyFig = (spans: Row[] | undefined) => {
+        const all = (spans ?? []).map((x) => String(x?.t ?? '')).join('');
+        const money = all.match(/\$[\d,.]+[KM]?|[\d.]+%/);
+        if (money) return money[0];
+        /* A plain count ("Friday 4 sales expire", the design's "Sunny 4 · Nicolay 1"), never a date's day ("Nov 27"). */
+        const cnt = all.match(/(?<!(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s)\b\d{1,4}\b(?!\s*(?:AM|PM|:))/);
+        return cnt ? cnt[0] : null;
+      };
       split = PARTS.map((b) => { const r = by.get(b), a = (r?.account ?? {}) as Row;
+        const heads: Row = {};
+        for (const sec of (r?.secs ?? []) as Row[]) { const f = keyFig(sec?.headline); if (f && sec?.kicker) heads[String(sec.kicker)] = f; }
         return { id: b, name: BOOKS[b].name, value: a.ok ? num(a.value) : null, today: a.ok ? num(a.today?.amount) : null,
           pct: a.ok ? num(a.today?.pct) : null, built_at: r?.built_at ?? null,
           /* Your book's parts on that account (brief_inputs.parts.book): the phone's Your book puts S and N under every
-             total on Together (handoff 2026-11-24 §2.2). */
-          parts: r?.parts ?? null }; });
+             total on Together (handoff 2026-11-24 §2.2); each name's parts for the name's own book. */
+          parts: r?.parts?.book ?? null, nameParts: r?.parts?.names ?? null,
+          /* The stats row and the change lines on Together read each account's share from these, as they read Home's. */
+          chart: r?.chart ?? null, open_pl: a.ok ? num(a.open_pl) : null, margin: a.ok ? num(a.margin) : null,
+          time_value_sold: a.ok ? num(a.time_value_sold) : null, tvLeft: num(r?.tv),
+          heads, names: ((r?.names ?? []) as Row[]).map((n) => String(n.t)) }; });
       const sidesP = PARTS.map((b) => by.get(b)?.side as Side | null).filter(Boolean) as Side[];
       if (sidesP.length) together = buildTogether(sidesP, today, companyOf);
     } catch (e) { console.warn('sunny-home together split', String((e as Error)?.message ?? e)); }
@@ -3583,7 +3686,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     trade_to_415: TRADE_TO_415.filter((t) => book.includes(t)),
     /* `up`: a hedge call (the quarterly calls under the call rule), apart from the LEAPs in the
        Positions totals (handoff 30). */
-    fresh, prices_est: pricesEst, account, side, together, split, book_of: { id: bookId, name: BOOKS[bookId].name, parts: group ? PARTS : null },
+    fresh, prices_est: pricesEst, account, side, together, split, income, book_of: { id: bookId, name: BOOKS[bookId].name, parts: group ? PARTS : null },
     share_avg: shareAvg, activity,
     /* Per-screen loading (18 Nov 2026): Home's own Activity, the sync line, the Levels figures and each event's title,
        without bodies or the trades inside a pickup; the phones and the web read `activity` whole only with the page

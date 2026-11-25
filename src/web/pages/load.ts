@@ -2,6 +2,7 @@
 // (WebLayout), so moving between pages never waits on code (Nik, 9 Nov 2026: smooth, "do a lazy load").
 export const page = {
   Home: () => import('./Home'),
+  Income: () => import('./Income'),
   Positions: () => import('./Positions'),
   Ticker: () => import('./Ticker'),
   TimeValue: () => import('../sheets/TimeValueSheet'),

@@ -10,6 +10,7 @@ import { page } from './web/pages/load';
 const Login = lazy(() => import('./web/pages/Login'));
 const WebLayout = lazy(() => import('./web/WebLayout'));
 const Home = lazy(page.Home);
+const Income = lazy(page.Income);
 const Positions = lazy(page.Positions);
 const Ticker = lazy(page.Ticker);
 
@@ -30,6 +31,7 @@ export default function App() {
             <Route path="/" element={<Login />} />
             <Route element={<RequireAuth><WebLayout /></RequireAuth>}>
               <Route path="/home" element={<Home />} />
+              <Route path="/income" element={<Income />} />
               <Route path="/positions" element={<Positions />} />
               <Route path="/positions/:t" element={<Positions />} />
               <Route path="/overview" element={<Navigate to="/home" replace />} />

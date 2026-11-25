@@ -43,7 +43,11 @@ nonisolated struct SDReply: Decodable, Sendable {
     nonisolated struct Row: Decodable, Sendable, Hashable {
         let k: Double; let K: Double; let pct: Double; let kA: Double?; let pr: Double; let be: Double; let itm: Double
         let est: Bool; let liq: Bool; let won: Double?
+        /// Open interest at the strike, contracts (Theta's chain snapshot, sunny-sd 24 Nov 2026). Older replies have none.
+        var oi: Double? = nil
     }
+    /// Each side's rows from 0 to 2 SD (k 0, 0.25 ... 2): Intelligence's strike tiles (handoff 2026-11-24 §4, 186a).
+    nonisolated struct Rows: Decodable, Sendable { let c: [Row]; let p: [Row] }
     /// The rule's pick: the SD per side, and its rows (carrying the strike it moved to).
     nonisolated struct Sug: Decodable, Sendable {
         let kc: Double; let kp: Double
@@ -65,6 +69,9 @@ nonisolated struct SDReply: Decodable, Sendable {
         var ivK: [[Double]]? = nil
         var ivKsrc: String? = nil
         var gamma: Gamma? = nil
+        /// The strikes listed for this expiry (the chain's step at a strike) and each side's rows by SD.
+        var ks: [Double]? = nil
+        var rows: Rows? = nil
     }
     /// The name's technicals (ticker-technicals): the averages, RSI, HV20, the IV's rank and its year's range, and the
     /// support and resistance zones (swing pivots, a band of half an ATR, strength = how often the price turned there).

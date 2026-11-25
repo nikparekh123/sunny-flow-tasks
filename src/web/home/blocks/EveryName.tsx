@@ -15,13 +15,18 @@ import { useNavigate } from 'react-router-dom';
 import type { BookId, J } from '../../lib/data';
 import { C, clean, count, pct, price } from '../../lib/format';
 import { inSessionOrder, nextEvents, railNames, strike } from '../rail/model';
+import { holderOf } from '../top/parts';
 import { BOX, TABLE_PAD } from './Card';
 import { byNextFriday } from './cards';
 import { pmove, type Mo } from './util';
+import { useWideTables } from './width';
 
 const COLS = 'minmax(118px,150px) minmax(84px,110px) minmax(100px,1fr) minmax(88px,120px) minmax(140px,1.6fr) minmax(92px,140px)';
-/** The tracks' least widths and the five gaps: under this the box scrolls sideways. */
-const MIN_W = 118 + 84 + 100 + 88 + 140 + 92 + 5 * 12;
+/** Under 1320 px of content (Current Web, Nov 24 "looks odd"): the Sector column folds away and the rest stop
+    squeezing, the name's line on one line. */
+const COLS_N = 'minmax(140px,1.2fr) minmax(84px,100px) minmax(96px,120px) minmax(150px,1.6fr) minmax(100px,1fr)';
+/** The tracks' least widths and the gaps: under this the box scrolls sideways. */
+const MIN_W = 118 + 84 + 100 + 88 + 140 + 92 + 5 * 12, MIN_W_N = 140 + 84 + 96 + 150 + 100 + 4 * 12;
 const HAIR = '1px solid rgba(255,255,255,.08)';
 const PERIOD: Record<Mo, string> = { pre: 'before the bell', open: 'today', post: 'today', weekend: 'the week' };
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -56,6 +61,8 @@ export function everyNameRows(payload: J, doc: J, book: BookId, fri: (s: string)
   const inputs = new Map<string, J>(((payload?.brief_inputs?.names ?? []) as J[]).map((n) => [String(n.t), n]));
   const brief = new Map<string, J>(((payload?.brief?.names ?? []) as J[]).map((n) => [String(n.t), n]));
   const secs = sectorOf(doc);
+  // Together: each row says whose it is, "Nike · 1,000 shares · Sunny" (Current Web `TG ? ' · Nicolay' : ' · Sunny'`).
+  const who = holderOf(payload);
   return names.map((n) => {
     const legs: J[] = inputs.get(n.t)?.legs ?? [];
     const shares = legs.filter((l) => l.kind === 'shares').reduce((a, l) => a + (+l.q || 0), 0);
@@ -71,7 +78,7 @@ export function everyNameRows(payload: J, doc: J, book: BookId, fri: (s: string)
     const ev = nextEvents(n.t, payload);
     const kp = n.kept ? Math.round(n.kept.pct) : null;
     return {
-      t: n.t, nm: [n.company, held].filter(Boolean).join(' · '),
+      t: n.t, nm: [n.company, held, who(n.t)].filter(Boolean).join(' · '),
       dot: n.st === 2 ? C.red : n.st === 1 ? C.orange : null,
       px: price(n.px), mv: pmove(n.mv), mc: n.mv < 0 ? C.red : C.green,
       sec: sx ? sx.t : '-', sm: sx ? pmove(sx.mv) : '', smc: sx && sx.mv < 0 ? C.red : C.green,
@@ -104,37 +111,40 @@ export default function EveryName({ payload, doc, book, mo }: { payload: J; doc:
   const head = clean(payload?.brief?.position?.subtitle);
   const fri = useMemo(() => byNextFriday(head), [head]);
   const rows = useMemo(() => everyNameRows(payload, doc, book, fri), [payload, doc, book, fri]);
+  const wide = useWideTables(), cols = wide ? COLS : COLS_N;
   if (!rows.length) return null;
   const sub = (s: string, c: string = C.ink2, w = 400) => (s ? <span style={{ fontSize: 12, fontWeight: w, color: c }}>{s}</span> : null);
   return (
     <div aria-label="Every name" style={{ ...BOX, padding: TABLE_PAD, display: 'flex', flexDirection: 'column', overflowX: 'auto', minWidth: 0 }}>
-      <div style={{ minWidth: MIN_W, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ minWidth: wide ? MIN_W : MIN_W_N, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, paddingBottom: 10 }}>
-          <span style={{ fontSize: 17, fontWeight: 600 }}>Every name</span>
-          <span style={{ fontSize: 13, color: C.ink2 }}>short first · a row opens Positions</span>
+          <span style={{ fontSize: 17, fontWeight: 600, whiteSpace: 'nowrap' }}>Every name</span>
+          <span style={{ fontSize: 13, color: C.ink2, textAlign: 'right' }}>short first · a row opens Positions</span>
         </div>
-        <div className="tnum kicker" style={{ display: 'grid', gridTemplateColumns: COLS, gap: 12, padding: '6px 0 8px' }}>
-          <span>Name</span><span>Price · {PERIOD[mo]}</span><span>Sector</span><span>Calls sold</span><span>{fri('Delta by Friday')}</span><span>Next</span>
+        <div className="tnum kicker" style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, padding: '6px 0 8px', whiteSpace: 'nowrap' }}>
+          <span>Name</span><span>Price · {PERIOD[mo]}</span>{wide && <span>Sector</span>}<span>Calls sold</span><span>{fri('Delta by Friday')}</span><span>Next</span>
         </div>
         {rows.map((r) => (
           <button key={r.t} type="button" className="bare tnum swb-row" onClick={() => navigate('/positions/' + encodeURIComponent(r.t))}
             aria-label={`${r.t}, ${r.nm}, ${r.px} ${r.mv}, ${r.rd}. Opens Positions`}
-            style={{ cursor: 'pointer', width: '100%', display: 'grid', gridTemplateColumns: COLS, gap: 12, alignItems: 'start', padding: '13px 0', borderTop: HAIR }}>
+            style={{ cursor: 'pointer', width: '100%', display: 'grid', gridTemplateColumns: cols, gap: 12, alignItems: 'start', padding: '13px 0', borderTop: HAIR }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
               <Logo t={r.t} dot={r.dot} />
               <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                 <span style={{ fontSize: 15, fontWeight: 600 }}>{r.t}</span>
-                {sub(r.nm)}
+                <span title={r.nm} style={{ fontSize: 12, color: C.ink2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.nm}</span>
               </span>
             </span>
             <span style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: 15, fontWeight: 500 }}>{r.px}</span>
               {sub(r.mv, r.mc, 600)}
             </span>
-            <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-              <span style={{ fontSize: 14, lineHeight: '19px', color: r.sm ? C.ink : C.ink2 }}>{r.sec}</span>
-              {sub(r.sm, r.smc, 600)}
-            </span>
+            {wide && (
+              <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                <span style={{ fontSize: 14, lineHeight: '19px', color: r.sm ? C.ink : C.ink2 }}>{r.sec}</span>
+                {sub(r.sm, r.smc, 600)}
+              </span>
+            )}
             <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
               <span style={{ fontSize: 14, color: r.cs === '-' ? C.ink2 : C.ink }}>{r.cs}</span>
               {sub(r.cs2, r.cs2c)}

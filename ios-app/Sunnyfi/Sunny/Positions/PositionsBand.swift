@@ -279,6 +279,8 @@ struct PosPayoffView: View {
     /// What has expired by the date on the slider ("Nov 20: 20 sold calls expired"), "" before the first expiry;
     /// VoiceOver only.
     var gone = ""
+    /// The Greeks at a price on this date (handoff 2026-11-24 §4: the Greeks row follows the touch, back on release).
+    var greeksAt: ((Double) -> (d: Double, g: Double, th: Double, vg: Double))? = nil
     private let H: CGFloat = 180
     /// How far across the chart the finger is while it scrubs sideways (0 to 1). Held in a reference only the headline
     /// and the scrub layer read, so a drag redraws those two and never the shaded curve or the Greeks (Nik, 13 Nov
@@ -303,20 +305,14 @@ struct PosPayoffView: View {
             axis.frame(height: 16)
             if dates.count > 1 { dateSlider.padding(.top, 6) }
             rangeSlider
-            VStack(spacing: 0) {
-                Rectangle().fill(PC.rule).frame(height: 1)
-                Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
-                    GridRow {
-                        greek("Delta", PosFmt.side(p.d), p.d < 0 ? PC.orange : PC.ink, said: PosFmt.side(p.d))
-                        greek("Theta a day", privacy ? BriefMask.shown : PosFmt.money(p.th), sign(p.th), said: PosSay.signed(p.th, privacy))
-                    }
-                    GridRow {
-                        greek("Gamma", "\(PosFmt.count(p.g)) a $1", p.g < 0 ? PC.red : PC.ink, said: "\(p.g < 0 ? "short" : "long") \(PosFmt.count(p.g)) a dollar")
-                        greek("Vega", privacy ? BriefMask.shown : PosFmt.money(p.vg), sign(p.vg), said: PosSay.signed(p.vg, privacy))
-                    }
+            PosGreeksRow(p: p, S0: S0, privacy: privacy, scrub: scrub, at: greeksAt)
+                .onAppear {
+                    #if DEBUG && targetEnvironment(simulator)
+                    // `-posScrub 0.7` holds the Payoff's touch at 70% across, to check the hover read in a screenshot.
+                    let a = ProcessInfo.processInfo.arguments
+                    if let i = a.firstIndex(of: "-posScrub"), a.indices.contains(i + 1), let f = Double(a[i + 1]) { scrub.f = f }
+                    #endif
                 }
-                .padding(.top, 8)
-            }
             // No how-to note under the Greeks (Nik, 18 Nov 2026: "I don't need jargon on how to use the slider").
         }
     }
@@ -331,15 +327,6 @@ struct PosPayoffView: View {
     }
 
     private func sign(_ v: Double) -> Color { v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink }
-    private func greek(_ l: String, _ v: String, _ c: Color, said: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text("\(l) · \(p.dateLabel)").sType(PT.t(11, 14), tabular: false).foregroundStyle(PC.mu)
-            Text(v).sType(PT.t(16, 20, 600)).foregroundStyle(c).lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(PosSay.words("\(l), \(p.dateLabel), \(said)"))
-    }
 
     // MARK: The sliders
 
@@ -488,7 +475,8 @@ struct PosPayoffView: View {
                 }
                 Circle().fill(PC.dot).frame(width: 12, height: 12).overlay(Circle().stroke(PC.dotRing, lineWidth: 3).padding(-1.5))
                     .offset(x: w / 2 - 6, y: fy(p.v0) - 6)
-                PosPayoffScrub(scrub: scrub, w: w, H: H, fy: fy, at: { PosPayoffHead.lerp(p.ys, $0) })
+                PosPayoffScrub(scrub: scrub, w: w, H: H, fy: fy, at: { PosPayoffHead.lerp(p.ys, $0) }, S0: S0, range: r, privacy: privacy,
+                               delta: greeksAt.map { g in { x in g(x).d } })
             }
         }
         .animation(nil, value: p.ys)
@@ -604,27 +592,99 @@ private struct PosPayoffHead: View {
     }
 }
 
-/// The Payoff chart's scrub layer: the line under the finger and a dot on the curve; it alone redraws with the finger.
+/// The Payoff chart's scrub layer: the line under the finger, a dot on the curve with the P&L beside it, and on top the
+/// price, how far from today and the delta there ("152.37 · ↑2.1% · Δ long 1,234", handoff 2026-11-24 §4); it alone
+/// redraws with the finger. A sideways drag or a 160 ms hold starts it; an up or down drag scrolls the page.
 private struct PosPayoffScrub: View {
     let scrub: PosScrubAt
     let w: CGFloat, H: CGFloat
     let fy: (Double) -> CGFloat
     let at: (Double) -> Double
+    let S0: Double, range: Double
+    let privacy: Bool
+    var delta: ((Double) -> Double)? = nil
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            if let f = scrub.f {
-                let x = CGFloat(f) * w, v = at(f)
-                Rectangle().fill(PC.mu.opacity(0.6)).frame(width: 1, height: H - 16).offset(x: x - 0.5, y: 8)
-                Circle().fill(v >= 0 ? PC.green : PC.red).frame(width: 11, height: 11).background(Circle().fill(PC.page).padding(-2))
-                    .position(x: x, y: fy(v))
+        Color.clear.frame(width: w, height: H).contentShape(Rectangle())
+            .gesture(PosScrubPan(moved: move, ended: end))
+            .gesture(PosHoldPan(moved: move, ended: end))
+            .overlay(alignment: .topLeading) {
+                if let f = scrub.f { read(f).allowsHitTesting(false) }
             }
-            Color.clear.frame(width: w, height: H).contentShape(Rectangle())
-                .gesture(PosScrubPan(moved: { lx in
-                    var tx = Transaction(); tx.disablesAnimations = true
-                    withTransaction(tx) { scrub.f = Double(max(0, min(1, lx / max(1, w)))) }
-                }, ended: { var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { scrub.f = nil } }))
+            .sensoryFeedback(.selection, trigger: scrub.f == nil)
+    }
+
+    /// Each part sits in its own w × H frame, placed by alignment guides, so nothing can widen the chart.
+    private func read(_ f: Double) -> some View {
+        let x = CGFloat(f) * w, v = at(f), px = S0 * (1 - range + 2 * range * f), ch = px / S0 - 1, y = fy(v)
+        let top = String(format: "%.2f", px) + " · " + (abs(ch) < 0.0005 ? "today" : PE.arrowPct(ch))
+            + (delta.map { " · Δ " + Self.dTx($0(px)) } ?? "")
+        let nb = at(max(0, min(1, f + (f > 0.6 ? -0.08 : 0.08)))), below = fy(nb) < y
+        return ZStack(alignment: .topLeading) {
+            Rectangle().fill(PC.ink.opacity(0.85)).frame(width: 1, height: H - 22)
+                .frame(width: w, height: H, alignment: .topLeading).offset(x: x - 0.5, y: 22)
+            // The price, how far from today and the delta there, centred on the line and held inside the chart.
+            Text(top).sType(PT.t(12, 18, 600)).foregroundStyle(PC.ink).lineLimit(1).fixedSize()
+                .padding(.horizontal, 3)
+                .background(RoundedRectangle(cornerRadius: 5).fill(PC.labelBg))
+                .alignmentGuide(.leading) { d in -min(max(0, x - d.width / 2), max(0, w - d.width)) }
+                .frame(width: w, height: H, alignment: .topLeading)
+            Circle().fill(v >= 0 ? PC.green : PC.red).frame(width: 11, height: 11).background(Circle().fill(PC.page).padding(-2))
+                .frame(width: w, height: H, alignment: .topLeading).offset(x: x - 5.5, y: y - 5.5)
+            // The P&L there, beside the dot (to its left past 60%), above or below it away from the curve.
+            Text(privacy ? BriefMask.shown : PosFmt.money(v)).sType(PT.t(15, 22, 700)).foregroundStyle(v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink)
+                .lineLimit(1).fixedSize()
+                .padding(.horizontal, 3)
+                .background(RoundedRectangle(cornerRadius: 5).fill(PC.labelBg))
+                .alignmentGuide(.leading) { d in f > 0.6 ? -(x - d.width - 10) : -(x + 10) }
+                .alignmentGuide(.top) { d in below ? -(y + 6) : -(y - d.height - 6) }
+                .frame(width: w, height: H, alignment: .topLeading)
         }
         .frame(width: w, height: H, alignment: .topLeading)
+    }
+    private func move(_ lx: CGFloat) {
+        var tx = Transaction(); tx.disablesAnimations = true
+        withTransaction(tx) { scrub.f = Double(max(0, min(1, lx / max(1, w)))) }
+    }
+    private func end() { var tx = Transaction(); tx.disablesAnimations = true; withTransaction(tx) { scrub.f = nil } }
+    static func dTx(_ v: Double) -> String { (v < 0 ? "short " : "long ") + PosFmt.count(v) }
+}
+
+/// The Greeks under the Payoff at the date on the slider; while a finger is on the chart they read the price under it
+/// ("Delta · at 152.37"), back on release (handoff 2026-11-24 §4). Its own view, so a drag redraws only this row.
+private struct PosGreeksRow: View {
+    let p: PosName.Payoff
+    let S0: Double
+    let privacy: Bool
+    let scrub: PosScrubAt
+    let at: ((Double) -> (d: Double, g: Double, th: Double, vg: Double))?
+    var body: some View {
+        let px = scrub.f.flatMap { f in at != nil ? S0 * (1 - p.range + 2 * p.range * f) : nil }
+        let g = px.flatMap { x in at?(x) } ?? (d: p.d, g: p.g, th: p.th, vg: p.vg)
+        let when = px.map { "at " + String(format: "%.2f", $0) } ?? p.dateLabel
+        VStack(spacing: 0) {
+            Rectangle().fill(PC.rule).frame(height: 1)
+            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
+                GridRow {
+                    greek("Delta", when, PosFmt.side(g.d), g.d < 0 ? PC.orange : PC.ink, said: PosFmt.side(g.d))
+                    greek("Theta a day", when, privacy ? BriefMask.shown : PosFmt.money(g.th), sign(g.th), said: PosSay.signed(g.th, privacy))
+                }
+                GridRow {
+                    greek("Gamma", when, "\(PosFmt.count(g.g)) a $1", g.g < 0 ? PC.red : PC.ink, said: "\(g.g < 0 ? "short" : "long") \(PosFmt.count(g.g)) a dollar")
+                    greek("Vega", when, privacy ? BriefMask.shown : PosFmt.money(g.vg), sign(g.vg), said: PosSay.signed(g.vg, privacy))
+                }
+            }
+            .padding(.top, 8)
+        }
+    }
+    private func sign(_ v: Double) -> Color { v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink }
+    private func greek(_ l: String, _ when: String, _ v: String, _ c: Color, said: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text("\(l) · \(when)").sType(PT.t(11, 14), tabular: true).foregroundStyle(PC.mu).lineLimit(1)
+            Text(v).sType(PT.t(16, 20, 600)).foregroundStyle(c).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(PosSay.words("\(l), \(when), \(said)"))
     }
 }
 
@@ -660,6 +720,35 @@ struct PosScrubPan: UIGestureRecognizerRepresentable {
         return g
     }
     func handleUIGestureRecognizerAction(_ g: UIPanGestureRecognizer, context: Context) {
+        switch g.state {
+        case .began, .changed: moved(context.converter.localLocation.x)
+        default: ended()
+        }
+    }
+}
+
+/// A 160 ms hold on a chart starts the scrub too (handoff 2026-11-24 §4, the phone's hover); once held, the finger
+/// moves it any way. The page's scroll waits for the hold to fail, which a quick drag does at once (10 pt).
+struct PosHoldPan: UIGestureRecognizerRepresentable {
+    var moved: (CGFloat) -> Void
+    var ended: () -> Void
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith o: UIGestureRecognizer) -> Bool {
+            !(o.view is UIScrollView && o is UIPanGestureRecognizer)
+        }
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldBeRequiredToFailBy o: UIGestureRecognizer) -> Bool {
+            o.view is UIScrollView && o is UIPanGestureRecognizer
+        }
+    }
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let g = UILongPressGestureRecognizer()
+        g.minimumPressDuration = 0.16
+        g.allowableMovement = 10
+        g.delegate = context.coordinator
+        return g
+    }
+    func handleUIGestureRecognizerAction(_ g: UILongPressGestureRecognizer, context: Context) {
         switch g.state {
         case .began, .changed: moved(context.converter.localLocation.x)
         default: ended()

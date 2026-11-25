@@ -1,5 +1,5 @@
 // Home above the numbered sections (README 1, items 1 to 7): the account row with the moment line and tabs, the
-// account value, its lines, the chart, ranges and stats, the index strip, (under 1180 px the Positions rail,
+// account value, its lines, the chart, ranges and stats, the index strip, (under 960 px of content Income today,
 // placed by the page), the alert card, then the moment's title, date line and lede.
 import { useMemo, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { AccountMenu } from '../components/AccountMenu';
@@ -12,6 +12,7 @@ import { AlertCard } from './top/AlertCard';
 import { alertsFor } from './top/alerts';
 import { IndexStrip } from './top/IndexStrip';
 import { chartModel, todayChange, weekChange, type Line } from './top/model';
+import { acctParts, changeParts } from './top/parts';
 import { Runs, spansOf } from './top/spans';
 import { buildStrip } from './top/strip';
 import type { TabState } from './top/tabs';
@@ -25,7 +26,7 @@ interface Props {
   current: boolean;
   tabs: TabState[];
   onTab: (t: Tab) => void;
-  /** The Positions rail when it sits in the main column (under 1180 px). */
+  /** Income today when it sits in the main column (under 960 px of content). */
   railSlot: ReactNode;
   /** Where the numbered sections are drawn (the alert's "See Coming up" scrolls there). */
   sectionsRef: RefObject<HTMLElement>;
@@ -37,6 +38,8 @@ export default function Top({ payload, doc, tab, current, tabs, onTab, railSlot,
   const { mask, privacy } = useWeb();
   const now = useNY(15_000);
   const m = useMemo(() => chartModel(payload), [payload]);
+  // Together: each account's part, worked out the same way as the total (Current Web `acct === 'tog'`).
+  const parts = useMemo(() => acctParts(payload), [payload]);
 
   // 1 · The moment line: the moment's name (the brief's title without "Summary", as the design writes it:
   // Pre-market, Market Hours, Post-market, Week in Review) and the live New York time; a saved brief keeps its own
@@ -48,13 +51,16 @@ export default function Top({ payload, doc, tab, current, tabs, onTab, railSlot,
     : `${session} · ${current ? clock12(now) : String(cap.clock ?? '')}`;
 
   // 2 · The moment's lines under the value: today in hours and post, the week on the weekend.
+  //    On Together each account's part follows the words: "today · Sunny ▼ $13.7K · Nicolay ▼ $4.2K".
   const moment: Line[] = [];
   if (tab === 'open' || tab === 'post') {
     const d = todayChange(m, payload, doc?.built_for, current);
-    if (d != null) moment.push({ k: 't', v: `${arrow(d)} ${money(d)}`, c: d < 0 ? C.red : C.green, l: 'today' });
+    const pt = changeParts(parts, (p) => todayChange(p.m, p.payload, doc?.built_for, current));
+    if (d != null) moment.push({ k: 't', v: `${arrow(d)} ${money(d)}`, c: d < 0 ? C.red : C.green, l: 'today', pt });
   } else if (tab === 'weekend') {
     const d = weekChange(m, doc?.built_for);
-    if (d != null) moment.push({ k: 'w', v: `${arrow(d)} ${money(d)}`, c: d < 0 ? C.red : C.green, l: 'this week' });
+    const pt = changeParts(parts, (p) => weekChange(p.m, doc?.built_for));
+    if (d != null) moment.push({ k: 'w', v: `${arrow(d)} ${money(d)}`, c: d < 0 ? C.red : C.green, l: 'this week', pt });
   }
 
   // 5 · The strip.
