@@ -105,7 +105,11 @@ function logged(listed: string[], day: string): string[] {
   const weeklies = fut.filter((e) => !isMonthly(e) && dte(day, e) <= 28).slice(0, 4);
   const monthlies = fut.filter((e) => isMonthly(e) && dte(day, e) <= 186);
   const jan = fut.find((e) => isMonthly(e) && e.slice(5, 7) === '01');
-  return [...new Set([...weeklies, ...monthlies, ...(jan ? [jan] : [])])].sort();
+  /* ⚠ AND THE FIRST FIVE, WHATEVER THEIR WEEKDAY (Nik, 24 Nov 2026: "walls for every expiry Intelligence shows").
+     sunny-sd shows the first five expiries and the next monthly; a name with Monday to Thursday expiries (IWM, SPCX,
+     NVDA) had its fifth one, IWM's Wed Dec 2, without walls, because only four short ones were kept. */
+  const first = fut.slice(0, 5);
+  return [...new Set([...first, ...weeklies, ...monthlies, ...(jan ? [jan] : [])])].sort();
 }
 
 /** Pull the chain for the expiries `pick` wants (or the listed ones) and turn it into walls.ts's shape.
