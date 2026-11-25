@@ -26,52 +26,52 @@ enum S {
                                                        : UIColor(hex: light).withAlphaComponent(la) })
     }
 
-    static let ink        = dyn(0x1D1D1F, 0xF5F5F7)   // text, selected chip fill
-    static let muted      = dyn(0x646469, 0x98989D)   // labels, secondary text (light deepened Oct 28, block 27: 4.5:1 everywhere)
-    static let paper      = dyn(0xFFFFFF, 0x1C1C1E)   // solid cards
-    static let surface    = dyn(0xF1F2F4, 0x2C2C2E)   // fills inside cards, soft panels
-    static let line       = dyn(0xE3E5E8, 0x3A3A3C)   // card outline, hairlines
-    static let green      = dyn(0x327133, 0x65C466)   // gains, up (light deepened Oct 28)
-    static let red        = dyn(0xBC2E30, 0xFF6961)   // losses, down; never a minus sign. Dark #FF6961 everywhere, Search too (handoff 6 Nov, answer 12)
-    static let yellowDeep = dyn(0x996C23, 0xF7CE46)   // breakeven text, near-breakeven dot
-    static let yellow     = dyn(0xF7CE46, 0xF7CE46)   // earnings card, breakeven dot, live glow
-    static let blue       = dyn(0x2E5ECA, 0x3A86F7)   // put strike, links (light deepened Oct 28)
+    static let ink        = dyn(0x212121, 0xF2F2F2)   // text, selected chip fill
+    static let muted      = dyn(0x666666, 0x8C8C8C)   // labels, secondary text (light deepened Oct 28, block 27: 4.5:1 everywhere)
+    static let paper      = dyn(0xFAFAFA, 0x212121)   // solid cards
+    static let surface    = dyn(0xF2F2F2, 0x2A2A2A)   // fills inside cards, soft panels
+    static let line       = dyn(0xE4E4E4, 0x383838)   // card outline, hairlines
+    static let green      = dyn(0x1C7840, 0x4CBB6C)   // gains, up (light deepened Oct 28)
+    static let red        = dyn(0xCC0000, 0xE82127)   // losses, down; never a minus sign. Dark #FF6961 everywhere, Search too (handoff 6 Nov, answer 12)
+    static let yellowDeep = dyn(0x996C23, 0xFCC00A)   // breakeven text, near-breakeven dot
+    static let yellow     = dyn(0xFCC00A, 0xFCC00A)   // earnings card, breakeven dot, live glow
+    static let blue       = dyn(0x3E6AE1, 0x3E6AE1)   // put strike, links (light deepened Oct 28)
     /// White text and marks on a filled card (Report green, Theta check ink).
     static let onFill     = Color.white
 
     // Accents (UI Kit §01)
-    static let orange       = dyn(0xF2A93B, 0xF2A93B)  // shares, refresh sun; the alert on a thin name (Oct 16)
+    static let orange       = dyn(0xE8A33D, 0xE8A33D)  // shares, refresh sun; the alert on a thin name (Oct 16)
     /// Text on or about a thin name: a thin Delta tile's % and sub line, the
     /// Planner's band word and number (handoff 25, Added Oct 16). 5.1:1 on white.
-    static let orangeDeep   = dyn(0xA34B00, 0xF2A93B)   // light deepened Oct 28
+    static let orangeDeep   = dyn(0xA34B00, 0xE8A33D)   // light deepened Oct 28
     /// The breathing tint, ring and glow use the bright pair in both modes
     /// (SunnyDelta keyframes: 242,169,59 and 235,75,70).
     /// The To do count badge's text: dark ink (S.ink's light value) on S.orange in both modes (handoff 30).
-    static let badgeInk = Color(hex: 0x1D1D1F)
-    static let breatheOrange = Color(hex: 0xF2A93B)
-    static let breatheRed    = Color(hex: 0xEB4B46)
+    static let badgeInk = Color(hex: 0x212121)
+    static let breatheOrange = Color(hex: 0xE8A33D)
+    static let breatheRed    = Color(hex: 0xE82127)
     static let sunDeep      = Color(hex: 0xE8862E)
     static let sunLight     = Color(hex: 0xFFE98F)
     static let yellowTint   = Color(hex: 0xFDF3D1)     // summary box, hot tile
     static let yellowInk    = Color(hex: 0x6B5B2E)     // text on the tint
     static let receiptRule  = Color(hex: 0xCFCCC5)
-    static let receiptSlot  = Color(hex: 0x111111)
+    static let receiptSlot  = Color(hex: 0x171717)
 
     // Rank ramp, Performance (UI Kit §01)
-    static let rank: [Color] = [0x1F5F21, 0x2E7A30, 0x3B873D, 0x4FA051, 0x65C466].map { Color(hex: $0) }
+    static let rank: [Color] = [0x1F5F21, 0x2E7A30, 0x3B873D, 0x4FA051, 0x4CBB6C].map { Color(hex: $0) }
     static let unrealizedTint = Color(hex: 0xA9E1AA)
     // Performance's summary box (block 20): soft yellow; dark is a dim
     // yellow wash with a yellow heading and light text.
-    static let sumBox  = dynA(0xFDF3D1, 1, 0xF7CE46, 0.14)
-    static let sumHead = dyn(0x6B5B2E, 0xF7CE46)
-    static let sumText = dyn(0x6B5B2E, 0xD9D9DC)
+    static let sumBox  = dynA(0xFDF3D1, 1, 0xFCC00A, 0.14)
+    static let sumHead = dyn(0x6B5B2E, 0xFCC00A)
+    static let sumText = dyn(0x6B5B2E, 0xD9D9D9)
 
     /// Yield's closing cost: the light top of each bar (block 17).
     static let callsBack = dyn(0xA9E1AA, 0x2F6B33)
     static let putsBack  = dyn(0xA9C2F7, 0x2A4C8F)
     static let loss1 = Color(hex: 0xB22A2D)
     static let loss2 = Color(hex: 0xD63437)
-    static let other = Color(hex: 0xB8BCC2)
+    static let other = Color(hex: 0xBBBBBB)
 
     // Account chart compare lines (block 02b), as SunnyHomeChart.dc.html
     // draws them: Sold is ink, Bought is blue, Shares orange, Dividends the
@@ -83,25 +83,25 @@ enum S {
 
     // Account chart furniture, as SunnyHomeChart.dc.html sets it: the dotted
     // zero line, the ring round the scrub dot, and a selected chip.
-    static let chartBase = dyn(0xC7C7CC, 0x636366)
-    static let chartRing = dyn(0xFFFFFF, 0x000000)
+    static let chartBase = dyn(0xC8C8C8, 0x636363)
+    static let chartRing = dyn(0xFAFAFA, 0x171717)
     static let chipOn    = Color(UIColor { $0.userInterfaceStyle == .dark
-        ? UIColor(hex: 0xF5F5F7) : UIColor(hex: 0x1D1D1F).withAlphaComponent(0.9) })
-    static let chipOnInk = dyn(0xFFFFFF, 0x1C1C1E)
+        ? UIColor(hex: 0xF2F2F2) : UIColor(hex: 0x212121).withAlphaComponent(0.9) })
+    static let chipOnInk = dyn(0xFAFAFA, 0x212121)
 
     // Deck card tones (block 03). Dark mode keeps the three filled tones, so
     // these do not swap; the frosted cards use S.frost and S.ink.
-    static let deckYellow = Color(hex: 0xF7CE46)
-    static let deckInk    = Color(hex: 0x1D1D1F)
+    static let deckYellow = Color(hex: 0xFCC00A)
+    static let deckInk    = Color(hex: 0x212121)
     static let deckGreen  = Color(hex: 0x3B873D)
 
     // The receipt desk and paper (UI Kit §27).
-    static let desk       = dyn(0xE6E3DC, 0x0A0A0A)
-    static let deskInk    = dyn(0x1D1D1F, 0xF5F5F7)
-    static let receiptInk = Color(hex: 0x1D1D1F)
-    static let receiptNote = Color(hex: 0x5E5E62)
+    static let desk       = dyn(0xE6E3DC, 0x171717)
+    static let deskInk    = dyn(0x212121, 0xF2F2F2)
+    static let receiptInk = Color(hex: 0x212121)
+    static let receiptNote = Color(hex: 0x5E5E5E)
     static let receiptRed = Color(hex: 0xD63437)
-    static let receiptMuted = Color(hex: 0x6E6E73)
+    static let receiptMuted = Color(hex: 0x6E6E6E)
 
     // Portfolio and Watchlist heat (block 10): four steps of strength, mixed
     // in oklch as the design does (green/red into the surface, the strong
@@ -112,66 +112,66 @@ enum S {
     // Positions (handoff 22, SunnyPositions.dc.html): the put tag's pill, the
     // footer rule, strike lines at 45% muted,
     // the gray status dot, and the corner glow tints (28% light, 22% dark).
-    static let pTrack    = dynA(0x1D1D1F, 0.06, 0xFFFFFF, 0.10)
-    static let pRule     = dynA(0x1D1D1F, 0.08, 0xFFFFFF, 0.10)
-    static let pNeutral  = Color(hex: 0x8E8E93)
-    static let pStrike   = dynA(0x6E6E73, 0.45, 0x98989D, 0.45)
+    static let pTrack    = dynA(0x212121, 0.06, 0xFAFAFA, 0.10)
+    static let pRule     = dynA(0x212121, 0.08, 0xFAFAFA, 0.10)
+    static let pNeutral  = Color(hex: 0x8C8C8C)
+    static let pStrike   = dynA(0x6E6E6E, 0.45, 0x8C8C8C, 0.45)
     static let pGlowSafe = (r: 101.0, g: 196.0, b: 102.0)
     static let pGlowNear = (r: 142.0, g: 142.0, b: 150.0)
     static let pGlowPast = (r: 235.0, g: 75.0, b: 70.0)
     /// Grid lines and soft fills (Yield, Payback, Sold vs Bought, Risk).
-    static let pGrid     = dynA(0x1D1D1F, 0.06, 0xFFFFFF, 0.07)
+    static let pGrid     = dynA(0x212121, 0.06, 0xFAFAFA, 0.07)
 
     // Positions Position · Risk (block 13i, 3 Nov 2026): the wall colors (Accelerator light deepened to 5.0:1),
     // the short stretch, the Goes short row's tint, chips on the chart, muted text on a tinted row.
-    static let wallCeiling = dyn(0x2F5AA8, 0x86A8F0)
+    static let wallCeiling = dyn(0x2F5AA8, 0x3E6AE1)
     static let wallFloor   = dyn(0x995123, 0xE8975C)
-    static let wallAccel   = dyn(0x0B6F75, 0x4CC9D0)
-    static let wallUnclear = dyn(0x6E6E73, 0xAEAEB2)
-    static let downTint    = dynA(0xBC2E30, 0.09, 0xFF6961, 0.16)
-    static let thinTint    = dynA(0xB35200, 0.10, 0xF2A93B, 0.18)
-    static let chartChip   = dynA(0xFFFFFF, 0.9, 0x1C1C1E, 0.86)
-    static let mutedOnTile = dyn(0x646469, 0xAEAEB2)
+    static let wallAccel   = dyn(0x6E6E6E, 0xAAAAAA)
+    static let wallUnclear = dyn(0x6E6E6E, 0xAAAAAA)
+    static let downTint    = dynA(0xCC0000, 0.09, 0xE82127, 0.16)
+    static let thinTint    = dynA(0xB35200, 0.10, 0xE8A33D, 0.18)
+    static let chartChip   = dynA(0xFAFAFA, 0.9, 0x212121, 0.86)
+    static let mutedOnTile = dyn(0x666666, 0xAAAAAA)
 
     // Added Oct 19 (handoff 26): the strategy mark fill (13b) and the
     // Aftershock countdown bar track (26); the Aftershock deck card (03b).
-    static let track = dynA(0x1D1D1F, 0.06, 0xFFFFFF, 0.10)
-    static let night = Color(hex: 0x05070A)
+    static let track = dynA(0x212121, 0.06, 0xFAFAFA, 0.10)
+    static let night = Color(hex: 0x171717)
 
     // Added Oct 23 (handoff 31): the way tiles on the To do face, the Walls screen's cards and chips
     // (with a 0.5 pt S.line hairline), and the rule's pick (with a 1.5 pt S.green ring).
-    static let tile      = dynA(0xFFFFFF, 0.55, 0xFFFFFF, 0.06)
-    static let tileWalls = dynA(0xFFFFFF, 0.72, 0xFFFFFF, 0.06)
-    static let greenTint = dynA(0x65C466, 0.16, 0x65C466, 0.18)
+    static let tile      = dynA(0xFAFAFA, 0.55, 0xFAFAFA, 0.06)
+    static let tileWalls = dynA(0xFAFAFA, 0.72, 0xFAFAFA, 0.06)
+    static let greenTint = dynA(0x4CBB6C, 0.16, 0x4CBB6C, 0.18)
 
     // Handoff 6 Nov 2026 (New Home, Positions, Overview; block 34): the design's own tokens, light / dark.
-    static let secondary       = dyn(0x6E6E73, 0x98989D)   // sub lines, labels, kickers
-    static let secondaryOnTint = dyn(0x6E6E73, 0xAEAEB2)   // text on tinted tiles and pills
+    static let secondary       = dyn(0x6E6E6E, 0x8C8C8C)   // sub lines, labels, kickers
+    static let secondaryOnTint = dyn(0x6E6E6E, 0xAAAAAA)   // text on tinted tiles and pills
     /// Gray text straight on Home's page, not in a card (kickers, the date line, the account strip, the chart's
     /// words): lighter in dark, where #98989D over the fixed green glow fell to 4.35:1 (Pass 4, Nik's pick A,
     /// 7 Nov 2026). Light is unchanged.
-    static let secondaryOnPage = dyn(0x6E6E73, 0xAEAEB2)
-    static let mutedOnPage     = dyn(0x646469, 0xAEAEB2)
-    static let hairline        = dyn(0xE3E5E8, 0x3A3A3C)   // rules between rows
-    static let act             = dyn(0xA34B00, 0xFF9F0A)   // orange: thin, act, turns short, Watch
+    static let secondaryOnPage = dyn(0x6E6E6E, 0xAAAAAA)
+    static let mutedOnPage     = dyn(0x666666, 0xAAAAAA)
+    static let hairline        = dyn(0xE4E4E4, 0x383838)   // rules between rows
+    static let act             = dyn(0xA34B00, 0xE8A33D)   // orange: thin, act, turns short, Watch
     /// Text on a filled S.act, S.red or S.green: white on the deep light fills, ink on the bright dark ones
     /// (white on #FF9F0A is 2.1:1, on #FF6961 2.7:1, on #65C466 2.2:1; ink on each is 6:1 or better).
-    static let onSignal        = dyn(0xFFFFFF, 0x1D1D1F)
-    static let navy            = dyn(0x2F5AA8, 0x86A8F0)   // call walls and call strikes (charts only)
+    static let onSignal        = dyn(0xFAFAFA, 0x212121)
+    static let navy            = dyn(0x2F5AA8, 0x3E6AE1)   // call walls and call strikes (charts only)
     static let brown           = dyn(0x995123, 0xE8975C)   // put walls (charts only)
-    static let teal            = dyn(0x0B6F75, 0x4CC9D0)   // technicals, accelerator
-    static let sheetFill       = dyn(0xFFFFFF, 0x1C1C1E)   // sheets, the Positions chart card
-    static let chip            = dyn(0xF1F2F4, 0x2C2C2E)   // close buttons, quiet fills
-    static let grabber         = dynA(0x3C3C43, 0.3, 0xEBEBF5, 0.3)   // sheet grabber, inactive deck dots
+    static let teal            = dyn(0x6E6E6E, 0xAAAAAA)   // technicals, accelerator
+    static let sheetFill       = dyn(0xFAFAFA, 0x212121)   // sheets, the Positions chart card
+    static let chip            = dyn(0xF2F2F2, 0x2A2A2A)   // close buttons, quiet fills
+    static let grabber         = dynA(0x3C3C3C, 0.3, 0xEBEBEB, 0.3)   // sheet grabber, inactive deck dots
     /// The economy's older readings (SunnyEconomy --bar): solid on a sheet, see-through on glass; the latest is ink.
-    static let econBar      = dyn(0xD1D1D6, 0x48484A)
-    static let econBarGlass = dynA(0x1D1D1F, 0.16, 0xFFFFFF, 0.24)
+    static let econBar      = dyn(0xD2D2D2, 0x474747)
+    static let econBarGlass = dynA(0x212121, 0.16, 0xFAFAFA, 0.24)
     /// Heat-map tiles (Your names, Sectors; SunnyEconomy tc(), Nik 4 Nov, 8 Nov): the app's green and red, pale to full,
     /// four steps by the size of the move (under 0.5%, 1.5%, 3%, then more). The text is the tile's own colour (README
     /// 11.2, Nov 8): darker on pale tiles, lighter on deep ones, every pair 4.5:1. The deepest fills went a shade darker.
     static let heatTileUp   = [dyn(0xE2F2E0, 0x1D3521), dyn(0xC2E4BE, 0x22492A), dyn(0x8FCF89, 0x2A6232), dyn(0x2B7330, 0x2E7034)]
     static let heatTileDown = [dyn(0xFBE3E2, 0x3D2322), dyn(0xF6C4C2, 0x572927), dyn(0xEE9B97, 0x77302D), dyn(0xB8322D, 0xA53A35)]
-    static let heatInkUp    = [dyn(0x1F5A23, 0xA8DCA3), dyn(0x1A5220, 0xB5E3B0), dyn(0x123F16, 0xC8EDC4), dyn(0xE4F4E1, 0xE3F5E0)]
+    static let heatInkUp    = [dyn(0x1F5A23, 0xA0D6AF), dyn(0x1A5220, 0xB5E3B0), dyn(0x123F16, 0xC8EDC4), dyn(0xE4F4E1, 0xE3F5E0)]
     static let heatInkDown  = [dyn(0x8E2420, 0xF2A9A5), dyn(0x7D1F1B, 0xF5B8B4), dyn(0x5E1411, 0xF9CFCC), dyn(0xFDE7E5, 0xFDE5E3)]
     static func heatStep(_ move: Double) -> Int { let a = abs(move); return a < 0.5 ? 0 : a < 1.5 ? 1 : a < 3 ? 2 : 3 }
     static func heatTile(_ move: Double) -> Color { (move >= 0 ? heatTileUp : heatTileDown)[heatStep(move)] }
@@ -184,16 +184,16 @@ enum S {
     static func signed(_ v: Double) -> Color { v > 0 ? green : v < 0 ? red : ink }
 
     /// Frosted solid deck cards (tokens.md, Glass): the opaque fill under the sheen.
-    static let frost: [Color] = [dyn(0xFFFFFF, 0x323234), dyn(0xF6F7F8, 0x1F1F21), dyn(0xFAFAFB, 0x28282A)]
+    static let frost: [Color] = [dyn(0xFAFAFA, 0x323232), dyn(0xF7F7F7, 0x1F1F1F), dyn(0xFAFAFA, 0x282828)]
 
     // MARK: Screen and glow
 
     /// Page background: a soft tinted gradient so glass has something to refract.
     static var screen: LinearGradient {
         LinearGradient(stops: [
-            .init(color: dyn(0xEEF2F0, 0x0A0F0C), location: 0),
-            .init(color: dyn(0xF1F2F4, 0x000000), location: 0.38),
-            .init(color: dyn(0xF3F1EE, 0x0C0A08), location: 1),
+            .init(color: dyn(0xF2F2F2, 0x171717), location: 0),
+            .init(color: dyn(0xF2F2F2, 0x171717), location: 0.38),
+            .init(color: dyn(0xF2F2F2, 0x171717), location: 1),
         ], startPoint: .top, endPoint: .bottom)
     }
     /// The phone design's default screen, "aurora": three soft glows fixed

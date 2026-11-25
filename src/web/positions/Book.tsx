@@ -14,13 +14,18 @@
 // or Income (Long and Short stay only as a delta's direction).
 // Calm: colour only on Danger, In the money, Roll and losses; legs with nothing to do read grey. A leg counts when
 // its own switch and each of its chips are on; off legs fade and leave Payoff and the Greeks (the page's sets).
-// No em dashes, no minus signs on money.
+// The focus look (handoff 2026-11-25-focus §2): words are never coloured (ink at 15 px and up, grey under), a loss
+// carries a − where red said it, a warning or an action keeps an 8 px dot (a short delta, a sold strike under 0.5 SD,
+// To roll, the List's In the money, Danger and Roll), chips that are on read #424242, switches on and the kept bar
+// grey #707070, the status pills keep their colour. Labels are plain 13 px words. No em dashes.
 import { useMemo, useState, type CSSProperties } from 'react';
 import { count, money } from '../lib/format';
+import { CHIP_ON, Dot, FILL, INK } from '../lib/focus';
 import { fk, type PLeg, type Pricer } from './model';
 import { sideOf } from './totals';
+import { sgL, wd } from './ui';
 
-const W = '#F5F5F7', MU = '#98989D', TX = '#AEAEB2', QG = '#8E8E93', RED = '#FF6961', GRN = '#65C466';
+const W = '#F2F2F2', MU = '#8C8C8C', TX = '#AAAAAA', QG = '#8C8C8C', RED = '#E82127', GRN = '#4CBB6C';
 const VKEY = 'sunny.book196w';
 type View = 'rows' | 'list';
 const readView = (): View => { try { return localStorage.getItem(VKEY) === 'list' ? 'list' : 'rows'; } catch { return 'rows'; } };
@@ -47,9 +52,9 @@ export interface BookChip { k: string; l: string; on: boolean; go: () => void }
 
 type St = '' | 'itm' | 'dan' | 'wat' | 'safe' | 'roll' | 'hed';
 const ST: Record<Exclude<St, ''>, [string, string, string, string]> = {
-  itm: ['In the money', RED, '#000000', 'none'], dan: ['Danger', 'rgba(255,105,97,.18)', RED, 'none'],
+  itm: ['In the money', RED, '#171717', 'none'], dan: ['Danger', 'rgba(232,33,39,.18)', RED, 'none'],
   wat: ['Watch', 'transparent', QG, 'none'], safe: ['Safe', 'transparent', QG, 'none'],
-  roll: ['Roll', GRN, '#000000', 'none'], hed: ['Bought', 'transparent', MU, 'inset 0 0 0 1px rgba(255,255,255,.22)'],
+  roll: ['Roll', GRN, '#171717', 'none'], hed: ['Bought', 'transparent', MU, 'inset 0 0 0 1px rgba(255,255,255,.22)'],
 };
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** "Nov 27", or "Mar 19 ’27" past six months (chips name a day, never only a month). */
@@ -57,14 +62,14 @@ export const exShort = (iso: string, days: number) => { const [y, m, d] = iso.sp
 const exLong = (iso: string, days: number) => { const [y, m, d] = iso.split('-').map(Number); return `${WD[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${exShort(iso, days)}`; };
 const f2 = (x: number) => x.toFixed(2);
 const dTx = (v: number) => (v < 0 ? 'short ' : 'long ') + count(v);
-const sw = (on: boolean | 'mixed') => ({ bg: on === true ? GRN : on === 'mixed' ? 'rgba(101,196,102,.45)' : 'rgba(120,120,128,.32)', kl: on === true ? 18 : on === 'mixed' ? 10 : 2 });
+const sw = (on: boolean | 'mixed') => ({ bg: on === true ? FILL : on === 'mixed' ? 'rgba(140,140,140,.45)' : 'rgba(128,128,128,.32)', kl: on === true ? 18 : on === 'mixed' ? 10 : 2 });
 
 function Sw({ on, label, go }: { on: boolean | 'mixed'; label: string; go: () => void }) {
   const s = sw(on);
   return (
     <button type="button" role="switch" aria-checked={on === 'mixed' ? 'mixed' : on} aria-label={label} onClick={go} className="bare"
       style={{ position: 'relative', flex: 'none', width: 40, height: 24, borderRadius: 12, background: s.bg, transition: 'background .2s' }}>
-      <span style={{ position: 'absolute', top: 2, left: s.kl, width: 20, height: 20, borderRadius: '50%', background: '#FFFFFF', boxShadow: '0 2px 4px rgba(0,0,0,.35)', transition: 'left .2s cubic-bezier(.22,1,.36,1)' }} />
+      <span style={{ position: 'absolute', top: 2, left: s.kl, width: 20, height: 20, borderRadius: '50%', background: '#FAFAFA', boxShadow: '0 2px 4px rgba(0,0,0,.35)', transition: 'left .2s cubic-bezier(.22,1,.36,1)' }} />
     </button>
   );
 }
@@ -98,7 +103,8 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
   const cell = (r: Row) => {
     const { it, st, sold, sh, hd } = r, l = it.l;
     const q = st !== 'itm' && st !== 'dan' && st !== 'roll', tx = q ? TX : W;
-    const qc = (x: number) => (x <= -0.5 ? RED : q ? tx : x >= 0.5 ? W : MU);
+    // A loss read red: now grey at 14 px with its − (focus 2.1, 2.2).
+    const qc = (x: number) => (x <= -0.5 ? wd(14) : q ? tx : x >= 0.5 ? W : MU);
     const P = st ? ST[st] : null;
     const s0 = it.s0 ?? (it.added ? it.sN : null);
     const dS = sold && s0 != null ? Math.round(it.sN * 100) - Math.round(s0 * 100) : 0;
@@ -112,11 +118,13 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
     return {
       nm, cnt, ex0, tx, q, P, op: it.eff ? 1 : 0.4,
       sd0: sold && s0 != null ? (s0 < 0 ? 'In the money' : f2(s0)) : '', arr: sold && s0 != null ? '→' : '',
-      arc: q ? MU : dS < 0 ? RED : dS > 0 ? GRN : MU, sdN, sdc: sold && it.sN < 0.5 ? RED : tx,
-      be: sold && it.sN < 0.5 ? `Breakeven ${f2(r.be)}` : '', px1, px2, px2c: (sold && (r.kp ?? 0) < 0) || (hd && gn < 0) ? RED : MU,
-      sf: it.added ? 'new' : km(r.sf), sfc: it.added ? MU : qc(r.sf), dl: dTx(r.dl), th: sh ? '$0' : km(r.th), thc: sh ? MU : qc(r.th),
-      kw: `${Math.max(0, Math.min(100, r.kp ?? 0))}%`, kbg: (r.kp ?? 0) >= 90 ? GRN : '#636366',
-      ftL: sh ? 'Delta' : 'Theta a day', ftV: sh ? dTx(r.dl) : km(r.th), ftc: sh ? tx : qc(r.th),
+      // The arrow (red closer, green farther) and the SD under 0.5 (red) are words now: grey at 14 px; the SD keeps a
+      // red dot, a warning (focus 2.3).
+      arc: MU, sdN, sdc: sold && it.sN < 0.5 ? wd(14) : tx, sdD: sold && it.sN < 0.5,
+      be: sold && it.sN < 0.5 ? `Breakeven ${f2(r.be)}` : '', px1, px2, px2c: MU,
+      sf: it.added ? 'new' : sgL(r.sf, km(r.sf)), sfc: it.added ? MU : qc(r.sf), dl: dTx(r.dl), th: sh ? '$0' : sgL(r.th, km(r.th)), thc: sh ? MU : qc(r.th),
+      kw: `${Math.max(0, Math.min(100, r.kp ?? 0))}%`, kbg: (r.kp ?? 0) >= 90 ? FILL : '#636363',
+      ftL: sh ? 'Delta' : 'Theta a day', ftV: sh ? dTx(r.dl) : sgL(r.th, km(r.th)), ftc: sh ? tx : qc(r.th),
       aria: [nm, ex0, cnt, P ? P[0] : '', sold ? `sold at ${s0 == null ? 'an SD not saved' : s0 < 0 ? 'in the money' : f2(s0) + ' SD'}, now ${sdN}${dS < 0 ? ', closer' : dS > 0 ? ', farther' : ''}` : sdN, px2,
         it.added ? 'new' : `${r.sf < 0 ? 'down ' : 'up '}${km(r.sf)} so far`, it.eff ? '' : 'off'].filter(Boolean).join(', '),
       swL: `${it.on ? 'Switch off' : 'Switch on'} ${nm}${sh ? '' : ' ' + l.exL}`,
@@ -128,7 +136,8 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
     const own = rs.filter((r) => r.it.on).length;
     return { ...s, none: !on.length, ac: (own === rs.length ? true : !own ? false : 'mixed') as boolean | 'mixed', own };
   };
-  const cl = (x: number) => (x >= 0.5 ? W : x <= -0.5 ? RED : MU);
+  /** A sum's colour at `fs`: ink from 50¢ up, a loss neutral by size (it carries its −), grey near zero. */
+  const cl = (x: number, fs: number) => (x >= 0.5 ? W : x <= -0.5 ? wd(fs) : MU);
   const mTog = (rs: Row[]) => () => setL(rs.map((r) => r.it), !rs.some((r) => r.it.on));
 
   /* ── The whole book on one line ── */
@@ -136,12 +145,13 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
   const nC = soldOn.filter((r) => r.it.l.ty === 'C').sort((a, b) => a.it.sN - b.it.sN)[0], nP = soldOn.filter((r) => r.it.l.ty === 'P').sort((a, b) => a.it.sN - b.it.sN)[0];
   const nR = soldOn.filter((r) => r.st === 'roll').length;
   const nTx = (r: Row) => `${fk(r.it.l.K)} ${r.it.l.exL} · ${r.it.sN < 0 ? 'in the money' : f2(r.it.sN) + ' SD'}`;
-  const top: { k: string; l: string; v: string; c: string }[] = [
-    { k: 'sf', l: 'So far', v: km(all.sf), c: cl(all.sf) }, { k: 'th', l: 'Theta a day', v: km(all.th), c: cl(all.th) },
-    { k: 'dl', l: 'Delta', v: all.none ? 'off' : dTx(all.dl), c: all.none ? MU : all.dl < 0 ? RED : W },
-    ...(nC ? [{ k: 'nc', l: 'Nearest call sold', v: nTx(nC), c: nC.it.sN < 0.5 ? RED : W }] : []),
-    ...(nP ? [{ k: 'np', l: 'Nearest put sold', v: nTx(nP), c: nP.it.sN < 0.5 ? RED : W }] : []),
-    ...(nR ? [{ k: 'nr', l: 'To roll', v: `${nR} at 90% kept`, c: GRN }] : []),
+  // The whole book in ink; a short delta and a sold strike under 0.5 SD keep a red dot, To roll a green one (2.3).
+  const top: { k: string; l: string; v: string; c: string; d?: 'r' | 'g' }[] = [
+    { k: 'sf', l: 'So far', v: sgL(all.sf, km(all.sf)), c: cl(all.sf, 15) }, { k: 'th', l: 'Theta a day', v: sgL(all.th, km(all.th)), c: cl(all.th, 15) },
+    { k: 'dl', l: 'Delta', v: all.none ? 'off' : dTx(all.dl), c: all.none ? MU : W, d: !all.none && all.dl < 0 ? 'r' : undefined },
+    ...(nC ? [{ k: 'nc', l: 'Nearest call sold', v: nTx(nC), c: W, d: nC.it.sN < 0.5 ? 'r' as const : undefined }] : []),
+    ...(nP ? [{ k: 'np', l: 'Nearest put sold', v: nTx(nP), c: W, d: nP.it.sN < 0.5 ? 'r' as const : undefined }] : []),
+    ...(nR ? [{ k: 'nr', l: 'To roll', v: `${nR} at 90% kept`, c: W, d: 'g' as const }] : []),
   ];
   const nS = rows.filter((r) => r.sold).length, nH = rows.filter((r) => r.hd).length, hasSh = rows.some((r) => r.sh), nOff = rows.filter((r) => !r.it.eff).length;
   const cnt = `${rows.length} ${rows.length === 1 ? 'leg' : 'legs'} · ` + [nS ? `${nS} sold` : '', nH ? `${nH} bought` : '', hasSh ? 'shares' : ''].filter(Boolean).join(', ') + (nOff ? ` · ${nOff} off` : '');
@@ -171,27 +181,30 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
     ['wat', 'Watch', '0.5 to 1 SD from the strike', W], ['safe', 'Safe', 'over 1 SD from the strike', W], ['hed', 'Bought', 'nearest first', W], ['', 'Shares', 'no expiry', W]];
   const lst = view !== 'list' ? [] : SG.map(([sk, tt, sub, tc]) => {
     const rs = rows.filter((r) => r.st === sk).sort((a, b) => (sk === 'roll' ? (b.kp ?? 0) - (a.kp ?? 0) : a.it.sN - b.it.sN));
-    return { k: 'L' + sk, rs, s: sums(rs), t: `${tt} · ${rs.length}`, sub, tc, tt };
+    // The heading in ink; In the money and Danger keep a red dot, Roll a green one (focus 2.3).
+    const d = tc === RED ? 'r' as const : tc === GRN ? 'g' as const : undefined;
+    return { k: 'L' + sk, rs, s: sums(rs), t: `${tt} · ${rs.length}`, sub, tc: INK, d, tt };
   }).filter((g) => g.rs.length);
 
   const COLS = '44px minmax(112px,1fr) 170px 116px 150px 88px 100px 88px', MINW = 980;
-  const head: CSSProperties = { fontSize: 12, lineHeight: '16px', fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: MU };
+  // Column heads and the whole book's labels as written (focus 2.5): 13 px, 500, grey, no capitals or tracking.
+  const head: CSSProperties = { fontSize: 13, lineHeight: '16px', fontWeight: 500, color: MU };
   const pill = (P: [string, string, string, string] | null, h = 24, pad = '0 9px', fs = 12) => P && (
-    <span style={{ height: h, padding: pad, borderRadius: 6, background: P[1], boxShadow: P[3], display: 'inline-flex', alignItems: 'center', fontSize: fs, lineHeight: 1, fontWeight: 700, color: P[2], whiteSpace: 'nowrap' }}>{P[0]}</span>
+    <span style={{ height: h, padding: pad, borderRadius: 6, background: P[1], boxShadow: P[3], display: 'inline-flex', alignItems: 'center', fontSize: fs, lineHeight: 1, fontWeight: 400, color: P[2], whiteSpace: 'nowrap' }}>{P[0]}</span>
   );
   const sdCell = (c: ReturnType<typeof cell>) => (
     <span style={{ display: 'flex', flexDirection: 'column', gap: 1, opacity: c.op }}>
       <span style={{ fontSize: 14, lineHeight: '20px', whiteSpace: 'nowrap' }}>
-        {c.sd0 && <><span style={{ color: MU }}>{c.sd0}</span> <span style={{ fontWeight: 700, color: c.arc }}>{c.arr}</span> </>}
-        <span style={{ fontWeight: 600, color: c.sdc }}>{c.sdN}</span>
+        {c.sd0 && <><span style={{ color: MU }}>{c.sd0}</span> <span style={{ fontWeight: 500, color: c.arc }}>{c.arr}</span> </>}
+        <span style={{ fontWeight: 500, color: c.sdc }}>{c.sdD && <Dot k="r" />}{c.sdN}</span>
       </span>
       {c.be && <span style={{ fontSize: 12, lineHeight: '16px', color: MU, whiteSpace: 'nowrap' }}>{c.be}</span>}
     </span>
   );
   const today = (k: string, pad: string) => (
     <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: MINW, padding: pad }}>
-      <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 700, whiteSpace: 'nowrap' }}>{f2(S0)} today</span>
-      <span aria-hidden="true" style={{ flex: 1, height: 1, background: 'rgba(245,245,247,.4)' }} />
+      <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 400, whiteSpace: 'nowrap' }}>{f2(S0)} today</span>
+      <span aria-hidden="true" style={{ flex: 1, height: 1, background: 'rgba(242,242,242,.4)' }} />
     </div>
   );
   const rowEl = (r: Row) => {
@@ -200,7 +213,7 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
       <div key={r.k} role="row" aria-label={mask(c.aria)} style={{ display: 'grid', gridTemplateColumns: COLS, minWidth: MINW, gap: 16, alignItems: 'center', minHeight: 54, color: c.tx, borderTop: '1px solid rgba(255,255,255,.07)' }}>
         <Sw on={r.it.on} label={c.swL} go={r.it.tg} />
         <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, opacity: c.op }}>
-          <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600, whiteSpace: 'nowrap' }}>{c.nm}</span>
+          <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500, whiteSpace: 'nowrap' }}>{c.nm}</span>
           <span style={{ fontSize: 12, lineHeight: '16px', color: MU, whiteSpace: 'nowrap' }}>{c.cnt}</span>
         </span>
         {sdCell(c)}
@@ -209,7 +222,7 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
           <span style={{ fontSize: 14, lineHeight: '20px', whiteSpace: 'nowrap' }}>{c.px1}</span>
           {c.px2 && <span style={{ fontSize: 12, lineHeight: '16px', color: c.px2c, whiteSpace: 'nowrap' }}>{c.px2}</span>}
         </span>
-        <span style={{ fontSize: 14, fontWeight: 600, color: c.sfc, opacity: c.op }}>{c.sf}</span>
+        <span style={{ fontSize: 14, fontWeight: 500, color: c.sfc, opacity: c.op }}>{c.sf}</span>
         <span style={{ fontSize: 14, whiteSpace: 'nowrap', opacity: c.op }}>{c.dl}</span>
         <span style={{ fontSize: 14, color: c.thc, opacity: c.op }}>{c.th}</span>
       </div>
@@ -223,7 +236,7 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
         <Sw on={r.it.on} label={c.swL} go={r.it.tg} />
         <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, opacity: c.op }}>
           <span style={{ display: 'flex', alignItems: 'baseline', gap: 8, whiteSpace: 'nowrap' }}>
-            <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600 }}>{c.nm}</span>
+            <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500 }}>{c.nm}</span>
             {c.ex0 && <span style={{ fontSize: 13, lineHeight: '18px', color: MU }}>{c.ex0}</span>}
           </span>
           <span style={{ fontSize: 12, lineHeight: '16px', color: MU, whiteSpace: 'nowrap' }}>{c.cnt}</span>
@@ -232,24 +245,26 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
         <span style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, opacity: c.op }}>
           <span style={{ fontSize: 14, lineHeight: '20px', whiteSpace: 'nowrap' }}>{c.px1}{c.px2 && <span style={{ color: c.px2c }}> · {c.px2}</span>}</span>
           {r.sold && (
-            <span aria-hidden="true" style={{ position: 'relative', display: 'block', height: 4, maxWidth: 180, borderRadius: 2, background: '#2C2C2E', overflow: 'hidden' }}>
+            <span aria-hidden="true" style={{ position: 'relative', display: 'block', height: 4, maxWidth: 180, borderRadius: 2, background: '#2A2A2A', overflow: 'hidden' }}>
               <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: c.kw, borderRadius: 2, background: c.kbg }} />
             </span>
           )}
         </span>
         <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, opacity: c.op }}>
-          <span style={{ fontSize: 14, lineHeight: '20px', fontWeight: 700, color: c.sfc, whiteSpace: 'nowrap' }}>{c.sf}</span>
+          <span style={{ fontSize: 14, lineHeight: '20px', fontWeight: 500, color: c.sfc, whiteSpace: 'nowrap' }}>{c.sf}</span>
           <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>So far</span>
         </span>
         <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, opacity: c.op }}>
-          <span style={{ fontSize: 14, lineHeight: '20px', fontWeight: 600, color: c.ftc, whiteSpace: 'nowrap' }}>{c.ftV}</span>
+          <span style={{ fontSize: 14, lineHeight: '20px', fontWeight: 500, color: c.ftc, whiteSpace: 'nowrap' }}>{c.ftV}</span>
           <span style={{ fontSize: 12, lineHeight: '16px', color: MU, whiteSpace: 'nowrap' }}>{c.ftL}</span>
         </span>
       </div>
     );
   };
-  const tri = (s: ReturnType<typeof sums>) => ({
-    sf: km(s.sf), sfc: s.none ? MU : cl(s.sf), dl: s.none ? 'off' : dTx(s.dl), dlc: s.none ? MU : s.dl < 0 ? RED : W, th: km(s.th), thc: s.none ? MU : cl(s.th),
+  // A group's sums at `fs` (14 px in Rows, 13 in List): a loss neutral with its −, a short delta with a red dot.
+  const tri = (s: ReturnType<typeof sums>, fs: number) => ({
+    sf: sgL(s.sf, km(s.sf)), sfc: s.none ? MU : cl(s.sf, fs), dl: s.none ? 'off' : dTx(s.dl), dlc: s.none ? MU : s.dl < 0 ? wd(fs) : W, dlD: !s.none && s.dl < 0,
+    th: sgL(s.th, km(s.th)), thc: s.none ? MU : cl(s.th, fs),
   });
   const legend: [Exclude<St, ''>, string][] = [['dan', 'under 0.5 SD'], ['wat', '0.5 to 1 SD'], ['safe', 'over 1 SD'], ['roll', '90% kept'], ['itm', ''], ['hed', '']];
 
@@ -267,13 +282,13 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
             <div role="radiogroup" aria-label="View" style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 999, background: 'rgba(255,255,255,.06)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.08)' }}>
               {([['rows', 'Rows'], ['list', 'List']] as [View, string][]).map(([k, l]) => (
                 <button key={k} type="button" role="radio" aria-checked={view === k} className="bare" onClick={() => setView(k)}
-                  style={{ height: 30, padding: '0 18px', borderRadius: 999, background: view === k ? W : 'transparent', fontSize: 13, lineHeight: '30px', fontWeight: 600,
-                    color: view === k ? '#000000' : W, whiteSpace: 'nowrap', transition: 'background .2s,color .2s' }}>{l}</button>
+                  style={{ height: 30, padding: '0 18px', borderRadius: 999, background: view === k ? W : 'transparent', fontSize: 13, lineHeight: '30px', fontWeight: 400,
+                    color: view === k ? '#171717' : W, whiteSpace: 'nowrap', transition: 'background .2s,color .2s' }}>{l}</button>
               ))}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
               <span style={{ fontSize: 20, lineHeight: '26px', fontWeight: 700, whiteSpace: 'nowrap' }}>{t} {f2(S0)}</span>
-              <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 600, whiteSpace: 'nowrap' }}><span style={{ color: ch > 0 ? GRN : RED }}>{mvA}</span> {mvT}</span>
+              <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 400, whiteSpace: 'nowrap' }}><span style={{ color: wd(13) }}>{mvA}</span> {mvT}</span>
             </div>
           </div>
         </div>
@@ -281,7 +296,7 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
           {top.map((x) => (
             <span key={x.k} role="listitem" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <span style={head}>{x.l}</span>
-              <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 700, color: x.c, whiteSpace: 'nowrap' }}>{x.v}</span>
+              <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500, color: x.c, whiteSpace: 'nowrap' }}>{x.d && <Dot k={x.d} />}{x.v}</span>
             </span>
           ))}
         </div>
@@ -291,18 +306,18 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
               {i > 0 && <span aria-hidden="true" style={{ width: 1, height: 20, margin: '0 6px', background: 'rgba(255,255,255,.14)' }} />}
               {row.map((c) => (
                 <button key={c.k} type="button" aria-pressed={c.on} aria-label={`${c.on ? 'Switch off' : 'Switch on'} ${c.l}`} onClick={c.go} className="bare"
-                  style={{ height: 32, padding: '0 12px', borderRadius: 999, background: c.on ? W : 'transparent', boxShadow: c.on ? 'none' : 'inset 0 0 0 1px rgba(255,255,255,.16)',
-                    fontSize: 13, lineHeight: '32px', fontWeight: 600, color: c.on ? '#000000' : QG, whiteSpace: 'nowrap', transition: 'background .2s,color .2s' }}>{c.l}</button>
+                  style={{ height: 32, padding: '0 12px', borderRadius: 999, background: c.on ? CHIP_ON : 'transparent', boxShadow: c.on ? 'none' : 'inset 0 0 0 1px rgba(255,255,255,.16)',
+                    fontSize: 13, lineHeight: '32px', fontWeight: 400, color: c.on ? INK : QG, whiteSpace: 'nowrap', transition: 'background .2s,color .2s' }}>{c.l}</button>
               ))}
             </span>
           ))}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             {reset && (
               <button type="button" className="bare swb-out" onClick={reset} aria-label="Reset the chips, every chip on"
-                style={{ height: 32, padding: '0 14px', borderRadius: 999, boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.16)', fontSize: 13, lineHeight: '32px', fontWeight: 600, color: W, whiteSpace: 'nowrap' }}>Reset</button>
+                style={{ height: 32, padding: '0 14px', borderRadius: 999, boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.16)', fontSize: 13, lineHeight: '32px', fontWeight: 400, color: W, whiteSpace: 'nowrap' }}>Reset</button>
             )}
             <button type="button" className="bare swb-out" onClick={mGo}
-              style={{ height: 32, padding: '0 14px', borderRadius: 999, boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.16)', fontSize: 13, lineHeight: '32px', fontWeight: 600, color: W, whiteSpace: 'nowrap' }}>{mL}</button>
+              style={{ height: 32, padding: '0 14px', borderRadius: 999, boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.16)', fontSize: 13, lineHeight: '32px', fontWeight: 400, color: W, whiteSpace: 'nowrap' }}>{mL}</button>
           </span>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 14px' }}>
@@ -319,7 +334,7 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
             <span role="columnheader">Sold at → now</span><span role="columnheader">So far</span><span role="columnheader">Delta</span><span role="columnheader">Theta a day</span>
           </div>
           {groups.map((g) => {
-            const v = tri(g.s);
+            const v = tri(g.s, 14);
             return (
               <div key={g.k} role="rowgroup" style={{ display: 'flex', flexDirection: 'column' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: COLS, minWidth: MINW, gap: 16, alignItems: 'center', padding: '14px 0 10px', borderTop: '1px solid rgba(255,255,255,.16)', opacity: g.s.none ? 0.45 : 1, transition: 'opacity .2s' }}>
@@ -329,12 +344,12 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
                     <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" style={{ flex: 'none', display: 'block', transform: g.open ? 'none' : 'rotate(-90deg)', transition: 'transform .25s ease' }}>
                       <path d="M3 4.5 6 7.5 9 4.5" style={{ fill: 'none', stroke: TX, strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' }} />
                     </svg>
-                    <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 700, whiteSpace: 'nowrap' }}>{g.t}</span>
+                    <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500, whiteSpace: 'nowrap' }}>{g.t}</span>
                     <span style={{ fontSize: 13, lineHeight: '18px', color: MU, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.sub}</span>
                   </button>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: v.sfc }}>{v.sf}</span>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: v.dlc, whiteSpace: 'nowrap' }}>{v.dl}</span>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: v.thc }}>{v.th}</span>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: v.sfc }}>{v.sf}</span>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: v.dlc, whiteSpace: 'nowrap' }}>{v.dlD && <Dot k="r" />}{v.dl}</span>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: v.thc }}>{v.th}</span>
                 </div>
                 {g.open && (g.k === 'none' ? g.rs.map(rowEl) : [...g.cs.map(rowEl), today('td' + g.k, '5px 0 5px 60px'), ...g.ps.map(rowEl)])}
               </div>
@@ -344,19 +359,19 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22, overflowX: 'auto', padding: '4px 0' }}>
           {lst.map((g) => {
-            const v = tri(g.s);
+            const v = tri(g.s, 13);
             return (
               <section key={g.k} aria-label={g.tt} style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 900 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <Sw on={g.s.ac} label={`${g.s.own ? 'Switch off every leg in' : 'Switch on every leg in'} ${g.tt}`} go={mTog(g.rs)} />
                   <span style={{ display: 'flex', alignItems: 'baseline', gap: 10, flex: 1, minWidth: 0, opacity: g.s.none ? 0.45 : 1, transition: 'opacity .2s' }}>
-                    <span style={{ fontSize: 16, lineHeight: '22px', fontWeight: 700, color: g.s.none ? MU : g.tc, whiteSpace: 'nowrap' }}>{g.t}</span>
+                    <span style={{ fontSize: 16, lineHeight: '22px', fontWeight: 500, color: g.s.none ? MU : g.tc, whiteSpace: 'nowrap' }}>{g.d && !g.s.none && <Dot k={g.d} />}{g.t}</span>
                     <span style={{ fontSize: 13, lineHeight: '18px', color: MU, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.sub}</span>
                   </span>
                   <span style={{ display: 'flex', gap: 20, fontSize: 13, lineHeight: '18px', color: MU, whiteSpace: 'nowrap', opacity: g.s.none ? 0.45 : 1 }}>
-                    <span>So far <span style={{ fontWeight: 700, color: v.sfc }}>{v.sf}</span></span>
-                    <span>Delta <span style={{ fontWeight: 700, color: v.dlc }}>{v.dl}</span></span>
-                    <span>Theta a day <span style={{ fontWeight: 700, color: v.thc }}>{v.th}</span></span>
+                    <span>So far <span style={{ fontWeight: 400, color: v.sfc }}>{v.sf}</span></span>
+                    <span>Delta <span style={{ fontWeight: 400, color: v.dlc }}>{v.dlD && <Dot k="r" />}{v.dl}</span></span>
+                    <span>Theta a day <span style={{ fontWeight: 400, color: v.thc }}>{v.th}</span></span>
                   </span>
                 </div>
                 <div role="list" style={{ display: 'flex', flexDirection: 'column', borderRadius: 20, background: 'rgba(255,255,255,.04)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.08)', overflow: 'hidden' }}>

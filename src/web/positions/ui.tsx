@@ -2,13 +2,24 @@
 // segmented control with a sliding thumb, the round switch, the fold that opens Sold in SD and Intelligence, the
 // hover pop-up, the box. Colours are the README's dark tokens. No em dashes in any words here.
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { FILL, GREY, INK, signed } from '../lib/focus';
 
-export const G = '#65C466', R = '#FF6961', O = '#FF9F0A', K = '#F5F5F7', MU = '#98989D', MT = '#AEAEB2', QU = '#8E8E93', Y = '#FFD60A';
-export const CEIL = '#86A8F0', FLOOR = '#C8946A', TEAL = '#4CC9D0', TEAL2 = '#8FDDE2', IVL = '#D4CEFF';
+export const G = '#4CBB6C', R = '#E82127', O = '#E8A33D', K = '#F2F2F2', MU = '#8C8C8C', MT = '#AAAAAA', QU = '#8C8C8C', Y = '#FCC00A';
+export const CEIL = '#3E6AE1', FLOOR = '#C8946A', TEAL = '#AAAAAA', TEAL2 = '#C8C8C8', IVL = '#D4CEFF';
 export const HAIR = '1px solid rgba(255,255,255,.08)', HAIR_S = '1px solid rgba(255,255,255,.14)';
-/** Green from zero up, red below (no minus sign anywhere: colour says it). */
+/** Green from zero up, red below: for marks only (a chart line, a dot), never for words (focus 2.1, 25 Nov 2026). */
 export const cl = (v: number) => (v >= 0 ? G : R);
-export const kicker: CSSProperties = { fontSize: 12, lineHeight: '16px', fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: MU };
+/** Focus 2.1: a word that was coloured is ink at 15 px and up, grey under 15. */
+export const wd = (fs: number) => (fs >= 15 ? INK : GREY);
+/** Focus 2.2: a gain or loss carries its sign, + up and − down; none on a masked figure ($•••) or one that rounds to
+    nothing ($0, 0%). */
+export const sg = (v: number, s: string) => (s.includes('•') || !/[1-9]/.test(s) ? s : signed(v, s));
+/** Only the −, where the old colour marked only a loss (a gain read plain ink). */
+export const sgL = (v: number, s: string) => (v < 0 ? sg(v, s) : s);
+/** Focus 2.4: calls and puts on words and thin lines (their blue and brown stay on fills). */
+export const TW = (ty: 'C' | 'P', a = 1) => (ty === 'C' ? `rgba(190,190,190,${a})` : `rgba(150,150,150,${a})`);
+/** A small label as written (focus 2.5): no capitals, no letter-spacing, 13 px, 500, grey. */
+export const kicker: CSSProperties = { fontSize: 13, lineHeight: '16px', fontWeight: 500, color: MU };
 export const tnum: CSSProperties = { fontVariantNumeric: 'tabular-nums' };
 
 /** The one glass recipe (README §4). */
@@ -41,29 +52,31 @@ export function useReducedMotion() {
   return rm;
 }
 
-/** The capsule segmented control: equal segments, a glass thumb that slides with a spring; selected 600, others 500. */
+/** The capsule segmented control: equal segments, a glass thumb that slides with a spring; every label 500 (focus 2.5:
+    bold only at 20 px and up; the thumb and the ink say which is picked). */
 export function Segmented<T extends string | number>({ items, value, onPick, label, width, size = 14, wrapStyle }:
   { items: [T, string][]; value: T; onPick: (v: T) => void; label: string; width?: number | string; size?: number; wrapStyle?: CSSProperties }) {
   const rm = useReducedMotion();
   const i = Math.max(0, items.findIndex((x) => x[0] === value)), n = items.length;
   return (
     <div role="radiogroup" aria-label={label} style={{ position: 'relative', display: 'grid', gridTemplateColumns: `repeat(${n},minmax(0,1fr))`,
-      width, padding: 2, borderRadius: 999, background: 'rgba(118,118,128,.24)', ...wrapStyle }}>
+      width, padding: 2, borderRadius: 999, background: 'rgba(128,128,128,.24)', ...wrapStyle }}>
       <span aria-hidden="true" style={{ position: 'absolute', top: 2, bottom: 2, left: 2, width: `calc((100% - 4px) / ${n})`, borderRadius: 999,
         transform: `translateX(${i * 100}%)`, transition: rm ? 'none' : 'transform .45s cubic-bezier(.34,1.36,.64,1)', ...THUMB }} />
       {items.map(([k, l]) => (
         <button key={String(k)} type="button" role="radio" aria-checked={k === value} className="bare" onClick={() => onPick(k)}
-          style={{ position: 'relative', textAlign: 'center', padding: '6px 4px', fontSize: size, lineHeight: '18px', fontWeight: k === value ? 600 : 500,
+          style={{ position: 'relative', textAlign: 'center', padding: '6px 4px', fontSize: size, lineHeight: '18px', fontWeight: 500,
             color: k === value ? K : MT, whiteSpace: 'nowrap', borderRadius: 999 }}>{l}</button>
       ))}
     </div>
   );
 }
 
-/** The round switch: 40×24, on #65C466, the knob slides .2s. */
+/** The round switch: 40×24, on the focus grey #707070 (focus 2.4: the "on" colour of a switch is no longer green), the
+    knob slides .2s. */
 export function Switch({ on, label, onToggle }: { on: boolean; label: string; onToggle: () => void }) {
   return (
-    <button type="button" role="switch" aria-checked={on} aria-label={label} className="switch" onClick={onToggle}><span /></button>
+    <button type="button" role="switch" aria-checked={on} aria-label={label} className="switch" onClick={onToggle} style={on ? { background: FILL } : undefined}><span /></button>
   );
 }
 
@@ -111,12 +124,12 @@ export function Hover({ id, x, w = 22, top = 0, bottom = 0, pop, on, set, aria }
       className="swp-hv" style={{ position: 'absolute', top, bottom, left: `${(x * 100).toFixed(2)}%`, width: w, marginLeft: typeof w === 'number' ? -w / 2 : undefined, zIndex: on ? 6 : 3, cursor: 'default', outline: 'none' }}>
       {on && (
         <span role="tooltip" style={{ position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%', transform: tx, width: 252, padding: '12px 14px', borderRadius: 14,
-          background: 'rgba(28,28,30,.97)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.12),0 12px 32px rgba(0,0,0,.55)', display: 'flex', flexDirection: 'column', gap: 8,
+          background: 'rgba(33,33,33,.97)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.12),0 12px 32px rgba(0,0,0,.55)', display: 'flex', flexDirection: 'column', gap: 8,
           pointerEvents: 'none', textAlign: 'left', whiteSpace: 'normal' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ flex: 'none', width: 8, height: 8, borderRadius: '50%', background: pop.dc }} />
             <span style={{ fontSize: 13, lineHeight: '18px', color: MT }}>{pop.t}</span>
-            <span style={{ marginLeft: 'auto', fontSize: 17, lineHeight: '22px', fontWeight: 600, color: K, ...tnum }}>{pop.v}</span>
+            <span style={{ marginLeft: 'auto', fontSize: 17, lineHeight: '22px', fontWeight: 500, color: K, ...tnum }}>{pop.v}</span>
           </span>
           {pop.rows.length > 0 && (
             <span style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,.10)' }}>
@@ -127,7 +140,7 @@ export function Hover({ id, x, w = 22, top = 0, bottom = 0, pop, on, set, aria }
               ))}
             </span>
           )}
-          {pop.say && <span style={{ fontSize: 13, lineHeight: '18px', color: '#C7C7CC', textWrap: 'pretty' }}>{pop.say}</span>}
+          {pop.say && <span style={{ fontSize: 13, lineHeight: '18px', color: '#C8C8C8', textWrap: 'pretty' }}>{pop.say}</span>}
         </span>
       )}
     </span>
@@ -145,7 +158,7 @@ export function Box({ q }: { q: BoxQ }) {
         {q.dot && <span style={{ flex: 'none', width: 6, height: 6, borderRadius: '50%', background: q.dot }} />}
         <span style={{ fontSize: 12, lineHeight: '16px', color: MU, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{q.l}</span>
       </span>
-      <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 600, color: q.vc ?? K, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', ...tnum }}>{q.v}</span>
+      <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 500, color: q.vc ?? K, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', ...tnum }}>{q.v}</span>
       <span style={{ fontSize: 12, lineHeight: '16px', color: q.sc ?? QU, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', ...tnum }}>{q.s || '\u00a0'}</span>
     </div>
   );
@@ -172,10 +185,10 @@ export function PosStyles() {
   return (
     <style>{`.sw .swp-row:hover{background:rgba(255,255,255,.03)}
 .sw .swp-cell:hover{filter:brightness(1.25)}
-.sw .swp-add:hover{background:#FFFFFF!important}
-.sw .swp-hv:focus-visible{outline:2px solid #86A8F0;outline-offset:2px;border-radius:6px}
+.sw .swp-add:hover{background:#FAFAFA!important}
+.sw .swp-hv:focus-visible{outline:2px solid #3E6AE1;outline-offset:2px;border-radius:6px}
 .sw .swp-scroll{scrollbar-width:none}.sw .swp-scroll::-webkit-scrollbar{display:none}
-.sw .swp-slider:focus-visible{box-shadow:0 0 0 2px rgba(10,132,255,.55)}
+.sw .swp-slider:focus-visible{box-shadow:0 0 0 2px rgba(62,106,225,.55)}
 .sw .swp-press:active{transform:scale(.97)}
 @keyframes swpFade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
 .sw .swp-fade{animation:swpFade .4s cubic-bezier(.22,1,.36,1) both}`}</style>

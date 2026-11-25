@@ -1,10 +1,20 @@
 // Shared bits for Home's section blocks: the server's runs of words, the design's numbers rules applied to the
 // server's strings, the heat-map tile colours (the design's dark palette), and a scroll to a block.
 import type { J } from '../../lib/data';
-import { C, clean, money, named, pct } from '../../lib/format';
+import { C, clean, money, named, pct, signBy, wordOf } from '../../lib/format';
 
 /** One run of words from the brief doc: { t, b, c } (BriefSpan). */
 export interface Span { t: string; b?: boolean; c?: string }
+
+/** A run's colour name on words (handoff 2026-11-25-focus §2.1): never a colour, ink at 15 px and up, grey under;
+    a grey or ink name as it is; no name, the text's own colour. */
+export const runColor = (c: string | null | undefined, fs: number, fb = 'inherit') => (c ? wordOf(named(c, fb), fs) : undefined);
+/** §2.2: the sign a run's colour gave a bare money figure or percentage (green +, red −), unless the run before it
+    already says which way: it ends in a sign, an arrow or a word like "down" ("Nvidia is down 5.1%" stays as it is).
+    `t` is the run as shown (after the privacy mask, so "$•••" never takes a sign). */
+const SAID = /([+\-−▲▼↑↓↗↘±]|\b(up|down|fell|rose|lost|gained|lower|higher|dropped|climbed|added|took|off|by))\s*$/i;
+export const runText = (c: string | null | undefined, t: string, prev = '') =>
+  (c && !SAID.test(prev) ? signBy(named(c, ''), t) : t);
 
 /** The doc's runs: a string, a list of strings, or a list of { t, b, c } (BriefSpan.list). */
 export const spans = (v: J): Span[] => {
@@ -56,7 +66,7 @@ export const numOf = (s: string | null | undefined) => {
 
 /** The design's heat tiles on dark (dk() of its UB/UF/DB/DF): by size of move <0.5, <1.5, <3, more; the text in
     the tile's own colour, lighter on the deeper tiles. */
-const UB = ['#1D3521', '#22492A', '#2A6232', '#2E7034'], UF = ['#A8DCA3', '#B5E3B0', '#C8EDC4', '#E3F5E0'];
+const UB = ['#1D3521', '#22492A', '#2A6232', '#2E7034'], UF = ['#A0D6AF', '#B5E3B0', '#C8EDC4', '#E3F5E0'];
 const DB = ['#3D2322', '#572927', '#77302D', '#A53A35'], DF = ['#F2A9A5', '#F5B8B4', '#F9CFCC', '#FDE5E3'];
 export const tileColors = (p: number) => {
   const a = Math.abs(p), L = a < 0.5 ? 0 : a < 1.5 ? 1 : a < 3 ? 2 : 3;

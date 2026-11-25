@@ -9,6 +9,8 @@
 // and high (ticker_fundamentals, the book's names); a fan from today's price to the right edge, as the design draws it,
 // low and high dashed, the average solid, and the analysts line under the note. Like the design's scale, the fan is
 // not part of the scale (a $19 to $62 spread would flatten the price line); it runs off the chart when far away.
+// The focus look (handoff 2026-11-25-focus §2): the moves in ink (their arrows say up or down), the price line and its
+// dot keep green or red, the priced move's dashed edges grey, bold only at 20 px and up.
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useTicker, type J } from '../lib/data';
@@ -79,8 +81,8 @@ function TickerPage({ t }: { t: string }) {
 
   const tp = (v: number) => (g.yf(v) * 100).toFixed(2) + '%';
   const hl = [
-    ...(on.pos ? pos.map((l) => ({ k: 'p' + l.k, v: l.k, l: l.label, bd: `1.5px ${l.solid ? 'solid' : 'dotted'} rgba(245,245,247,.72)`, right: false })) : []),
-    ...(on.walls ? walls.map((l) => ({ k: 'w' + l.label, v: l.k, l: l.label, bd: `2px dashed rgba(245,245,247,${l.floor ? '.42' : '.72'})`, right: true })) : []),
+    ...(on.pos ? pos.map((l) => ({ k: 'p' + l.k, v: l.k, l: l.label, bd: `1.5px ${l.solid ? 'solid' : 'dotted'} rgba(242,242,242,.72)`, right: false })) : []),
+    ...(on.walls ? walls.map((l) => ({ k: 'w' + l.label, v: l.k, l: l.label, bd: `2px dashed rgba(242,242,242,${l.floor ? '.42' : '.72'})`, right: true })) : []),
   ];
   const side = (r: boolean) => {
     const xs = hl.filter((x) => x.right === r);
@@ -117,7 +119,7 @@ function TickerPage({ t }: { t: string }) {
     const hl = hlEl.current;
     if (hl) {
       const a = hl.firstElementChild as HTMLSpanElement | null, c = hl.lastElementChild as HTMLSpanElement | null;
-      if (a) { a.textContent = `${arrow(ch)} ${price(ch)} · ${pct(sr.pts[0] > 0 ? (ch / sr.pts[0]) * 100 : 0)}`; a.style.color = ch >= 0 ? C.green : C.red; }
+      if (a) { a.textContent = `${arrow(ch)} ${price(ch)} · ${pct(sr.pts[0] > 0 ? (ch / sr.pts[0]) * 100 : 0)}`; a.style.color = C.ink; }
       if (c) c.textContent = day;
       hl.style.display = 'inline';
     }
@@ -143,13 +145,13 @@ function TickerPage({ t }: { t: string }) {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 34, lineHeight: '40px', fontWeight: 700, letterSpacing: '-.025em' }}>{t}</span>
         {d && <span ref={pxEl} className="tnum" style={{ fontSize: 28, lineHeight: '34px', fontWeight: 500 }}>{price(px)}</span>}
-        {d && <span ref={mvEl} style={{ fontSize: 16, fontWeight: 600, color: mv < 0 ? C.red : C.green }}>{arrow(mv)} {pct(mv)} today</span>}
+        {d && <span ref={mvEl} style={{ fontSize: 16, fontWeight: 500, color: C.ink }}>{arrow(mv)} {pct(mv)} today</span>}
       </div>
       <span className="tnum" style={{ fontSize: 15, minHeight: 18 }}>
         <span ref={rngEl}>
-          {d && s.pts.length > 1 && <><span style={{ fontWeight: 600, color: lc }}>{arrow(dff)} {price(dff)} · {pct(dffP)}</span> <span style={{ color: C.ink2 }}>{s.phrase}</span></>}
+          {d && s.pts.length > 1 && <><span style={{ fontWeight: 500, color: C.ink }}>{arrow(dff)} {price(dff)} · {pct(dffP)}</span> <span style={{ color: C.ink2 }}>{s.phrase}</span></>}
         </span>
-        <span ref={hlEl} style={{ display: 'none' }}><span style={{ fontWeight: 600 }} /> <span style={{ color: C.ink2 }} /></span>
+        <span ref={hlEl} style={{ display: 'none' }}><span style={{ fontWeight: 500 }} /> <span style={{ color: C.ink2 }} /></span>
       </span>
 
       <div ref={box} onPointerMove={scrub} onPointerDown={scrub} onPointerLeave={unscrub} onPointerCancel={unscrub}
@@ -163,7 +165,7 @@ function TickerPage({ t }: { t: string }) {
           <>
             {on.walls && band && (
               <span style={{ position: 'absolute', left: '88%', right: 0, top: tp(band[0]), height: ((g.yf(band[1]) - g.yf(band[0])) * 100).toFixed(2) + '%',
-                boxSizing: 'content-box', background: 'rgba(134,168,240,.08)', borderTop: '1px dashed rgba(134,168,240,.4)', borderBottom: '1px dashed rgba(134,168,240,.4)' }} />
+                boxSizing: 'content-box', background: 'rgba(62,106,225,.08)', borderTop: '1px dashed rgba(190,190,190,.4)', borderBottom: '1px dashed rgba(190,190,190,.4)' }} />
             )}
             <svg viewBox="0 0 400 100" preserveAspectRatio="none" aria-hidden="true" style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%' }}>
               {on.tech && <path d={g.m20} style={{ fill: 'none', stroke: C.teal, strokeWidth: 1.5, strokeDasharray: '4 3', vectorEffect: 'non-scaling-stroke' }} />}
@@ -180,10 +182,10 @@ function TickerPage({ t }: { t: string }) {
             ))}
             {tags.map((x) => (
               <span key={'l' + x.k} style={{ position: 'absolute', zIndex: 1, left: x.right ? 'auto' : 8, right: x.right ? 8 : 'auto', top: x.ly - 11,
-                background: 'rgba(6,8,7,.92)', borderRadius: 6, padding: '1px 7px', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>{x.l}</span>
+                background: 'rgba(23,23,23,.92)', borderRadius: 6, padding: '1px 7px', fontSize: 12, fontWeight: 400, whiteSpace: 'nowrap' }}>{x.l}</span>
             ))}
-            <span style={{ position: 'absolute', zIndex: 2, left: '88%', top: tp(px), transform: 'translate(-50%,-50%)', background: '#F5F5F7', color: '#000000',
-              borderRadius: 999, padding: '2px 9px', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>{price(px)}</span>
+            <span style={{ position: 'absolute', zIndex: 2, left: '88%', top: tp(px), transform: 'translate(-50%,-50%)', background: '#F2F2F2', color: '#171717',
+              borderRadius: 999, padding: '2px 9px', fontSize: 12, fontWeight: 400, whiteSpace: 'nowrap' }}>{price(px)}</span>
             <span ref={lineEl} style={{ position: 'absolute', zIndex: 3, left: 0, top: 0, bottom: 0, borderLeft: '1px solid rgba(255,255,255,.35)', pointerEvents: 'none', opacity: 0 }}>
               <span ref={dateEl} style={{ position: 'absolute', top: -20, left: 0, fontSize: 12, fontWeight: 500, color: C.ink3, whiteSpace: 'nowrap', padding: '0 6px' }} />
             </span>
@@ -201,8 +203,8 @@ function TickerPage({ t }: { t: string }) {
         <div role="radiogroup" aria-label="Range" style={{ display: 'flex', gap: 26 }}>
           {RANGES.map((r) => (
             <button key={r} type="button" role="radio" aria-checked={r === rg} className="bare" onClick={() => setRg(r)}
-              style={{ padding: '10px 0 9px', fontSize: 14, fontWeight: r === rg ? 700 : 400, color: r === rg ? '#F5F5F7' : C.ink2,
-                boxShadow: `inset 0 -2px 0 ${r === rg ? '#F5F5F7' : 'transparent'}` }}>{r}</button>
+              style={{ padding: '10px 0 9px', fontSize: 14, fontWeight: r === rg ? 500 : 400, color: r === rg ? '#F2F2F2' : C.ink2,
+                boxShadow: `inset 0 -2px 0 ${r === rg ? '#F2F2F2' : 'transparent'}` }}>{r}</button>
           ))}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, paddingBottom: 8 }}>
@@ -210,8 +212,8 @@ function TickerPage({ t }: { t: string }) {
             const can = !!d && ok[k], sel = can && on[k];
             return (
               <button key={k} type="button" className="bare sw-tkl" aria-pressed={sel} aria-disabled={!can} onClick={can ? () => toggle(k) : undefined}
-                style={{ padding: '6px 14px', borderRadius: 999, fontSize: 14, lineHeight: '18px', fontWeight: sel ? 600 : 500,
-                  color: !can ? 'rgba(255,255,255,.3)' : sel ? '#FFFFFF' : '#F5F5F7', background: sel ? 'rgba(255,255,255,.20)' : 'transparent',
+                style={{ padding: '6px 14px', borderRadius: 999, fontSize: 14, lineHeight: '18px', fontWeight: 500,
+                  color: !can ? 'rgba(255,255,255,.3)' : sel ? '#FAFAFA' : '#F2F2F2', background: sel ? 'rgba(255,255,255,.20)' : 'transparent',
                   boxShadow: sel ? SG : 'none', outline: '1px solid rgba(255,255,255,.14)', outlineOffset: -1, whiteSpace: 'nowrap', cursor: can ? 'pointer' : 'default' }}>
                 {can || !d ? l : `${l} · n/a`}
               </button>
@@ -225,7 +227,7 @@ function TickerPage({ t }: { t: string }) {
       {on.tgt && tg && (
         <span style={{ fontSize: 13, color: C.violet }}>Analysts, 12 months: low {tgtP(tg.low)} · average {tgtP(tg.avg)} · high {tgtP(tg.high)}</span>
       )}
-      <style>{`.sw .sw-tkb:hover{color:#F5F5F7!important}.sw .sw-tkl:focus-visible{outline:2px solid #86A8F0!important;outline-offset:2px!important}`}</style>
+      <style>{`.sw .sw-tkb:hover{color:#F2F2F2!important}.sw .sw-tkl:focus-visible{outline:2px solid #3E6AE1!important;outline-offset:2px!important}`}</style>
     </div>
   );
 }

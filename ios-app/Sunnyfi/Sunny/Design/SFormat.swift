@@ -3,10 +3,11 @@
 //  Sunny
 //
 //  How every number reads (README Rules, block 23 "Money"):
-//  · No plus or minus signs. Colour carries the sign (S.signed).
+//  · The focus look (handoff 2026-11-25-focus §2.2): colour no longer carries the sign. A gain or loss that
+//    colour used to mark takes + or − (U+2212) in front (SF.signed); the formatters here stay unsigned.
 //  · $ with K above $1,000, one decimal, ".0" dropped: $4.2K, $22K, $860.
 //    Above $100,000 the K loses its decimal ($176K); millions read $1.2M.
-//  · A gain in a comparison gets a +: "+$1.2K" (the one place a sign shows).
+//  · A comparison carries its sign: "+$1.2K" for a gain, "−$1.2K" for a loss.
 //
 
 import Foundation
@@ -30,8 +31,8 @@ enum F {
         return "$" + trim(a / 1_000_000) + "M"
     }
 
-    /// A comparison: "+$1.2K" for a gain, "$1.2K" (red) for a loss.
-    static func moneyDelta(_ v: Double) -> String { (v > 0 ? "+" : "") + moneyK(v) }
+    /// A comparison: "+$1.2K" for a gain, "−$1.2K" for a loss (focus: red no longer says it).
+    static func moneyDelta(_ v: Double) -> String { SF.signed(v, moneyK(v)) }
 
     /// 2.13% · 1.4% — no sign; `places` decimals.
     static func pct(_ v: Double, places: Int = 2) -> String {

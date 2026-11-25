@@ -14,13 +14,14 @@
 //    No explanation or how-to lines anywhere (Nik, 24 Nov 2026): no hint under the chips and no definitions under the
 //    groups; labels, figures and statuses only.
 //    Each leg: SD sold → now with kept % (sold), the SD from today (bought), so far, the count, its own 51 × 31 switch
-//    (44 pt targets). Calm: colour only on Danger, In the money, Roll and losses; legs with nothing to do read grey.
+//    (44 pt targets). Calm: legs with nothing to do read grey. Focus (25 Nov 2026): no colour on words; a loss carries
+//    its −; Danger and In the money keep a red dot, Roll and To roll a green one; chips on are #424242; switches on grey.
 //  A leg counts when its own switch and each of its chips are on: those legs drive Payoff and the Greeks (the off set
 //  goes to PosName.payoff; every leg starts on and a switch flips it, PosName.offs).
 //  SD sold → now: the SD when sold is sunny-sd's sold[].z0 (the fill's own price, IV and days); now is Sold in SD's
 //  (the leg's IV over the trading days left). A leg bought reads its SD from today. Tried legs (PositionsTries) sit in their
 //  status group with "from Intelligence", a switch and ✕.
-//  No em dashes in any words here; no minus signs (red alone says negative).
+//  No em dashes in any words here; a loss is − (U+2212), never a hyphen.
 //
 
 import SwiftUI
@@ -211,13 +212,13 @@ enum PEC {
     static let ink = PC.ink
     static let mu = PC.mu
     /// Legs with nothing to do (#AEAEB2 dark, #8E8E93 light).
-    static let quiet = S.dyn(0x8E8E93, 0xAEAEB2)
+    static let quiet = S.dyn(0x8C8C8C, 0xAAAAAA)
     static let red = PC.red, green = PC.green
-    static let tile = S.dynA(0xFFFFFF, 1, 0xFFFFFF, 0.04)
-    static let tileRing = S.dynA(0x1D1D1F, 0.08, 0xFFFFFF, 0.08)
-    static let rowRule = S.dynA(0x1D1D1F, 0.07, 0xFFFFFF, 0.06)
-    static let switchOff = S.dynA(0x787880, 0.2, 0x787880, 0.32)
-    static let chipRing = S.dynA(0x1D1D1F, 0.16, 0xFFFFFF, 0.16)
+    static let tile = S.dynA(0xFAFAFA, 1, 0xFAFAFA, 0.04)
+    static let tileRing = S.dynA(0x212121, 0.08, 0xFAFAFA, 0.08)
+    static let rowRule = S.dynA(0x212121, 0.07, 0xFAFAFA, 0.06)
+    static let switchOff = S.dynA(0x808080, 0.2, 0x808080, 0.32)
+    static let chipRing = S.dynA(0x212121, 0.16, 0xFAFAFA, 0.16)
 }
 
 // MARK: - The view
@@ -253,28 +254,36 @@ struct PosEveryBook: View {
     private func km(_ v: Double) -> String { privacy ? BriefMask.shown : PosFmt.money(v) }
     private func dTx(_ v: Double) -> String { (v < 0 ? "short " : "long ") + PosFmt.count(v) }
     private func f2(_ x: Double) -> String { String(format: "%.2f", abs(x)) }
-    /// Calm: a gain reads in ink, a loss red, nothing grey.
-    private func cl(_ v: Double) -> Color { v >= 0.5 ? PEC.ink : v <= -0.5 ? PEC.red : PEC.mu }
+    /// Calm: a gain or a loss reads in ink (a loss with its −, focus §2.2), nothing grey.
+    private func cl(_ v: Double) -> Color { abs(v) >= 0.5 ? PEC.ink : PEC.mu }
+    /// A loss under 15 pt: grey (focus §2.1); a gain keeps its ink.
+    private func clSmall(_ v: Double) -> Color { v <= -0.5 ? SF.grey : cl(v) }
+    /// Money with a − on a loss, where red used to say it (gains were ink, so they stay bare).
+    private func kmL(_ v: Double) -> String { v <= -0.5 && !privacy ? "\u{2212}" + km(v) : km(v) }
 
     private var sums: some View {
         let near = { (l: PosEvery.Leg) in "\(PE.fk(l.K)) \(l.exLabel) · " + ((l.sN ?? 0) < 0 ? "in the money" : "\(f2(l.sN ?? 0)) SD") }
-        var items: [(String, String, String, Color)] = [
-            ("sf", "So far", km(m.sfT), cl(m.sfT)), ("th", "Theta a day", km(m.thT), cl(m.thT)), ("dl", "Delta", dTx(m.dlT), m.dlT < 0 ? PEC.red : PEC.ink)]
-        if let c = m.nearC { items.append(("nc", "Nearest call sold", near(c), (c.sN ?? 0) < 0.5 ? PEC.red : PEC.ink)) }
-        if let p = m.nearP { items.append(("np", "Nearest put sold", near(p), (p.sN ?? 0) < 0.5 ? PEC.red : PEC.ink)) }
-        if m.toRoll > 0 { items.append(("nr", "To roll", "\(m.toRoll) at 90% kept", PEC.green)) }
+        // Focus: figures in ink (a loss with its −); a sold strike under 0.5 SD keeps a red dot, To roll a green one.
+        var items: [(String, String, String, Color, SF.Dot?)] = [
+            ("sf", "So far", kmL(m.sfT), cl(m.sfT), nil), ("th", "Theta a day", kmL(m.thT), cl(m.thT), nil), ("dl", "Delta", dTx(m.dlT), PEC.ink, nil)]
+        if let c = m.nearC { items.append(("nc", "Nearest call sold", near(c), PEC.ink, (c.sN ?? 0) < 0.5 ? .danger : nil)) }
+        if let p = m.nearP { items.append(("np", "Nearest put sold", near(p), PEC.ink, (p.sN ?? 0) < 0.5 ? .danger : nil)) }
+        if m.toRoll > 0 { items.append(("nr", "To roll", "\(m.toRoll) at 90% kept", PEC.ink, .act)) }
         let rows = stride(from: 0, to: items.count, by: 2).map { Array(items[$0..<min($0 + 2, items.count)]) }
         return Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 10) {
             ForEach(rows.indices, id: \.self) { i in
                 GridRow {
                     ForEach(rows[i], id: \.0) { x in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(x.1.uppercased()).sType(PT.t(11, 14, 600, tr: 0.05), tabular: false).foregroundStyle(PEC.mu)
-                            Text(x.2).sType(PT.t(15, 20, 700)).foregroundStyle(x.3).fixedSize(horizontal: false, vertical: true)
+                            // The label as a plain word: as written, 13 pt 500 grey, no tracking (focus §2.5).
+                            Text(x.1).sType(PT.t(13, 16, 500), tabular: false).foregroundStyle(SF.grey)
+                            ((x.4.map { SF.dot($0) } ?? Text("")) + Text(x.2))
+                                .sType(PT.t(15, 20, 700)).foregroundStyle(x.3).fixedSize(horizontal: false, vertical: true)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(PosSay.words("\(x.1), \(x.2)"))
+                        // VoiceOver keeps the word, not the sign: "So far, down 4.3 thousand dollars".
+                        .accessibilityLabel(PosSay.words("\(x.1), \(x.2.hasPrefix("\u{2212}") ? "down " + x.2.dropFirst() : x.2)"))
                     }
                     if rows[i].count == 1 { Color.clear.frame(height: 1) }
                 }
@@ -318,9 +327,10 @@ struct PosEveryBook: View {
 
     private func chipButton(_ c: PosEvery.Chip) -> some View {
         Button { chip(c.id) } label: {
-            Text(c.label).sType(PT.t(14, 18, 600), tabular: false).foregroundStyle(c.on ? PC.onInk : PC.quiet).lineLimit(1)
+            // On: #424242 with ink words (focus §2.6); off stays outlined.
+            Text(c.label).sType(PT.t(14, 18, 600), tabular: false).foregroundStyle(c.on ? SF.chipOnInk : PC.quiet).lineLimit(1)
                 .padding(.horizontal, 13).frame(height: 34)
-                .background { Capsule().fill(c.on ? PEC.ink : .clear) }
+                .background { Capsule().fill(c.on ? SF.chipOn : .clear) }
                 .overlay { if !c.on { Capsule().strokeBorder(PEC.chipRing, lineWidth: 1) } }
                 .frame(height: 44).contentShape(Rectangle())
         }
@@ -352,7 +362,8 @@ struct PosEveryBook: View {
     }
     private func look(_ l: PosEvery.Leg) -> Look {
         let q = l.quiet, TX = q ? PEC.quiet : PEC.ink
-        let qc = { (x: Double) -> Color in x <= -0.5 ? PEC.red : q ? TX : cl(x) }
+        // A loss in ink with its − (focus: red never on words, 15 pt and up is ink).
+        let qc = { (x: Double) -> Color in x <= -0.5 ? PEC.ink : q ? TX : cl(x) }
         let word: String = switch l.st {
         case .itm: "In the money"
         case .dan: "Danger"
@@ -368,11 +379,12 @@ struct PosEveryBook: View {
         let px2 = l.sold ? ((l.kp ?? 0) >= 0 ? "\(l.kp ?? 0)% kept" : "\(abs(l.kp ?? 0))% lost") : l.role == .bought ? "\(gn >= 0 ? "Up" : "Down") \(abs(gn))%" : ""
         let added = l.tryID != nil
         return Look(tx: TX, word: word,
-                    sdc: l.sold && sN < 0.5 ? PEC.red : TX, arc: q ? PEC.mu : dS < 0 ? PEC.red : dS > 0 ? PEC.green : PEC.mu,
+                    // Under 15 pt: what was red or green reads grey (focus §2.1); the group's title keeps the dot.
+                    sdc: l.sold && sN < 0.5 ? SF.grey : TX, arc: PEC.mu,
                     sd0: l.sold ? (s0.map { $0 < 0 ? "In the money" : f2($0) } ?? "") : "",
                     sdN: l.sh || l.sN == nil ? "" : sN < 0 ? "In the money" : "\(f2(sN)) SD",
-                    px2: px2, px2c: (l.sold && (l.kp ?? 0) < 0) || (l.role == .bought && gn < 0) ? PEC.red : PEC.mu,
-                    sf: added ? "new" : km(l.sf), sfc: added ? PEC.mu : qc(l.sf))
+                    px2: px2, px2c: PEC.mu,
+                    sf: added ? "new" : kmL(l.sf), sfc: added ? PEC.mu : qc(l.sf))
     }
 
     private func said(_ l: PosEvery.Leg, _ k: Look) -> String {
@@ -393,24 +405,28 @@ struct PosEveryBook: View {
         .accessibilityLabel("Take off \(l.name) \(l.exLabel), tried from Intelligence")
     }
 
-    /// "$X so far · $Y theta a day", each figure bold in its colour.
+    /// "$X so far · −$Y theta a day", each figure bold: a gain in ink, a loss grey with its − (focus, under 15 pt).
     private func groupLine(_ g: PosEvery.Group) -> some View {
-        (Text(km(g.sf)).fontWeight(.bold).foregroundStyle(g.none ? PEC.mu : cl(g.sf)) + Text(" so far · ")
-         + Text(km(g.th)).fontWeight(.bold).foregroundStyle(g.none ? PEC.mu : cl(g.th)) + Text(" theta a day"))
+        (Text(kmL(g.sf)).fontWeight(.bold).foregroundStyle(g.none ? PEC.mu : clSmall(g.sf)) + Text(" so far · ")
+         + Text(kmL(g.th)).fontWeight(.bold).foregroundStyle(g.none ? PEC.mu : clSmall(g.th)) + Text(" theta a day"))
             .sType(PT.t(12, 16), tabular: true).foregroundStyle(PEC.mu).lineLimit(1).minimumScaleFactor(0.85)
+            .accessibilityLabel(PosSay.words("\(g.sf <= -0.5 ? "down " : "")\(km(g.sf)) so far, \(g.th <= -0.5 ? "down " : "")\(km(g.th)) theta a day"))
     }
 
     // MARK: The list (by what each leg needs)
 
     private func listGroup(_ g: PosEvery.Group) -> some View {
-        let tc: Color = g.none ? PEC.mu : g.tone == .itm || g.tone == .dan ? PEC.red : g.tone == .roll ? PEC.green : PEC.ink
+        // The title in ink; In the money and Danger keep a red dot, Roll a green one (focus §2.3). All off: grey, no dot.
+        let tc: Color = g.none ? PEC.mu : PEC.ink
+        let dot: SF.Dot? = g.none ? nil : g.tone == .itm || g.tone == .dan ? .danger : g.tone == .roll ? .act : nil
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
                 PosSwitch(state: g.own, label: (g.own == .none ? "Switch on every leg in " : "Switch off every leg in ") + g.title) {
                     setL(g.legs, g.own == .none)
                 }
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(g.title).sType(PT.t(15, 20, 700), tabular: true).foregroundStyle(tc)
+                    ((dot.map { SF.dot($0) } ?? Text("")) + Text(g.title)).sType(PT.t(15, 20, 700), tabular: true).foregroundStyle(tc)
+                        .accessibilityLabel(PosSay.words(g.title))
                     if !g.sub.isEmpty { Text(g.sub).sType(PT.t(12, 16), tabular: false).foregroundStyle(PEC.mu).lineLimit(1) }
                     groupLine(g)
                 }
@@ -470,7 +486,8 @@ struct PosSwitch: View {
     var body: some View {
         Button(action: action) {
             ZStack(alignment: .leading) {
-                Capsule().fill(state == .all ? PEC.green : state == .some ? PEC.green.opacity(0.45) : PEC.switchOff)
+                // On: neutral grey, not green (focus §2.4); part on #8C8C8C at the old opacity.
+                Capsule().fill(state == .all ? SF.fill : state == .some ? PC.band.opacity(0.45) : PEC.switchOff)
                     .animation(.easeOut(duration: 0.25), value: state)
                 Circle().fill(Color.white)
                     .shadow(color: .black.opacity(0.3), radius: 4, y: 3)

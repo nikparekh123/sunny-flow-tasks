@@ -148,7 +148,7 @@ struct GammaWatchPage: View {
                 Text(t).sType(SType(size: 28, weight: 800, line: 32, tracking: -0.01), tabular: false).foregroundStyle(S.ink)
                 Text("OI only, no tape labels · not in your book")
                     .sType(SType(size: 13, weight: 600, line: 18, tracking: 0), tabular: false)
-                    .foregroundStyle(S.orangeDeep)
+                    .foregroundStyle(S.muted)   // focus §2.1
                 Text("Walls from open interest at the last close. The tape is read for the names you hold.")
                     .sType(SType(size: 13, weight: 400, line: 18, tracking: 0), tabular: false)
                     .foregroundStyle(S.muted)

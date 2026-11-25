@@ -38,7 +38,7 @@ struct SunnySun: View {
             }
             .rotationEffect(.degrees(spinning ? (spin ? 360 : 0) : Double(progress) * 120))
             Circle()
-                .fill(LinearGradient(colors: [mix(0xF2A93B, 0xFFE98F, bright), mix(0xE8862E, 0xF7CE46, bright)],
+                .fill(LinearGradient(colors: [mix(0xE8A33D, 0xFFE98F, bright), mix(0xE8862E, 0xFCC00A, bright)],
                                      startPoint: UnitPoint(x: 0.2, y: 0), endPoint: UnitPoint(x: 0.8, y: 1)))
                 .frame(width: size / 2, height: size / 2)
                 .shadow(color: S.yellow.opacity(0.15 + 0.75 * bright), radius: (4 + 56 * bright) / 2)
@@ -76,13 +76,14 @@ struct SunriseLoading: View {
                 }
                 .frame(width: 160, height: 110)
                 .clipped()
-                Capsule().fill(up ? S.yellow : Color(hex: 0xD7D9DD))
+                Capsule().fill(up ? S.yellow : Color(hex: 0xD9D9D9))
                     .shadow(color: S.yellow.opacity(up ? 0.7 : 0), radius: 8)
                     .frame(width: 272, height: 2)
                 VStack(spacing: 10) {
                     Text("Sunny").sType(.largeTitle, tabular: false).foregroundStyle(S.ink)
-                    Text("FETCHING YOUR BOOK").sType(SType(size: 11, weight: 600, line: 11, tracking: 0.04), tabular: false)
-                        .foregroundStyle(S.muted)
+                    // Focus §2.5: a plain word, as written: 13 pt 500 grey, no capitals, no tracking.
+                    Text("Fetching your book").sType(SType(size: 13, weight: 500, line: 13, tracking: 0), tabular: false)
+                        .foregroundStyle(SF.grey)
                 }
                 .padding(.top, 28)
                 .opacity(up || reduce ? 1 : 0)
@@ -116,13 +117,14 @@ struct PullSunrise: View {
             }
             .frame(width: 120, height: 92)
             .clipped()
-            Capsule().fill(lit ? S.yellow : Color(hex: 0xD7D9DD).mix(with: S.orange, by: prog))
+            Capsule().fill(lit ? S.yellow : Color(hex: 0xD9D9D9).mix(with: S.orange, by: prog))
                 .shadow(color: (lit ? S.yellow : S.orange).opacity(lit ? 0.7 : 0.5 * prog), radius: lit ? 8 : 5 * prog)
                 .frame(width: 272, height: 2)
-            Text(phase == .done ? "UPDATED · JUST NOW" : phase == .refreshing ? "FETCHING QUOTES"
-                 : phase == .armed ? "RELEASE TO REFRESH" : "PULL FOR THE LATEST")
-                .sType(SType(size: 11, weight: 600, line: 11, tracking: 0.04), tabular: false)
-                .foregroundStyle(phase == .done ? S.green : S.muted)
+            // Focus §2.5: plain words, 13 pt 500 grey (was small capitals; done was green).
+            Text(phase == .done ? "Updated · just now" : phase == .refreshing ? "Fetching quotes"
+                 : phase == .armed ? "Release to refresh" : "Pull for the latest")
+                .sType(SType(size: 13, weight: 500, line: 13, tracking: 0), tabular: false)
+                .foregroundStyle(SF.grey)
                 .padding(.top, 12)
         }
         .padding(.bottom, 12)

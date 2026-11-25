@@ -8,13 +8,16 @@
 //  New average = (shares × average paid − premium kept) ÷ shares; premium kept = every close of a call or put sold on
 //  the ticker since the book started (Nik, 24 Nov 2026: premium kept only). On this card down is good: a lower average
 //  is a win. Data: sunny-home `share_avg` (index.ts), s2 = [calls sold, puts sold] a share.
-//    Header: logo, ticker, N shares; "Down $8.13" green, "Up" red, "Held" grey.
+//    Header: logo, ticker, N shares; "Down $8.13" or "Up" in ink, "Held" grey.
 //    Summary: "Ahead of the price by $X a share." then "Sold calls and puts took $Y off the $Z you paid."
-//    Chart: the week's closes, the average from last Friday to now, the gap shaded (green under the price, red over),
+//    Chart: the week's closes, the average from last Friday to now, the gap shaded (grey under or over the price),
 //    Paid dashed, tags Avg · Price · Paid on the right.
 //    What moved it · a share · since Sep 1: two tiles, Calls sold and Puts sold, in the Performance legend colours
-//    (up is a loss, red).
+//    (up is a loss, +).
 //  No em dashes in any words here.
+//  Focus (25 Nov): the words carry no colour ("Down $8.13", the summary's figures and the tiles are ink; Down, Up,
+//  Ahead, took and added say which way, and a tile that pushed the average up starts with +); the gap's shading is
+//  green and red with their legend squares (the focus reference keeps them).
 //
 
 import SwiftUI
@@ -50,7 +53,7 @@ struct ShareAvgCard: View {
     let privacy: Bool
 
     static let labels = ["Calls sold", "Puts sold"]
-    static let colors: [Color] = [S.dyn(0x327133, 0x327133), S.dyn(0x2E5ECA, 0x2E5ECA)]
+    static let colors: [Color] = [S.dyn(0x1C7840, 0x1C7840), S.dyn(0x3E6AE1, 0x3E6AE1)]
     private let H: CGFloat = 140
 
     private func m2(_ v: Double) -> String { String(format: "$%.2f", abs(v)) }
@@ -69,7 +72,7 @@ struct ShareAvgCard: View {
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 0) {
                     Text(flat ? "Held" : "\(wk < 0 ? "Down" : "Up") \(m2(wk))").sType(SType(size: 15, weight: 600, line: 20, tracking: 0))
-                        .foregroundStyle(flat ? S.secondary : wk < 0 ? S.green : S.red)
+                        .foregroundStyle(flat ? S.secondary : S.ink)
                     Text("this week").sType(SType(size: 12, weight: 500, line: 15, tracking: 0), tabular: false).foregroundStyle(S.secondary)
                 }
             }
@@ -87,10 +90,10 @@ struct ShareAvgCard: View {
     private func summary(at: Bool, ahead: Bool, gap: Double, pd0: Double, paid: Double) -> some View {
         let even = abs(pd0) < 0.005
         let first: Text = at ? Text("At the price.").fontWeight(.semibold)
-            : Text("\(ahead ? "Ahead of" : "Behind") the price by ").fontWeight(.semibold) + Text(m2(gap)).fontWeight(.semibold).foregroundStyle(ahead ? S.green : S.red)
+            : Text("\(ahead ? "Ahead of" : "Behind") the price by ").fontWeight(.semibold) + Text(m2(gap)).fontWeight(.semibold)
                 + Text(" a share.").fontWeight(.semibold)
         let rest: Text = even ? Text(" Sold calls and puts left the \(m2(paid)) you paid where it was.")
-            : Text(" Sold calls and puts \(pd0 > 0 ? "added " : "took ")") + Text(m2(pd0)).foregroundStyle(pd0 > 0 ? S.red : S.green)
+            : Text(" Sold calls and puts \(pd0 > 0 ? "added " : "took ")") + Text(m2(pd0))
                 + Text("\(pd0 > 0 ? " to" : " off") the \(m2(paid)) you paid.")
         return (first + rest).sType(SType(size: 15, weight: 400, line: 21, tracking: 0)).foregroundStyle(S.ink)
             .fixedSize(horizontal: false, vertical: true)
@@ -137,6 +140,7 @@ struct ShareAvgCard: View {
                 return c
             }()
             ZStack(alignment: .topLeading) {
+                // The gap keeps green and red, so its legend still reads (as the focus reference draws it).
                 shade(true).fill(S.green.opacity(0.16))
                 shade(false).fill(S.red.opacity(0.16))
                 Path { p in p.move(to: CGPoint(x: 0, y: Y(paid))); p.addLine(to: CGPoint(x: pw, y: Y(paid))) }
@@ -152,11 +156,11 @@ struct ShareAvgCard: View {
                     Path { p in p.move(to: CGPoint(x: pw, y: x.y)); p.addLine(to: CGPoint(x: pw + 8, y: cs[i])) }.stroke(S.secondary.opacity(0.4), lineWidth: 1)
                     HStack(spacing: 3) {
                         Text(x.n).font(.inter(12, x.k == "a" ? 700 : x.k == "x" ? 600 : 500, tabular: true))
-                            .foregroundStyle(x.k == "a" ? S.dyn(0xFFFFFF, 0x000000) : x.k == "x" ? S.ink : S.secondary)
-                        Text(x.s).font(.inter(10, 500)).foregroundStyle(x.k == "a" ? S.dyn(0xAEAEB2, 0x48484A) : S.secondary)
+                            .foregroundStyle(x.k == "a" ? S.dyn(0xFAFAFA, 0x171717) : x.k == "x" ? S.ink : S.secondary)
+                        Text(x.s).font(.inter(10, 500)).foregroundStyle(x.k == "a" ? S.dyn(0xAAAAAA, 0x474747) : S.secondary)
                     }
                     .padding(.horizontal, x.k == "p" ? 3 : 7).frame(height: 18)
-                    .background(Capsule().fill(x.k == "a" ? S.ink : x.k == "x" ? S.dynA(0x767680, 0.12, 0xFFFFFF, 0.12) : .clear))
+                    .background(Capsule().fill(x.k == "a" ? S.ink : x.k == "x" ? S.dynA(0x808080, 0.12, 0xFAFAFA, 0.12) : .clear))
                     .fixedSize()
                     .offset(x: pw + 10, y: cs[i] - 9)
                 }
@@ -185,8 +189,8 @@ struct ShareAvgCard: View {
                             RoundedRectangle(cornerRadius: 2).fill(Self.colors[j]).frame(width: 8, height: 8)
                             Text(l).sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary).lineLimit(1)
                         }
-                        Text(z ? "-" : tz ? "under 1¢" : m2(v)).sType(SType(size: 15, weight: 600, line: 20, tracking: 0))
-                            .foregroundStyle(z || tz ? S.secondary : v > 0 ? S.red : S.ink)
+                        Text(z ? "-" : tz ? "under 1¢" : v > 0 ? SF.signed(v, m2(v)) : m2(v)).sType(SType(size: 15, weight: 600, line: 20, tracking: 0))
+                            .foregroundStyle(z || tz ? S.secondary : S.ink)
                     }
                     .opacity(z ? 0.35 : 1)
                     .accessibilityElement(children: .ignore)

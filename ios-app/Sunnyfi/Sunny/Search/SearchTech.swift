@@ -69,15 +69,16 @@ struct SXTechCard: View {
         .accessibilityLabel(label(k))
     }
 
-    /// The big number, the line under it and its colour.
+    /// The big number, the line under it and its colour. Focus: the line is never orange, green or red; what was
+    /// coloured is grey (14 pt), the words say above or below, and the RSI dot keeps its orange.
     private func words(_ k: String) -> (String, String, Color) {
         if k == "rsi", let r = p.rsi {
             let hot = r.reads == "overbought" || r.reads == "oversold"
-            return (String(r.v), (r.reads ?? "neutral").capitalized, hot ? SX.thin : SX.ink)
+            return (String(r.v), (r.reads ?? "neutral").capitalized, hot ? SF.word(14) : SX.ink)
         }
         if k == "range" { return ("\(p.range.under)%", "under the high", SX.muted) }
         guard let a = p.ma[k] ?? nil else { return ("", "", SX.muted) }
-        return (String(format: "%.2f", a.v), String(format: "Price %.1f%% ", a.p) + (a.up ? "above" : "below"), a.up ? SX.up : SX.down)
+        return (String(format: "%.2f", a.v), String(format: "Price %.1f%% ", a.p) + (a.up ? "above" : "below"), SF.word(14))
     }
 
     private func label(_ k: String) -> String {

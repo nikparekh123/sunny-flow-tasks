@@ -1,10 +1,11 @@
 // The brief's rich text: runs of { t, b, c } (BriefSpan on the phone). Bold runs at the phone's bold (700 in the
-// lede), a run's colour from its role; privacy masks every book dollar. Headlines read thick then thin: the first
-// sentence in the headline weight, the rest regular (the phone's HeadlineWeight.split).
+// lede); a run's colour role never colours the words (handoff 2026-11-25-focus §2.1), a gain or loss takes its sign
+// (§2.2); privacy masks every book dollar. Headlines read thick then thin: the first sentence in the headline weight,
+// the rest regular (the phone's HeadlineWeight.split).
 import type { CSSProperties } from 'react';
 import type { J } from '../../lib/data';
-import { clean, named } from '../../lib/format';
-import { words } from '../blocks/util';
+import { clean } from '../../lib/format';
+import { runColor, runText, words } from '../blocks/util';
 
 export interface Span { t: string; b?: boolean; c?: string }
 
@@ -15,18 +16,17 @@ export function spansOf(v: J): Span[] {
     .filter(Boolean) as Span[];
 }
 
-const runColor = (c?: string) => (c ? named(c, 'inherit') : undefined);
-
-/** A list of runs as inline spans. */
-export function Runs({ spans, mask, bold = 700 }: { spans: Span[]; mask: (s: string) => string; bold?: number }) {
+/** A list of runs as inline spans; `fs` is the text's size (the lede 20, the strip's headline 17). */
+export function Runs({ spans, mask, bold = 700, fs = 17 }: { spans: Span[]; mask: (s: string) => string; bold?: number; fs?: number }) {
+  const shown = spans.map((s) => mask(words(clean(s.t))));
   return (
     <>
       {spans.map((s, i) => {
         const st: CSSProperties = {};
         if (s.b) st.fontWeight = bold;
-        const col = runColor(s.c);
+        const col = runColor(s.c, fs);
         if (col) st.color = col;
-        return <span key={i} style={st}>{mask(words(clean(s.t)))}</span>;
+        return <span key={i} style={st}>{runText(s.c, shown[i], shown[i - 1] ?? '')}</span>;
       })}
     </>
   );

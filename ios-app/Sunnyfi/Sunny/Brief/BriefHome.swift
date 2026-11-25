@@ -169,7 +169,7 @@ struct BriefTopEdge: View {
             ZStack {
                 Rectangle().fill(.ultraThinMaterial)
                     .mask(LinearGradient(colors: [.black, .black.opacity(0.6), .clear], startPoint: .top, endPoint: .bottom))
-                LinearGradient(colors: [S.dyn(0xEEF2F0, 0x0A0F0C), S.dyn(0xEEF2F0, 0x0A0F0C).opacity(0.7), .clear], startPoint: .top, endPoint: .bottom)
+                LinearGradient(colors: [S.dyn(0xF2F2F2, 0x171717), S.dyn(0xF2F2F2, 0x171717).opacity(0.7), .clear], startPoint: .top, endPoint: .bottom)
             }
             .frame(height: 76)
             Spacer(minLength: 0)

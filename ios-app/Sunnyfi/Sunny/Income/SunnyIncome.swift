@@ -7,6 +7,8 @@
 //  hedges spread to their expiry and taken off, the year at the 4-week pace.
 //  SunnyPayback: made after closing costs and hedges against the same base,
 //  paid back in a window between two paces, and what the LEAPs are worth.
+//  The focus look (25 Nov 2026): the bars keep their colours (Nik: keep the bars in colour), no red or green on
+//  words or figures (a gain or loss carries + or −), the large green areas grey; the chart lines and dots keep theirs.
 //
 
 import SwiftUI
@@ -107,17 +109,18 @@ struct SunnyYield: View {
         let up = all.map { max($0.cs, $0.ps) }.max() ?? 0, down = all.map { max($0.cb - $0.cs, $0.pb - $0.ps, 0) }.max() ?? 0
         let h = { (v: Double) -> CGFloat in CGFloat(v / max(1e-9, up + down)) * 116 }
         VStack(alignment: .leading, spacing: 20) {
-            SPeriodHeader(label: "Yield", hero: tot.any ? fmt(net) : "-", heroValue: net,
-                          heroColor: tot.any && net < 0 ? S.red : S.ink,
+            SPeriodHeader(label: "Yield", hero: tot.any ? (net < 0 ? SF.signed(net, fmt(net)) : fmt(net)) : "-", heroValue: net,
+                          heroColor: S.ink,
                           sub: periodText(col) + (base > 0 ? " · on \(F.moneyK(base)) in LEAPS" : ""),
                           onTap: { withAnimation(.smooth(duration: S.roll)) { mode = mode.next } }, period: P,
                           canGoBack: Periods.canGoBack(P, today: home.today, start: Periods.bookStart(home)), subLines: 2)
             VStack(alignment: .leading, spacing: 4) {
                 if tot.any {
-                    SStatLine(items: [(fmt(r(tot.sold)), "sold", S.ink), (fmt(r(tot.back)), "closing cost", S.red),
-                                      (fmt(r(tot.hg)), tot.hg < 0 ? "hedges back" : "hedges", tot.hg < 0 ? S.green : S.red)])
+                    SStatLine(items: [(fmt(r(tot.sold)), "sold", S.ink), (SF.signed(-r(tot.back), fmt(r(tot.back))), "closing cost", SF.grey),
+                                      (SF.signed(-r(tot.hg), fmt(r(tot.hg))), tot.hg < 0 ? "hedges back" : "hedges", SF.grey)])
                     if let p = pace {
-                        SStatLine(items: [("\(Int(abs(p.pct).rounded()))%", "a year at the \(p.weeks)-week pace", p.pct < 0 ? S.red : S.ink)])
+                        let y = "\(Int(abs(p.pct).rounded()))%"
+                        SStatLine(items: [(p.pct < 0 ? SF.signed(p.pct, y) : y, "a year at the \(p.weeks)-week pace", p.pct < 0 ? SF.grey : S.ink)])
                     }
                 } else {
                     SStatLine(items: [("-", "not traded yet", S.ink)])
@@ -129,10 +132,11 @@ struct SunnyYield: View {
                 let s = sums(c.rows)
                 let bar = { (sold: Double, back: Double, solid: Color, key: String, label: Bool) -> SBar in
                     let kept = max(0, sold - back), cut = min(back, sold)
+                    let n = r(s.sold) - r(s.back) - r(s.hg)
                     return SBar(segs: [.init(value: h(kept), color: solid, hidden: hidden.contains(key)),
                                        .init(value: h(cut), color: S.muted, hidden: hidden.contains(key + "b"), hatch: true)],
-                                label: label && !c.rows.isEmpty && s.sold > 0 ? fmt(r(s.sold) - r(s.back) - r(s.hg)) : "",
-                                labelColor: r(s.sold) - r(s.back) - r(s.hg) < 0 ? S.red : S.ink,
+                                label: label && !c.rows.isEmpty && s.sold > 0 ? (n < 0 ? SF.signed(n, fmt(n)) : fmt(n)) : "",
+                                labelColor: n < 0 ? SF.grey : S.ink,
                                 below: hidden.contains(key) ? 0 : h(max(0, back - sold)))
                 }
                 return SBarColumn(id: c.id, label: c.label,
@@ -210,8 +214,8 @@ struct SunnyPayback: View {
                 Text("Payback").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.muted)
                 Button { withAnimation(.smooth(duration: S.roll)) { mode = mode.next } } label: {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(none ? "-" : hero(a)).sType(.largeNumber)
-                            .foregroundStyle(none ? S.ink : a.made < 0 ? S.red : S.green)
+                        Text(none ? "-" : mode == .tv ? hero(a) : SF.signed(a.made, hero(a))).sType(.largeNumber)
+                            .foregroundStyle(S.ink)
                             .lineLimit(1).minimumScaleFactor(0.6)
                         Text(none ? "nothing to pay back" : heroSub(a))
                             .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
@@ -227,14 +231,14 @@ struct SunnyPayback: View {
                 SStatLine(items: [("-", "no LEAPs held", S.ink)])
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    SStatLine(items: [(F.moneyK(a.start), "/ wk since start", a.start < 0 ? S.red : S.green)]
-                              + (a.last4.map { [(F.moneyK($0), "/ wk last 4 weeks", $0 < 0 ? S.red : S.ink)] } ?? []))
+                    SStatLine(items: [(SF.signed(a.start, F.moneyK(a.start)), "/ wk since start", SF.grey)]
+                              + (a.last4.map { [($0 < 0 ? SF.signed($0, F.moneyK($0)) : F.moneyK($0), "/ wk last 4 weeks", $0 < 0 ? SF.grey : S.ink)] } ?? []))
                     window(a, w1, w2)
                     SInlineInsight(lead: insight.lead, rest: insight.rest)
                 }
                 chart(a, w1, w2)
                 VStack(spacing: 0) {
-                    row("Made", F.moneyK(a.made), a.made < 0 ? S.red : S.green, S.green,
+                    row("Made", SF.signed(a.made, F.moneyK(a.made)), S.ink, S.green,
                         Text("Settled ") + Text(F.moneyK(a.settled)).foregroundStyle(S.ink).bold() + Text(" · open this week ")
                             + Text(F.moneyK(a.open)).foregroundStyle(S.ink).bold(),
                         Text("After \(F.moneyK(a.closing)) of closing costs and " + (a.hedges < 0 ? "hedges that brought back \(F.moneyK(a.hedges))" : "\(F.moneyK(a.hedges)) of hedges")))
@@ -245,8 +249,8 @@ struct SunnyPayback: View {
                             ?? (a.last4 == nil ? nil : Text("No date at the last 4 weeks' pace"))))
                     let under = a.base - a.value
                     row("LEAPS today", F.moneyK(a.value), S.ink, S.blue,
-                        under > 0 ? Text(F.moneyK(under)).foregroundStyle(S.red) + Text(" under the \(F.moneyK(a.base)) paid. Payback is not profit until they hold their value.")
-                                  : Text(F.moneyK(-under)).foregroundStyle(S.green) + Text(" over the \(F.moneyK(a.base)) paid."), nil, last: true)
+                        under > 0 ? Text(F.moneyK(under)) + Text(" under the \(F.moneyK(a.base)) paid. Payback is not profit until they hold their value.")
+                                  : Text(F.moneyK(-under)) + Text(" over the \(F.moneyK(a.base)) paid."), nil, last: true)
                 }
             }
         }
@@ -362,7 +366,7 @@ struct SunnyPayback: View {
                         var w = Path(); w.move(to: CGPoint(x: nowX, y: nowY)); w.addLine(to: e1)
                         if e1.x < W { w.addLine(to: CGPoint(x: W, y: e1.y)) }
                         w.addLine(to: e2); w.closeSubpath()
-                        ctx.fill(w, with: .color(S.green.opacity(0.10)))
+                        ctx.fill(w, with: .color(Color(hex: 0x8C8C8C).opacity(0.10)))
                     }
                     if !ser.isEmpty {
                         var t = steps { ser[$0].cap }
@@ -370,7 +374,7 @@ struct SunnyPayback: View {
                         ctx.stroke(t, with: .color(S.pNeutral), style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
                         let m = steps { ser[$0].made }
                         var f = m; f.addLine(to: CGPoint(x: X(ser.last!.d), y: H)); f.addLine(to: CGPoint(x: X(ser[0].d), y: H)); f.closeSubpath()
-                        ctx.fill(f, with: .color(S.green.opacity(0.12)))
+                        ctx.fill(f, with: .color(Color(hex: 0x8C8C8C).opacity(0.12)))
                         ctx.stroke(m, with: .color(S.green), style: StrokeStyle(lineWidth: 2, lineJoin: .round))
                     }
                     if let e1 {
@@ -392,7 +396,7 @@ struct SunnyPayback: View {
                     Circle().fill(S.green).frame(width: 10, height: 10).overlay(Circle().stroke(S.paper, lineWidth: 2))
                         .position(e1)
                     Text(Self.long(dateIn(w1))).sType(SType(size: 11, weight: 700, line: 13, tracking: 0), tabular: false)
-                        .foregroundStyle(S.green).fixedSize()
+                        .foregroundStyle(SF.grey).fixedSize()
                         .position(x: min(e1.x, W - 34), y: e1.y + 14)
                 }
                 if let e2, let w2 {

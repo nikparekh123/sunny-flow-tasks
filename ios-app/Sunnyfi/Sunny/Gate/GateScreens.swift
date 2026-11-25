@@ -5,7 +5,9 @@
 //  What stands in front of Home: the access-code sign-in, the first-run
 //  choices (Face ID, alerts), the lock, and the sunrise loading screen
 //  (block 25, "First load"). Behaviour as in the Sunnyfi app; the look is
-//  built from the S tokens only.
+//  built from the S tokens only. The focus look (25 Nov 2026): a switch that is
+//  on is neutral grey (SF.fill), an error is grey words after the red dot, the
+//  page is flat.
 //
 
 import SwiftUI
@@ -39,7 +41,12 @@ struct SignInScreen: View {
                     .padding(.top, 24)
                     .onChange(of: code) { _, v in code = String(v.filter(\.isNumber).prefix(10)) }
                 if let e = auth.error {
-                    Text(e).sType(.note, tabular: false).foregroundStyle(S.red).padding(.top, 10)
+                    HStack(alignment: .center, spacing: 0) {
+                        SDot(kind: .danger)
+                        Text(e).sType(.note, tabular: false).foregroundStyle(SF.grey)
+                    }
+                    .padding(.top, 10)
+                    .accessibilityElement(children: .combine)
                 }
                 Button {
                     Task { await auth.signIn(code: code) }
@@ -85,7 +92,7 @@ struct FirstRunScreen: View {
                                 .sType(.note, tabular: false).foregroundStyle(S.muted)
                         }
                     }
-                    .tint(S.green)
+                    .tint(SF.fill)
                     .onChange(of: faceID) { _, on in
                         guard on else { lock.biometricEnabled = false; return }
                         Task {
@@ -103,7 +110,7 @@ struct FirstRunScreen: View {
                                 .sType(.note, tabular: false).foregroundStyle(S.muted)
                         }
                     }
-                    .tint(S.green)
+                    .tint(SF.fill)
                     .onChange(of: alerts) { _, on in
                         guard on else { return }
                         Task {

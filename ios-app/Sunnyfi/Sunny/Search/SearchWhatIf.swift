@@ -4,8 +4,8 @@
 //
 //  What if · Delta and Gamma (block 29, handoff Oct 30 2026): what a move does to a name's delta. A slider from 15%
 //  down to 15% up in 0.5% steps; the state (On target, Thin, Short), net delta in shares, its share of long delta and
-//  the P&L follow it live. The chart: bought delta as a green area above zero, sold as a red area below, net as the
-//  ink line, the week's walls as verticals, today as a gray line, dots where the slider sits. sunny-search sends every
+//  the P&L follow it live. The chart: bought delta as an area above zero, sold as an area below (grey since the focus
+//  look), net as the ink line, the week's walls as verticals, today as a gray line, dots where the slider sits. sunny-search sends every
 //  step worked out (sunny-home's Δ Γ model, widened to 15%) and the tip already written: the To do hedge as a story.
 //
 
@@ -44,7 +44,8 @@ struct SXWhatIfCard: View {
         return At(m: r[0], S: p.px * (1 + r[0] / 100), b: r[1], s: r[2], d: r[3], pl: r[4])
     }
     private func state(_ a: At) -> String { a.d < 0 ? "Short" : a.d < 0.25 * p.long ? "Thin" : "On target" }
-    private func stateC(_ s: String) -> Color { s == "Short" ? SX.down : s == "Thin" ? SX.thin : SX.up }
+    /// Focus: the state is ink words; Short, the warning, keeps a red dot before it (Thin is orange: no dot).
+    private func stateC(_ s: String) -> Color { SX.ink }
 
     var body: some View {
         let a = at(mv), st = state(a)
@@ -90,22 +91,26 @@ struct SXWhatIfCard: View {
 
     private func reading(_ a: At, _ st: String) -> some View {
         let pct = Int((abs(a.d) / max(1, p.long) * 100).rounded())
-        let plC = a.pl >= 5 ? SX.up : a.pl <= -5 ? SX.down : SX.ink
+        // Focus: the three numbers are ink; the P&L carries + or − (its colour used to), its word grey.
+        let plV = abs(a.pl) < 5 ? Self.money(a.pl) : SF.signed(a.pl, Self.money(a.pl))
         let sdT = mv == 0 ? "" : p.sd.map { $0 > 0 ? " · " + String(format: "%.1f", abs(mv) / $0) + " SD" : "" } ?? ""
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 (Text("If \(p.t) \(moveText(mv))").font(.system(size: 20, weight: .bold)).tracking(-0.2).foregroundColor(SX.ink)
-                    + Text(sdT).font(.system(size: 15, weight: .semibold)).foregroundColor(SX.muted))
+                    + Text(sdT).font(.system(size: 15, weight: SX.focus(.semibold, 15))).foregroundColor(SX.muted))
                     .lineLimit(1).minimumScaleFactor(0.8)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                // The dot is an overlay in its own 15 pt, so the word keeps the row's baseline.
                 Text(st).sx(SXType(size: 15, line: 20, weight: .bold, style: .subheadline, tracking: 0)).foregroundStyle(stateC(st))
+                    .padding(.leading, st == "Short" ? 15 : 0)
+                    .overlay(alignment: .leading) { if st == "Short" { SDot(kind: .danger) } }
                     .fixedSize()
             }
             HStack(alignment: .top, spacing: 10) {
-                num("Net delta", Int(abs(a.d).rounded()).formatted(.number.grouping(.automatic)) + " Δ", a.d < 0 ? SX.down : SX.ink,
+                num("Net delta", Int(abs(a.d).rounded()).formatted(.number.grouping(.automatic)) + " Δ", SX.ink,
                     a.d < 0 ? "short, in shares" : "in shares", SX.muted)
-                num("Of long delta", "\(pct)%", a.d < 0 ? SX.down : pct < 25 ? SX.thin : SX.ink, "25% is the line", SX.muted)
-                num("P&L if today", Self.money(a.pl), plC, abs(a.pl) < 5 ? "flat" : a.pl > 0 ? "gain" : "loss", plC)
+                num("Of long delta", "\(pct)%", SX.ink, "25% is the line", SX.muted)
+                num("P&L if today", plV, SX.ink, abs(a.pl) < 5 ? "flat" : a.pl > 0 ? "gain" : "loss", SX.muted)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -123,7 +128,7 @@ struct SXWhatIfCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The design's money: $4.9K from a thousand, else to the $10; no sign (the colour says it).
+    /// The design's money: $4.9K from a thousand, else to the $10; no sign (the card puts the + or − on it).
     static func money(_ v: Double) -> String {
         let a = abs(v)
         guard a >= 1000 else { return "$" + String(Int((a / 10).rounded() * 10)) }
@@ -233,8 +238,9 @@ private struct SXWhatIfPlot: View {
                             path.addLine(to: CGPoint(x: w, y: z)); path.addLine(to: CGPoint(x: 0, y: z)); path.closeSubpath()
                             ctx.fill(path, with: .color(c))
                         }
-                        area({ ser[$0].b }, Color(red: 101 / 255, green: 196 / 255, blue: 102 / 255).opacity(0.38))
-                        area({ ser[$0].s }, Color(red: 235 / 255, green: 75 / 255, blue: 70 / 255).opacity(0.40))
+                        // Focus §2.4: the green and red areas are large fills, so neutral grey at their own opacity.
+                        area({ ser[$0].b }, Color(hex: 0x8C8C8C).opacity(0.38))
+                        area({ ser[$0].s }, Color(hex: 0x8C8C8C).opacity(0.40))
                         func vline(_ x: CGFloat, _ c: Color, _ lw: CGFloat, _ dash: [CGFloat]) {
                             var l = Path(); l.move(to: CGPoint(x: x * w, y: 0)); l.addLine(to: CGPoint(x: x * w, y: H))
                             ctx.stroke(l, with: .color(c), style: StrokeStyle(lineWidth: lw, lineCap: .round, dash: dash))
@@ -255,8 +261,8 @@ private struct SXWhatIfPlot: View {
                             .background(SX.paper, in: .rect(cornerRadius: 6))
                             .offset(x: l.x, y: l.y)
                     }
-                    Text("Bought").sx(SXType(size: 12, line: 14, weight: .bold, style: .caption1, tracking: 0)).foregroundStyle(SX.up).offset(y: 36)
-                    Text("Sold").sx(SXType(size: 12, line: 14, weight: .bold, style: .caption1, tracking: 0)).foregroundStyle(SX.down).offset(y: H - 16)
+                    Text("Bought").sx(SXType(size: 12, line: 14, weight: .bold, style: .caption1, tracking: 0)).foregroundStyle(SF.word(12)).offset(y: 36)
+                    Text("Sold").sx(SXType(size: 12, line: 14, weight: .bold, style: .caption1, tracking: 0)).foregroundStyle(SF.word(12)).offset(y: H - 16)
                     let xm = CGFloat((cur.m + 15) / 30) * W
                     ForEach(Array([(cur.b, SX.up), (cur.s, SX.down), (cur.d, cur.d < 0 ? SX.down : SX.ink)].enumerated()), id: \.offset) { _, d in
                         Circle().fill(d.1).frame(width: 9, height: 9)
@@ -269,7 +275,7 @@ private struct SXWhatIfPlot: View {
             ZStack(alignment: .top) {
                 Text("15% down").frame(maxWidth: .infinity, alignment: .leading)
                 VStack(spacing: 0) {
-                    Text("Today").fontWeight(.bold).foregroundStyle(SX.ink)
+                    Text("Today").fontWeight(SX.focus(.bold, 12)).foregroundStyle(SX.ink)
                     Text(String(format: "%.2f", p.px))
                 }
                 Text("15% up").frame(maxWidth: .infinity, alignment: .trailing)

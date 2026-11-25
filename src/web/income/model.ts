@@ -6,13 +6,14 @@
 // the banner's periods and scale).
 //
 // Nik's rules: ready to roll at 90% kept, 95% shown too ("or wait for 95%"); in the money is flagged only, never
-// advice; no minus signs (red says it); no em dashes; never invent a strike (no chain, "Ready to roll").
+// advice; a loss carries a − and the words wear no colour (handoff 2026-11-25-focus §2: the colours below mark a
+// state, the page draws them as a dot or a ring); no em dashes; never invent a strike (no chain, "Ready to roll").
 import type { J } from '../lib/data';
 import { shortDate } from '../lib/clock';
 
-export const W = '#F5F5F7', MU = '#98989D', QT = '#AEAEB2', RED = '#FF6961', GRN = '#65C466', ONW = '#000000', TRK = '#2C2C2E';
-/** Calls and puts in the banner (dark): calls #86A8F0, puts #C8946A; a loss in red tones. */
-export const CC = '#86A8F0', PC = '#C8946A', CC_LOSS = '#FF6961', PC_LOSS = 'rgba(255,105,97,.5)';
+export const W = '#F2F2F2', MU = '#8C8C8C', QT = '#AAAAAA', RED = '#E82127', GRN = '#4CBB6C', ONW = '#171717', TRK = '#2A2A2A';
+/** Calls and puts in the banner (dark): calls #3E6AE1, puts #C8946A; a loss in red tones. */
+export const CC = '#3E6AE1', PC = '#C8946A', CC_LOSS = '#E82127', PC_LOSS = 'rgba(232,33,39,.5)';
 export const ln = (a: number) => `rgba(255,255,255,${a})`;
 
 export interface Next { ex: string; exL: string; K: number | null; pr: number | null; z: number; d: number | null }
@@ -61,11 +62,13 @@ const cap1 = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
     one figure that decides it, and a grey line only when there is something to do. */
 export interface Line {
   k: string; big: string; bigC: string; title: string; titleC: string; date: string; act: string; actC: string; grey: string | null; aria: string;
+  /** The warning dot before the big %: r in the money, g ready to roll (focus §2.3). */
+  dot?: 'r' | 'g';
 }
 export function lineOf(r: Rung, withTicker: boolean): Line {
   const itm = r.st === 'itm', roll = r.st === 'roll', kp = r.kp, loss = kp != null && kp < 0;
   const kk = `${withTicker ? r.t + ' ' : ''}${fk(r.K)} ${side(r)} ×${r.q}`;
-  const big = kp == null ? '-' : `${Math.abs(kp)}%`;
+  const pc = kp == null ? '-' : `${Math.abs(kp)}%`, big = loss ? `−${pc}` : pc;
   // Red when in the money or at a loss, green when ready to roll, grey otherwise; the action wears the same colour.
   const bigC = itm || loss ? RED : roll ? GRN : QT;
   const nx = r.next;
@@ -88,8 +91,8 @@ export function lineOf(r: Rung, withTicker: boolean): Line {
   const title = (itm ? '' : roll ? 'Roll ' : 'Hold ') + kk;
   const state = itm ? 'in the money' : roll ? 'ready to roll' : loss ? 'lost' : 'kept';
   return {
-    k: r.k, big, bigC, title, titleC: itm || roll ? W : QT, date: r.exL, act, actC: bigC, grey,
-    aria: `${title}, ${r.exL}, ${big} ${state}${act ? ', ' + act : ''}${grey ? '. ' + grey : ''}`,
+    k: r.k, big, bigC, title, titleC: itm || roll ? W : QT, date: r.exL, act, actC: bigC, grey, dot: itm ? 'r' : roll ? 'g' : undefined,
+    aria: `${title}, ${r.exL}, ${pc} ${state}${act ? ', ' + act : ''}${grey ? '. ' + grey : ''}`,
   };
 }
 

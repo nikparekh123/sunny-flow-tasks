@@ -9,7 +9,8 @@
 //  Built once per build with IncModel (BriefState.setIncome), never in a body.
 //
 //  A strike is never invented: a next rung without a listed strike shows no strike (no next tile on its day; a roll
-//  reads "Roll to Dec 7" without one). No em dashes, no minus signs in any words here.
+//  reads "Roll to Dec 7" without one). No em dashes in any words here; since the focus look a lost % on its own
+//  carries a minus (U+2212), and the views draw the tones through IncC.word (red and green are marks only).
 //
 
 import Foundation
@@ -277,8 +278,11 @@ nonisolated struct IncCal: Hashable {
                 sub = "Sold at \(IncFmt.f2(r.at))"
             }
         }
-        let word = ring == .itm ? "In the money" : ring == .act ? "Roll" : big
-        let short = ring == .itm ? "ITM" : ring == .act ? "Roll" : big
+        // Focus: a lost % standing on its own (the cell, All's word) carries the minus red used to give; the tile's
+        // big % keeps "lost" after it instead.
+        let signedBig = lo ? "\u{2212}" + big : big
+        let word = ring == .itm ? "In the money" : ring == .act ? "Roll" : signedBig
+        let short = ring == .itm ? "ITM" : ring == .act ? "Roll" : signedBig
         let kept = kp.map { lo ? "\(abs($0)) percent lost" : "\($0) percent kept" } ?? "no mark"
         let premSold = m0(r.at * Double(r.q) * 100), premLeft = m0((r.mk ?? r.at) * Double(r.q) * 100)
         return Leg(id: r.id, lab: nm, big: big, bw: bw, tone: tone, act: act, sub: sub, premSold: premSold, premLeft: premLeft, ring: ring,

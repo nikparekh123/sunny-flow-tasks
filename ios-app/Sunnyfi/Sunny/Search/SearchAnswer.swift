@@ -155,15 +155,21 @@ struct SXBig: View {
     }
 
     var body: some View {
+        // Focus: ink, the sign the colour used to give, or the red dot on a warning.
+        let shownV = SX.signed(value, tone), pre = shownV == value ? "" : String(shownV.prefix(1))
         VStack(alignment: .leading, spacing: 4) {
             if let label { Text(label).sx(.headline).foregroundStyle(SX.ink) }
-            Group {
-                if count, let n { SXCount(value: shown, target: n, final: value, fmt: fmt) } else { Text(value) }
+            HStack(alignment: .center, spacing: 0) {
+                if let d = SX.dot(tone, value, size: type.size) { SDot(kind: d) }
+                Group {
+                    if count, let n { SXCount(value: shown, target: n, final: shownV, fmt: fmt, pre: pre) } else { Text(shownV) }
+                }
+                .sx(type)
+                .foregroundStyle(SX.tone(tone, SX.ink, size: type.size))
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
             }
-            .sx(type)
-            .foregroundStyle(SX.tone(tone, SX.ink))
-            .lineLimit(1)
-            .minimumScaleFactor(0.5)
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel(value)
             if let sub { Text(SXText.styled(sub, .headline, dts)).sx(.headline.weighted(.medium)).foregroundStyle(SX.muted) }
         }
@@ -183,10 +189,12 @@ private struct SXCount: View, Animatable {
     var value: Double
     let target: Double, final: String
     let fmt: String
+    /// The sign the final words carry, on every frame of the count.
+    var pre = ""
     var animatableData: Double { get { value } set { value = newValue } }
     var body: some View {
         if value == target { Text(final) }
-        else { Text(fmt == "$" ? SampleEngine.fK(value) : Int(value.rounded()).formatted(.number.grouping(.automatic))) }
+        else { Text(pre + (fmt == "$" ? SampleEngine.fK(value) : Int(value.rounded()).formatted(.number.grouping(.automatic)))) }
     }
 }
 
@@ -199,11 +207,15 @@ struct SXTrio: View {
     var body: some View {
         HStack(alignment: .top, spacing: small ? 10 : 12) {
             ForEach(Array(items.prefix(3).enumerated()), id: \.offset) { _, x in
+                let vt: SXType = small ? .trioSmall : .trio, st: SXType = small ? .tiny : .label, v = x.value ?? ""
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(x.label ?? "").sx(small ? .tiny : .label).foregroundStyle(SX.muted)
-                    Text(x.value ?? "").sx(small ? .trioSmall : .trio).foregroundStyle(SX.tone(x.tone, SX.ink))
-                        .lineLimit(1).minimumScaleFactor(0.6)
-                    if let s = x.sub { Text(SXText.styled(s, small ? .tiny : .label, dts)).sx(small ? .tiny : .label).foregroundStyle(SX.tone(x.subTone, SX.muted)) }
+                    Text(x.label ?? "").sx(st).foregroundStyle(SX.muted)
+                    HStack(alignment: .center, spacing: 0) {
+                        if let d = SX.dot(x.tone, v, size: vt.size) { SDot(kind: d) }
+                        Text(SX.signed(v, x.tone)).sx(vt).foregroundStyle(SX.tone(x.tone, SX.ink, size: vt.size))
+                            .lineLimit(1).minimumScaleFactor(0.6)
+                    }
+                    if let s = x.sub { Text(SXText.styled(SX.signed(s, x.subTone), st, dts)).sx(st).foregroundStyle(SX.tone(x.subTone, SX.muted, size: st.size)) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -237,12 +249,12 @@ struct SXRows: View {
         let t: SXType = panel ? .panelRow : .row
         return VStack(alignment: .leading, spacing: panel ? 3 : 2) {
             HStack(alignment: .firstTextBaseline, spacing: panel ? 12 : 14) {
-                (Text(r.a ?? "").fontWeight(.semibold).foregroundColor(SX.tone(r.aTone, SX.ink))
-                 + Text(SXText.styled(r.b ?? "", t, dts)).foregroundColor(SX.tone(r.bTone, SX.muted)))
+                (Text(r.a ?? "").fontWeight(SX.focus(.semibold, t.size)).foregroundColor(SX.tone(r.aTone, SX.ink, size: t.size))
+                 + Text(SXText.styled(SX.signed(r.b ?? "", r.bTone), t, dts)).foregroundColor(SX.tone(r.bTone, SX.muted, size: t.size)))
                     .sx(t)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let v = r.r {
-                    Text(v).sx(t.weighted(.bold)).foregroundStyle(SX.tone(r.rTone, SX.ink)).lineLimit(1).fixedSize()
+                    Text(SX.signed(v, r.rTone)).sx(t.weighted(.bold)).foregroundStyle(SX.tone(r.rTone, SX.ink, size: t.size)).lineLimit(1).fixedSize()
                 }
             }
             if let s = r.sub { Text(SXText.styled(s, panel ? .label : .small, dts)).sx(panel ? .label.weighted(.regular) : .small).foregroundStyle(SX.muted) }
@@ -319,7 +331,7 @@ struct SXTableView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(r.label ?? "").sx(.tableLabel).foregroundStyle(SX.muted).frame(maxWidth: .infinity, alignment: .leading)
                     ForEach(Array(r.values.prefix(3).enumerated()), id: \.offset) { i, v in
-                        Text(v ?? "").sx(.panelRow.weighted(i == 0 ? .bold : .medium)).foregroundStyle(SX.tone(r.tone, SX.ink))
+                        Text(SX.signed(v ?? "", r.tone)).sx(.panelRow.weighted(i == 0 ? .bold : .medium)).foregroundStyle(SX.tone(r.tone, SX.ink, size: SXType.panelRow.size))
                             .lineLimit(1).minimumScaleFactor(0.7).frame(width: i == 0 ? 62 : 58, alignment: .trailing)
                     }
                 }
@@ -336,14 +348,15 @@ struct SXWeb: View {
     let summary: String, sources: [SXWebSource], line: String
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) { SXGlobe(); Text("From the web").sx(.time.weighted(.bold)) }.foregroundStyle(SX.web)
+            // Focus: links and their globe are words, so no blue (ink at 15 pt and up, grey under).
+            HStack(spacing: 6) { SXGlobe(); Text("From the web").sx(.time.weighted(.bold)) }.foregroundStyle(SX.muted)
             SXWords(text: summary, type: .say)
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(sources, id: \.url) { s in
                     Link(destination: URL(string: s.url) ?? URL(string: "https://sunnyfi.co")!) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text([s.site, s.date].compactMap { $0 }.joined(separator: " · ")).sx(.time.weighted(.semibold)).foregroundStyle(SX.muted)
-                            Text(s.title).sx(.headline.weighted(.medium)).foregroundStyle(SX.web).multilineTextAlignment(.leading)
+                            Text(s.title).sx(.headline.weighted(.medium)).foregroundStyle(SX.ink).multilineTextAlignment(.leading)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 10)
@@ -351,7 +364,7 @@ struct SXWeb: View {
                     }
                 }
             }
-            HStack(spacing: 6) { SXGlobe(); Text(line).sx(.source) }.foregroundStyle(SX.web)
+            HStack(spacing: 6) { SXGlobe(); Text(line).sx(.source) }.foregroundStyle(SX.muted)
         }
     }
 }
@@ -377,7 +390,7 @@ struct SXNone: View {
             if let d = didYouMean {
                 Button { ask(d) } label: {
                     HStack(spacing: 10) {
-                        (Text("Did you mean ").foregroundColor(SX.muted) + Text(d).fontWeight(.semibold).foregroundColor(SX.ink) + Text("?").foregroundColor(SX.ink))
+                        (Text("Did you mean ").foregroundColor(SX.muted) + Text(d).fontWeight(SX.focus(.semibold, SXType.field.size)).foregroundColor(SX.ink) + Text("?").foregroundColor(SX.ink))
                             .sx(.field.weighted(.medium))
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(SX.muted)
@@ -395,7 +408,7 @@ struct SXNone: View {
 // MARK: - Source line
 
 /// Last on every answer, always in the same place: Live (green dot with a halo), Sunny (gray dot), Last close
-/// (ring), research (square), From the web (blue globe).
+/// (ring), research (square), From the web (the globe; grey since the focus look, it sits on words).
 struct SXSourceLine: View {
     let kind: String, text: String
     var body: some View {
@@ -409,7 +422,7 @@ struct SXSourceLine: View {
             }
             Text(text).sx(.source)
         }
-        .foregroundStyle(kind == "web" ? SX.web : SX.muted)
+        .foregroundStyle(SX.muted)
         .accessibilityElement(children: .combine)
     }
 }

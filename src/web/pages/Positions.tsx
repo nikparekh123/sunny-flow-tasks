@@ -35,7 +35,7 @@ import { closedDays, soldLegs } from '../positions/sold';
 import { readParts } from '../positions/totals';
 import { useTarget } from '../positions/target';
 import { tryNum, useTries } from '../positions/tries';
-import { G, K, MU, O, PosStyles, R, Segmented, useReducedMotion } from '../positions/ui';
+import { K, MU, O, PosStyles, R, Segmented, useReducedMotion } from '../positions/ui';
 import { WhatIf } from '../positions/WhatIfPanel';
 import { useWhatIf, type Draft } from '../positions/whatif';
 
@@ -50,7 +50,7 @@ const asOf = (iso: string | undefined) => {
 function Logo({ t }: { t: string }) {
   const [bad, setBad] = useState(false);
   useEffect(() => setBad(false), [t]);
-  if (bad) return <span aria-hidden="true" style={{ fontSize: 10, lineHeight: '12px', fontWeight: 700, color: '#1D1D1F' }}>{t}</span>;
+  if (bad) return <span aria-hidden="true" style={{ fontSize: 10, lineHeight: '12px', fontWeight: 400, color: '#212121' }}>{t}</span>;
   return <img src={`/logos/${t}.png`} alt="" aria-hidden="true" draggable={false} onError={() => setBad(true)} style={{ width: '60%', height: '60%', objectFit: 'contain', pointerEvents: 'none' }} />;
 }
 
@@ -120,13 +120,13 @@ export default function Positions() {
                     style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, width: 70 }}>
                     {/* Handoff 2026-11-18 §3.2: a white disc with the logo at 60%; the ring is an inset shadow, so the dot
                         (pinned to the top right) never moves when a name is picked. */}
-                    <span style={{ position: 'relative', width: 50, height: 50, boxSizing: 'border-box', borderRadius: '50%', background: '#FFFFFF',
-                      boxShadow: on ? 'inset 0 0 0 3px #F5F5F7' : 'inset 0 0 0 1.5px rgba(255,255,255,.2)', transition: rm ? 'none' : 'box-shadow .2s ease',
+                    <span style={{ position: 'relative', width: 50, height: 50, boxSizing: 'border-box', borderRadius: '50%', background: '#FAFAFA',
+                      boxShadow: on ? 'inset 0 0 0 3px #F2F2F2' : 'inset 0 0 0 1.5px rgba(255,255,255,.2)', transition: rm ? 'none' : 'box-shadow .2s ease',
                       display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <Logo t={n.t} />
                       {dot && <span style={{ position: 'absolute', right: 0, top: 0, width: 11, height: 11, borderRadius: '50%', background: dot === 'red' ? R : O }} />}
                     </span>
-                    <span style={{ fontSize: 13, fontWeight: on ? 700 : 400, color: on ? K : MU }}>{n.t}</span>
+                    <span style={{ fontSize: 13, fontWeight: 400, color: on ? K : MU }}>{n.t}</span>
                   </button>
                 );
               })}
@@ -164,13 +164,14 @@ function Name({ book, t, name, payload }: { book: BookId; t: string; name: J; pa
         <span className="tnum" style={{ whiteSpace: 'nowrap' }}>
           <span style={{ fontSize: 30, fontWeight: 700, letterSpacing: '-.02em' }}>{t}</span>{' '}
           <span style={{ fontSize: 22, color: MU }}>{price(S0)}</span>{' '}
-          <span style={{ fontSize: 16, fontWeight: 600, color: mv < 0 ? R : G }}>{arrow(mv)} {pct(mv)}</span>
+          {/* Focus 2.1 (25 Nov 2026): the move in ink; its arrow says up or down. */}
+          <span style={{ fontSize: 16, fontWeight: 500, color: K }}>{arrow(mv)} {pct(mv)}</span>
         </span>
         <span style={{ fontSize: 15, color: MU }}>{company}{strat ? ' · ' + strat.charAt(0).toUpperCase() + strat.slice(1) : ''}</span>
       </div>
       {sa && (
         <div className="tnum" style={{ display: 'flex', alignItems: 'baseline', gap: '4px 14px', flexWrap: 'wrap', marginTop: -18, fontSize: 14, lineHeight: '20px', color: MU }}>
-          <span style={{ fontWeight: 600, color: K }}>Share average {price(Math.max(0, +sa.w[1]))}</span>
+          <span style={{ fontWeight: 500, color: K }}>Share average {price(Math.max(0, +sa.w[1]))}</span>
           <span>Paid {price(+sa.paid)}</span>
         </div>
       )}
@@ -357,7 +358,7 @@ function Detail({ book, t, grid, payload, mask }: { book: BookId; t: string; gri
             <Segmented label="Payoff or price" items={[['pay', 'Payoff'], ['price', 'Price']]} value={view} onPick={setView} width={184} />
             {view === 'price' ? (rw && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <span style={{ fontSize: 13, color: MU }}>{rw.l} <span style={{ fontWeight: 600, color: rw.c }}>{rw.v}</span></span>
+                <span style={{ fontSize: 13, color: MU }}>{rw.l} <span style={{ fontWeight: 400, color: MU }}>{rw.v}</span></span>
                 {rw.coneOk && <ConeSwitch on={cone} toggle={toggleCone} />}
               </div>
             )) : <Segmented label="Chart or table" items={[['chart', 'Chart'], ['table', 'Table']]} value={tab} onPick={setTab} width={170} size={13} />}

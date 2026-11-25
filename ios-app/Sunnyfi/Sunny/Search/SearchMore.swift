@@ -145,7 +145,8 @@ struct SXAlsoHelps: View {
                     if !x.pend { Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(SX.muted) }
                 }
                 Text(x.v).sx(.tileValue).foregroundStyle(SX.ink).lineLimit(1).minimumScaleFactor(0.7)
-                Text(x.d).sx(.tileLine).foregroundStyle(x.pend ? SX.muted : SX.tone(x.tone, SX.ink))
+                Text(x.pend ? x.d : SX.signed(x.d, x.tone)).sx(.tileLine)
+                    .foregroundStyle(x.pend ? SX.muted : SX.tone(x.tone, SX.ink, size: SXType.tileLine.size))
                     .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
             }
             .padding(.vertical, 12).padding(.horizontal, 14)

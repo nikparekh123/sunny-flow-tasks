@@ -86,7 +86,7 @@ enum SXPay {
         let p = pow(10, floor(log10(x))), m = x / p
         return (m < 1.5 ? 1 : m < 3 ? 2 : m < 7 ? 5 : 10) * p
     }
-    /// Dollars to the nearest $10, no sign: red says it costs.
+    /// Dollars to the nearest $10, no sign (SX.valueText puts the + or − on the chart's numbers).
     static func usd(_ v: Double) -> String { "$" + Int((abs(v) / 10).rounded() * 10).formatted(.number.grouping(.automatic)) }
     static func k(_ x: Double) -> String { x == x.rounded() ? String(Int(x)) : String(format: "%.2f", x) }
     static func px(_ x: Double) -> String { String(format: "%.2f", x) }
@@ -95,17 +95,21 @@ enum SXPay {
 // MARK: - Colours (block 28)
 
 extension SX {
-    /// The payoff line: green where it pays, red where it costs.
+    /// The payoff line: green where it pays, red where it costs (a chart line keeps its colour).
     static let payUp = S.dyn(0x1BA94C, 0x34D35B)
-    static let payDown = S.dyn(0xEE3B3B, 0xFF5A4F)
+    static let payDown = S.dyn(0xEE3B3B, 0xE82127)
+    /// The area under the line, both sides: neutral grey at the old opacities (focus §2.4, a large fill).
+    static let payFill = S.dyn(0x8C8C8C, 0x8C8C8C)
     /// The move priced in by Friday.
-    static let cone = S.dynA(0x1D1D1F, 0.055, 0xFFFFFF, 0.07)
-    static let grid = S.dynA(0x1D1D1F, 0.05, 0xFFFFFF, 0.06)
-    static let zero = S.dynA(0x1D1D1F, 0.26, 0xFFFFFF, 0.30)
+    static let cone = S.dynA(0x212121, 0.055, 0xFAFAFA, 0.07)
+    static let grid = S.dynA(0x212121, 0.05, 0xFAFAFA, 0.06)
+    static let zero = S.dynA(0x212121, 0.26, 0xFAFAFA, 0.30)
     /// Each name behind the book's line.
-    static let leg = S.dynA(0x1D1D1F, 0.30, 0xFFFFFF, 0.34)
-    /// Text on a number: the app's shades, so it passes 4.5:1.
-    static func value(_ v: Double) -> Color { v >= 5 ? up : v <= -5 ? down : ink }
+    static let leg = S.dynA(0x212121, 0.30, 0xFAFAFA, 0.34)
+    /// A number on the line (12 pt): no colour (focus §2.1), grey under 15 pt; its + or − says up or down.
+    static func value(_ v: Double) -> Color { SF.word(12) }
+    /// "+$860", "−$1,230", "$0": the sign once the figure is $5 or more either way.
+    static func valueText(_ v: Double) -> String { abs(v) >= 5 ? SF.signed(v, SXPay.usd(v)) : SXPay.usd(v) }
 }
 
 // MARK: - The card
@@ -167,7 +171,7 @@ struct SXPayoffCard: View {
                     if n.chips.allSatisfy({ o.contains($0.g) }) { return }
                     off = o
                     sx = nil
-                } label: { SXPayChip(text: c.t, on: on) }
+                } label: { SXPayChip(text: c.t, on: on, many: n.chips.count >= 3) }
                 .buttonStyle(.plain)
                 .accessibilityLabel(c.t)
                 .accessibilityValue(on ? "on" : "off")
@@ -183,7 +187,7 @@ struct SXPayoffCard: View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(["All"] + p.names.map(\.t), id: \.self) { t in
-                    Button { pick = t; sx = nil } label: { SXPayChip(text: t, on: pick == t) }
+                    Button { pick = t; sx = nil } label: { SXPayChip(text: t, on: pick == t, many: p.names.count + 1 >= 3) }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(pick == t ? [.isSelected] : [])
                 }
@@ -291,17 +295,19 @@ struct SXPayoffCard: View {
     }
 }
 
-/// A chip: 30 high inside a 44 pt target; ink when on, a gray fill when off; the colour eases in 0.2 s.
+/// A chip: 30 high inside a 44 pt target; ink when on, a gray fill when off; the colour eases in 0.2 s. In a row of
+/// three or more (`many`), on is the focus look's #424242 with ink words in dark (SF.chipOn), the ink chip in light.
 private struct SXPayChip: View {
     let text: String, on: Bool
+    var many = false
     var body: some View {
         Text(text)
             .sx(SXType(size: 14, line: 18, weight: .semibold, style: .subheadline, tracking: 0))
-            .foregroundStyle(on ? SX.paper : SX.ink)
+            .foregroundStyle(on ? (many ? SF.chipOnInk : SX.paper) : SX.ink)
             .lineLimit(1)
             .padding(.horizontal, 12)
             .frame(height: 30)
-            .background(on ? SX.ink : SX.fill, in: .capsule)
+            .background(on ? (many ? SF.chipOn : SX.ink) : SX.fill, in: .capsule)
             .animation(.easeOut(duration: 0.2), value: on)
             .frame(height: 44)
             .contentShape(.rect)
@@ -437,15 +443,15 @@ struct SXPlotView: View {
 
         // The move priced in.
         if let b = p.band { ctx.fill(Path(CGRect(x: X(b.0), y: 0, width: X(b.1) - X(b.0), height: H)), with: .color(SX.cone)) }
-        // Fills under the main line, fading toward zero.
+        // Fills under the main line, fading toward zero: neutral grey both sides (focus §2.4); the line keeps its colour.
         for (c, q) in zip(p.curves, pts) where c.main {
             var up = Path(), dn = Path()
             up.move(to: CGPoint(x: 0, y: y0)); dn.move(to: CGPoint(x: 0, y: y0))
             for e in q { up.addLine(to: CGPoint(x: X(e.0), y: Y(max(0, e.1)))); dn.addLine(to: CGPoint(x: X(e.0), y: Y(min(0, e.1)))) }
             up.addLine(to: CGPoint(x: w, y: y0)); up.closeSubpath(); dn.addLine(to: CGPoint(x: w, y: y0)); dn.closeSubpath()
-            ctx.fill(up, with: .linearGradient(Gradient(stops: [.init(color: SX.payUp.opacity(0.34), location: 0), .init(color: SX.payUp.opacity(0.03), location: z)]),
+            ctx.fill(up, with: .linearGradient(Gradient(stops: [.init(color: SX.payFill.opacity(0.34), location: 0), .init(color: SX.payFill.opacity(0.03), location: z)]),
                                                startPoint: .zero, endPoint: CGPoint(x: 0, y: H)))
-            ctx.fill(dn, with: .linearGradient(Gradient(stops: [.init(color: SX.payDown.opacity(0.03), location: z), .init(color: SX.payDown.opacity(0.34), location: 1)]),
+            ctx.fill(dn, with: .linearGradient(Gradient(stops: [.init(color: SX.payFill.opacity(0.03), location: z), .init(color: SX.payFill.opacity(0.34), location: 1)]),
                                                startPoint: .zero, endPoint: CGPoint(x: 0, y: H)))
         }
         // Grid, every nice step but zero; then zero.
@@ -484,7 +490,7 @@ struct SXPlotView: View {
         // Labels: $0, the walls' names in rows at the top, the line ends, then the numbers on the line.
         func label(_ s: String, _ c: Color, _ weight: Font.Weight, padX: CGFloat, padY: CGFloat, paper: Bool,
                    at place: (CGSize) -> CGPoint) {
-            let r = ctx.resolve(Text(s).font(.system(size: 12, weight: weight)).monospacedDigit().foregroundStyle(c))
+            let r = ctx.resolve(Text(s).font(.system(size: 12, weight: SX.focus(weight, 12))).monospacedDigit().foregroundStyle(c))
             let m = r.measure(in: CGSize(width: 1000, height: 100))
             let box = CGSize(width: m.width + padX * 2, height: 14 + padY * 2), o = place(box)
             if paper { ctx.fill(Path(roundedRect: CGRect(origin: o, size: box), cornerRadius: 4), with: .color(SX.paper)) }
@@ -495,7 +501,7 @@ struct SXPlotView: View {
         var row = 0
         for m in p.marks where m.label != nil && m.S >= p.lo && m.S <= p.hi {
             let x = X(m.S), right = XF(m.S) > 0.62, top = CGFloat(row) * 15
-            let r = ctx.resolve(Text(m.label!).font(.system(size: 12, weight: .semibold)).monospacedDigit().foregroundStyle(m.color))
+            let r = ctx.resolve(Text(m.label!).font(.system(size: 12, weight: SX.focus(.semibold, 12))).monospacedDigit().foregroundStyle(m.color))
             let tw = r.measure(in: CGSize(width: 1000, height: 100)).width, dw: CGFloat = m.conf == nil ? 0 : 4 + 3 * 5 + 2 * 1.6
             let box = CGRect(x: right ? x - 4 - (tw + dw + 4) : x + 4, y: top, width: tw + dw + 4, height: 14)
             ctx.fill(Path(roundedRect: box, cornerRadius: 4), with: .color(SX.paper))
@@ -523,7 +529,7 @@ struct SXPlotView: View {
             seen.insert(key)
             let y = Y(t.v), f = XF(t.S), x = X(t.S)
             let above = t.v >= 0 ? y - 26 > wallRows : y + 26 > H - 4
-            label(key + t.t2, SX.value(t.v), .bold, padX: 4, padY: 1, paper: true) { b in
+            label(SX.valueText(t.v) + t.t2, SX.value(t.v), .bold, padX: 4, padY: 1, paper: true) { b in
                 CGPoint(x: f < 0.1 ? x - 4 : f > 0.9 ? x + 4 - b.width : x - b.width / 2, y: above ? y - 25 : y + 9)
             }
         }
@@ -542,8 +548,8 @@ struct SXPlotView: View {
         for a in p.ax.sorted(by: { $0.pr < $1.pr }) {
             let f = CGFloat(XF(a.S))
             if f < 0 || f > 1 || (!a.edge && (f <= 0 || f >= 1)) { continue }
-            let t = ctx.resolve(Text(a.t).font(.system(size: 12, weight: a.weight)).monospacedDigit().foregroundStyle(a.ink ? SX.ink : SX.muted))
-            let t2 = ctx.resolve(Text(a.t2).font(.system(size: 12, weight: .medium)).foregroundStyle(SX.muted))
+            let t = ctx.resolve(Text(a.t).font(.system(size: 12, weight: SX.focus(a.weight, 12))).monospacedDigit().foregroundStyle(a.ink ? SX.ink : SX.muted))
+            let t2 = ctx.resolve(Text(a.t2).font(.system(size: 12, weight: SX.focus(.medium, 12))).foregroundStyle(SX.muted))
             let wd = max(t.measure(in: size).width, a.t2.isEmpty ? 0 : t2.measure(in: size).width)
             let x = f < 0.07 ? f * w - 2 : f > 0.93 ? f * w + 2 : f * w
             let l = f < 0.07 ? x : f > 0.93 ? x - wd : x - wd / 2, gap = 0.03 * w

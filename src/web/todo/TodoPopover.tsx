@@ -1,5 +1,5 @@
 // To do in the web header (handoff 2026-11-10-todo, "Web · header" and "Web · the popover"): "7 to do" left of the
-// privacy eye, quiet on purpose (#636366, under 4.5:1 by design, do not "fix" it), "To do" alone when nothing is
+// privacy eye, quiet on purpose (#636363, under 4.5:1 by design, do not "fix" it), "To do" alone when nothing is
 // open. It opens a menu-glass popover with the list. Nik's list is his alone (shared by his two logins); the cousin
 // gets a private list of his own, without "Shared by both accounts" (10 Nov 2026).
 //
@@ -63,8 +63,8 @@ function Popover({ api, n, shared, btn, kbd, onClose }: { api: Api; n: number; s
           maxHeight: `calc(100% - ${HEADER_H + 32}px)`, overflowY: 'auto', overscrollBehavior: 'contain', padding: '16px 18px 12px', borderRadius: 16,
           display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-          <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 600 }}>To do</span>
-          <span style={{ fontSize: 12, lineHeight: '16px', color: '#98989D' }}>{shared ? 'Shared by both accounts · ' : ''}{n ? n + ' open' : 'Nothing open'}</span>
+          <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 500 }}>To do</span>
+          <span style={{ fontSize: 12, lineHeight: '16px', color: '#8C8C8C' }}>{shared ? 'Shared by both accounts · ' : ''}{n ? n + ' open' : 'Nothing open'}</span>
         </div>
         <TodoList items={api.items ?? []} today={today} known={known} add={api.add} set={api.set} note={api.note} remove={api.remove} escRef={esc} focusAdd={kbd} />
       </div>
@@ -91,12 +91,12 @@ export function TodoButton() {
     <>
       <button ref={btn} type="button" className="bare sw-todo" onClick={(e) => { setKbd(e.detail === 0); setOpen((o) => !o); }} aria-haspopup="dialog" aria-expanded={open}
         aria-label={n ? `To do, ${n} open` : 'To do, nothing open'}
-        style={{ flex: 'none', marginRight: -16, padding: '8px 0', fontSize: 13, lineHeight: '16px', fontWeight: 400, color: open ? '#F5F5F7' : '#636366',
+        style={{ flex: 'none', marginRight: -16, padding: '8px 0', fontSize: 13, lineHeight: '16px', fontWeight: 400, color: open ? '#F2F2F2' : '#636363',
           whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', transition: 'color .2s' }}>
-        {n ? <><span style={{ fontWeight: 600 }}>{n}</span> to do</> : 'To do'}
+        {n ? <><span style={{ fontWeight: 400 }}>{n}</span> to do</> : 'To do'}
       </button>
       {open && host && createPortal(<Popover api={api} n={n} shared={shared} btn={btn} kbd={kbd} onClose={close} />, host)}
-      <style>{`.sw .sw-todo:hover{color:#F5F5F7!important}.sw .td-mo:hover{background:rgba(118,118,128,.16)}`
+      <style>{`.sw .sw-todo:hover{color:#F2F2F2!important}.sw .td-mo:hover{background:rgba(128,128,128,.16)}`
         + `.sw .td-in{all:unset;box-sizing:border-box;font-family:inherit}.sw input.td-in:focus-visible{outline:none}`}</style>
     </>
   );

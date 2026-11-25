@@ -7,10 +7,12 @@
 //  Monthly only, with no Weekly | Monthly switch, and opens on this month ("Nov so far"). The chart is the hero: up to
 //  8 bars, 140 tall, every bar stacked in full colour (calls #86A8F0, puts #C8946A dark; #4F7BDA, #B5794A light),
 //  dashed grid and a value scale on the right; a tap picks a bar (a soft column behind it, its value on top). A month
-//  that lost money draws its loss below the line in red tones, never with a minus sign. Everything else is small:
+//  that lost money draws its loss below the line in red tones (bars keep their colour). Everything else is small:
 //  Realized income and the period 13 pt, the total 22, the yield grey ("about N% a year", or "so far" for the month
 //  under way), Together's Sunny · Nicolay parts, Calls and Puts under them, then By ticker as thin 34 pt rows (logo,
 //  ticker, total, grey "avg $"), the top 5 then All N names | Fewer. Card padding 16, radius 20, 14 apart.
+//  The focus look (25 Nov 2026): the bars keep calls blue and puts brown (and the loss tones under the line); every
+//  word and figure is ink or grey, and a loss carries a minus (U+2212) instead of red; none with the privacy mask.
 //
 
 import SwiftUI
@@ -48,6 +50,9 @@ struct IncBannerView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .sunnyGlass(radius: 20)
     }
+
+    /// A loss's minus (U+2212), now that red is a mark only; none with the privacy mask or on a figure that rounds to 0.
+    private func neg(_ v: Double, _ s: String) -> String { !privacy && v.rounded() < 0 ? SF.signed(-1, s) : s }
 
     // MARK: Periods
 
@@ -96,8 +101,8 @@ struct IncBannerView: View {
     }
 
     private func total(_ t: Double) -> some View {
-        Text(IncFmt.dollars(t, privacy)).sType(IncT.t(22, 28, 700, tr: -0.02))
-            .foregroundStyle(t < 0 && !privacy ? IncC.red : IncC.ink)
+        Text(neg(t, IncFmt.dollars(t, privacy))).sType(IncT.t(22, 28, 700, tr: -0.02))
+            .foregroundStyle(IncC.ink)
             .lineLimit(1).fixedSize()
             .accessibilityLabel(privacy ? "hidden" : (t < 0 ? "lost " : "") + IncFmt.dollars(t, false))
     }
@@ -113,11 +118,11 @@ struct IncBannerView: View {
         }
     }
 
-    /// "Sunny $5,373 · Nicolay $1,293" (12/16 grey; a loss in red).
+    /// "Sunny $5,373 · Nicolay −$1,293" (12/16 grey; a loss with its minus).
     private func accountParts(_ sel: IncBanner.Period) -> some View {
         let parts = accounts.map { a -> Text in
             let v = sel.bk[a]?.total ?? 0
-            return Text("\(a) \(Text(IncFmt.dollars(v, privacy)).foregroundStyle(v < 0 && !privacy ? IncC.red : IncC.mu))")
+            return Text("\(a) \(Text(neg(v, IncFmt.dollars(v, privacy))).foregroundStyle(IncC.mu))")
         }
         var line = Text("")
         for (i, p) in parts.enumerated() { line = i == 0 ? p : Text("\(line) · \(p)") }
@@ -138,7 +143,7 @@ struct IncBannerView: View {
     private func legend(_ c: Color, _ l: String, _ v: Double) -> some View {
         HStack(spacing: 5) {
             RoundedRectangle(cornerRadius: 2, style: .continuous).fill(c).frame(width: 8, height: 8)
-            Text("\(l) \(Text(IncFmt.dollars(v, privacy)).foregroundStyle(v < 0 && !privacy ? IncC.red : IncC.mu))")
+            Text("\(l) \(Text(neg(v, IncFmt.dollars(v, privacy))).foregroundStyle(IncC.mu))")
                 .sType(IncT.t(12, 16)).foregroundStyle(IncC.mu).lineLimit(1).fixedSize()
         }
         .accessibilityElement(children: .ignore)
@@ -168,8 +173,8 @@ struct IncBannerView: View {
                 let y = zero + v * k
                 ZStack(alignment: .trailing) {
                     Line().stroke(IncC.line(0.08), style: StrokeStyle(lineWidth: 1, dash: [3, 3])).frame(height: 1)
-                    Text(IncFmt.money(v, privacy)).font(.inter(11, 400, tabular: true))
-                        .foregroundStyle(v < 0 ? IncC.red : IncC.mu)
+                    Text(neg(v, IncFmt.money(v, privacy))).font(.inter(11, 400, tabular: true))
+                        .foregroundStyle(IncC.mu)
                         .lineLimit(1).fixedSize()
                 }
                 .frame(height: 14)
@@ -210,8 +215,8 @@ struct IncBannerView: View {
                     .fill(on ? IncC.soft : .clear)
                 VStack(spacing: 0) {
                     if on && !empty {
-                        Text(IncFmt.money(x.total, privacy)).font(.inter(12, 700, tabular: true))
-                            .foregroundStyle(x.total < 0 && !privacy ? IncC.red : IncC.ink)
+                        Text(neg(x.total, IncFmt.money(x.total, privacy))).font(.inter(12, 700, tabular: true))
+                            .foregroundStyle(x.total < 0 && !privacy ? SF.word(12) : IncC.ink)
                             .lineLimit(1).fixedSize()
                             .padding(.bottom, 6)
                     }
@@ -272,8 +277,8 @@ struct IncBannerView: View {
                         IncLogo(t: r.t, size: 18, ratio: 0.62)
                         Text(r.t).sType(IncT.t(13, 18, 600), tabular: false).foregroundStyle(IncC.ink)
                         Spacer(minLength: 8)
-                        Text(IncFmt.dollars(r.v, privacy)).sType(IncT.t(13, 18, 600))
-                            .foregroundStyle(r.v < 0 && !privacy ? IncC.red : IncC.ink)
+                        Text(neg(r.v, IncFmt.dollars(r.v, privacy))).sType(IncT.t(13, 18, 600))
+                            .foregroundStyle(r.v < 0 && !privacy ? SF.word(13) : IncC.ink)
                         Text(banner.avg[r.t].map { "avg $" + IncFmt.f2($0) } ?? "no shares")
                             .sType(IncT.t(12, 16)).foregroundStyle(IncC.mu)
                             .frame(minWidth: 76, alignment: .trailing)

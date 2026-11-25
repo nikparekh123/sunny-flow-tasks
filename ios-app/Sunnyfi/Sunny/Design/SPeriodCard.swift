@@ -479,8 +479,10 @@ struct SLegend: View {
 
 // MARK: - Inline insight (block 22, the default style)
 
-/// A hairline under the stats. Tap: it thickens into the warm-to-cool line
-/// and the card's sentence opens under it. Tap again to fold.
+/// A hairline under the stats. Tap: it thickens into a line and the card's
+/// sentence opens under it. Tap again to fold. The focus look (25 Nov 2026):
+/// the warm-to-cool line, its orange glow and the tinted panel are neutral
+/// (an ink line, a flat raised panel), as the old colours left the palette.
 struct SInlineInsight: View {
     let lead: String
     let rest: String
@@ -492,23 +494,21 @@ struct SInlineInsight: View {
             Button { withAnimation(.timingCurve(0.34, 1.4, 0.4, 1, duration: 0.6)) { open.toggle() } } label: {
                 ZStack(alignment: .leading) {
                     Rectangle().fill(S.line)
-                    LinearGradient(colors: [Color(hex: 0xF2A06E), Color(hex: 0xF7CE9A), Color(hex: 0x7FA6F0)],
-                                   startPoint: .leading, endPoint: .trailing)
+                    Rectangle().fill(S.ink)
                         .scaleEffect(x: open ? 1 : 0, anchor: .leading)
                         .opacity(open ? 1 : 0)
                 }
                 .frame(height: open ? 3 : 1)
-                .shadow(color: open ? Color(hex: 0xF2A06E).opacity(0.55) : .clear, radius: 5, y: 2)
                 .frame(height: 16, alignment: .bottom)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(open ? "Hide the insight" : "Show the insight")
             if open {
-                (Text(lead).font(SType(size: 15, weight: 700, line: 20, tracking: 0).font()).foregroundStyle(scheme == .dark ? .white : S.ink)
+                (Text(lead).font(SType(size: 15, weight: 700, line: 20, tracking: 0).font()).foregroundStyle(S.ink)
                  + Text(rest.isEmpty ? "" : " " + rest))
                     .sType(SType(size: 15, weight: 400, line: 20, tracking: 0), tabular: false)
-                    .foregroundStyle(scheme == .dark ? Color.white.opacity(0.92) : S.muted)
+                    .foregroundStyle(scheme == .dark ? S.ink.opacity(0.92) : S.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.vertical, 16).padding(.horizontal, 20)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -522,19 +522,6 @@ struct SInlineInsight: View {
         .padding(.horizontal, -20)
     }
 
-    private var insightFill: some View {
-        Group {
-            if scheme == .dark {
-                LinearGradient(stops: [.init(color: Color(red: 54/255, green: 30/255, blue: 36/255).opacity(0.97), location: 0),
-                                       .init(color: Color(red: 14/255, green: 14/255, blue: 16/255).opacity(0.97), location: 0.46),
-                                       .init(color: Color(red: 22/255, green: 34/255, blue: 64/255).opacity(0.97), location: 1)],
-                               startPoint: UnitPoint(x: 0, y: 0.3), endPoint: UnitPoint(x: 1, y: 0.7))
-            } else {
-                LinearGradient(stops: [.init(color: Color(red: 1, green: 190/255, blue: 150/255).opacity(0.72), location: 0),
-                                       .init(color: Color(red: 1, green: 236/255, blue: 214/255).opacity(0.62), location: 0.46),
-                                       .init(color: Color(red: 160/255, green: 196/255, blue: 1).opacity(0.72), location: 1)],
-                               startPoint: UnitPoint(x: 0, y: 0.3), endPoint: UnitPoint(x: 1, y: 0.7))
-            }
-        }
-    }
+    /// A flat raised panel (#2A2A2A dark, #F2F2F2 light), no tint.
+    private var insightFill: some View { S.surface }
 }

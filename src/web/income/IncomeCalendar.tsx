@@ -7,17 +7,21 @@
 //   the range (‹ › on Week, which walks the four weeks; Week | Month) ·
 //   the grid, Mon to Fri: Week one tall week, Month four. Today a white circle, past and closed days faded.
 // No dollar figures, so privacy does not touch it. The ticker (per account), the week and the view last the session.
+// The focus look (handoff 2026-11-25-focus §2): the words neutral (the strip's dots and the tiles' rings keep the red
+// and green), a lost % takes a −, the day heads plain grey words.
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { BookId, J } from '../lib/data';
 import { ny } from '../lib/clock';
 import { BOOK_NAME } from '../components/AccountMenu';
+import { label as LABEL } from '../lib/focus';
+import { signBy, wordOf } from '../lib/format';
 import { Disc } from './ui';
 import { GRN, ln, MU, ONW, QT, RED, W, type Income, type IncName } from './model';
 import { calOf, closedDays, contentOf, ctxSub, dayAria, dayLabel, daysOf, DN, rangeOf, statusOf, type Content, type Day, type View } from './calendar';
 
-const TRK = 'rgba(118,118,128,.24)', THUMB = 'rgba(255,255,255,.2)', TH_SH = 'inset 0 0 0 .5px rgba(255,255,255,.22),0 2px 8px rgba(0,0,0,.35)';
+const TRK = 'rgba(128,128,128,.24)', THUMB = 'rgba(255,255,255,.2)', TH_SH = 'inset 0 0 0 .5px rgba(255,255,255,.22),0 2px 8px rgba(0,0,0,.35)';
 const TILE = 'rgba(255,255,255,.04)';
-const pill = (on: boolean): CSSProperties => ({ fontWeight: on ? 600 : 500, color: on ? W : MU, background: on ? THUMB : 'transparent', boxShadow: on ? TH_SH : 'none', transition: 'background .2s,color .2s' });
+const pill = (on: boolean): CSSProperties => ({ fontWeight: 500, color: on ? W : MU, background: on ? THUMB : 'transparent', boxShadow: on ? TH_SH : 'none', transition: 'background .2s,color .2s' });
 const WRAP = { textWrap: 'pretty' } as CSSProperties;
 
 /* The session's picks (README §4): the ticker with the account it was picked on, the week and the view. */
@@ -104,8 +108,8 @@ export function IncomeCalendar({ inc, payload, book }: { inc: Income; payload: J
         </div>
         <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, textAlign: 'right' }}>
           <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            {st.big > 0 && <span style={{ fontSize: 34, lineHeight: 1.12, fontWeight: 800, letterSpacing: '-.03em', color: st.c }}>{st.big}</span>}
-            <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 600, color: st.wc }}>{st.w}</span>
+            {st.big > 0 && <span style={{ fontSize: 34, lineHeight: 1.12, fontWeight: 800, letterSpacing: '-.03em', color: wordOf(st.c, 34) }}>{st.big}</span>}
+            <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 500, color: st.wc }}>{st.w}</span>
           </span>
           <span style={{ fontSize: 13, lineHeight: '18px', color: MU }}>{st.sub}</span>
         </div>
@@ -123,7 +127,7 @@ export function IncomeCalendar({ inc, payload, book }: { inc: Income; payload: J
             </div>
           )}
           <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-            <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 700, whiteSpace: 'nowrap' }}>{rg.t}</span>
+            <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 500, whiteSpace: 'nowrap' }}>{rg.t}</span>
             <span style={{ fontSize: 12, lineHeight: '16px', color: MU, whiteSpace: 'nowrap' }}>{rg.s}</span>
           </span>
         </div>
@@ -138,7 +142,7 @@ export function IncomeCalendar({ inc, payload, book }: { inc: Income; payload: J
       <div role="grid" aria-label={`Income calendar, ${ctxT}, ${rg.t}`} style={{ borderRadius: 20, background: 'rgba(255,255,255,.04)', boxShadow: `inset 0 0 0 1px ${ln(0.08)}`, overflow: 'hidden' }}>
         <div role="row" style={{ display: 'grid', gridTemplateColumns: 'repeat(5,minmax(0,1fr))', borderBottom: `1px solid ${ln(0.08)}` }}>
           {DN.map((l) => (
-            <span key={l} role="columnheader" style={{ padding: '10px 14px', fontSize: 12, lineHeight: '16px', fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: MU }}>{l}</span>
+            <span key={l} role="columnheader" style={{ padding: '10px 14px', ...LABEL, lineHeight: '16px' }}>{l}</span>
           ))}
         </div>
         {weeks.map((ws, wi) => (
@@ -161,9 +165,9 @@ function Cell({ x, label, week, ct, open }: { x: Day; label: string; week: boole
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0, opacity: x.past || x.closed ? 0.45 : 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ minWidth: 26, height: 26, padding: '0 7px', borderRadius: 13, background: x.today ? W : 'transparent', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 13, lineHeight: 1, fontWeight: x.today ? 700 : 500, color: x.today ? ONW : x.past ? MU : W, whiteSpace: 'nowrap' }}>{label}</span>
-          {x.today && <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600 }}>Today</span>}
-          {x.closed && <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: MU }}>Closed</span>}
+            fontSize: 13, lineHeight: 1, fontWeight: 500, color: x.today ? ONW : x.past ? MU : W, whiteSpace: 'nowrap' }}>{label}</span>
+          {x.today && <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 400 }}>Today</span>}
+          {x.closed && <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 400, color: MU }}>Closed</span>}
         </div>
         {ct.tiles.map((l) => (
           <div key={l.k} role="group" aria-label={l.aria}
@@ -171,14 +175,14 @@ function Cell({ x, label, week, ct, open }: { x: Day; label: string; week: boole
             <span style={{ fontSize: 13, lineHeight: '18px', color: MU, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.nm}</span>
             {l.big && (
               <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                <span style={{ fontSize: 30, lineHeight: 1.12, fontWeight: 800, letterSpacing: '-.03em', color: l.bc, whiteSpace: 'nowrap' }}>{l.big}</span>
+                <span style={{ fontSize: 30, lineHeight: 1.12, fontWeight: 800, letterSpacing: '-.03em', color: wordOf(l.bc, 30), whiteSpace: 'nowrap' }}>{l.big}</span>
                 <span style={{ fontSize: 13, lineHeight: '18px', color: MU }}>{l.bw}</span>
               </span>
             )}
             <span aria-hidden="true" style={{ fontSize: 12, lineHeight: '16px', color: MU, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              <span style={{ fontWeight: 600, color: W }}>{l.prem[0]}</span> premium · <span style={{ fontWeight: 600, color: W }}>{l.prem[1]}</span> to collect
+              <span style={{ fontWeight: 400, color: W }}>{l.prem[0]}</span> premium · <span style={{ fontWeight: 400, color: W }}>{l.prem[1]}</span> to collect
             </span>
-            {l.act && <span style={{ paddingTop: 2, fontSize: 13, lineHeight: '18px', fontWeight: 600, color: l.bc, ...WRAP }}>{l.act}</span>}
+            {l.act && <span style={{ paddingTop: 2, fontSize: 13, lineHeight: '18px', fontWeight: 400, color: wordOf(l.bc, 13), ...WRAP }}>{l.act}</span>}
             {l.sub && <span style={{ fontSize: 12, lineHeight: '16px', color: MU, ...WRAP }}>{l.sub}</span>}
           </div>
         ))}
@@ -189,8 +193,8 @@ function Cell({ x, label, week, ct, open }: { x: Day; label: string; week: boole
             {/* The ticker and the word share a line; in a narrow column the word drops under the ticker rather than
                 cutting the ticker short. */}
             <span style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 9, minWidth: 0 }}>
-              <span style={{ minWidth: 0, fontSize: 13, lineHeight: '18px', fontWeight: 600, color: r.tc, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.t}</span>
-              <span style={{ marginLeft: 'auto', fontSize: 14, lineHeight: '18px', fontWeight: 700, color: r.wc, whiteSpace: 'nowrap' }}>{r.word}</span>
+              <span style={{ minWidth: 0, fontSize: 13, lineHeight: '18px', fontWeight: 400, color: r.tc, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.t}</span>
+              <span style={{ marginLeft: 'auto', fontSize: 14, lineHeight: '18px', fontWeight: 500, color: wordOf(r.wc, 14), whiteSpace: 'nowrap' }}>{signBy(r.wc, r.word)}</span>
             </span>
             {r.why && <span style={{ gridColumn: '2 / 3', fontSize: 12, lineHeight: '16px', color: MU, ...WRAP }}>{r.why}</span>}
           </button>
@@ -199,7 +203,7 @@ function Cell({ x, label, week, ct, open }: { x: Day; label: string; week: boole
         {ct.nx.map((z) => (
           <div key={z.k} style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, padding: '8px 12px 9px', borderRadius: 14, border: `1px dashed ${ln(0.28)}` }}>
             <span style={{ fontSize: 12, lineHeight: '16px', color: MU, ...WRAP }}>{z.top}</span>
-            <span style={{ fontSize: 14, lineHeight: '19px', fontWeight: 600, color: QT, ...WRAP }}>{z.main}</span>
+            <span style={{ fontSize: 14, lineHeight: '19px', fontWeight: 500, color: QT, ...WRAP }}>{z.main}</span>
           </div>
         ))}
       </div>

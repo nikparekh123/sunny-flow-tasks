@@ -1,12 +1,14 @@
 // Sign in (README 0, `Web Login.dc.html`, dark). The real sign-in is the 10-digit code (A1, Nik 8 Nov 2026):
-// tried on Nik's login, then his cousin's, as on the phone.
+// tried on Nik's login, then his cousin's, as on the phone. The focus look (handoff 2026-11-25-focus): the page flat,
+// the live dot without its glow, a wrong code said in grey words after a red dot (the slots' lines stay red).
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import '../web.css';
 import { getCurrentSession, signInWithCode } from '../lib/auth';
 import { marketStatus, ny } from '../lib/clock';
+import { Dot } from '../lib/focus';
 
-const INK = '#F5F5F7', MU = '#AEAEB2', RED = '#FF6961';
+const INK = '#F2F2F2', MU = '#AAAAAA', RED = '#E82127';
 const GL = 'linear-gradient(160deg,rgba(255,255,255,.10) 0%,rgba(255,255,255,.03) 38%,rgba(255,255,255,.02) 62%,rgba(255,255,255,.07) 100%)';
 
 export default function Login() {
@@ -46,20 +48,18 @@ export default function Login() {
   return (
     <div className="sw" data-screen-label="Sign in" style={{ position: 'relative', minHeight: '100vh', display: 'grid', gridTemplateRows: 'auto 1fr auto',
       gap: 32, padding: '28px 48px 40px', overflow: 'hidden', color: INK }}>
-      <div aria-hidden="true" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background:
-        'radial-gradient(60vw 52vw at 4% -10%,rgba(101,196,102,.28),transparent 62%),radial-gradient(52vw 52vw at 104% 30%,rgba(115,182,249,.22),transparent 60%),radial-gradient(62vw 50vw at 30% 116%,rgba(247,206,70,.16),transparent 62%)' }} />
-      <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, fontSize: 12, fontWeight: 600, letterSpacing: '.24em' }}>
+      <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, fontSize: 12, fontWeight: 400, letterSpacing: '.24em' }}>
         <span>SUNNY</span>
         <span style={{ fontVariantNumeric: 'tabular-nums', letterSpacing: '.14em', fontWeight: 500, color: MU }}>{hm} · NYC</span>
       </div>
       <h1 style={{ position: 'relative', alignSelf: 'center', margin: 0, maxWidth: 1400, fontSize: 'clamp(56px,9.4vw,184px)', lineHeight: 0.9,
         fontWeight: 800, letterSpacing: '-.05em', textWrap: 'balance' } as React.CSSProperties}>
-        Welcome to Sunny Wealth Management<span style={{ color: '#65C466' }}>.</span>
+        Welcome to Sunny Wealth Management<span style={{ color: '#4CBB6C' }}>.</span>
       </h1>
       <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 32, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, letterSpacing: '.06em', lineHeight: '18px', color: MU }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, color: INK }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#65C466', opacity: mkt.live ? 1 : 0.35, boxShadow: '0 0 10px rgba(101,196,102,.8)' }} />
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400, color: INK }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4CBB6C', opacity: mkt.live ? 1 : 0.35 }} />
             {mkt.line}
           </span>
           <span style={{ fontWeight: 500 }}>Private. For invited accounts only.</span>
@@ -67,12 +67,12 @@ export default function Login() {
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10, width: 'min(480px,100%)',
           padding: '18px 20px 14px', borderRadius: 24, background: GL, WebkitBackdropFilter: 'blur(14px) saturate(180%)', backdropFilter: 'blur(14px) saturate(180%)',
           boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.16),inset 1.5px 1.5px 0 -.5px rgba(255,255,255,.28),0 10px 24px -6px rgba(0,0,0,.4)' }}>
-          <label htmlFor="code" style={{ alignSelf: 'stretch', fontSize: 11, fontWeight: 600, letterSpacing: '.24em', color: MU }}>SIGN IN</label>
+          <label htmlFor="code" style={{ alignSelf: 'stretch', fontSize: 11, fontWeight: 400, letterSpacing: '.24em', color: MU }}>SIGN IN</label>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, width: '100%' }}>
             <div onClick={() => inRef.current?.focus()} style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-end', height: 44, cursor: 'text' }}>
               {Array.from({ length: 10 }, (_, i) => {
                 const cur = foc && i === Math.min(code.length, 9) && !busy, full = i < code.length;
-                const bc = bad ? RED : cur ? INK : full ? 'rgba(245,245,247,.7)' : 'rgba(245,245,247,.28)';
+                const bc = bad ? RED : cur ? INK : full ? 'rgba(242,242,242,.7)' : 'rgba(242,242,242,.28)';
                 return (
                   <span key={i} style={{ flex: 1, marginLeft: i === 3 || i === 6 ? 14 : 0, marginRight: 3, height: 40, display: 'flex', alignItems: 'flex-end',
                     justifyContent: 'center', paddingBottom: 6, fontSize: 24, lineHeight: '24px', fontWeight: 600, fontVariantNumeric: 'tabular-nums',
@@ -86,12 +86,12 @@ export default function Login() {
                 style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, border: 'none', background: 'transparent', color: 'transparent', caretColor: 'transparent', fontSize: 24 }} />
             </div>
             <button type="submit" disabled={!ready} className="bare" style={{ flex: 'none', cursor: ready ? 'pointer' : 'default', height: 44, padding: '0 20px',
-              display: 'flex', alignItems: 'center', gap: 8, borderRadius: 999, fontSize: 12, fontWeight: 700, letterSpacing: '.18em',
-              background: on ? '#F5F5F7' : 'rgba(118,118,128,.24)', color: on ? '#000000' : 'rgba(245,245,247,.6)', transition: 'background .2s,color .2s' }}>
+              display: 'flex', alignItems: 'center', gap: 8, borderRadius: 999, fontSize: 12, fontWeight: 400, letterSpacing: '.18em',
+              background: on ? '#F2F2F2' : 'rgba(128,128,128,.24)', color: on ? '#171717' : 'rgba(242,242,242,.6)', transition: 'background .2s,color .2s' }}>
               {busy ? 'SIGNING IN' : 'SIGN IN'}<span aria-hidden="true" style={{ fontSize: 15, letterSpacing: 0 }}>↵</span>
             </button>
           </div>
-          <span id="msg" role="status" style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.14em', textAlign: 'right', color: bad ? RED : MU }}>{msg}</span>
+          <span id="msg" role="status" style={{ fontSize: 11, fontWeight: 400, letterSpacing: '.14em', textAlign: 'right', color: MU }}>{bad && !busy && <Dot k="r" />}{msg}</span>
         </form>
       </div>
     </div>

@@ -6,14 +6,16 @@
 //   Sector           its sector and the sector's move, from the brief's sector maps (each map holds that sector's
 //                    biggest names only, so a smaller name reads a quiet "-")
 //   Calls sold       each sold call strike × contracts; under it the share of the premium captured and the soonest expiry
-//   Delta by Friday  the read (Your position, By name) in its colour; under it the move priced by Friday
+//   Delta by Friday  the read (Your position, By name), a red dot when the name is past its best (handoff
+//                    2026-11-25-focus §2.3: the words neutral); under it the move priced by Friday
 //   Next             the next earnings or ex-dividend, then the one after
 // Everything comes from the Home payload through the rail's model (railNames, the book engine) and the brief.
 // Columns: the design's minmax tracks; the box scrolls sideways when narrow.
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { BookId, J } from '../../lib/data';
-import { C, clean, count, pct, price } from '../../lib/format';
+import { C, clean, count, pct, price, wordOf } from '../../lib/format';
+import { Dot } from '../../lib/focus';
 import { inSessionOrder, nextEvents, railNames, strike } from '../rail/model';
 import { holderOf } from '../top/parts';
 import { BOX, TABLE_PAD } from './Card';
@@ -96,9 +98,9 @@ export function everyNameRows(payload: J, doc: J, book: BookId, fri: (s: string)
 function Logo({ t, dot }: { t: string; dot: string | null }) {
   const [bad, setBad] = useState(false);
   return (
-    <span aria-hidden="true" style={{ flex: 'none', position: 'relative', width: 32, height: 32, borderRadius: '50%', background: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <span aria-hidden="true" style={{ flex: 'none', position: 'relative', width: 32, height: 32, borderRadius: '50%', background: '#FAFAFA', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       {bad
-        ? <span style={{ fontSize: 9, fontWeight: 700, color: '#1D1D1F' }}>{t.slice(0, 4)}</span>
+        ? <span style={{ fontSize: 9, fontWeight: 400, color: '#212121' }}>{t.slice(0, 4)}</span>
         : <img src={`/logos/${encodeURIComponent(t)}.png`} alt="" onError={() => setBad(true)} style={{ width: '60%', height: '60%', objectFit: 'contain' }} />}
       {dot && <span style={{ position: 'absolute', right: -2, top: -2, width: 9, height: 9, borderRadius: '50%', background: dot }} />}
     </span>
@@ -113,12 +115,12 @@ export default function EveryName({ payload, doc, book, mo }: { payload: J; doc:
   const rows = useMemo(() => everyNameRows(payload, doc, book, fri), [payload, doc, book, fri]);
   const wide = useWideTables(), cols = wide ? COLS : COLS_N;
   if (!rows.length) return null;
-  const sub = (s: string, c: string = C.ink2, w = 400) => (s ? <span style={{ fontSize: 12, fontWeight: w, color: c }}>{s}</span> : null);
+  const sub = (s: string, c: string = C.ink2) => (s ? <span style={{ fontSize: 12, fontWeight: 400, color: wordOf(c, 12) }}>{s}</span> : null);
   return (
     <div aria-label="Every name" style={{ ...BOX, padding: TABLE_PAD, display: 'flex', flexDirection: 'column', overflowX: 'auto', minWidth: 0 }}>
       <div style={{ minWidth: wide ? MIN_W : MIN_W_N, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, paddingBottom: 10 }}>
-          <span style={{ fontSize: 17, fontWeight: 600, whiteSpace: 'nowrap' }}>Every name</span>
+          <span style={{ fontSize: 17, fontWeight: 500, whiteSpace: 'nowrap' }}>Every name</span>
           <span style={{ fontSize: 13, color: C.ink2, textAlign: 'right' }}>short first · a row opens Positions</span>
         </div>
         <div className="tnum kicker" style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, padding: '6px 0 8px', whiteSpace: 'nowrap' }}>
@@ -131,18 +133,18 @@ export default function EveryName({ payload, doc, book, mo }: { payload: J; doc:
             <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
               <Logo t={r.t} dot={r.dot} />
               <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <span style={{ fontSize: 15, fontWeight: 600 }}>{r.t}</span>
+                <span style={{ fontSize: 15, fontWeight: 500 }}>{r.t}</span>
                 <span title={r.nm} style={{ fontSize: 12, color: C.ink2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.nm}</span>
               </span>
             </span>
             <span style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: 15, fontWeight: 500 }}>{r.px}</span>
-              {sub(r.mv, r.mc, 600)}
+              {sub(r.mv, r.mc)}
             </span>
             {wide && (
               <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                 <span style={{ fontSize: 14, lineHeight: '19px', color: r.sm ? C.ink : C.ink2 }}>{r.sec}</span>
-                {sub(r.sm, r.smc, 600)}
+                {sub(r.sm, r.smc)}
               </span>
             )}
             <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
@@ -150,7 +152,7 @@ export default function EveryName({ payload, doc, book, mo }: { payload: J; doc:
               {sub(r.cs2, r.cs2c)}
             </span>
             <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-              <span style={{ fontSize: 14, lineHeight: '19px', fontWeight: 600, color: r.rdc }}>{r.rd}</span>
+              <span style={{ fontSize: 14, lineHeight: '19px', fontWeight: 500, color: wordOf(r.rdc, 14) }}>{r.rdc === C.red && <Dot k="r" />}{r.rd}</span>
               {sub(r.pm)}
             </span>
             <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>

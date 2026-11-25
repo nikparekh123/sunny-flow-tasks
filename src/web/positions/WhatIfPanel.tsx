@@ -5,13 +5,15 @@
 //   server, public.payoff_tries: each with its switch and ✕, 24 Nov 2026), and the legs switched off in Every leg.
 //   Net Δ: the whole name with the changes. Cash today: premium in less premium out. Back to the book clears all.
 // Every price is the book engine's (Pricer.quote, on the IV a trade is priced on). Only the tries are kept on the server.
+// The focus look (handoff 2026-11-25-focus §2): cash in or out reads in ink or grey with + or −, the Net Δ in ink or
+// grey (no orange), labels as plain words; Add stays the one white button.
 import { shortDate } from '../lib/clock';
 import { count, money, price } from '../lib/format';
 import type { Draft } from './whatif';
 import { tradeName, type PLeg, type Pricer, type Trade } from './model';
-import { G, GLASS, K, MU, O, R, Segmented, Switch, kicker, tnum } from './ui';
+import { GLASS, K, MU, Segmented, Switch, kicker, sg, tnum, wd } from './ui';
 
-const field = { height: 34, border: 'none', borderRadius: 10, padding: '0 6px', background: 'rgba(118,118,128,.24)', color: K, fontSize: 13, width: '100%' } as const;
+const field = { height: 34, border: 'none', borderRadius: 10, padding: '0 6px', background: 'rgba(128,128,128,.24)', color: K, fontSize: 13, width: '100%' } as const;
 
 export function WhatIf({ pr, base, off, trades, effOn, draft, ivOf, strikes, expiries, expL, nCh, dirty, cashC, mask, setDraft, add, remove, toggle, reset }: {
   /** `trades`: every trade with its own switch; `effOn`: the ones that count (their switch and Every leg's chips). */
@@ -65,13 +67,13 @@ export function WhatIf({ pr, base, off, trades, effOn, draft, ivOf, strikes, exp
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
         <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-          <span style={{ fontSize: 14, lineHeight: '18px', fontWeight: 600 }}>{tradeName(draft, expL(draft.ex))}</span>
+          <span style={{ fontSize: 14, lineHeight: '18px', fontWeight: 500 }}>{tradeName(draft, expL(draft.ex))}</span>
           <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>
-            {price(q.per)} each · Δ {dTx(q.delta).toLowerCase()} · <span style={{ fontWeight: 600, color: q.cash >= 0 ? G : R }}>{mask(money(q.cash))} {q.cash >= 0 ? 'in' : 'out'}</span>
+            {price(q.per)} each · Δ {dTx(q.delta).toLowerCase()} · <span style={{ fontWeight: 400, color: wd(12) }}>{sg(q.cash, mask(money(q.cash)))} {q.cash >= 0 ? 'in' : 'out'}</span>
           </span>
         </span>
         <button type="button" className="bare swp-add" onClick={() => add({ side: draft.side, ty: draft.ty, K: draft.K, ex: draft.ex, n: draft.n, iv })}
-          style={{ flex: 'none', padding: '8px 20px', borderRadius: 999, background: K, color: '#000000', fontSize: 14, fontWeight: 600 }}>Add</button>
+          style={{ flex: 'none', padding: '8px 20px', borderRadius: 999, background: K, color: '#171717', fontSize: 14, fontWeight: 500 }}>Add</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, borderTop: '1px solid rgba(255,255,255,.14)', paddingTop: 10 }}>
         <span style={{ ...kicker, paddingBottom: 4 }}>Your changes</span>
@@ -84,31 +86,31 @@ export function WhatIf({ pr, base, off, trades, effOn, draft, ivOf, strikes, exp
             <div key={l.k} style={{ display: 'grid', gridTemplateColumns: tried ? '40px minmax(0,1fr) auto 26px' : 'minmax(0,1fr) auto 26px', gap: 8, alignItems: 'center', padding: '6px 0' }}>
               {tried && <Switch on={u.on} label={`${u.on ? 'Switch off' : 'Switch on'} ${l.lb}`} onToggle={() => toggle(u)} />}
               <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, opacity: on ? 1 : 0.45 }}>
-                <span style={{ fontSize: 14, lineHeight: '18px', fontWeight: 600 }}>{l.lb}</span>
+                <span style={{ fontSize: 14, lineHeight: '18px', fontWeight: 500 }}>{l.lb}</span>
                 <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>{tried ? 'from Intelligence' : u.src === 'sd' ? 'from the SD calculator' : 'tried here'}{on ? '' : ' · switched off'}</span>
               </span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: cash >= 0 ? G : R, whiteSpace: 'nowrap', opacity: on ? 1 : 0.45 }}>{mask(money(cash))} {cash >= 0 ? 'in' : 'out'}</span>
+              <span style={{ fontSize: 13, fontWeight: 400, color: wd(13), whiteSpace: 'nowrap', opacity: on ? 1 : 0.45 }}>{sg(cash, mask(money(cash)))} {cash >= 0 ? 'in' : 'out'}</span>
               <button type="button" className="xbtn" onClick={() => remove(u)} aria-label={`Take off ${l.lb}`} style={{ width: 26, height: 26, fontSize: 11 }}>✕</button>
             </div>
           );
         })}
-        {nOff > 0 && <span style={{ padding: '4px 0', fontSize: 13, lineHeight: '18px', color: '#AEAEB2' }}>{nOff} {nOff === 1 ? 'leg' : 'legs'} switched off in Every leg</span>}
+        {nOff > 0 && <span style={{ padding: '4px 0', fontSize: 13, lineHeight: '18px', color: '#AAAAAA' }}>{nOff} {nOff === 1 ? 'leg' : 'legs'} switched off in Every leg</span>}
         {!trades.length && !nOff && <span style={{ fontSize: 13, lineHeight: '18px', color: MU }}>Nothing yet. Add a trade here, try one from Intelligence, or switch a leg off in Every leg.</span>}
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
         <span style={{ fontSize: 13, color: MU }}>Net Δ</span>
-        <span style={{ display: 'flex', gap: 6, fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap' }}>
-          <span style={{ color: chg ? MU : d0 < 0 ? O : K }}>{dTx(d0)}</span>
-          {chg && <><span style={{ color: MU }}>→</span><span style={{ color: d1 < 0 ? O : K }}>{dTx(d1)}</span></>}
+        <span style={{ display: 'flex', gap: 6, fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap' }}>
+          <span style={{ color: chg ? MU : d0 < 0 ? wd(14) : K }}>{dTx(d0)}</span>
+          {chg && <><span style={{ color: MU }}>→</span><span style={{ color: d1 < 0 ? wd(14) : K }}>{dTx(d1)}</span></>}
         </span>
       </div>
       <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, borderTop: '1px solid rgba(255,255,255,.14)', paddingTop: 12 }}>
         <span style={{ display: 'flex', flexDirection: 'column' }}>
           <span style={{ fontSize: 12, color: MU }}>Cash today</span>
-          <span style={{ fontSize: 18, fontWeight: 600, color: cashC >= 0 ? G : R }}>{mask(money(cashC))}</span>
+          <span style={{ fontSize: 18, fontWeight: 500, color: K }}>{sg(cashC, mask(money(cashC)))}</span>
         </span>
         <button type="button" className="bare" onClick={reset} disabled={!dirty}
-          style={{ padding: '7px 16px', borderRadius: 999, background: 'rgba(118,118,128,.24)', fontSize: 14, fontWeight: 500, opacity: dirty ? 1 : 0.4, cursor: dirty ? 'pointer' : 'default' }}>Back to the book</button>
+          style={{ padding: '7px 16px', borderRadius: 999, background: 'rgba(128,128,128,.24)', fontSize: 14, fontWeight: 500, opacity: dirty ? 1 : 0.4, cursor: dirty ? 'pointer' : 'default' }}>Back to the book</button>
       </div>
     </div>
   );

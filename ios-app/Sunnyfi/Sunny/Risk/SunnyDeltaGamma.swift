@@ -44,9 +44,10 @@ struct SunnyDeltaGamma: View {
                 JumpSlider(value: $r.jump, stops: true)
             }
             HStack(alignment: .top, spacing: 16) {
-                hero(Dm < 0 ? "Short at +\(router.jump)%" : "Still long at +\(router.jump)%", PF.usd(Dm), Dm < 0 ? S.red : S.ink,
+                // Focus §2.1, §2.2: the figures in ink, a short with its −.
+                hero(Dm < 0 ? "Short at +\(router.jump)%" : "Still long at +\(router.jump)%", (Dm <= -0.5 ? "\u{2212}" : "") + PF.usd(Dm), S.ink,
                      "down from \(PF.usd(D0))")
-                hero("The jump costs", PF.usd(GB), S.red, WP > 0 ? String(format: "%.1f weeks of premium", GB / WP) : "")
+                hero("The jump costs", PF.usd(GB), S.ink, WP > 0 ? String(format: "%.1f weeks of premium", GB / WP) : "")
             }
             .padding(.top, -4)
             Text("Right is less long, past the dashed line it's short. Higher costs more. Tap a name to open it in Positions.")
@@ -99,8 +100,9 @@ private struct DGMap: View {
             let Yw = { (w: Double) -> CGFloat in (H - 12) - CGFloat(min(1, max(0, w) / Self.CAP)) * (H - 24) }
             let XS = [0, Xv(0.5), Xv(0), W], YS = [0, Yw(2), Yw(1), H]
             let ink = scheme == .dark ? Color.white : S.ink
-            let RK: [Color] = [ink.opacity(0.035), ink.opacity(0.075), Color(red: 235 / 255, green: 75 / 255, blue: 70 / 255).opacity(0.13),
-                               Color(red: 235 / 255, green: 75 / 255, blue: 70 / 255).opacity(0.25), Color(red: 214 / 255, green: 52 / 255, blue: 55 / 255).opacity(0.42)]
+            // Focus §2.4: the big red zones go grey (#8C8C8C) at their own opacity.
+            let zone = Color(hex: 0x8C8C8C)
+            let RK: [Color] = [ink.opacity(0.035), ink.opacity(0.075), zone.opacity(0.13), zone.opacity(0.25), zone.opacity(0.42)]
             let pts = place(W: W, H: H, Xv: Xv, Yw: Yw)
             ZStack(alignment: .topLeading) {
                 ForEach(0..<3, id: \.self) { i in
@@ -114,8 +116,8 @@ private struct DGMap: View {
                     .stroke(Color(red: 179 / 255, green: 38 / 255, blue: 42 / 255).opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
                 label("Still long", x: (XS[0] + XS[1]) / 2, y: 14, c: S.muted)
                 label("Thin", x: (XS[1] + XS[2]) / 2, y: 14, c: S.muted)
-                label("Short", x: (XS[2] + XS[3]) / 2, y: 14, c: S.red)
-                Text("Act first").sType(SType(size: 11, weight: 600, line: 13, tracking: 0)).foregroundStyle(S.red).fixedSize()
+                label("Short", x: (XS[2] + XS[3]) / 2, y: 14, c: S.muted)
+                Text("Act first").sType(SType(size: 11, weight: 600, line: 13, tracking: 0)).foregroundStyle(S.muted).fixedSize()
                     .position(x: W - 30, y: 30)
                 Text("2 weeks").sType(SType(size: 11, weight: 600, line: 13, tracking: 0)).foregroundStyle(S.muted).fixedSize()
                     .position(x: W - 26, y: Yw(2) - 7)
@@ -193,7 +195,7 @@ private struct DGMap: View {
                     .overlay(Circle().strokeBorder(S.line, lineWidth: b.st == .short ? 0 : 1))
                     .shadow(color: .black.opacity(0.12), radius: 3, y: 2)
                 Text(String(format: "%.1f wk", b.wk)).sType(SType(size: 11, weight: 600, line: 13, tracking: 0))
-                    .foregroundStyle(b.st == .short ? S.red : S.muted)
+                    .foregroundStyle(S.muted)
                     .fixedSize()
             }
             .contentShape(Circle())

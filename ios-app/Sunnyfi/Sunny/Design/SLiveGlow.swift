@@ -8,6 +8,8 @@
 //  Pulse: from nothing at 60% size, to full in 0.6 s (size over 0.9 s),
 //  settles to 45% from 1 s over 2.4 s, then fades out over 90 s from 3.5 s.
 //  Every live card pulses on the same update. Reduce Motion: fades only.
+//  ⚠ FOCUS (handoff 2026-11-25-focus §1.3, Nik: the colours pop too much; the glows are gone, every surface flat):
+//  the yellow sun and blue moon no longer draw (`SGlowLayer.on`); the pulse's timing is kept for the day it returns.
 //
 
 import SwiftUI
@@ -22,6 +24,8 @@ extension EnvironmentValues {
 }
 
 struct SGlowLayer: View {
+    /// Off since the focus look: no glow behind any card.
+    static let on = false
     @Environment(\.livePulse) private var pulse
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduce
@@ -30,6 +34,10 @@ struct SGlowLayer: View {
     @State private var run: Task<Void, Never>?
 
     var body: some View {
+        if Self.on { glow } else { Color.clear.allowsHitTesting(false).accessibilityHidden(true) }
+    }
+
+    private var glow: some View {
         GeometryReader { g in
             Circle()
                 .fill(RadialGradient(colors: [scheme == .dark ? S.glowMoon : S.glowSun, .clear],

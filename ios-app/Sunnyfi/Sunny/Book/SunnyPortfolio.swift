@@ -218,7 +218,7 @@ struct SunnyPortfolio: View {
 
 // MARK: - Shared bits
 
-/// A range filter pill (UI Kit 08): 40 tall, 12/12 600, selected ink.
+/// A range filter pill (UI Kit 08): 40 tall, 12/12 600, selected the chip-on grey with ink words (focus §2.6).
 struct SFilterPill: View {
     let title: String
     let selected: Bool
@@ -227,10 +227,10 @@ struct SFilterPill: View {
         Button(action: action) {
             Text(title)
                 .sType(.label, tabular: false)
-                .foregroundStyle(selected ? S.chipOnInk : S.ink)
+                .foregroundStyle(selected ? SF.chipOnInk : S.ink)
                 .padding(.horizontal, 14)
                 .frame(height: 40)
-                .background { if selected { Capsule().fill(S.ink) } }
+                .background { if selected { Capsule().fill(SF.chipOn) } }
                 .glassEffect(selected ? .identity : .regular.interactive(), in: .capsule)
                 .contentShape(Capsule())
         }

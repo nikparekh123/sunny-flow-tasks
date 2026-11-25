@@ -25,18 +25,18 @@ export function AlertCard({ alerts, mask, action }: { alerts: Alert[]; mask: (s:
     <div role="region" aria-label="Alert" className="g1"
       style={{ marginTop: 24, borderRadius: 20, padding: '16px 18px 14px 22px', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: '6px 16px' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, color: C.ink3 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 400, color: C.ink3 }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: a.dot }} />{mask(a.kick)}
         </span>
-        <span style={{ fontSize: 17, lineHeight: '23px', fontWeight: 600 }}>{mask(a.t)}</span>
+        <span style={{ fontSize: 17, lineHeight: '23px', fontWeight: 500 }}>{mask(a.t)}</span>
         {a.s && <span style={{ fontSize: 14, lineHeight: '20px', color: C.ink2 }}>{mask(a.s)}</span>}
       </div>
       <button type="button" className="bare" onClick={dismiss} aria-label="Dismiss"
-        style={{ alignSelf: 'start', width: 28, height: 28, borderRadius: '50%', background: 'rgba(118,118,128,.24)', display: 'flex',
+        style={{ alignSelf: 'start', width: 28, height: 28, borderRadius: '50%', background: 'rgba(128,128,128,.24)', display: 'flex',
           alignItems: 'center', justifyContent: 'center', fontSize: 11, color: C.ink3 }}>✕</button>
       <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingTop: 4 }}>
         {act && (
-          <button type="button" className="bare" onClick={act.go} style={{ fontSize: 14, fontWeight: 600, color: C.green }}>{act.label} ›</button>
+          <button type="button" className="bare" onClick={act.go} style={{ fontSize: 14, fontWeight: 500, color: C.ink2 }}>{act.label} ›</button>
         )}
         <span style={{ flex: 1 }} />
         {many && (

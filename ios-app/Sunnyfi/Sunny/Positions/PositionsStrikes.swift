@@ -188,13 +188,13 @@ struct PosStrikesView: View {
     let onTry: ([(ty: String, K: Double, ex: String, n: Int)]) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduce
 
-    private static let selSub = S.dyn(0xC7C7CC, 0x3A3A3C)
-    private static let tileFill = S.dynA(0xFFFFFF, 0.9, 0xFFFFFF, 0.06)
-    private static let tileRing = S.dynA(0x1D1D1F, 0.08, 0xFFFFFF, 0.10)
+    private static let selSub = S.dyn(0xC8C8C8, 0x383838)
+    private static let tileFill = S.dynA(0xFAFAFA, 0.9, 0xFAFAFA, 0.06)
+    private static let tileRing = S.dynA(0x212121, 0.08, 0xFAFAFA, 0.10)
     private static let stepFill = Color(.sRGB, red: 118 / 255, green: 118 / 255, blue: 128 / 255, opacity: 0.24)
     /// The card's soft box (rgba(255,255,255,.05) in the design) and its section rules (.10).
-    private static let softFill = S.dynA(0x1D1D1F, 0.04, 0xFFFFFF, 0.05)
-    private static let cardRule = S.dynA(0x1D1D1F, 0.10, 0xFFFFFF, 0.10)
+    private static let softFill = S.dynA(0x212121, 0.04, 0xFAFAFA, 0.05)
+    private static let cardRule = S.dynA(0x212121, 0.10, 0xFAFAFA, 0.10)
 
     private func km(_ x: Double) -> String { PosFmt.money(x) }
 
@@ -379,7 +379,8 @@ struct PosStrikesView: View {
             }
             // 3. On the way up | down: the levels as rows.
             VStack(alignment: .leading, spacing: 0) {
-                Text(c ? "ON THE WAY UP" : "ON THE WAY DOWN").sType(PT.t(13, 18, 600, tr: 0.05), tabular: false).foregroundStyle(PC.mu)
+                // A plain word as written, 13 pt 500 grey, no tracking (focus §2.5).
+                Text(c ? "On the way up" : "On the way down").sType(PT.t(13, 18, 500), tabular: false).foregroundStyle(SF.grey)
                     .padding(.bottom, 4)
                     .accessibilityLabel(c ? "On the way up" : "On the way down")
                     .accessibilityAddTraits(.isHeader)
@@ -490,7 +491,8 @@ struct PosStrikesView: View {
                         onTry(tried ? [] : rows.map { (ty: $0.s.ty, K: $0.s.K, ex: $0.s.ex, n: $0.n) })
                     } label: {
                         Text(tried ? "In Payoff · Undo" : "Try in Payoff").sType(PT.t(15, 20, 600), tabular: false)
-                            .foregroundStyle(tried ? PC.green : PC.ink).lineLimit(1)
+                            // No green on the words (focus §2.1); the tinted capsule behind them stays.
+                            .foregroundStyle(PC.ink).lineLimit(1)
                             .padding(.horizontal, 18).frame(height: 44)
                             .background { if tried { Capsule().fill(PC.green.opacity(0.18)) } }
                             .glassEffect(tried ? .identity : .regular, in: .capsule)

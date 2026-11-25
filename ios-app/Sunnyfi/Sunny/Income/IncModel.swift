@@ -12,7 +12,8 @@
 //  "Down 0.40 a share", "In the money by 2.10") and a grey line only for a roll or in the money. In the money is
 //  flagged only, never advice. A roll with no listed strike shows no strike: one is never invented.
 //
-//  No em dashes, no minus signs (red says negative) in any words here.
+//  No em dashes in any words here. Since the focus look (25 Nov 2026) red is a mark only, so a lost % on its own
+//  carries a minus (U+2212) and the views draw the tones through IncC.word.
 //
 
 import SwiftUI
@@ -96,7 +97,8 @@ nonisolated struct IncLine: Identifiable, Hashable {
         let kk = r.name(ticker: ticker) + " ×\(r.q)"
         let kp = r.kp
         let loss = (kp ?? 0) < 0
-        let big = kp.map { "\(abs($0))%" } ?? ""
+        // Focus (25 Nov 2026): red no longer says a loss, so a lost % carries the minus (U+2212).
+        let big = kp.map { ($0 < 0 ? "\u{2212}" : "") + "\(abs($0))%" } ?? ""
         let bigTone: IncTone = r.itm || loss ? .red : r.roll ? .green : .quiet
         let title = (r.itm ? "" : r.roll ? "Roll " : "Hold ") + kk
         let titleTone: IncTone = r.itm || r.roll ? .ink : .quiet

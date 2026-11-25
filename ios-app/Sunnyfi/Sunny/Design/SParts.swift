@@ -66,7 +66,7 @@ struct SFrostedSurface: View {
                     .init(color: .white.opacity(0), location: 0.5),
                     .init(color: .white.opacity(dark ? 0.08 : 0.55), location: 1),
                 ], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
-            .overlay(shape.stroke(Color(red: 29 / 255, green: 29 / 255, blue: 31 / 255).opacity(dark ? 0 : 0.06), lineWidth: 1))
+            .overlay(shape.stroke(Color(hex: 0x212121).opacity(dark ? 0 : 0.06), lineWidth: 1))
             .shadow(color: .black.opacity(dark ? 0.2 : 0.04), radius: 1.5, y: 1)
             .shadow(color: .black.opacity(dark ? 0.32 : 0.08), radius: 12, y: 10)
     }
@@ -74,7 +74,8 @@ struct SFrostedSurface: View {
 
 // MARK: - Pill
 
-/// A filter pill (UI Kit §08): Inter 600 12, radius 30, selected = ink fill.
+/// A filter pill (UI Kit §08): Inter 600 12, radius 30. Selected: the focus look's chip-on (§2.6, #424242 with ink
+/// words in dark; the ink chip in light), since pills come in rows.
 struct SPill: View {
     let title: String
     let selected: Bool
@@ -84,10 +85,10 @@ struct SPill: View {
         Button(action: action) {
             Text(title)
                 .sType(.label, tabular: false)
-                .foregroundStyle(selected ? S.paper : S.ink)
+                .foregroundStyle(selected ? SF.chipOnInk : S.ink)
                 .padding(.horizontal, 14)
                 .frame(height: height)
-                .background(Capsule().fill(selected ? S.ink : S.surface))
+                .background(Capsule().fill(selected ? SF.chipOn : S.surface))
                 .contentShape(Rectangle())
         }
         .buttonStyle(SPressStyle())

@@ -229,7 +229,7 @@ struct IndexCard: View {
     var body: some View {
         let price = q.price, prev = q.prev
         let diff = price - prev, pct = prev != 0 ? diff / prev * 100 : 0
-        let up = diff >= 0, tone = up ? S.green : S.red
+        let up = diff >= 0
         let shown = dollars ? (level ? F.level(diff) : "$" + F.level(diff)) : F.pct(pct)
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 0) {
@@ -251,8 +251,9 @@ struct IndexCard: View {
                             .sType(.price)
                             .contentTransition(.numericText(value: price))
                         HStack(spacing: 4) {
-                            SArrow(up: up).foregroundStyle(tone)
-                            Text(shown).sType(.change).foregroundStyle(tone)
+                            // Focus (25 Nov): the triangle says which way; it and the move are ink, not green or red.
+                            SArrow(up: up).foregroundStyle(S.ink)
+                            Text(shown).sType(.change).foregroundStyle(S.ink)
                                 .contentTransition(.numericText(value: dollars ? diff : pct))
                         }
                     }
@@ -315,7 +316,7 @@ struct OvernightCard: View {
                             SArrow(up: v >= 0)
                             Text(F.pct(v)).sType(.change)
                         }
-                        .foregroundStyle(v >= 0 ? S.green : S.red)
+                        .foregroundStyle(S.ink)   // the triangle says which way (focus)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityElement(children: .ignore)
@@ -395,7 +396,7 @@ struct LastWeekCard: View {
                     SArrow(up: up)
                     Text(F.pct(move, places: 1)).sType(.change)
                 }
-                .foregroundStyle(tone)
+                .foregroundStyle(S.ink)   // the triangle says which way; the dot on the band keeps the tone (focus)
                 Text(priced.map { "±\(String(format: "%.1f", $0))% priced" } ?? "on the week")
                     .sType(SType(size: 12, weight: 500, line: 14, tracking: 0), tabular: false)
                     .foregroundStyle(S.muted).lineLimit(1)

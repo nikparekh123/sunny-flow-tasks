@@ -30,7 +30,7 @@ struct SXBook: Decodable, Equatable {
 
 extension SX {
     /// A small chart's tile.
-    static let tile = S.dynA(0x1D1D1F, 0.035, 0xFFFFFF, 0.05)
+    static let tile = S.dynA(0x212121, 0.035, 0xFAFAFA, 0.05)
 }
 
 struct SXBookCard: View {
@@ -76,6 +76,14 @@ struct SXBookCard: View {
 
     private func open(_ r: SXBookRow) { ask("How’s \(r.t) doing \(Self.when[rg]!)?") }
 
+    /// The status line in grey; a price through a sold strike keeps the red dot before it (focus §2.3).
+    private func status(_ r: SXBookRow) -> some View {
+        HStack(alignment: .center, spacing: 0) {
+            if r.warn { SDot(kind: .danger) }
+            Text(r.st).foregroundStyle(r.stC)
+        }
+    }
+
     // MARK: The list
 
     private func list(_ rows: [SXBookRow]) -> some View {
@@ -85,15 +93,16 @@ struct SXBookCard: View {
                     HStack(spacing: 10) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(r.t).sx(SXType(size: 17, line: 22, weight: .bold, style: .body, tracking: 0)).foregroundStyle(SX.ink)
-                            Text(r.st).sx(SXType(size: 13, line: 17, weight: .medium, style: .footnote, tracking: 0)).foregroundStyle(r.stC)
+                            status(r)
+                                .sx(SXType(size: 13, line: 17, weight: .medium, style: .footnote, tracking: 0))
                                 .lineLimit(1).truncationMode(.tail)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         SXMini(r: r, H: 34, pt: 4, pb: 4, grid: false).frame(width: 64, height: 34)
                         VStack(alignment: .trailing, spacing: 1) {
                             Text(String(format: "$%.2f", r.px)).sx(.question).foregroundStyle(SX.ink)
-                            Text(SXC.pc(r.mv)).sx(SXType(size: 13, line: 17, weight: .semibold, style: .footnote, tracking: 0))
-                                .foregroundStyle(r.mv < 0 ? SX.down : SX.up)
+                            Text(SX.signed(r.mv, SXC.pc(r.mv))).sx(SXType(size: 13, line: 17, weight: .semibold, style: .footnote, tracking: 0))
+                                .foregroundStyle(SF.word(13))
                         }
                         .lineLimit(1).fixedSize()
                         .frame(width: 66, alignment: .trailing)
@@ -119,14 +128,14 @@ struct SXBookCard: View {
                 Button { open(r) } label: {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            (Text(r.t).fontWeight(.bold).foregroundColor(SX.ink) + Text(" " + String(format: "$%.2f", r.px)).fontWeight(.medium).foregroundColor(SX.muted))
+                            (Text(r.t).fontWeight(SX.focus(.bold, 17)).foregroundColor(SX.ink) + Text(" " + String(format: "$%.2f", r.px)).fontWeight(.medium).foregroundColor(SX.muted))
                                 .lineLimit(1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            Text(SXC.pc(r.mv)).fontWeight(.bold).foregroundStyle(r.mv < 0 ? SX.down : SX.up)
+                            Text(SX.signed(r.mv, SXC.pc(r.mv))).fontWeight(SX.focus(.bold, 17)).foregroundStyle(SX.ink)
                         }
                         .sx(SXType(size: 17, line: 22, weight: .bold, style: .body, tracking: 0))
                         SXMini(r: r, H: 56, pt: 5, pb: 5, grid: true).frame(height: 56)
-                        Text(r.st).sx(SXType(size: 14, line: 18, weight: .semibold, style: .subheadline, tracking: 0)).foregroundStyle(r.stC)
+                        status(r).sx(SXType(size: 14, line: 18, weight: .semibold, style: .subheadline, tracking: 0))
                     }
                     .padding(EdgeInsets(top: 12, leading: 14, bottom: 10, trailing: 14))
                     .background(SX.tile, in: .rect(cornerRadius: 16, style: .continuous))
@@ -149,6 +158,8 @@ struct SXBookRow {
     /// A level (the nearest strike, or the Ceiling) or the 50-day as a line.
     let ref: Double?, refL: [Double]?
     let st: String, stC: Color
+    /// The price is through a sold strike: the status keeps a red dot (it was red; orange near ones stay plain).
+    let warn: Bool
     /// Where the week's days left start (1 off Week).
     let dl: Double
     let aria: String
@@ -159,7 +170,9 @@ struct SXBookRow {
         self.px = px
         let i0 = rg == "w" ? n.ix.w : rg == "m" ? n.ix.m : rg == "q" ? n.ix.q : 0
         mv = i0 >= 0 && i0 < k && cs[i0] > 0 ? px / cs[i0] - 1 : 0
-        var st = "", stC = SX.muted, ord = 0.0, ref: Double? = nil, refL: [Double]? = nil
+        // Focus: the status is grey words (it was red, orange or grey); only red keeps a dot.
+        var st = "", ord = 0.0, ref: Double? = nil, refL: [Double]? = nil, warn = false
+        let stC = SX.muted
         if rg == "w" {
             raw = n.week.pts.map { (x: $0[0], p: $0[1]) }
             dl = n.week.today >= 0 ? (raw.last?.x ?? 1) : 1
@@ -168,12 +181,11 @@ struct SXBookRow {
                 let nm = SXC.k(near.s.k) + (near.s.cp == "c" ? " calls" : " puts")
                 ref = near.s.k; ord = near.d
                 st = near.d < 0 ? (near.s.cp == "c" ? "Above your " : "Below your ") + nm : SXC.pc(near.d) + (near.s.cp == "c" ? " under " : " over ") + nm
-                stC = near.d < 0 ? SX.down : near.d < 0.015 ? SX.thin : SX.muted
+                warn = near.d < 0
             } else if let ce = n.ceil {
                 let d = (ce - px) / px
                 ref = ce; ord = d
                 st = d < 0 ? "Above the Ceiling" : SXC.pc(d) + " under the Ceiling"
-                stC = d < 0.015 ? SX.thin : SX.muted
             } else { st = "Nothing sold"; ord = 1 }
         } else {
             let part = Array(cs[min(max(0, i0), k)...])
@@ -190,7 +202,7 @@ struct SXBookRow {
                 ord = d
             }
         }
-        self.st = st; self.stC = stC; self.ord = ord; self.ref = ref; self.refL = refL
+        self.st = st; self.stC = stC; self.warn = warn; self.ord = ord; self.ref = ref; self.refL = refL
         aria = "\(n.co), \(st), " + (mv < 0 ? "down " : "up ") + SXC.pc(mv)
     }
 }

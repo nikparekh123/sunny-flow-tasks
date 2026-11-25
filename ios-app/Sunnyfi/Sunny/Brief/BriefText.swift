@@ -79,11 +79,11 @@ struct BriefSpan: Hashable {
         }
     }
 
-    var color: Color {
+    /// The run's colour on a sentence of `size` (focus, 25 Nov §2.1): a green, red or orange run is a word, so it goes
+    /// neutral, ink at 15 pt and up, grey under. Its sign is `BriefWords.signed`.
+    func color(_ size: CGFloat) -> Color {
         switch c {
-        case "green": S.green
-        case "red": S.red
-        case "orange": S.act
+        case "green", "red", "orange", "navy", "brown", "teal": SF.word(size)
         case "secondary", "muted": S.secondary
         default: S.ink
         }
@@ -103,14 +103,25 @@ enum BriefWords {
             let shown = privacy ? BriefMask.mask(s.t) : s.t
             if shown != s.t { masked = true }
             said += shown
-            var r = AttributedString(shown)
+            var r = AttributedString(shown == s.t ? signed(s, shown, after: said.dropLast(shown.count)) : shown)
             let t = s.b ? base.weighted(boldWeight) : base
             r.font = t.font(tabular: true)
-            r.foregroundColor = s.c == nil ? baseColor : s.color
+            r.foregroundColor = s.c == nil ? baseColor : s.color(base.size)
             a += r
         }
         let t = Text(a)
         return masked ? t.accessibilityLabel(BriefMask.spoken(said)) : t
+    }
+
+    /// §2.2: a green run that is a bare money figure or percentage gets +, a red one −, unless the words before it
+    /// already say which way (they end in a sign, an arrow or a word like "down": "Nvidia is down 5.1%" stays as it
+    /// is), as the web's runText does. "Sunny 2.9% · Nicolay 5.1%" reads "Sunny −2.9% · Nicolay −5.1%".
+    private static let said = try! Regex("([+\\-−▲▼↑↓↗↘±]|\\b(up|down|fell|rose|lost|gained|lower|higher|dropped|climbed|added|took|off|by|gave back))\\s*$").ignoresCase()
+    private static let bare = try! Regex("^\\$?\\d[\\d,]*(\\.\\d+)?[KMB]?%?$")
+    static func signed(_ s: BriefSpan, _ shown: String, after before: Substring) -> String {
+        guard s.c == "green" || s.c == "red", shown.wholeMatch(of: bare) != nil,
+              before.firstMatch(of: said) == nil else { return shown }
+        return SF.signed(s.c == "green" ? 1 : -1, shown)
     }
 
     /// A plain string with the mask applied when privacy is on.

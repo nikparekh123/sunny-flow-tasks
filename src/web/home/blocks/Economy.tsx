@@ -14,6 +14,9 @@ const SEG_ON = 'inset 0 0 0 .5px rgba(255,255,255,.22),inset 0 1px 0 rgba(255,25
 /** The readings that cross zero are drawn from a zero line (the design's 'zero' kind). */
 const ZERO = new Set(['curve_10y3m', 'stress_index', 'sahm', 'lending_standards']);
 
+/** A reading below zero says so with a − (handoff 2026-11-25-focus §2.2: no red on numbers): "−0.52". */
+const minus = (v: unknown) => (isNeg(String(v ?? '')) ? '−' : '') + unsign(String(v ?? ''));
+
 const flagOf = (e: J): Filter | null => (e.tagStyle === 'yellow' || /worth watching/i.test(e.tag ?? '') ? 'w' : /new since/i.test(e.tag ?? '') ? 'n' : null);
 
 export function readings(doc: J, card: J): J[] {
@@ -30,12 +33,12 @@ export default function Economy({ list }: { list: J[] }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div role="radiogroup" aria-label="Readings" style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 999, background: 'rgba(118,118,128,.24)' }}>
+        <div role="radiogroup" aria-label="Readings" style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 999, background: 'rgba(128,128,128,.24)' }}>
           {chips.map(([k, l]) => {
             const on = f === k;
             return (
               <button key={k} type="button" role="radio" aria-checked={on} className="bare swb-chip" onClick={() => setF(k)}
-                style={{ padding: '6px 14px', borderRadius: 999, fontSize: 14, lineHeight: '18px', fontWeight: on ? 600 : 500, color: on ? '#FFFFFF' : C.ink,
+                style={{ padding: '6px 14px', borderRadius: 999, fontSize: 14, lineHeight: '18px', fontWeight: 500, color: on ? '#FAFAFA' : C.ink,
                   background: on ? 'rgba(255,255,255,.20)' : 'transparent', boxShadow: on ? SEG_ON : 'none', whiteSpace: 'nowrap' }}>
                 {l}
               </button>
@@ -76,40 +79,39 @@ function Tile({ e }: { e: J }) {
       geo = vals.map((x) => [96 - hf(x), hf(x)]);
     }
   }
-  const neg = isNeg(e.value);
   return (
     <div className="soft-econ" style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, minHeight: 20 }}>
-        <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600 }}>{clean(e.name ?? e.label)}</span>
+        <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500 }}>{clean(e.name ?? e.label)}</span>
         {fl ? (
-          <span style={{ flex: 'none', borderRadius: 999, padding: '2px 9px', fontSize: 11, lineHeight: '16px', fontWeight: 600, whiteSpace: 'nowrap',
-            background: fl === 'w' ? 'rgba(255,159,10,.16)' : 'rgba(255,255,255,.10)', color: fl === 'w' ? C.orange : C.ink }}>{clean(e.tag)}</span>
+          <span style={{ flex: 'none', borderRadius: 999, padding: '2px 9px', fontSize: 11, lineHeight: '16px', fontWeight: 400, whiteSpace: 'nowrap',
+            background: fl === 'w' ? 'rgba(232,163,61,.16)' : 'rgba(255,255,255,.10)', color: fl === 'w' ? C.orange : C.ink }}>{clean(e.tag)}</span>
         ) : null}
       </div>
-      <span style={{ fontSize: 30, lineHeight: '34px', fontWeight: 600, letterSpacing: '-.02em', color: neg ? C.red : C.ink }}>{unsign(e.value)}</span>
+      <span style={{ fontSize: 30, lineHeight: '34px', fontWeight: 600, letterSpacing: '-.02em', color: C.ink }}>{minus(e.value)}</span>
       {pts.length ? (
         <>
           <div role="img" aria-label={clean(e.chartAria)} style={{ position: 'relative', height: 56, borderBottom: '1px solid rgba(255,255,255,.12)' }}>
             {geo.map(([top, h], i) => (
-              <span key={i} style={{ position: 'absolute', left: (i * 25 + 5) + '%', width: '15%', top: top.toFixed(1) + '%', height: h.toFixed(1) + '%', borderRadius: 3, background: i === L ? '#F5F5F7' : 'rgba(255,255,255,.16)' }} />
+              <span key={i} style={{ position: 'absolute', left: (i * 25 + 5) + '%', width: '15%', top: top.toFixed(1) + '%', height: h.toFixed(1) + '%', borderRadius: 3, background: i === L ? '#F2F2F2' : 'rgba(255,255,255,.16)' }} />
             ))}
             {lines.map((z) => (
               <span key={z.k} style={{ position: 'absolute', left: 0, right: 0, top: z.top.toFixed(1) + '%', borderTop: z.bd }}>
-                {z.l ? <span style={{ position: 'absolute', right: 0, top: z.lt, fontSize: 11, lineHeight: '14px', color: C.ink3, background: 'rgba(6,8,7,.9)', borderRadius: 4, padding: '0 4px', whiteSpace: 'nowrap' }}>{z.l}</span> : null}
+                {z.l ? <span style={{ position: 'absolute', right: 0, top: z.lt, fontSize: 11, lineHeight: '14px', color: C.ink3, background: 'rgba(23,23,23,.9)', borderRadius: 4, padding: '0 4px', whiteSpace: 'nowrap' }}>{z.l}</span> : null}
               </span>
             ))}
           </div>
           <div className="tnum" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))' }} aria-hidden="true">
             {pts.map((p, i) => (
               <span key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', paddingLeft: '5%' }}>
-                <span style={{ fontSize: 12, fontWeight: i === L ? 700 : 400, color: isNeg(p.value) ? C.red : C.ink }}>{unsign(p.value)}</span>
+                <span style={{ fontSize: 12, fontWeight: 400, color: isNeg(p.value) ? C.ink2 : C.ink }}>{minus(p.value)}</span>
                 <span style={{ fontSize: 11, color: C.ink2, whiteSpace: 'nowrap' }}>{clean(p.label)}</span>
               </span>
             ))}
           </div>
         </>
       ) : null}
-      {e.trend ? <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 600 }}>{clean(e.trend)}</span> : null}
+      {e.trend ? <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 400 }}>{clean(e.trend)}</span> : null}
       {e.note ? <span style={{ fontSize: 13, lineHeight: '19px', color: C.ink2, textWrap: 'pretty' } as React.CSSProperties}>{clean(e.note)}</span> : null}
     </div>
   );
@@ -124,7 +126,7 @@ export function OutToday({ card }: { card: J }) {
   return (
     <div style={{ ...BOX, display: 'flex', flexDirection: 'column', gap: 14, padding: TABLE_PAD }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
-        <span style={{ fontSize: 17, fontWeight: 600 }}>{clean(card.title) || 'Out today'}</span>
+        <span style={{ fontSize: 17, fontWeight: 500 }}>{clean(card.title) || 'Out today'}</span>
       </div>
       <div className="tnum" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 12 }}>
         {list.map((e) => <Tile key={e.id ?? e.name} e={e} />)}

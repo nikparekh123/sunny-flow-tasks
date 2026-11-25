@@ -13,7 +13,7 @@ import SwiftUI
 /// The book cards' own measures from the design's CSS.
 enum BB {
     /// The design's --fill: rgba(118,118,128,.12) light, .24 dark (bands, boxes inside cards, quiet buttons).
-    static let fill = S.dynA(0x767680, 0.12, 0x767680, 0.24)
+    static let fill = S.dynA(0x808080, 0.12, 0x808080, 0.24)
     static let body = SType(size: 15, weight: 500, line: 21, tracking: 0)
     static let big = SType(size: 40, weight: 800, line: 44, tracking: -0.03)
     static let bigSub = SType(size: 14, weight: 500, line: 19, tracking: 0)
@@ -96,20 +96,31 @@ private struct BLabelRow: Layout {
 }
 
 /// One bar per week or month on one baseline, the design's grid (SunnyBriefs Yield and Payback): `count` columns 10
-/// apart, bottom aligned in a grid `grid` tall; each column its value (11/13, 700 in the value's colour, the marked
-/// one 800 in the bar's tint) 4 over a bar of radius 6, the tallest `tallest` and the rest to scale (2 at least),
-/// green, or red for a week or month that lost, at 35% (the marked one full). The value row is reserved over the
-/// tallest bar: the grid grows if the value's line would not fit, so a value is never cut. Every value is one size.
+/// apart, bottom aligned in a grid `grid` tall; each column its value (11/13, 700, the marked one 800) 4 over a bar of
+/// radius 6, the tallest `tallest` and the rest to scale (2 at least), green, or red for a week or month that lost,
+/// at 35% (the marked one full). The value row is reserved over the tallest bar: the grid grows if the value's line
+/// would not fit, so a value is never cut. Every value is one size. Focus (25 Nov): a large green or red fill goes
+/// neutral, but bar charts keep their green and red (`keepTint`, Nik 25 Nov 2026: keep the bars in colour); a value is a word, so it is neutral, and one whose colour said up or
+/// down (the marked one, a red one) carries + or −.
 private struct BColumnBars: View {
     let bars: [JSONValue]
     var grid: CGFloat = 84
     var tallest: CGFloat = 56
     var privacy = false
     var title: String? = nil
+    /// Bar charts keep their green and red (Nik, 25 Nov 2026: "keep the bars in colour", and the Realized P&L bars
+    /// "keep them green and red"); `false` draws them neutral.
+    var keepTint = true
     @Environment(\.dynamicTypeSize) private var dts
     @Environment(\.sTypeScales) private var scales
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var width: CGFloat = 0
+
+    /// A bar's fill: its tint (green, red for a loss) where kept, else neutral grey; the marked bar full, the rest 35%.
+    private func barFill(_ v: Double, marked: Bool) -> Color {
+        if keepTint { let t = v < 0 ? S.red : S.green; return marked ? t : t.opacity(0.35) }
+        return marked ? SF.fill : S.pNeutral.opacity(0.35)
+    }
 
     /// The values' type at the phone's text size, made smaller all together (never one bar alone) only when the
     /// widest value would reach past its column and 3 into each gap: at the largest text sizes five values such as
@@ -120,7 +131,7 @@ private struct BColumnBars: View {
         guard width > 0, !bars.isEmpty else { return t }
         let n = CGFloat(bars.count), room = (width - 10 * (n - 1)) / n + 6
         let f = t.weighted(800).uiFont(tabular: true)
-        let widest = bars.map { (BriefWords.plain($0["value"].string, privacy: privacy) as NSString).size(withAttributes: [.font: f]).width }.max() ?? 0
+        let widest = bars.indices.map { (shown($0) as NSString).size(withAttributes: [.font: f]).width }.max() ?? 0
         guard widest > room, widest > 0 else { return t }
         let k = max(11 / t.size, room / widest)   // never under the design's own 11
         return SType(size: (t.size * k * 2).rounded(.down) / 2, weight: 700, line: (t.line * k).rounded(), tracking: 0)
@@ -128,6 +139,24 @@ private struct BColumnBars: View {
 
     /// The signed number when the server sends one (`n` money, `signed` a yield), else the label's own number.
     private var vals: [Double] { bars.map { $0["n"].double ?? $0["signed"].double ?? $0["value"].double ?? 0 } }
+
+    /// The column that is marked: the highlighted one, else the last.
+    private var marked: Int { bars.firstIndex { $0["highlight"].bool } ?? bars.count - 1 }
+
+    /// Bar i's value as shown: masked under privacy, and with the + or − its colour used to carry when it was
+    /// coloured (the marked one in its tint, or a red or green value).
+    private func shown(_ i: Int) -> String {
+        let b = bars[i], t = BriefWords.plain(b["value"].string, privacy: privacy)
+        let c = b["valueColor"].string
+        guard i == marked || c == "red" || c == "green", BK.isFigure(t) else { return t }
+        return SF.signed(vals[i], t)
+    }
+
+    /// Bar i's value colour: a value that was in a colour is now a neutral word; ink and secondary stay.
+    private func ink(_ i: Int, _ size: CGFloat) -> Color {
+        let c = bars[i]["valueColor"].string
+        return i == marked || c == "red" || c == "green" ? SF.word(size) : BK.word(c, size)
+    }
 
     /// One spoken line for the whole chart: each bar's label and value, a loss as "down", money "hidden" under privacy.
     private func summary(_ vals: [Double]) -> String {
@@ -156,16 +185,16 @@ private struct BColumnBars: View {
         return VStack(spacing: 6) {
             HStack(alignment: .top, spacing: 10) {
                 ForEach(Array(bars.enumerated()), id: \.offset) { i, b in
-                    let hl = i == marked, v = vals[i], tint = v < 0 ? S.red : S.green
+                    let hl = i == marked, v = vals[i]
                     let h = max(2, tallest * CGFloat(abs(v) / mx))
-                    let label = BriefWords.line(b["value"].string, privacy: privacy)
+                    let label = BriefWords.line(shown(i), privacy: privacy)
                         .sType(value.weighted(hl ? 800 : 700))
                         .environment(\.sTypeScales, false)
-                        .foregroundStyle(hl ? tint : BK.color(b["valueColor"].string))
+                        .foregroundStyle(ink(i, value.size))
                         .lineLimit(1).fixedSize()
                         .frame(height: line)
                     let bar = RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(b["empty"].bool ? S.chip : hl ? tint : tint.opacity(0.35))
+                        .fill(b["empty"].bool ? S.chip : barFill(v, marked: hl))
                         .frame(height: h)
                         .animation(S.moving(S.page, reduce), value: v)
                     VStack(spacing: 0) {
@@ -196,19 +225,19 @@ private struct BColumnBars: View {
         return VStack(spacing: 4) {
             HStack(alignment: .bottom, spacing: 10) {
                 ForEach(Array(bars.enumerated()), id: \.offset) { i, b in
-                    let hl = i == marked, tint = vals[i] < 0 ? S.red : S.green
+                    let hl = i == marked
                     VStack(spacing: 4) {
                         // The value's row is reserved at its line; the value is centred on the column at its own
                         // width and never sets the column's width (the columns share the card evenly).
                         Color.clear.frame(height: line).overlay {
-                            BriefWords.line(b["value"].string, privacy: privacy)
+                            BriefWords.line(shown(i), privacy: privacy)
                                 .sType(value.weighted(hl ? 800 : 700))
                                 .environment(\.sTypeScales, false)
-                                .foregroundStyle(hl ? tint : BK.color(b["valueColor"].string))
+                                .foregroundStyle(ink(i, value.size))
                                 .lineLimit(1).fixedSize()
                         }
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(b["empty"].bool ? S.chip : hl ? tint : tint.opacity(0.35))
+                            .fill(b["empty"].bool ? S.chip : barFill(vals[i], marked: hl))
                             .frame(height: max(2, tallest * CGFloat(abs(vals[i]) / mx)))
                             // Bar fills on the page curve (never the segmented spring), instant under Reduce Motion.
                             .animation(S.moving(S.page, reduce), value: vals[i])
@@ -226,9 +255,9 @@ private struct BColumnBars: View {
 }
 
 /// The month's weeks in Results (SunnyBriefs p31.res.isM): the legend (12/15 700, 10 pt swatches of radius 3, 14
-/// apart), then each week a pair of bars around one zero line: Sold, kept (green, 8% in, 38% wide) and Long (grey at
+/// apart), then each week a pair of bars around one zero line: Sold, kept (focus: #707070, was green; 8% in, 38% wide) and Long (grey at
 /// 45%, 54% in, 38% wide), radius 5, the longest 63 and the rest to scale, up for a gain and down for a loss, each
-/// value (11/13 700, unsigned, in its colour) 2 beyond its bar's end and centred over it. The zero line sits 70 down
+/// value (11/13 700; focus: neutral, + or − where its colour said which way) 2 beyond its bar's end and centred over it. The zero line sits 70 down
 /// a 150 box (lower, and the box taller, only when a bar and its value need it). A month shows at least four week
 /// columns, filled from the left; the weeks' dates on their own row 6 under the box, the current week 800 ink.
 private struct BPairedWeeks: View {
@@ -239,7 +268,14 @@ private struct BPairedWeeks: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var width: CGFloat = 0
 
-    struct Value { let n: Double; let text: String; let color: String? }
+    struct Value {
+        let n: Double; let text: String; let color: String?
+        /// The value as shown (focus §2.2): masked under privacy, a red or green figure with its sign.
+        func shown(_ privacy: Bool) -> String {
+            let t = BriefWords.plain(text, privacy: privacy)
+            return (color == "red" || color == "green") && BK.isFigure(t) ? SF.signed(n, t) : t
+        }
+    }
     struct Week { let label: String; let hl: Bool; let sold: Value; let long: Value }
 
     /// The signed dollars (`n`, sunny-home v132), else the label read back ("$15.8K", negative when red).
@@ -268,8 +304,8 @@ private struct BPairedWeeks: View {
         guard width > 0 else { return t }
         let col = (width - 10 * CGFloat(cols - 1)) / CGFloat(cols), room = col * 0.54 + 4
         let f = t.uiFont(tabular: true)
-        let widest = ws.flatMap { [$0.sold.text, $0.long.text] }
-            .map { (BriefWords.plain($0, privacy: privacy) as NSString).size(withAttributes: [.font: f]).width }.max() ?? 0
+        let widest = ws.flatMap { [$0.sold.shown(privacy), $0.long.shown(privacy)] }
+            .map { ($0 as NSString).size(withAttributes: [.font: f]).width }.max() ?? 0
         guard widest > room, widest > 0 else { return t }
         let k = max(11 / t.size, room / widest)
         return SType(size: (t.size * k * 2).rounded(.down) / 2, weight: 700, line: (t.line * k).rounded(), tracking: 0)
@@ -284,7 +320,7 @@ private struct BPairedWeeks: View {
         let vt = valueType(ws, cols: cols), lh = vt.line
         let zero = max(70, up + 2 + lh), box = max(150, zero + down + 2 + lh)
         let legend = chart["legend"].array.compactMap(\.string)
-        let grey = Color(.sRGB, red: 118 / 255, green: 118 / 255, blue: 128 / 255, opacity: 0.45)
+        let grey = Color(.sRGB, red: 128 / 255, green: 128 / 255, blue: 128 / 255, opacity: 0.45)   // neutral, no blue cast (focus)
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 14) {
                 ForEach(Array(legend.enumerated()), id: \.offset) { i, l in
@@ -309,8 +345,8 @@ private struct BPairedWeeks: View {
                                     .frame(width: col * 0.38, height: max(1, h))
                                     .offset(x: x0 + col * (j == 0 ? 0.08 : 0.54), y: pos ? zero - h : zero)
                                     .animation(S.moving(S.page, reduce), value: v.n)
-                                BriefWords.line(v.text, privacy: privacy).sType(vt).environment(\.sTypeScales, false)
-                                    .foregroundStyle(BK.color(v.color)).lineLimit(1).fixedSize()
+                                BriefWords.line(v.shown(privacy), privacy: privacy).sType(vt).environment(\.sTypeScales, false)
+                                    .foregroundStyle(BK.word(v.color, vt.size)).lineLimit(1).fixedSize()
                                     .frame(width: col * 0.54, height: lh)
                                     .offset(x: x0 + col * (j == 0 ? 0 : 0.46), y: pos ? zero - h - 2 - lh : zero + h + 2)
                             }
@@ -383,8 +419,9 @@ struct BWhatsMoving: View {
                             }
                         }
                         .frame(height: 16)
+                        // Focus: the move is a word (its arrow says which way); the dot on the track keeps the colour.
                         Text(r["move"].string ?? "").sType(SType(size: 14, weight: 800, line: 17, tracking: 0))
-                            .foregroundStyle(BK.color(r["moveColor"].string)).lineLimit(1).fixedSize()
+                            .foregroundStyle(BK.word(r["moveColor"].string, 14)).lineLimit(1).fixedSize()
                             .frame(minWidth: 56, alignment: .trailing)   // one line at any text size (Pass 5)
                     }
                     // One stop per name (the logo is hidden, so the name is said here): "Nike, down 1.7%, priced move 2.2%".
@@ -454,7 +491,7 @@ struct BToDecide: View {
                                 Path { $0.move(to: CGPoint(x: 0, y: 1)); $0.addLine(to: CGPoint(x: 14, y: 1)) }
                                     .stroke(keep ? S.secondary : S.ink, style: StrokeStyle(lineWidth: keep ? 1.5 : 2.25, dash: keep ? [3, 2.5] : []))
                                     .frame(width: 14, height: 2)
-                                Text(l["t"].string ?? "").sType(BB.legend, tabular: false).foregroundStyle(BK.color(l["c"].string))
+                                Text(l["t"].string ?? "").sType(BB.legend, tabular: false).foregroundStyle(BK.word(l["c"].string, BB.legend.size))
                             }
                         }
                     }
@@ -471,14 +508,15 @@ struct BToDecide: View {
 }
 
 /// The what-if's picture (SunnyBriefs `pay(t, roll)`): P&L by the what-if's date across the name's price, keeping the
-/// sold calls (dashed) or rolling them up (solid), green above zero and red below, the strikes (grey dashes, labels
-/// under), the walls (coloured dashes, labels on two rows over the chart) and Today. Drawn in the design's 252 × 124
+/// sold calls (dashed) or rolling them up (solid), the area above and below zero (focus: neutral grey, was green and
+/// red), the strikes (grey dashes, labels under), the walls (dashes: calls and puts walls grey, the accelerator orange;
+/// grey labels on two rows over the chart) and Today. Drawn in the design's 252 × 124
 /// box and scaled to the width, lines and the Today word with it; the HTML labels keep their 12 pt.
 struct BWhatIfChart: View {
     let labels: [JSONValue]
     @Environment(BriefState.self) private var brief
 
-    struct Mark { let x: CGFloat; let y: CGFloat; let l: String; let c: Color }
+    struct Mark { let x: CGFloat; let y: CGFloat; let l: String; let c: Color }   // c: the label's (word) colour
     struct Model {
         var act: [CGPoint] = [], keep: [CGPoint] = [], fill: [CGPoint] = []
         var zy: CGFloat = 69, today = CGPoint(x: 126, y: 69)
@@ -530,11 +568,12 @@ struct BWhatIfChart: View {
         m.strikeLabels = ks.prefix(3).map { Mark(x: X($0), y: 122, l: fk($0), c: S.secondary) }
         // Walls in view, by strike, at most 4; close walls of one kind share a label; labels take the first of two
         // rows (9 and 21) with room, clear of Today and of each other, or are left off.
-        let wv = labels.filter { $0["kind"].string == "wall" }.compactMap { l -> (k: Double, ty: String, c: Color)? in
+        // A wall's dash is a thin line (BK.line: calls and puts walls grey, the accelerator orange); its label a word.
+        let wv = labels.filter { $0["kind"].string == "wall" }.compactMap { l -> (k: Double, ty: String, c: Color, line: Color)? in
             guard let s = l["t"].string, let k = num(s) else { return nil }
-            return (k, String(s.split(separator: " ").first ?? ""), BK.color(l["c"].string))
+            return (k, String(s.split(separator: " ").first ?? ""), BK.word(l["c"].string, 12), BK.line(l["c"].string))
         }.filter { $0.k > lo && $0.k < hi }.sorted { $0.k < $1.k }.prefix(4)
-        m.walls = wv.map { (X($0.k), $0.c) }
+        m.walls = wv.map { (X($0.k), $0.line) }
         var groups: [(ty: String, ks: [Double], xs: [CGFloat], c: Color)] = []
         for w in wv {
             if let g = groups.last, g.ty == w.ty, X(w.k) - g.xs.last! < 40 { groups[groups.count - 1].ks.append(w.k); groups[groups.count - 1].xs.append(X(w.k)) }
@@ -574,8 +613,9 @@ struct BWhatIfChart: View {
                     let line = { (a: [CGPoint]) -> Path in var p = Path(); if let f = a.first { p.move(to: f); a.dropFirst().forEach { p.addLine(to: $0) } }; return p }
                     let v = { (x: CGFloat) -> Path in Path { $0.move(to: CGPoint(x: x, y: 26)); $0.addLine(to: CGPoint(x: x, y: 112)) } }
                     ctx.stroke(Path { $0.move(to: CGPoint(x: 0, y: m.zy)); $0.addLine(to: CGPoint(x: 252, y: m.zy)) }, with: .color(S.secondary.opacity(0.35)), lineWidth: 1)
-                    ctx.fill(poly { max($0, m.zy) }, with: .color(S.red.opacity(0.13)))
-                    ctx.fill(poly { min($0, m.zy) }, with: .color(S.green.opacity(0.15)))
+                    // The payoff area under the curve is a large fill with no text: neutral grey at its old opacity (§2.4).
+                    ctx.fill(poly { max($0, m.zy) }, with: .color(S.pNeutral.opacity(0.13)))
+                    ctx.fill(poly { min($0, m.zy) }, with: .color(S.pNeutral.opacity(0.15)))
                     for x in m.strikes { ctx.stroke(v(x), with: .color(S.secondary.opacity(0.45)), style: StrokeStyle(lineWidth: 1, dash: [2, 3])) }
                     for w in m.walls { ctx.stroke(v(w.x), with: .color(w.c), style: StrokeStyle(lineWidth: 1.25, dash: [4, 3])) }
                     if !m.keep.isEmpty { ctx.stroke(line(m.keep), with: .color(S.secondary), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])) }
@@ -635,10 +675,7 @@ struct BDatedRows: View {
             }
         }
         .briefCard()
-        .background(alignment: .bottom) {
-            // The calendar card's soft yellow foot (as the design draws it).
-            RoundedRectangle(cornerRadius: 20, style: .continuous).fill(LinearGradient(colors: [.clear, S.yellow.opacity(0.18)], startPoint: .top, endPoint: .bottom))
-        }
+        // Focus (25 Nov): the calendar card's soft yellow foot is gone; the card is flat paper like the rest.
         .padding(.horizontal, S.margin)
     }
 }
@@ -773,7 +810,8 @@ struct BResults: View {
                 let paired = s["charts"].array.first { !$0["groups"].array.isEmpty }
                 if let b = s["big"].string {
                     VStack(alignment: .leading, spacing: 2) {
-                        BriefWords.line(b, privacy: privacy).sType(BB.big).foregroundStyle(BK.color(s["bigColor"].string))
+                        BriefWords.line(BK.signed(BriefWords.plain(b, privacy: privacy), s["bigColor"].string), privacy: privacy)
+                            .sType(BB.big).foregroundStyle(BK.word(s["bigColor"].string, BB.big.size))
                         BriefWords.line(s["bigSub"].string, privacy: privacy).sType(BB.bigSub, tabular: false).foregroundStyle(S.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         if let t = paired?["title"].string {
@@ -797,11 +835,11 @@ struct BResults: View {
                                 BBody(v: dv["line"], privacy: privacy, type: BB.note)
                             }
                             Spacer(minLength: 0)
-                            // "None this week" is 15/20 regular in ink (Nov 8); an amount stays 17/22 heavy in its colour.
+                            // "None this week" is 15/20 regular in ink (Nov 8); an amount stays 17/22 heavy, neutral with its sign (focus).
                             let none = (dv["right"].string ?? "").hasPrefix("None")
-                            BriefWords.line(dv["right"].string, privacy: privacy)
+                            BriefWords.line(BK.signed(BriefWords.plain(dv["right"].string, privacy: privacy), dv["rightColor"].string), privacy: privacy)
                                 .sType(none ? SType(size: 15, weight: 400, line: 20, tracking: 0) : SType(size: 17, weight: 800, line: 22, tracking: 0))
-                                .foregroundStyle(none ? S.ink : BK.color(dv["rightColor"].string)).lineLimit(1).fixedSize()
+                                .foregroundStyle(none ? S.ink : BK.word(dv["rightColor"].string, 17)).lineLimit(1).fixedSize()
                         }
                         .padding(.top, 12)
                     }
@@ -902,8 +940,9 @@ struct BClosedRolled: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 0) {
-                BriefWords.line(r["value"].string, privacy: privacy).sType(SType(size: 17, weight: 800, line: 21, tracking: 0))
-                    .foregroundStyle(BK.color(r["valueColor"].string)).lineLimit(1)
+                BriefWords.line(BK.signed(BriefWords.plain(r["value"].string, privacy: privacy), r["valueColor"].string), privacy: privacy)
+                    .sType(SType(size: 17, weight: 800, line: 21, tracking: 0))
+                    .foregroundStyle(BK.word(r["valueColor"].string, 17)).lineLimit(1)
                 Text(r["valueLabel"].string ?? "").sType(SType(size: 11, weight: 500, line: 14, tracking: 0), tabular: false).foregroundStyle(S.secondary)
             }
             .fixedSize()
@@ -927,7 +966,8 @@ struct BAfterHours: View {
                         .accessibilityLabel(BSay.words(card["source"].string))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Text(card["move"].string ?? "").sType(SType(size: 20, weight: 800, line: 24, tracking: 0)).foregroundStyle(BK.color(card["moveColor"].string))
+                Text(BK.signed(card["move"].string, card["moveColor"].string) ?? "").sType(SType(size: 20, weight: 800, line: 24, tracking: 0))
+                    .foregroundStyle(BK.word(card["moveColor"].string, 20))
                     .lineLimit(1).fixedSize()
                     .accessibilityLabel("after hours " + BSay.move(card["move"].string, color: card["moveColor"].string))
             }
@@ -1042,6 +1082,7 @@ struct BThetaMonth: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             BHead(card: card)
+            // Bars keep their green and red (Nik, 25 Nov 2026: keep the bars in colour).
             HStack(spacing: 14) {
                 ForEach(Array(card["legend"].array.compactMap(\.string).enumerated()), id: \.offset) { i, l in
                     HStack(spacing: 6) {
@@ -1105,7 +1146,7 @@ struct BPayback: View {
         VStack(alignment: .leading, spacing: 16) {
             BHead(card: card)
             VStack(alignment: .leading, spacing: 2) {
-                Text(card["big"].string ?? "").sType(BB.big).foregroundStyle(BK.color(card["bigColor"].string))
+                Text(BK.signed(card["big"].string, card["bigColor"].string) ?? "").sType(BB.big).foregroundStyle(BK.word(card["bigColor"].string, BB.big.size))
                 BriefWords.line(card["bigSub"].string, privacy: privacy).sType(BB.bigSub, tabular: false).foregroundStyle(S.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1128,7 +1169,7 @@ struct BPayback: View {
                         // The figure and its words in one run: "$27.6K under what you paid".
                         BriefWords.line([r["value"].string, r["valueSub"].string].compactMap { $0 }.joined(separator: " "), privacy: privacy)
                             .sType(SType(size: 14, weight: 800, line: 19, tracking: 0))
-                            .foregroundStyle(BK.color(r["valueColor"].string)).multilineTextAlignment(.trailing)
+                            .foregroundStyle(BK.word(r["valueColor"].string, 14)).multilineTextAlignment(.trailing)
                             .layoutPriority(1)   // the grid's auto column: the figure keeps its width, the label wraps
                     }
                     .padding(.vertical, 9)

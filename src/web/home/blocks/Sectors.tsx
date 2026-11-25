@@ -1,9 +1,9 @@
 // Sectors (Current Web, `b.isSecbar` and `b.isMaps`): the All 11 sectors table, in a box since 2026-11-18 (Sector ·
 // Weight · Move on a bar centred on zero · Leads · Trails · Your names, a quiet - when none), then a heat map per
 // sector, three a row (two when narrow): a squarified treemap of its biggest names by weight, tiles coloured by move
-// with the text in the tile's own
-// colour, labels only when they fit, the book's names ringed, a tooltip and aria-label on every tile, and a tile
-// of a book name opening its ticker page. Data: the brief doc's sectors card (`maps`, one per sector,
+// with the text in the tile's own colour (the tiles keep their red and green: Nik, 25 Nov 2026; every other move on
+// the page is a neutral word with its arrow, handoff 2026-11-25-focus §2.1), labels only when they fit, the book's
+// names ringed, a tooltip and aria-label on every tile, and a tile of a book name opening its ticker page. Data: the brief doc's sectors card (`maps`, one per sector,
 // each with its tiles: ticker, name, move, weight). Leads and Trails are the best and worst movers among those tiles.
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -57,7 +57,7 @@ export function SectorTable({ secs, sub, onRow }: { secs: Sec[]; sub: string; on
   const rows = secs.slice().sort((a, b) => b.mv - a.mv);
   const mx = Math.max(...rows.map((x) => Math.abs(x.mv)), 0) || 1;
   const mover = (q: Item | undefined) => (q ? (
-    <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, fontSize: 13, lineHeight: '17px', color: q.p >= 0 ? C.green : C.red }}>
+    <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, fontSize: 13, lineHeight: '17px', color: C.ink2 }}>
       <span title={q.nm} style={ONE}>{q.nm}</span>
       <span style={{ whiteSpace: 'nowrap' }}>{pmove(q.p)}</span>
     </span>
@@ -65,7 +65,7 @@ export function SectorTable({ secs, sub, onRow }: { secs: Sec[]; sub: string; on
   return (
     <div style={{ ...BOX, display: 'flex', flexDirection: 'column', padding: TABLE_PAD }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, paddingBottom: 10 }}>
-        <span style={{ fontSize: 17, fontWeight: 600, whiteSpace: 'nowrap' }}>All {secs.length} sectors</span>
+        <span style={{ fontSize: 17, fontWeight: 500, whiteSpace: 'nowrap' }}>All {secs.length} sectors</span>
         <span style={{ fontSize: 13, color: C.ink2, textAlign: 'right' }}>{sub}</span>
       </div>
       <div className="tnum kicker" style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, padding: '6px 0 8px', whiteSpace: 'nowrap' }}>
@@ -85,11 +85,11 @@ export function SectorTable({ secs, sub, onRow }: { secs: Sec[]; sub: string; on
                 <span style={{ position: 'absolute', left: '50%', top: -4, bottom: -4, borderLeft: '1px solid rgba(255,255,255,.3)' }} />
                 <span style={{ position: 'absolute', top: 0, height: '100%', left: (up ? 50 : 50 - wd).toFixed(1) + '%', width: wd.toFixed(1) + '%', background: up ? C.green : C.red, borderRadius: 3 }} />
               </span>
-              <span style={{ fontSize: 14, fontWeight: 600, color: up ? C.green : C.red, whiteSpace: 'nowrap' }}>{pmove(x.mv)}</span>
+              <span style={{ fontSize: 14, fontWeight: 500, color: C.ink2, whiteSpace: 'nowrap' }}>{pmove(x.mv)}</span>
             </span>
             {mover(x.ld)}
             {mover(x.tr)}
-            <span style={{ fontSize: 13, fontWeight: 600, color: x.yours.length ? C.ink : C.ink2, minWidth: 0 }}>{x.yours.length ? x.yours.join(' · ') : '-'}</span>
+            <span style={{ fontSize: 13, fontWeight: 400, color: x.yours.length ? C.ink : C.ink2, minWidth: 0 }}>{x.yours.length ? x.yours.join(' · ') : '-'}</span>
           </>
         );
         const style = { boxSizing: 'border-box' as const, width: '100%', display: 'grid', gridTemplateColumns: cols, gap: 12, alignItems: 'center', padding: '11px 0', borderTop: HAIR };
@@ -147,12 +147,12 @@ export function SectorMaps({ secs, held, linked }: { secs: Sec[]; held: Set<stri
         return (
           <div key={x.id} data-sec={'map-' + x.id} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, padding: `16px ${c === cols - 1 ? 0 : 20}px 22px ${c ? 20 : 0}px`, borderTop: HAIR, borderLeft: c ? HAIR : 'none' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ fontSize: 15, fontWeight: 600 }}>{x.t}</span>
-              <span style={{ fontSize: 15, fontWeight: 600, color: x.mv >= 0 ? C.green : C.red, whiteSpace: 'nowrap' }}>{pmove(x.mv)}</span>
+              <span style={{ fontSize: 15, fontWeight: 500 }}>{x.t}</span>
+              <span style={{ fontSize: 15, fontWeight: 500, color: C.ink, whiteSpace: 'nowrap' }}>{pmove(x.mv)}</span>
             </div>
             <span style={{ fontSize: 12, color: C.ink2 }}>
               {x.w} of the S&amp;P 500
-              {x.yours.length ? <> · <span style={{ color: C.ink, fontWeight: 600 }}>yours: {x.yours.join(', ')}</span></> : null}
+              {x.yours.length ? <> · <span style={{ color: C.ink, fontWeight: 400 }}>yours: {x.yours.join(', ')}</span></> : null}
             </span>
             <div style={{ position: 'relative', height: MH, marginTop: 10 }}>
               {x.tiles.map((q) => {
@@ -167,8 +167,8 @@ export function SectorMaps({ secs, held, linked }: { secs: Sec[]; held: Set<stri
                     onPointerEnter={ok ? () => pre(q.t) : undefined} onFocus={ok ? () => pre(q.t) : undefined}
                     style={{ position: 'absolute', left: (q.x / MW0 * 100).toFixed(2) + '%', top: (q.y / MH * 100).toFixed(2) + '%', width: (q.w / MW0 * 100).toFixed(2) + '%', height: (q.h / MH * 100).toFixed(2) + '%', padding: 1.5, cursor: ok ? 'pointer' : 'default' }}>
                     <span style={{ boxSizing: 'border-box', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1,
-                      border: held.has(q.t) ? '1.5px solid rgba(245,245,247,.6)' : '1px solid rgba(0,0,0,.28)', borderRadius: 5, background: bg, color: fg, overflow: 'hidden' }}>
-                      {showT ? <span style={{ maxWidth: '100%', overflow: 'hidden', whiteSpace: 'nowrap', fontSize: fs, fontWeight: 600, lineHeight: 1.1 }}>{q.t}</span> : null}
+                      border: held.has(q.t) ? '1.5px solid rgba(242,242,242,.6)' : '1px solid rgba(0,0,0,.28)', borderRadius: 5, background: bg, color: fg, overflow: 'hidden' }}>
+                      {showT ? <span style={{ maxWidth: '100%', overflow: 'hidden', whiteSpace: 'nowrap', fontSize: fs, fontWeight: fs >= 14 ? 500 : 400, lineHeight: 1.1 }}>{q.t}</span> : null}
                       {showP ? <span style={{ fontSize: 11, lineHeight: 1.15 }}>{p}</span> : null}
                     </span>
                   </button>

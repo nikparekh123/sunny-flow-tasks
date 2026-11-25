@@ -4,7 +4,8 @@
 //   the week ("This week · ends Fri Nov 20")
 //   one sentence on what needs you; a tap opens the strikes to roll, each with why and a Roll tag
 //   Coming in · from what you sold: Calls sold, Puts sold, the time value left with "N% captured of $Y" under it
-//   Going out · a week of your hedges: Hedge calls, Hedge puts, in red
+//   Going out · a week of your hedges: Hedge calls, Hedge puts, each with a − (the focus look, handoff
+//     2026-11-25-focus §2: no colour on the words; the bars, dots and pills keep theirs)
 //   Net by Friday = the time value left less that week of hedges
 //   In the money on its own line (the time value leaves it out)
 // Every line opens to its names. No bars. The design's small line per name is left out: there is no series per leg
@@ -13,16 +14,16 @@
 // under 5 cents of time value) and every option bought (`hedges`, a week of decay each, total `hedgeWeek`).
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useHome, type J } from '../lib/data';
-import { C, money, pct } from '../lib/format';
+import { C, money, pct, sgn, wordOf } from '../lib/format';
 import { useWeb } from '../lib/state';
 import { readyToRoll, strike, tvHedges, tvLeftWeek, tvLegs, type TvHedge, type TvLeg } from '../home/rail/model';
 
-const MU = C.ink2, LN = '1px solid rgba(255,255,255,.08)', OR = '#F2A93B';
+const MU = C.ink2, LN = '1px solid rgba(255,255,255,.08)', OR = '#E8A33D';
 /** The pills (dark): grey for time value still to come, red for what goes out or sits in the money. */
-const GREY = ['rgba(118,118,128,.32)', C.ink], RED = [C.red, '#000000'];
+const GREY = ['rgba(128,128,128,.32)', C.ink], RED = [C.red, '#171717'];
 const sum = <T,>(xs: T[], f: (x: T) => number) => xs.reduce((a, x) => a + f(x), 0);
 /** Time value captured, signed (Nik, 18 Nov 2026: "show negatives"): "52% captured", or "2.1% lost" when the legs
-    carry more time value than they were sold for (LULU's 110 calls after a 7% day). Red when lost. */
+    carry more time value than they were sold for (LULU's 110 calls after a 7% day). */
 const capOf = (left: number, col: number): { t: string; neg: boolean } => {
   if (!(col > 0)) return { t: '0% captured', neg: false };
   const x = (1 - left / col) * 100, a = Math.abs(x);
@@ -134,10 +135,10 @@ export default function TimeValueSheet() {
     const hedgeWeek = p?.brief?.timeValue?.hedgeWeek != null ? Number(p.brief.timeValue.hedgeWeek) : sum(hedges, (h) => h.week);
     const ready = readyToRoll(legs), ok = legs.filter((l) => !l.ready);
     const inn = [...new Set(all.map((l) => l.ex))].sort().map((ex) => ({ ex, words: endsWords(ex), lines: [
-      soldLine(`c|${ex}`, 'Calls sold', '#327133', all.filter((l) => l.ex === ex && !l.put)),
-      soldLine(`p|${ex}`, 'Puts sold', '#2E5ECA', all.filter((l) => l.ex === ex && l.put)),
+      soldLine(`c|${ex}`, 'Calls sold', '#1C7840', all.filter((l) => l.ex === ex && !l.put)),
+      soldLine(`p|${ex}`, 'Puts sold', '#3E6AE1', all.filter((l) => l.ex === ex && l.put)),
     ].filter((x): x is Line => !!x) })).filter((g) => g.lines.length);
-    const out = [hedgeLine('oc', 'Hedge calls', C.green, hedges.filter((h) => !h.put)), hedgeLine('ip', 'Hedge puts', '#73B6F9', hedges.filter((h) => h.put))]
+    const out = [hedgeLine('oc', 'Hedge calls', C.green, hedges.filter((h) => !h.put)), hedgeLine('ip', 'Hedge puts', '#3E6AE1', hedges.filter((h) => h.put))]
       .filter((x): x is Line => !!x);
     const itmLegs = all.filter((l) => l.intr > 0);
     const itmV = sum(itmLegs, (l) => l.intr * l.q * 100);
@@ -169,7 +170,7 @@ export default function TimeValueSheet() {
             {p && <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 500, color: MU }}>{r.when}</span>}
           </span>
           <button ref={xRef} type="button" onClick={close} aria-label="Close" className="xbtn"
-            style={{ flex: 'none', width: 32, height: 32, fontSize: 13, color: '#AEAEB2' }}>✕</button>
+            style={{ flex: 'none', width: 32, height: 32, fontSize: 13, color: '#AAAAAA' }}>✕</button>
         </div>
 
         {!p ? null : !r.any ? (
@@ -185,7 +186,7 @@ export default function TimeValueSheet() {
               <button type="button" className="bare tv-tap" onClick={r.ready.length ? () => setRollOpen((o) => !o) : undefined}
                 aria-expanded={r.ready.length ? rollOpen : undefined} aria-label={mask(snText)}
                 style={{ cursor: r.ready.length ? 'pointer' : 'default', display: 'block', fontSize: 19, lineHeight: '26px', fontWeight: 400, textWrap: 'pretty' } as CSSProperties}>
-                <span style={{ fontWeight: 600 }}>{sn.lead}</span>
+                <span style={{ fontWeight: 500 }}>{sn.lead}</span>
                 {r.ready.length > 0 && <Chev open={rollOpen} size={13} style={{ display: 'inline-block', verticalAlign: -1, margin: '0 2px 0 5px' }} />}
                 <span>{sn.r1}</span>{sn.m != null && <span>{mask(money(sn.m))}</span>}<span>{sn.r2}</span>
               </button>
@@ -201,15 +202,15 @@ export default function TimeValueSheet() {
                         <Logo t={l.t} size={32} />
                         <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                           <span style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '2px 6px' }}>
-                            <span style={{ fontSize: 15, lineHeight: '19px', fontWeight: 600 }}>{l.name}</span>
+                            <span style={{ fontSize: 15, lineHeight: '19px', fontWeight: 500 }}>{l.name}</span>
                             <span style={{ fontSize: 13, lineHeight: '17px', fontWeight: 500, color: MU }}>{strike(l.K)} {l.put ? 'puts' : 'calls'} sold ×{l.q}</span>
                           </span>
-                          <span style={{ fontSize: 13, lineHeight: '17px', fontWeight: 600, color: itm ? C.red : OR }}>
+                          <span style={{ fontSize: 13, lineHeight: '17px', fontWeight: 400, color: MU }}>
                             {why}{!itm && <>{mask(money(l.tvLeft))} left</>}
                           </span>
                         </span>
                         <span style={{ flex: 'none', height: 24, padding: '0 10px', borderRadius: 12, display: 'inline-flex', alignItems: 'center',
-                          fontSize: 12, fontWeight: 600, color: OR, background: 'rgba(242,169,59,.18)' }}>Roll</span>
+                          fontSize: 12, fontWeight: 400, color: OR, background: 'rgba(232,163,61,.18)' }}>Roll</span>
                       </div>
                     );
                   })}
@@ -221,12 +222,12 @@ export default function TimeValueSheet() {
               <Kicker>Coming in · from what you sold</Kicker>
               {r.inn.map((g) => (
                 <div key={g.ex} style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ padding: '8px 0 0', fontSize: 12, lineHeight: '16px', fontWeight: 600, color: MU }}>{g.words}</span>
+                  <span style={{ padding: '8px 0 0', fontSize: 12, lineHeight: '16px', fontWeight: 400, color: MU }}>{g.words}</span>
                   {g.lines.map((l) => {
                     const c = capOf(l.v, l.col ?? 0);
                     return (
                       <LineRow key={l.k} l={l} tall open={open === l.k} toggle={() => setOpen(open === l.k ? null : l.k)} items={stable(l.k, l.items)}
-                        sub={<><span style={{ color: c.neg ? C.red : undefined }}>{c.t}</span> of {mask(money(l.col))}</>} unit="left" />
+                        sub={<><span>{c.t}</span> of {mask(money(l.col))}</>} unit="left" />
                     );
                   })}
                 </div>
@@ -238,8 +239,8 @@ export default function TimeValueSheet() {
                 ))}
               </>}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, marginTop: 10, padding: '14px 22px 0 0', borderTop: `1.5px solid ${C.ink}` }}>
-                <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 700 }}>Net by Friday</span>
-                <span style={{ fontSize: 24, lineHeight: '28px', fontWeight: 800, letterSpacing: '-.01em', color: Math.round(r.net) < 0 ? C.red : C.ink }}>{mask(money(r.net))}</span>
+                <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 500 }}>Net by Friday</span>
+                <span style={{ fontSize: 24, lineHeight: '28px', fontWeight: 800, letterSpacing: '-.01em', color: C.ink }}>{Math.round(r.net) < 0 ? sgn(-1, mask(money(r.net))) : mask(money(r.net))}</span>
               </div>
             </div>
 
@@ -258,7 +259,7 @@ export default function TimeValueSheet() {
 const TV_CSS = `@keyframes tvFade{from{opacity:0}to{opacity:1}}.sw .tv-in{animation:tvFade .25s ease both}.sw .tv-tap:active{opacity:.6}`;
 
 function Kicker({ children, top }: { children: ReactNode; top?: boolean }) {
-  return <span style={{ padding: top ? '14px 0 2px' : '0 0 2px', fontSize: 13, lineHeight: '18px', fontWeight: 600, color: MU }}>{children}</span>;
+  return <span style={{ padding: top ? '14px 0 2px' : '0 0 2px', fontSize: 13, lineHeight: '18px', fontWeight: 400, color: MU }}>{children}</span>;
 }
 
 function Chev({ open, size = 12, style }: { open: boolean; size?: number; style?: CSSProperties }) {
@@ -285,7 +286,7 @@ function LineRow({ l, open, toggle, items, sub, unit, tall, dot }:
           {sub && <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 500, color: MU }}>{sub}</span>}
         </span>
         <span style={{ whiteSpace: 'nowrap' }}>
-          <span style={{ fontSize: dot ? 15 : 16, lineHeight: '20px', fontWeight: 600, color: l.vc }}>{mask(money(l.v))}</span>
+          <span style={{ fontSize: dot ? 15 : 16, lineHeight: '20px', fontWeight: 500, color: wordOf(l.vc, 15) }}>{l.vc === C.red && !dot ? sgn(-1, mask(money(l.v))) : mask(money(l.v))}</span>
           {unit && <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 500, color: MU }}> {unit}</span>}
         </span>
         <Chev open={open} />
@@ -296,11 +297,11 @@ function LineRow({ l, open, toggle, items, sub, unit, tall, dot }:
             <div key={i.k} role="listitem" style={{ display: 'grid', gridTemplateColumns: '24px minmax(0,1fr) auto', gap: 10, alignItems: 'center', minHeight: 40 }}>
               <Logo t={i.t} size={24} />
               <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 14, lineHeight: '18px', fontWeight: 600 }}>{i.nm}</span>
+                <span style={{ fontSize: 14, lineHeight: '18px', fontWeight: 500 }}>{i.nm}</span>
                 <span style={{ fontSize: 12, lineHeight: '15px', fontWeight: 500, color: MU, textWrap: 'pretty' } as CSSProperties}>{i.sub}</span>
               </span>
               <span style={{ minWidth: 68, height: 28, padding: '0 9px', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: i.pill[0], color: i.pill[1], fontSize: 13, lineHeight: '16px', fontWeight: 600, whiteSpace: 'nowrap' }}>{mask(money(i.v))}</span>
+                background: i.pill[0], color: i.pill[1], fontSize: 13, lineHeight: '16px', fontWeight: 400, whiteSpace: 'nowrap' }}>{mask(money(i.v))}</span>
             </div>
           ))}
         </div>
@@ -314,10 +315,10 @@ function Logo({ t, size }: { t: string; size: number }) {
   const [bad, setBad] = useState(false);
   useEffect(() => setBad(false), [t]);
   return (
-    <span aria-hidden="true" style={{ width: size, height: size, borderRadius: '50%', background: '#FFFFFF', boxShadow: '0 0 0 .5px rgba(0,0,0,.12)',
+    <span aria-hidden="true" style={{ width: size, height: size, borderRadius: '50%', background: '#FAFAFA', boxShadow: '0 0 0 .5px rgba(0,0,0,.12)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
       {bad
-        ? <span style={{ fontSize: size > 28 ? 9 : 7, lineHeight: '10px', fontWeight: 700, color: '#1D1D1F' }}>{t.slice(0, 4)}</span>
+        ? <span style={{ fontSize: size > 28 ? 9 : 7, lineHeight: '10px', fontWeight: 400, color: '#212121' }}>{t.slice(0, 4)}</span>
         : <img src={`/logos/${encodeURIComponent(t)}.png`} alt="" draggable={false} onError={() => setBad(true)}
             style={{ width: '74%', height: '74%', objectFit: 'contain', pointerEvents: 'none' }} />}
     </span>

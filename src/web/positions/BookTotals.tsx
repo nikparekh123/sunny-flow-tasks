@@ -3,9 +3,10 @@
 // order: Shares, Calls bought, Calls sold, Puts bought, Puts sold, in a grid that fills the width on a wide screen and
 // is one column on a phone. Each block (Nik, 25 Nov 2026: "Now (change %), on tap change dollars, TV", one line):
 //   The part's name, muted.
-//   What it is worth now big in ink (sold: what it costs to buy back), then the all-time change in brackets, green
-//   gained or kept, red lost, never a minus sign: the % (on cost; sold: the share of what was collected) or, after a
-//   click on any block, the dollars. Options end the line with a clock and their time value.
+//   What it is worth now big in ink (sold: what it costs to buy back), then the all-time change in brackets, in ink
+//   with + gained or kept and − lost (focus 2.1 and 2.2, 25 Nov 2026; no sign while the privacy mask is on): the % (on
+//   cost; sold: the share of what was collected) or, after a click on any block, the dollars. Options end the line
+//   with a clock and their time value.
 // The picked name's own book follows in the same blocks, only the parts it holds.
 // Every figure is sunny-home's (payload.brief_inputs.parts, totals.ts), the same numbers the phone reads.
 
@@ -19,7 +20,7 @@ const money0 = (v: number) => {
   return a >= 999_500 ? `$${Math.round(a / 1e6)}M` : a >= 999.5 ? `$${Math.round(a / 1e3)}K` : `$${Math.round(a)}`;
 };
 import { PARTS, legsIn, type PKey, type Part, type Parts } from './totals';
-import { G, K, MU, R } from './ui';
+import { K, MU } from './ui';
 
 const RULE = '1px solid rgba(255,255,255,.08)';
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -36,11 +37,15 @@ function Clock() {
 
 function Block({ k, p, mask, who, usd, flip }: { k: PKey; p: Part; mask: (s: string) => string; who: string; usd: boolean; flip: () => void }) {
   const def = PARTS.find((x) => x.k === k)!;
-  const a = p.all, ok = a >= -0.5, c = a > 0.5 ? G : a < -0.5 ? R : K;
+  const a = p.all, ok = a >= -0.5;
   const word = def.sold ? (ok ? 'kept' : 'lost') : ok ? 'gain' : 'loss';
   const now = def.sold ? p.value - a : p.value;
   const x = def.sold ? (p.value > 0 ? (a / p.value) * 100 : 0) : p.abase > 0 ? (a / p.abase) * 100 : 0;
   const allS = mask(money0(a)), nowS = mask(money0(now)), tvS = p.tv != null ? mask(money0(p.tv)) : null;
+  // The sign the colour used to give: + over 50¢, − under −50¢; none while the privacy mask is on or on a figure that
+  // rounds to nothing.
+  const fig = usd ? allS : pct(x);
+  const sgn = mask('$1') !== '$1' || !/[1-9]/.test(fig) ? '' : a > 0.5 ? '+' : a < -0.5 ? '−' : '';
   const aria = [`${who}${def.l}, ${nowS} now`, `${word} ${allS}`,
     def.sold ? `${pct(x)} ${ok ? 'captured' : 'lost'}` : `return ${ok ? 'up' : 'down'} ${pct(x)}`,
     tvS ? `${tvS} time value` : ''].filter(Boolean).join(', ');
@@ -50,7 +55,7 @@ function Block({ k, p, mask, who, usd, flip }: { k: PKey; p: Part; mask: (s: str
       <span aria-hidden="true" style={{ fontSize: 14, lineHeight: '18px', color: MU, whiteSpace: 'nowrap' }}>{def.l}</span>
       <span aria-hidden="true" style={{ marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 6, width: '100%', whiteSpace: 'nowrap' }}>
         <span style={{ fontSize: 18, lineHeight: '24px', fontWeight: 700, letterSpacing: '-0.01em', color: K }}>{nowS}</span>
-        <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 600, color: c }}>({usd ? allS : pct(x)})</span>
+        <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 600, color: K }}>({sgn}{fig})</span>
         {tvS && (
           <span style={{ paddingLeft: 6, flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 14, lineHeight: '18px', color: MU }}>
             <Clock /><span style={{ fontWeight: 600, color: K }}>{tvS}</span>

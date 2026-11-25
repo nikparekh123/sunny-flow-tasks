@@ -1,5 +1,5 @@
 // Home's numbered sections (README 1, item 8, and "Blocks used inside sections"; Current Web `d.hs`).
-// Each section: padding-top 64, gap 22 inside; the kicker ("1 · WORLD AND ECONOMY") 8 over the headline (h2 28/36,
+// Each section: padding-top 64, gap 22 inside; the kicker ("1 · World and economy") 8 over the headline (h2 28/36,
 // the first sentence 600, the rest 400 at .72); then its blocks. Cards sit in boxes on a two-column grid (handoff
 // 2026-11-18 §3.1); a half-width box left alone on its row takes the full row. Overnight, the economy readings, the
 // sectors table with its heat maps and Every name take the full width; Every name leads Your book.
@@ -9,7 +9,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import type { BookId, J } from '../lib/data';
 import { useWeb } from '../lib/state';
-import { C, clean, named } from '../lib/format';
+import { C, clean } from '../lib/format';
 import './blocks/blocks.css';
 import { FullRow, Grid, More } from './blocks/Card';
 import { gridCards, type Ctx, type GridItem } from './blocks/cards';
@@ -21,7 +21,7 @@ import Levels from './blocks/Levels';
 import Overnight from './blocks/Overnight';
 import ShareAvg from './blocks/ShareAvg';
 import { SectorMaps, SectorTable, sectorsOf } from './blocks/Sectors';
-import { momentOf, scrollToSel, spans, tidy, type Mo, type Span } from './blocks/util';
+import { momentOf, runColor, runText, scrollToSel, spans, tidy, type Mo, type Span } from './blocks/util';
 import { headParts } from './top/parts';
 
 const INDEX = new Set(['indexCards', 'futuresCards', 'theWeekIndexes']);
@@ -68,13 +68,16 @@ function split(runs: Span[]): { t: string; thick: boolean; c?: string }[] {
   return out;
 }
 
+/** The headline (28 px): a run's colour name never colours the words, a gain or loss takes its sign (handoff
+    2026-11-25-focus §2.1, §2.2). */
 function Headline({ runs, mask }: { runs: Span[]; mask: (s: string) => string }) {
   const parts = split(runs.map((r) => ({ ...r, t: tidy(r.t) })));
+  const shown = parts.map((p) => mask(p.t));
   return (
     <h2 className="h2">
       {parts.map((p, i) => (p.thick
-        ? <span key={i} style={p.c ? { color: named(p.c) } : undefined}>{mask(p.t)}</span>
-        : <span key={i} className="thin" style={p.c ? { color: named(p.c, 'rgba(245,245,247,.72)') } : undefined}>{mask(p.t)}</span>))}
+        ? <span key={i} style={p.c ? { color: runColor(p.c, 28, C.ink) } : undefined}>{runText(p.c, shown[i], shown[i - 1] ?? '')}</span>
+        : <span key={i} className="thin" style={p.c ? { color: runColor(p.c, 28, 'rgba(242,242,242,.72)') } : undefined}>{runText(p.c, shown[i], shown[i - 1] ?? '')}</span>))}
     </h2>
   );
 }

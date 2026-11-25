@@ -24,8 +24,9 @@ struct PosPriceChart: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
     private let H = PosPrice.CH, TAGW: CGFloat = 96
 
-    /// Calls blue, puts brown (162a).
+    /// Calls blue, puts brown (162a), on fills only (the cone's dots); words and thin lines are grey (`tw`, focus §2.4).
     static func tc(_ put: Bool, _ a: Double = 1) -> Color { (put ? PC.floor : PC.ceiling).opacity(a) }
+    static func tw(_ put: Bool, _ a: Double = 1) -> Color { PC.legWord(put).opacity(a) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -53,7 +54,7 @@ struct PosPriceChart: View {
                 labels(p).frame(height: 16)
                 // One line, as the design (SunnyPositionsPhone): "Past week ▼ 15.3% · to Fri Nov 20". The how-to note is
                 // gone (Nik, 18 Nov 2026), and it no longer grows when 1 SD is on, which jumped the page.
-                (Text("Past week ") + Text("\(p.move < 0 ? "▼" : "▲") \(PE.pcx(p.move))").foregroundStyle(p.move < 0 ? PC.red : PC.green)
+                (Text("Past week ") + Text("\(p.move < 0 ? "▼" : "▲") \(PE.pcx(p.move))")
                  + Text(" · to \(p.fridayWords)"))
                     .sType(PT.t(12, 16), tabular: true).foregroundStyle(PC.mu)
                     .accessibilityLabel(PosSay.words("Past week \(p.move < 0 ? "down" : "up") \(PE.pcx(p.move)), to \(p.fridayWords)"))
@@ -76,9 +77,10 @@ struct PosPriceChart: View {
                 // 162a: the room between the nearest sold strikes (it goes while the cone is on).
                 if let r = p.room {
                     ZStack(alignment: .topLeading) {
-                        Rectangle().fill(PC.green.opacity(0.10)).frame(width: pw, height: max(0, r.bottom - r.top)).offset(y: r.top)
-                        if r.up { Rectangle().fill(PC.red.opacity(0.08)).frame(width: pw, height: r.top) }
-                        if r.dn { Rectangle().fill(PC.red.opacity(0.08)).frame(width: pw, height: max(0, H - r.bottom)).offset(y: r.bottom) }
+                        // Big green and red bands go grey at their own opacity (focus §2.4).
+                        Rectangle().fill(PC.band.opacity(0.10)).frame(width: pw, height: max(0, r.bottom - r.top)).offset(y: r.top)
+                        if r.up { Rectangle().fill(PC.band.opacity(0.08)).frame(width: pw, height: r.top) }
+                        if r.dn { Rectangle().fill(PC.band.opacity(0.08)).frame(width: pw, height: max(0, H - r.bottom)).offset(y: r.bottom) }
                     }
                     .opacity(p.coneOn ? 0 : 1)
                 }
@@ -91,9 +93,9 @@ struct PosPriceChart: View {
                         pp.closeSubpath()
                     } }
                     ZStack(alignment: .topLeading) {
-                        if let f = c.fG { poly(f).fill(PC.green.opacity(0.24)) }
-                        if let f = c.fU { poly(f).fill(PC.red.opacity(0.45)) }
-                        if let f = c.fD { poly(f).fill(PC.red.opacity(0.45)) }
+                        if let f = c.fG { poly(f).fill(PC.band.opacity(0.24)) }
+                        if let f = c.fU { poly(f).fill(PC.band.opacity(0.45)) }
+                        if let f = c.fD { poly(f).fill(PC.band.opacity(0.45)) }
                         P(c.YU).stroke(PC.ink.opacity(0.8), lineWidth: 1)
                         P(c.YD).stroke(PC.ink.opacity(0.8), lineWidth: 1)
                     }
@@ -104,9 +106,9 @@ struct PosPriceChart: View {
                 }
                 ForEach(p.lines) { l in
                     Path { $0.move(to: CGPoint(x: 0, y: l.y)); $0.addLine(to: CGPoint(x: pw, y: l.y)) }
-                        .stroke(Self.tc(l.put, l.sold ? 0.9 : 0.55), style: l.sold ? StrokeStyle(lineWidth: 1.5, dash: [4, 3]) : StrokeStyle(lineWidth: 1, lineCap: .round, dash: [0.1, 3]))
+                        .stroke(Self.tw(l.put, l.sold ? 0.9 : 0.55), style: l.sold ? StrokeStyle(lineWidth: 1.5, dash: [4, 3]) : StrokeStyle(lineWidth: 1, lineCap: .round, dash: [0.1, 3]))
                     if l.shown && !l.name.isEmpty {
-                        Text(l.name).sType(PT.t(12, 14, 600), tabular: true).foregroundStyle(Self.tc(l.put, l.sold ? 1 : 0.85))
+                        Text(l.name).sType(PT.t(12, 14, 600), tabular: true).foregroundStyle(Self.tw(l.put, l.sold ? 1 : 0.85))
                             .padding(.horizontal, 3)
                             .background(RoundedRectangle(cornerRadius: 3).fill(p.coneOn ? PC.page : .clear))
                             .fixedSize()
@@ -128,7 +130,7 @@ struct PosPriceChart: View {
                 if let c = p.cone, p.coneOn {
                     ForEach(c.drops, id: \.id) { q in
                         Path { $0.move(to: CGPoint(x: CGFloat(q.x) * pw, y: q.y)); $0.addLine(to: CGPoint(x: CGFloat(q.x) * pw, y: H)) }
-                            .stroke(Self.tc(q.put, 0.8), style: StrokeStyle(lineWidth: 1, dash: [1, 2]))
+                            .stroke(Self.tw(q.put, 0.8), style: StrokeStyle(lineWidth: 1, dash: [1, 2]))
                     }
                     ForEach(c.dots, id: \.id) { q in
                         Circle().fill(Self.tc(q.put)).frame(width: 9, height: 9).background(Circle().fill(PC.page).padding(-2))
@@ -157,9 +159,13 @@ struct PosPriceChart: View {
             ForEach(p.near) { n in
                 HStack(spacing: 10) {
                     Path { $0.move(to: CGPoint(x: 0, y: 1)); $0.addLine(to: CGPoint(x: 18, y: 1)) }
-                        .stroke(Self.tc(n.put), style: StrokeStyle(lineWidth: 2, dash: [4, 3])).frame(width: 18, height: 2)
-                    Text(n.name).sType(PT.t(15, 20, 600), tabular: true).foregroundStyle(Self.tc(n.put))
-                    Text(n.d).sType(PT.t(14, 20, 600)).foregroundStyle(n.tone == .red ? PC.red : n.tone == .orange ? PC.orange : PC.mu).lineLimit(1)
+                        .stroke(Self.tw(n.put), style: StrokeStyle(lineWidth: 2, dash: [4, 3])).frame(width: 18, height: 2)
+                    Text(n.name).sType(PT.t(15, 20, 600), tabular: true).foregroundStyle(Self.tw(n.put))
+                    // Grey words; a sold strike within 0.5 SD or in the money keeps a red dot before it (focus §2.3).
+                    HStack(spacing: 0) {
+                        if n.tone == .red { SDot(kind: .danger) }
+                        Text(n.d).sType(PT.t(14, 20, 600)).foregroundStyle(PC.mu).lineLimit(1)
+                    }
                     Spacer(minLength: 0)
                 }
                 .accessibilityElement(children: .ignore)
@@ -184,10 +190,14 @@ struct PosPriceChart: View {
     private func tag(_ t: PosPrice.Tag) -> some View {
         // 162a: the strike and its SD on this week's move ("36 0.46 SD"); without an IV, the % as before.
         let zt = t.zTone ?? t.tone
-        let pc = zt == .red ? PC.red : zt == .orange ? PC.orange : t.sold ? PC.bright : PC.muT
+        // Focus §2.1, §2.3: the closeness reads grey (no red or orange on words); red keeps a dot before it.
+        let pc = zt == .red || zt == .orange ? PC.mu : t.sold ? PC.bright : PC.muT
         return HStack(spacing: 4) {
             Text(t.sd != nil ? t.k : t.n).font(.inter(13, t.px || t.sold ? 700 : 600, tabular: true)).foregroundStyle(t.px ? PC.onInk : t.sold ? PC.ink : PC.bright)
-            if !t.px { Text((t.sd ?? t.s) + (t.fold > 0 ? " +\(t.fold)" : "")).font(.inter(12, t.sold ? 600 : 500, tabular: true)).foregroundStyle(pc) }
+            if !t.px {
+                (zt == .red ? SF.dot(.danger) : Text(""))
+                    + Text((t.sd ?? t.s) + (t.fold > 0 ? " +\(t.fold)" : "")).font(.inter(12, t.sold ? 600 : 500, tabular: true)).foregroundStyle(pc)
+            }
         }
         .lineLimit(1)
         .padding(.horizontal, t.px ? 8 : t.put ? 7 : 0)
@@ -202,7 +212,7 @@ struct PosPriceChart: View {
             ZStack(alignment: .topLeading) {
                 ForEach(p.xl) { x in
                     Text(x.t).sType(PT.t(12, 16, x.put != nil ? 700 : 400), tabular: false)
-                        .foregroundStyle(x.put.map { Self.tc($0) } ?? (x.now ? PC.ink : PC.mu)).fixedSize()
+                        .foregroundStyle(x.put.map { Self.tw($0) } ?? (x.now ? PC.ink : PC.mu)).fixedSize()
                         .offset(x: x.put != nil ? CGFloat(x.x) * pw - 12 : CGFloat(x.x) * pw)
                 }
             }
@@ -231,7 +241,7 @@ private struct PosPriceScrub: View {
                 Circle().fill(col).frame(width: 11, height: 11).background(Circle().fill(PC.page).padding(-2))
                     .position(x: CGFloat(x) * pw, y: p.y(a.v + (b.v - a.v) * w))
                 PosScrubTip(rows: [(Self.when(near), PC.mu, false), (PosFmt.price(near.v), PC.ink, true),
-                                   ("\(mv < 0 ? "▼" : "▲") \(PE.pcx(mv)) since \(Self.when(P[0]).replacingOccurrences(of: " close", with: ""))", mv < 0 ? PC.red : PC.green, false)],
+                                   ("\(mv < 0 ? "▼" : "▲") \(PE.pcx(mv)) since \(Self.when(P[0]).replacingOccurrences(of: " close", with: ""))", PC.mu, false)],
                             x: CGFloat(x) * pw, w: pw)
             }
             Color.clear.frame(width: pw, height: PosPrice.CH).contentShape(Rectangle())
@@ -297,7 +307,7 @@ struct PosPayoffView: View {
             HStack(alignment: .top, spacing: 12) {
                 PosPayoffHead(t: t, S0: S0, p: p, privacy: privacy, scrub: scrub)
                 Spacer(minLength: 0)
-                Text(right).sType(PT.t(13, 18, 600)).foregroundStyle(peak != nil ? PC.orange : PC.ink).multilineTextAlignment(.trailing)
+                Text(right).sType(PT.t(13, 18, 600)).foregroundStyle(peak != nil ? PC.mu : PC.ink).multilineTextAlignment(.trailing)
                     .accessibilityLabel(PosSay.words(right))
             }
             if let tg = target { targetLine(tg) }
@@ -321,12 +331,13 @@ struct PosPayoffView: View {
     private func targetLine(_ tg: Double) -> some View {
         let v = PosPayoffHead.plAt(p, S0, tg), m = tg / S0 - 1
         return (Text("At your target \(PosFmt.price(tg)) · \(m >= 0 ? "↑" : "↓")\(PE.pcx(m)), \(p.byT): ").foregroundStyle(PC.mu)
-                + Text(privacy ? BriefMask.shown : PosFmt.money(v)).foregroundStyle(sign(v)).fontWeight(.semibold))
+                + Text(privacy ? BriefMask.shown : PC.signed(v, PosFmt.money(v))).foregroundStyle(sign(v)).fontWeight(.semibold))
             .sType(PT.t(13, 18), tabular: true)
             .accessibilityLabel(PosSay.words("At your target \(PosFmt.price(tg)), \(p.byT), \(PosSay.signed(v, privacy))"))
     }
 
-    private func sign(_ v: Double) -> Color { v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink }
+    /// A gain or loss under 15 pt reads grey with its sign (focus §2.1, §2.2); nothing either way stays ink.
+    private func sign(_ v: Double) -> Color { abs(v) > 0.5 ? PC.mu : PC.ink }
 
     // MARK: The sliders
 
@@ -447,12 +458,13 @@ struct PosPayoffView: View {
                         .frame(width: max(0, bR - bL), height: H).offset(x: bL)
                 }
                 ZStack {
-                    area.fill(LinearGradient(colors: [PC.green.opacity(0.4), PC.green.opacity(0)], startPoint: .top, endPoint: .bottom))
+                    // The area under the curve grey at its own opacity; the curve keeps its green and red (focus §2.4).
+                    area.fill(LinearGradient(colors: [PC.band.opacity(0.4), PC.band.opacity(0)], startPoint: .top, endPoint: .bottom))
                     line.stroke(PC.green, style: StrokeStyle(lineWidth: 2.5, lineJoin: .round))
                 }
                 .mask(Rectangle().frame(height: max(0, zy)).frame(maxHeight: .infinity, alignment: .top))
                 ZStack {
-                    area.fill(LinearGradient(colors: [PC.red.opacity(0), PC.red.opacity(0.4)], startPoint: .top, endPoint: .bottom))
+                    area.fill(LinearGradient(colors: [PC.band.opacity(0), PC.band.opacity(0.4)], startPoint: .top, endPoint: .bottom))
                     line.stroke(PC.red, style: StrokeStyle(lineWidth: 2.5, lineJoin: .round))
                 }
                 .mask(Rectangle().frame(height: max(0, H - zy)).frame(maxHeight: .infinity, alignment: .bottom))
@@ -571,8 +583,8 @@ private struct PosPayoffHead: View {
             return abs(m) < 0.0005 ? "" : " (\(m > 0 ? "↑" : "↓")\(String(format: "%.1f", abs(m) * 100))%)"
         } ?? ""
         VStack(alignment: .leading, spacing: 2) {
-            Text(privacy ? BriefMask.shown : PosFmt.money(v0)).sType(PT.t(26, 32, 700, tr: -0.02))
-                .foregroundStyle(v0 > 0.5 ? PC.green : v0 < -0.5 ? PC.red : PC.ink)
+            Text(privacy ? BriefMask.shown : PC.signed(v0, PosFmt.money(v0))).sType(PT.t(26, 32, 700, tr: -0.02))
+                .foregroundStyle(PC.ink)
             Text("If \(t) is at \(PosFmt.price(x0))\(move) \(p.byT)\(at == nil ? ", from today’s marks" : "")").sType(PT.t(12, 16)).foregroundStyle(PC.mu)
                 .lineLimit(2, reservesSpace: true)
         }
@@ -631,7 +643,7 @@ private struct PosPayoffScrub: View {
             Circle().fill(v >= 0 ? PC.green : PC.red).frame(width: 11, height: 11).background(Circle().fill(PC.page).padding(-2))
                 .frame(width: w, height: H, alignment: .topLeading).offset(x: x - 5.5, y: y - 5.5)
             // The P&L there, beside the dot (to its left past 60%), above or below it away from the curve.
-            Text(privacy ? BriefMask.shown : PosFmt.money(v)).sType(PT.t(15, 22, 700)).foregroundStyle(v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink)
+            Text(privacy ? BriefMask.shown : PC.signed(v, PosFmt.money(v))).sType(PT.t(15, 22, 700)).foregroundStyle(PC.ink)
                 .lineLimit(1).fixedSize()
                 .padding(.horizontal, 3)
                 .background(RoundedRectangle(cornerRadius: 5).fill(PC.labelBg))
@@ -665,18 +677,18 @@ private struct PosGreeksRow: View {
             Rectangle().fill(PC.rule).frame(height: 1)
             Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
                 GridRow {
-                    greek("Delta", when, PosFmt.side(g.d), g.d < 0 ? PC.orange : PC.ink, said: PosFmt.side(g.d))
-                    greek("Theta a day", when, privacy ? BriefMask.shown : PosFmt.money(g.th), sign(g.th), said: PosSay.signed(g.th, privacy))
+                    // Ink with a sign where colour said up or down (focus §2.1, §2.2); Short and Long are words already.
+                    greek("Delta", when, PosFmt.side(g.d), PC.ink, said: PosFmt.side(g.d))
+                    greek("Theta a day", when, privacy ? BriefMask.shown : PC.signed(g.th, PosFmt.money(g.th)), PC.ink, said: PosSay.signed(g.th, privacy))
                 }
                 GridRow {
-                    greek("Gamma", when, "\(PosFmt.count(g.g)) a $1", g.g < 0 ? PC.red : PC.ink, said: "\(g.g < 0 ? "short" : "long") \(PosFmt.count(g.g)) a dollar")
-                    greek("Vega", when, privacy ? BriefMask.shown : PosFmt.money(g.vg), sign(g.vg), said: PosSay.signed(g.vg, privacy))
+                    greek("Gamma", when, "\(g.g <= -0.5 ? "\u{2212}" : "")\(PosFmt.count(g.g)) a $1", PC.ink, said: "\(g.g < 0 ? "short" : "long") \(PosFmt.count(g.g)) a dollar")
+                    greek("Vega", when, privacy ? BriefMask.shown : PC.signed(g.vg, PosFmt.money(g.vg)), PC.ink, said: PosSay.signed(g.vg, privacy))
                 }
             }
             .padding(.top, 8)
         }
     }
-    private func sign(_ v: Double) -> Color { v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink }
     private func greek(_ l: String, _ when: String, _ v: String, _ c: Color, said: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text("\(l) · \(when)").sType(PT.t(11, 14), tabular: true).foregroundStyle(PC.mu).lineLimit(1)

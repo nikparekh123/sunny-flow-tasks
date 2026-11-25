@@ -205,9 +205,9 @@ struct SunnyWalls: View {
             withAnimation(reduce ? nil : S.standard(0.2)) { exp = e }
         } label: {
             Text(PF.monthDay(e)).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
-                .foregroundStyle(on ? S.paper : S.ink)
+                .foregroundStyle(on ? SF.chipOnInk : S.ink)
                 .padding(.horizontal, 14).frame(height: 36)
-                .background(Capsule().fill(on ? S.ink : S.tileWalls))
+                .background(Capsule().fill(on ? SF.chipOn : S.tileWalls))   // on: the chip-on grey (focus §2.6)
                 .overlay(Capsule().strokeBorder(on ? .clear : S.line, lineWidth: 0.5))
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
@@ -295,7 +295,7 @@ struct SunnyWalls: View {
                 .sType(SType(size: 12, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.muted)
             HStack(spacing: 6) {
                 Text(g.map(PWays.gamma) ?? "").foregroundStyle(S.ink)
-                Text(ch).foregroundStyle(moved ? S.orangeDeep : S.muted)
+                Text(ch).foregroundStyle(S.muted)   // focus: a word, never orange; the arrow says which way
             }
             .sType(SType(size: 13, weight: 600, line: 18, tracking: 0))
             .lineLimit(1).minimumScaleFactor(0.85)
@@ -362,7 +362,7 @@ struct SunnyWalls: View {
         }()
         return VStack(alignment: .trailing, spacing: 0) {
             Text(w.k.map(PF.strike) ?? "None").sType(SType(size: 13, weight: bold ? 700 : 500, line: 16, tracking: 0))
-                .foregroundStyle(moved ? S.orangeDeep : S.ink)
+                .foregroundStyle(moved ? SF.word(13) : S.ink)   // a moved wall: grey, not orange (focus)
             Text(w.g.map(PWays.gamma) ?? " ").sType(SType(size: 11, weight: 500, line: 13, tracking: 0)).foregroundStyle(S.muted)
             if let q {
                 Text(q).sType(SType(size: 11, weight: 500, line: 13, tracking: 0)).foregroundStyle(S.muted).lineLimit(1)

@@ -8,6 +8,9 @@
 //  names ranked by the period, each bar split by position type, losses left
 //  of zero, with filters and the yellow summary box. SunnyAllocation: the
 //  biggest holding, a segment bar and the rows.
+//  Focus (handoff 2026-11-25-focus §2): no colour on words (ink 15 pt and up, grey under), a loss carries its −
+//  (gains were ink and stay bare, a comparison keeps its + and gets a −), the chips on in #424242; the bars and the
+//  type colours on fills stay.
 //
 
 import SwiftUI
@@ -49,6 +52,8 @@ struct SunnySoldBought: View {
     }
     /// To the nearest 100 above $1K.
     private func q(_ v: Double) -> Double { abs(v) >= 1000 ? (v / 100).rounded() * 100 : v.rounded() }
+    /// "+$1.2K" or "−$1.2K" where green or red used to say it (focus §2.2).
+    static func signed(_ v: Double) -> String { abs(v) < 0.5 ? F.moneyK(v) : SF.signed(v, F.moneyK(v)) }
 
     var body: some View {
         // Nothing tapped: the numbers follow the grey box (this week or month).
@@ -61,14 +66,14 @@ struct SunnySoldBought: View {
         let unit = pick != nil ? (P.view == .week ? "week" : "month") : (P.view == .week ? "month" : "year")
         let s = sentence(X, unit: unit, current: current)
         VStack(alignment: .leading, spacing: 20) {
-            SPeriodHeader(label: "Sold vs Bought", hero: X == nil ? "-" : F.moneyK(net), heroValue: net,
-                          heroColor: X == nil ? S.ink : net < 0 ? S.red : S.green,
+            SPeriodHeader(label: "Sold vs Bought", hero: X == nil ? "-" : Self.signed(net), heroValue: net,
+                          heroColor: S.ink,
                           sub: "\(label) · net" + (current && X != nil ? " · \(F.moneyK(home.soldVsBought.openCredit)) open" : ""),
                           onTap: {}, period: P, canGoBack: Periods.canGoBack(P, today: home.today, start: Periods.bookStart(home)))
             VStack(alignment: .leading, spacing: 0) {
                 if let X {
-                    SStatLine(items: [(F.moneyK(q(X.chg)), X.chg < 0 ? "longs lost" : "longs added", X.chg < 0 ? S.red : S.green),
-                                      (F.moneyK(q(X.real)), X.real < 0 ? "shorts cost" : "shorts kept", X.real < 0 ? S.red : S.green)])
+                    SStatLine(items: [(Self.signed(q(X.chg)), X.chg < 0 ? "longs lost" : "longs added", SF.grey),
+                                      (Self.signed(q(X.real)), X.real < 0 ? "shorts cost" : "shorts kept", SF.grey)])
                 } else {
                     SStatLine(items: [("-", "not traded yet", S.ink)])
                 }
@@ -134,7 +139,7 @@ struct SunnySoldBought: View {
                                         VStack(spacing: 4) {
                                             UnevenRoundedRectangle(topLeadingRadius: 1, bottomLeadingRadius: 5, bottomTrailingRadius: 5, topTrailingRadius: 1)
                                                 .fill(j == 0 ? S.ink : S.deckYellow).frame(height: v < 0 && up ? bar(v) : 0)
-                                            if v < 0 { label(F.moneyK(v), S.red, up) }
+                                            if v < 0 { label(Self.signed(v), SF.grey, up) }
                                         }
                                         .animation(S.standard(S.grow), value: up)
                                         .frame(maxWidth: .infinity)
@@ -243,8 +248,8 @@ struct SunnyPerformance: View {
     private struct T { let key: String; let name: String; let color: Color }
     private static let types: [T] = [
         T(key: "calls sold", name: "Calls sold", color: Color(hex: 0x3B873D)), T(key: "puts sold", name: "Puts sold", color: Color(hex: 0x366DEB)),
-        T(key: "calls bought", name: "Calls bought", color: Color(hex: 0x65C466)), T(key: "puts bought", name: "Puts bought", color: Color(hex: 0x73B6F9)),
-        T(key: "shares", name: "Shares", color: Color(hex: 0xF2A93B)),
+        T(key: "calls bought", name: "Calls bought", color: Color(hex: 0x4CBB6C)), T(key: "puts bought", name: "Puts bought", color: Color(hex: 0x3E6AE1)),
+        T(key: "shares", name: "Shares", color: Color(hex: 0xE8A33D)),
     ]
 
     /// The book's first month (Sep 2026). The LEAPs bought on 31 Aug count in it,
@@ -263,6 +268,8 @@ struct SunnyPerformance: View {
         return out
     }
     private func on(_ k: String) -> Bool { types.isEmpty || types.contains(k) }
+    /// A loss with its − where red used to say it; a gain was ink and stays bare (focus §2.2).
+    static func lossSigned(_ v: Double) -> String { v <= -0.5 ? "\u{2212}" + F.moneyK(v) : F.moneyK(v) }
 
     /// ticker -> type -> month -> $
     private var data: [String: [String: [String: Double]]] {
@@ -333,16 +340,17 @@ struct SunnyPerformance: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Performance").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.muted)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(none ? "$0" : F.moneyK(tot)).sType(.largeNumber).foregroundStyle(tot < 0 ? S.red : S.ink)
+                    Text(none ? "$0" : Self.lossSigned(tot)).sType(.largeNumber).foregroundStyle(S.ink)
                         .contentTransition(.numericText(value: tot))
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(per.map { "\(monthName($0).uppercased()) \($0.prefix(4))" } ?? "YTD \(year)")
-                            .sType(SType(size: 15, weight: 600, line: 20, tracking: 0.02), tabular: false)
+                        // As written, no capitals, no tracking (focus §2.5).
+                        Text(per.map { "\(monthName($0)) \($0.prefix(4))" } ?? "YTD \(year)")
+                            .sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
                         Text(none ? "" : per == nil ? "\(ms.first.map(monthName) ?? "Jan") to \(ms.last.map(monthName) ?? "")"
                              : delta == nil ? "first month on record"
-                             : "vs \(monthName(ms[pIdx! - 1]).uppercased()) · \(F.moneyDelta(delta!))" + (pct.map { " · \($0)%" } ?? ""))
+                             : "vs \(monthName(ms[pIdx! - 1])) · \(SunnySoldBought.signed(delta!))" + (pct.map { " · \($0)%" } ?? ""))
                             .sType(SType(size: 13, weight: 600, line: 16, tracking: 0))
-                            .foregroundStyle(per == nil || delta == nil ? S.muted : delta! < 0 ? S.red : S.green)
+                            .foregroundStyle(S.muted)
                             .lineLimit(1)
                     }
                 }
@@ -352,11 +360,11 @@ struct SunnyPerformance: View {
                 let lossMonths = bestIx.map { series[$0] < 0 } ?? false
                 let best = bestIx.map { monthName(ms[$0]) } ?? "-"
                 if unrealized && !realized {
-                    SStatLine(items: [(F.moneyK(ytd), "open", ytd < 0 ? S.red : S.ink),
-                                      (best, lossMonths ? "least open loss" : "best month opened", lossMonths ? S.red : S.green)])
+                    SStatLine(items: [(Self.lossSigned(ytd), "open", ytd < 0 ? SF.grey : S.ink),
+                                      (best, lossMonths ? "least open loss" : "best month opened", SF.grey)])
                 } else {
-                    SStatLine(items: [(F.moneyK(ytd), "ytd", ytd < 0 ? S.red : S.ink), (F.moneyK(ytd / n), "per mo", ytd < 0 ? S.red : S.ink),
-                                      (best, lossMonths ? "smallest loss" : "best month", bestIx == nil ? S.ink : lossMonths ? S.red : S.green)])
+                    SStatLine(items: [(Self.lossSigned(ytd), "ytd", ytd < 0 ? SF.grey : S.ink), (Self.lossSigned(ytd / n), "per mo", ytd < 0 ? SF.grey : S.ink),
+                                      (best, lossMonths ? "smallest loss" : "best month", bestIx == nil ? S.ink : SF.grey)])
                 }
                 SInlineInsight(lead: list.first.map { "\($0.t) \(unrealized && !realized ? "leads your open book." : "is your best performer.")" } ?? "Nothing yet.",
                                rest: "Companies rank by the period you pick. The strip on each row shows each month. Tap a row to focus on it.")
@@ -424,9 +432,10 @@ struct SunnyPerformance: View {
                 if let dot { Circle().fill(dot).frame(width: 8, height: 8).opacity(dotOn ? 1 : 0.35) }
                 Text(t).sType(.label, tabular: false)
             }
-            .foregroundStyle(on ? S.chipOnInk : S.ink)
+            // On: #424242 with ink words (focus §2.6), across the three filter rows alike.
+            .foregroundStyle(on ? SF.chipOnInk : S.ink)
             .padding(.horizontal, 12).frame(height: 32)
-            .background { if on { Capsule().fill(S.chipOn) } }
+            .background { if on { Capsule().fill(SF.chipOn) } }
             .glassEffect(on ? .identity : .regular.interactive(), in: .capsule)
             .contentShape(Capsule().inset(by: -6))
         }
@@ -455,7 +464,8 @@ struct SunnyPerformance: View {
         // The type that moved the money most, either way: the largest by size, never one at $0 (Nik's screenshot,
         // 10 Nov 2026: "Mostly puts sold, $0" in a month every type lost).
         let topT = typeTotals.filter { abs($0.1) >= 1 }.max { abs($0.1) < abs($1.1) }
-        let money = { (v: Double) -> Text in Text(F.moneyK(v)).fontWeight(.semibold).foregroundColor(v < 0 ? S.red : S.sumHead) }
+        // No red or yellow on the figures (focus §2.1, under 15 pt: grey); a loss carries its −.
+        let money = { (v: Double) -> Text in Text(Self.lossSigned(v)).fontWeight(.semibold).foregroundColor(SF.grey) }
         var sentence = Text("")
         if none {
             sentence = Text("Turn on Realized or Unrealized to see how your positions performed.")
@@ -473,7 +483,7 @@ struct SunnyPerformance: View {
         }
         return VStack(alignment: .leading, spacing: 4) {
             Text(head).sType(SType(size: 12, weight: 700, line: 16, tracking: 0), tabular: false).lineLimit(2)
-                .foregroundStyle(S.sumHead)
+                .foregroundStyle(SF.grey)
             sentence.sType(SType(size: 13, weight: 400, line: 18, tracking: 0)).lineLimit(2)
                 .foregroundStyle(S.sumText)
         }
@@ -524,8 +534,8 @@ struct SunnyPerformance: View {
                         }
                         .frame(height: 26)
                         spark(r.t, ms: ms, net: net)
-                        Text(F.moneyK(v)).sType(SType(size: 13, weight: 700, line: 16, tracking: 0))
-                            .foregroundStyle(v < 0 ? S.red : S.ink).frame(width: 52, alignment: .trailing)
+                        Text(Self.lossSigned(v)).sType(SType(size: 13, weight: 700, line: 16, tracking: 0))
+                            .foregroundStyle(v < 0 ? SF.grey : S.ink).frame(width: 52, alignment: .trailing)
                     }
                     .padding(.vertical, 6).padding(.horizontal, 8)
                     .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(focus == r.t ? S.surface : .clear))
@@ -575,8 +585,8 @@ struct SunnyPerformance: View {
                         RoundedRectangle(cornerRadius: 2).fill(t.color).frame(width: 4)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(t.name).sType(SType(size: 13, weight: 400, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted).lineLimit(1)
-                            Text(v == 0 ? "-" : F.moneyK(v)).sType(SType(size: 15, weight: 700, line: 15, tracking: 0))
-                                .foregroundStyle(v < 0 ? S.red : S.ink)
+                            Text(v == 0 ? "-" : Self.lossSigned(v)).sType(SType(size: 15, weight: 700, line: 15, tracking: 0))
+                                .foregroundStyle(S.ink)
                         }
                     }
                     .fixedSize(horizontal: false, vertical: true)
@@ -595,7 +605,7 @@ struct SunnyAllocation: View {
     @State private var picked: String? = DebugPreset.string("alloc.pick")
     @State private var more = DebugPreset.bool("alloc.more")
 
-    private static let palette: [Color] = [0x3B873D, 0x65C466, 0x366DEB, 0x73B6F9, 0xF7CE46, 0x996C23, 0x6E6E73].map { Color(hex: $0) }
+    private static let palette: [Color] = [0x3B873D, 0x4CBB6C, 0x366DEB, 0x3E6AE1, 0xFCC00A, 0x996C23, 0x6E6E6E].map { Color(hex: $0) }
 
     var body: some View {
         // Share of what: value now (Nik took the proposal). Cash stays out of the three numbers.
@@ -618,8 +628,10 @@ struct SunnyAllocation: View {
                 Button { withAnimation(.smooth(duration: S.roll)) { dollars.toggle() } } label: {
                     VStack(alignment: .leading, spacing: 6) {
                         if let h = hero {
-                            Text("\(dollars ? F.moneyK(h.usd) : pct(h.usd)) in \(h.name)").sType(.largeNumber)
-                                .foregroundStyle(sel == nil && h.usd / total > 0.3 ? S.red : S.ink)
+                            // Over 30% in one name is a warning: ink with a red dot before it (focus §2.3).
+                            ((sel == nil && h.usd / total > 0.3 ? SF.dot(.danger) : Text("")) + Text("\(dollars ? F.moneyK(h.usd) : pct(h.usd)) in \(h.name)"))
+                                .sType(.largeNumber)
+                                .foregroundStyle(S.ink)
                                 .lineLimit(1).minimumScaleFactor(0.6)
                         } else {
                             Text("-").sType(.largeNumber)
@@ -635,7 +647,7 @@ struct SunnyAllocation: View {
             }
             VStack(alignment: .leading, spacing: 0) {
                 SStatLine(items: [(F.moneyK(invested), "invested", S.ink), (F.moneyK(now), "now", S.ink),
-                                  (F.moneyK(diff), diff < 0 ? "down" : "up", diff < 0 ? S.red : S.green)])
+                                  (F.moneyK(diff), diff < 0 ? "down" : "up", SF.grey)])
                 SInlineInsight(lead: insight.lead, rest: insight.rest)
             }
             GeometryReader { g in

@@ -159,7 +159,7 @@ struct BriefDeck: View {
     }
 }
 
-/// An alert card: Earnings season and Holiday on white (kicker in caps, title 28/34 bold, sub, a 200 pt
+/// An alert card: Earnings season and Holiday on white (kicker as written, title 28/34 bold, sub, a 200 pt
 /// watermark of its mark at 6%, X); Aftershock in the deepest blue of the hour with its scan state and an arrow.
 private struct AlertCard: View {
     let alert: JSONValue
@@ -191,9 +191,10 @@ private struct AlertCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text((alert["kicker"].string ?? "").uppercased())
-                        .sType(SType(size: 13, weight: 700, line: 16, tracking: 0.06), tabular: false)
-                        .foregroundStyle(dark ? .white.opacity(0.85) : S.ink)
+                    // Focus §2.5: no small capitals; the kicker is a plain 13 pt 500 word, grey (white on Aftershock's blue).
+                    Text(alert["kicker"].string ?? "")
+                        .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
+                        .foregroundStyle(dark ? .white.opacity(0.85) : SF.grey)
                         .accessibilityLabel(Self.spoken(alert["kicker"].string ?? ""))
                     Spacer()
                     if dark {
@@ -280,7 +281,7 @@ struct DayCaption: View {
             VStack(spacing: 1) {
                 Text(session).sFont(13, .semibold)
                 HStack(spacing: 5) {
-                    if warn || live?.2 == true { Circle().fill(Color(hex: 0xF2A93B)).frame(width: 6, height: 6) }
+                    if warn || live?.2 == true { Circle().fill(Color(hex: 0xE8A33D)).frame(width: 6, height: 6) }
                     Text(sub).sFont(12, .medium).monospacedDigit()
                         .foregroundStyle(.white.opacity(0.8))
                 }

@@ -171,7 +171,7 @@ struct GammaPage: View {
             if disagree(g) {
                 HStack(spacing: 6) {
                     Circle().fill(S.orange).frame(width: 7, height: 7)
-                    Text("Weekly and monthly disagree").sType(SType(size: 13, weight: 600, line: 18, tracking: 0), tabular: false).foregroundStyle(S.orangeDeep)
+                    Text("Weekly and monthly disagree").sType(SType(size: 13, weight: 600, line: 18, tracking: 0), tabular: false).foregroundStyle(S.muted)
                 }
             }
             if let f = v.flip {
@@ -182,7 +182,7 @@ struct GammaPage: View {
                 Text(c < 0.5 ? "Low tape coverage today (\(Int((c * 100).rounded()))%). Each wall is read from its own strike; a strike too thin to read shows Unclear."
                               : "Tape coverage \(Int((c * 100).rounded()))% of today's option volume")
                     .sType(SType(size: 13, weight: c < 0.5 ? 600 : 500, line: 18, tracking: 0))
-                    .foregroundStyle(c < 0.5 ? S.orangeDeep : S.muted)
+                    .foregroundStyle(S.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if key == "all", let r = v.rolloff {
@@ -218,13 +218,13 @@ struct GammaPage: View {
                 }
                 Toggle(isOn: $compare) {
                     Text("Compare with 1 week ago").sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                }.tint(S.green)
+                }.tint(SF.fill)   // focus §2.4: a switch that is on is grey
                 Toggle(isOn: $trades) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Show your trades").sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
                         Text(GammaText.tradesLine(legs)).sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)
                     }
-                }.tint(S.green)
+                }.tint(SF.fill)
                 if let p = v.priced {
                     Text("Priced move by \(PWays.weekday(p.exp)) ±\(F.trim(p.sd1Pct))%, lighter to ±\(F.trim(p.sd1Pct * 1.5))% (1.5 SD)")
                         .sType(SType(size: 12, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.muted)

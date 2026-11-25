@@ -29,7 +29,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     return () => { live = false; sub.subscription.unsubscribe(); };
   }, []);
 
-  if (state === 'loading') return <div style={{ minHeight: '100vh', background: '#000000' }} aria-busy="true" />;
+  if (state === 'loading') return <div style={{ minHeight: '100vh', background: '#171717' }} aria-busy="true" />;
   if (state === 'anon') return <Navigate to="/" replace />;
   if (state === 'denied') return <Navigate to="/?denied=1" replace />;
   return <>{children}</>;

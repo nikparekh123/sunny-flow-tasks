@@ -95,6 +95,8 @@ function YourPosition({ card, cx }: { card: J; cx: Ctx }) {
   const head = clean(card.subtitle ?? m.subtitle), fri = byNextFriday(head);
   const rows: Row[] = (m.rows ?? []).map((r: J) => ({
     k: r.id, l: clean(r.name), s: bm(cx, fri(clean(r.line))), sc: col(r.lineColor, C.ink2), v: clean(r.right), c: col(r.rightColor),
+    // A name past its best by Friday, and its short delta, keep a red dot (handoff 2026-11-25-focus §2.3).
+    sd: r.lineColor === 'red' ? 'r' : undefined, vd: r.rightColor === 'red' ? 'r' : undefined,
     go: () => navigate('/positions/' + r.id), aria: `${clean(r.name)}, ${fri(clean(r.line))}, ${clean(r.right)}. Opens Positions`,
   }));
   const short = m.shortAt != null && isFinite(+m.shortAt) ? ` · makes the most at ↑${(+m.shortAt).toFixed(1)}%` : '';

@@ -8,7 +8,8 @@
 //  every range at once (a year of closes with the 50 and 200-day averages, this week's line every 15 minutes, what
 //  is held, the week's walls, the saved research), and the card draws it and writes the sentence under it from the
 //  same figures the answer was written from. The price line and today's dot are green or red by the move over the
-//  range, as the number in the header. Values never move the scale: past an edge they pin to it with an arrow.
+//  range; the number in the header is ink with its + or − (focus, 25 Nov 2026). Values never move the scale: past an
+//  edge they pin to it with an arrow.
 //
 
 import SwiftUI
@@ -49,12 +50,14 @@ struct SXChart: Decodable, Equatable {
 // MARK: - Colours (block 29)
 
 extension SX {
-    /// Research: fair value and the analysts' target.
-    static let research = S.dyn(0x6941C6, 0xB69CFF)
+    /// Research: fair value and the analysts' target. A chart level, so the focus look's level greys (the purple is
+    /// gone with the old palette): the line #AAAAAA, its words #C8C8C8.
+    static let research = SF.levelLine
+    static let researchWord = SF.levelLabel
     /// The days left in the week, and the range control's track.
-    static let left = S.dynA(0x1D1D1F, 0.045, 0xFFFFFF, 0.06)
-    static let segTrack = S.dynA(0x767680, 0.12, 0x767680, 0.24)
-    static let segThumb = S.dynA(0xFFFFFF, 0.88, 0xFFFFFF, 0.20)
+    static let left = S.dynA(0x212121, 0.045, 0xFAFAFA, 0.06)
+    static let segTrack = S.dynA(0x808080, 0.12, 0x808080, 0.24)
+    static let segThumb = S.dynA(0xFAFAFA, 0.88, 0xFAFAFA, 0.20)
 }
 
 // MARK: - The card
@@ -116,8 +119,8 @@ struct SXChartCard: View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(String(format: "$%.2f", p.c.last ?? p.px))
                 .sx(SXType(size: 30, line: 34, weight: .bold, style: .title1, tracking: -0.025)).foregroundStyle(SX.ink)
-            Text(SXC.pc(move) + " " + Self.over[rg]!)
-                .sx(.question).foregroundStyle(move < 0 ? SX.down : SX.up)
+            Text(SX.signed(move, SXC.pc(move)) + " " + Self.over[rg]!)
+                .sx(.question).foregroundStyle(SX.ink)
         }
         .accessibilityElement(children: .combine)
     }
@@ -176,8 +179,10 @@ struct SXChartCard: View {
     private func foot(_ lines: [[SXChartBuild.Run]]) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(Array(lines.enumerated()), id: \.offset) { _, runs in
+                // A run that is a warning (the price through a sold strike) keeps the red dot before it.
                 runs.enumerated().reduce(Text("")) { t, e in
-                    t + Text((e.offset > 0 ? " " : "") + e.element.t).foregroundColor(e.element.c).fontWeight(e.element.w)
+                    t + Text(e.offset > 0 ? " " : "") + (e.element.dot.map { SF.dot($0) } ?? Text(""))
+                        + Text(e.element.t).foregroundColor(e.element.c).fontWeight(SX.focus(e.element.w, 15))
                 }
                 .sx(SXType(size: 15, line: 21, weight: .medium, style: .subheadline, tracking: 0))
                 .fixedSize(horizontal: false, vertical: true)
@@ -365,7 +370,7 @@ enum SXC {
 
 /// The reference's simWeek and simTrend, line for line: one range's marks, labels, axis and sentence.
 struct SXChartBuild {
-    struct Run { let t: String; let c: Color; let w: Font.Weight }
+    struct Run { let t: String; let c: Color; let w: Font.Weight; var dot: SF.Dot? = nil }
     let p: SXChart, rg: String, on: (String) -> Bool
 
     var out: SXChartOut {
@@ -442,17 +447,18 @@ struct SXChartBuild {
         if pos, !p.sold.isEmpty, let cap = p.cap {
             if cap.pct >= 0 {
                 let tag = cap.tag ?? "on pace"
-                o.foot.append([Run(t: "\(cap.pct)% captured", c: SX.ink, w: .bold), Run(t: "· " + tag, c: tag == "behind pace" ? SX.thin : SX.up, w: .semibold)])
+                // Focus: the words are ink; on pace, behind pace say it themselves.
+                o.foot.append([Run(t: "\(cap.pct)% captured", c: SX.ink, w: .bold), Run(t: "· " + tag, c: SX.ink, w: .semibold)])
             } else if let s = p.sold.max(by: { abs(px - $0.k) > abs(px - $1.k) }) {
                 // Worth more than sold: how far through the strike the price sits (not in the design, 30 Oct).
-                o.foot.append([Run(t: SXC.pc(abs(px / s.k - 1)) + (s.cp == "c" ? " over" : " under") + " your \(SXC.k(s.k)) " + (s.cp == "c" ? "calls" : "puts"), c: SX.down, w: .bold)])
+                o.foot.append([Run(t: SXC.pc(abs(px / s.k - 1)) + (s.cp == "c" ? " over" : " under") + " your \(SXC.k(s.k)) " + (s.cp == "c" ? "calls" : "puts"), c: SX.ink, w: .bold, dot: .danger)])
             }
         } else if let near = sold.map({ (s: $0, d: $0.cp == "c" ? ($0.k - px) / px : (px - $0.k) / px) }).min(by: { $0.d < $1.d }) {
             // Nothing left this week (a Friday after the sale): the nearest sold strike, as the book's row reads it.
             let nm = SXC.k(near.s.k) + (near.s.cp == "c" ? " calls" : " puts")
             o.foot.append([Run(t: near.d < 0 ? (near.s.cp == "c" ? "Above your " : "Below your ") + nm
                                 : SXC.pc(near.d) + (near.s.cp == "c" ? " under your " : " over your ") + nm,
-                               c: near.d < 0 ? SX.down : near.d < 0.015 ? SX.thin : SX.ink, w: .bold)])
+                               c: SX.ink, w: .bold, dot: near.d < 0 ? .danger : nil)])
         } else if !W.isEmpty {
             let ce = W.first { $0.lb == "Ceiling" }, fl = W.first { $0.lb == "Floor" }
             let t = ce.map { px > $0.k } == true ? "Above the Ceiling" : fl.map { px < $0.k } == true ? "Below the Floor"
@@ -483,9 +489,9 @@ struct SXChartBuild {
             let col = ["LEAPS": SX.ink, "Hedge call": SX.call, "Hedge put": SX.put, "Hedge": SX.call, "Insurance": SX.put]
             if let k = p.leapsK {
                 o.fills.append(.init(pts: cs.enumerated().map { CGPoint(x: XI($0.offset), y: Y(max($0.element, k))) }
-                    + [CGPoint(x: xe, y: Y(k)), CGPoint(x: 0, y: Y(k))], c: SX.upTint))
+                    + [CGPoint(x: xe, y: Y(k)), CGPoint(x: 0, y: Y(k))], c: SX.areaTint))
                 foot.append([Run(t: "LEAPS", c: SX.muted, w: .medium),
-                             Run(t: "\(Int(((px / k - 1) * 100).rounded()))% in the money", c: px > k ? SX.up : SX.down, w: .bold)])
+                             Run(t: "\(Int(((px / k - 1) * 100).rounded()))% in the money", c: SX.ink, w: .bold)])
             }
             for l in p.legs {
                 let c = col[l.g] ?? SX.ink
@@ -511,23 +517,23 @@ struct SXChartBuild {
             }
             let r = p.rsi ?? 50, hot = r > 70 || r < 30, last = ma.last.flatMap { $0 } ?? px
             foot.insert([Run(t: (px >= last ? "Above" : "Below") + " its \(mk)-day" + (xm.map { " since " + $0.d } ?? ""), c: SX.ink, w: .bold),
-                         Run(t: "· RSI \(Int(r.rounded())), " + (r > 70 ? "overbought" : r < 30 ? "oversold" : "neutral"), c: hot ? SX.thin : SX.muted, w: .medium)], at: 0)
+                         Run(t: "· RSI \(Int(r.rounded())), " + (r > 70 ? "overbought" : r < 30 ? "oversold" : "neutral"), c: hot ? SX.ink : SX.muted, w: .medium)], at: 0)
         }
         if val, let res = p.res {
             func lvl(_ v: Double, _ t: String, _ dash: [CGFloat]) {
                 if v > sc.hi || v < sc.lo {
                     let up = v > sc.hi
-                    labs.append(.init(t: (up ? "↑ " : "↓ ") + t, y: up ? 15 : H - 1, c: SX.research, align: .leading))
+                    labs.append(.init(t: (up ? "↑ " : "↓ ") + t, y: up ? 15 : H - 1, c: SX.researchWord, align: .leading))
                 } else {
                     o.lines.append(.init(pts: [CGPoint(x: 0, y: Y(v)), CGPoint(x: xe, y: Y(v))], c: SX.research, w: 1.5, dash: dash))
-                    labs.append(.init(t: t, y: Y(v) - 1, c: SX.research, align: .leading))
+                    labs.append(.init(t: t, y: Y(v) - 1, c: SX.researchWord, align: .leading))
                 }
             }
             lvl(res.an, "Analysts " + String(format: "%.2f", res.an), [5, 4])
             lvl(res.fv, "Fair value " + String(format: "%.2f", res.fv), [])
-            let tone = { (v: Double) in v >= px ? SX.up : SX.down }
-            foot.insert([Run(t: "Analysts", c: SX.muted, w: .medium), Run(t: dist(res.an), c: tone(res.an), w: .bold),
-                         Run(t: "· fair value", c: SX.muted, w: .medium), Run(t: dist(res.fv), c: tone(res.fv), w: .bold)], at: 0)
+            // Focus: "12% above" says the side in words; ink, no colour.
+            foot.insert([Run(t: "Analysts", c: SX.muted, w: .medium), Run(t: dist(res.an), c: SX.ink, w: .bold),
+                         Run(t: "· fair value", c: SX.muted, w: .medium), Run(t: dist(res.fv), c: SX.ink, w: .bold)], at: 0)
         }
         o.lines.append(.init(pts: ptsC, c: SX.ink, w: 2))
         o.dots.append(.init(x: xe, y: Y(px), s: 9, c: SX.ink))

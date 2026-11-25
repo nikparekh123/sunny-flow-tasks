@@ -1,4 +1,4 @@
-// The frame every signed-in page sits in: the page background and glow, the shared SVG gradients, the fixed header,
+// The frame every signed-in page sits in: the page background (flat, no glow), the shared SVG gradients, the fixed header,
 // and the Time value sheet on top when it is open. It also reads every page's code ahead, and keeps the scroll:
 // a new page opens at its top, Back returns to where that page was left, and a name switch inside a page stays put.
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef } from 'react';
@@ -55,11 +55,12 @@ export default function WebLayout() {
     <WebStateProvider>
       <div className="sw">
         <div className="sw-ambient" aria-hidden="true" />
-        {/* The payoff fills every chart shares (README "Payoff fills"). */}
+        {/* The payoff fills every chart shares (README "Payoff fills"): large fills, so neutral grey #707070 at the
+            same opacities (handoff 2026-11-25-focus §2.4); the lines over them keep their green and red. */}
         <svg width="0" height="0" aria-hidden="true" style={{ position: 'absolute' }}>
           <defs>
-            <linearGradient id="sunGU" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#65C466" stopOpacity=".42" /><stop offset="1" stopColor="#65C466" stopOpacity=".02" /></linearGradient>
-            <linearGradient id="sunGD" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#FF6961" stopOpacity=".02" /><stop offset="1" stopColor="#FF6961" stopOpacity=".42" /></linearGradient>
+            <linearGradient id="sunGU" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#707070" stopOpacity=".42" /><stop offset="1" stopColor="#707070" stopOpacity=".02" /></linearGradient>
+            <linearGradient id="sunGD" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#707070" stopOpacity=".02" /><stop offset="1" stopColor="#707070" stopOpacity=".42" /></linearGradient>
           </defs>
         </svg>
         <Header />

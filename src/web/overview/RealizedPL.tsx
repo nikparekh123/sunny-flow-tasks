@@ -2,17 +2,18 @@
 // year with each account's part; By month as vertical bars stacked by account (Sunny solid green, Nicolay the lighter
 // green; bar 62% of its column, at most 48 px, radius 6 6 3 3, chart 132 tall, scale the largest month × 1.02),
 // the total above each bar and the month under it, a dashed least-squares trend through the totals (the server's
-// fit), a tap reads one month. A month that lost money draws down from the baseline in red tones, never a minus
-// sign. Dividends sit on their own line, never added in.
+// fit), a tap reads one month. A month that lost money draws down from the baseline in red tones. The bars keep their
+// green and red (Nik, 25 Nov 2026); every figure in words is neutral with its sign, + made, − lost (handoff
+// 2026-11-25-focus §2.1, §2.2). Dividends sit on their own line, never added in.
 import { useState } from 'react';
-import { C, arrow, money } from '../lib/format';
+import { C, arrow, money, signBy, wordOf } from '../lib/format';
 import { useWeb } from '../lib/state';
 import { H2, LINE, cl } from './ui';
 import { dayLabel, dom, monthDay, type Month, type Together } from './together';
 
 const H = 132;
 /** Each account's bar colour: the first solid, the next lighter; green made, red lost. */
-const tint = (i: number, v: number) => (v >= 0 ? (i ? 'rgba(101,196,102,.42)' : '#65C466') : (i ? 'rgba(255,105,97,.42)' : '#FF6961'));
+const tint = (i: number, v: number) => (v >= 0 ? (i ? 'rgba(76,187,108,.42)' : '#4CBB6C') : (i ? 'rgba(232,33,39,.42)' : '#E82127'));
 
 export function RealizedPL({ t }: { t: Together }) {
   const { mask } = useWeb();
@@ -75,9 +76,9 @@ export function RealizedPL({ t }: { t: Together }) {
         return (
           <div key={k} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: '2px 12px', alignItems: 'center', minHeight: 60, padding: '8px 0', borderTop: LINE }}>
             <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 500 }}>{l}</span>
-            <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 700, color: cl(tot), textAlign: 'right' }}>{mask(money(tot))}</span>
+            <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 500, color: wordOf(cl(tot), 17), textAlign: 'right' }}>{signBy(cl(tot), mask(money(tot)))}</span>
             <span style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: '0 12px', fontSize: 12, lineHeight: '16px', fontWeight: 500, color: C.ink2 }}>
-              {parts(per).map((p) => <span key={p.nm}>{p.nm} <span style={{ fontWeight: 600, color: cl(p.v) }}>{mask(money(p.v))}</span></span>)}
+              {parts(per).map((p) => <span key={p.nm}>{p.nm} <span style={{ fontWeight: 400, color: wordOf(cl(p.v), 12) }}>{signBy(cl(p.v), mask(money(p.v)))}</span></span>)}
             </span>
           </div>
         );
@@ -87,7 +88,7 @@ export function RealizedPL({ t }: { t: Together }) {
         <div role="group" aria-label={mask(`Realized P&L by month, both accounts.${tr ? ` Trend ${tr.slope < 0 ? 'down' : 'up'} ${money(tr.slope)} a month.` : ''} Tap a month for each account.`)}
           style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '14px 0 6px', borderTop: LINE }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px 12px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600 }}>By month</span>
+            <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500 }}>By month</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 12, lineHeight: '16px', fontWeight: 500, color: C.ink2 }}>
               {names.map((nm, i) => (
                 <span key={nm} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -105,7 +106,7 @@ export function RealizedPL({ t }: { t: Together }) {
           <div aria-hidden="true" style={{ display: 'grid', gridTemplateColumns: `repeat(${nM},minmax(0,1fr))`, marginBottom: -4 }}>
             {months.map((m) => {
               const on = m.m === sel.m;
-              return <span key={m.m} style={{ textAlign: 'center', fontSize: 12, lineHeight: '16px', fontWeight: on ? 700 : 500, color: on ? cl(m.total) : C.ink2, whiteSpace: 'nowrap' }}>{mask(money(m.total))}</span>;
+              return <span key={m.m} style={{ textAlign: 'center', fontSize: 12, lineHeight: '16px', fontWeight: 500, color: on ? C.ink : C.ink2, whiteSpace: 'nowrap' }}>{signBy(cl(m.total), mask(money(m.total)))}</span>;
             })}
           </div>
 
@@ -149,7 +150,7 @@ export function RealizedPL({ t }: { t: Together }) {
             {months.map((m) => {
               const on = m.m === sel.m;
               return (
-                <span key={m.m} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: 12, lineHeight: '16px', fontWeight: on ? 700 : 500, color: on ? C.ink : C.ink2 }}>
+                <span key={m.m} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', fontSize: 12, lineHeight: '16px', fontWeight: 500, color: on ? C.ink : C.ink2 }}>
                   {m.s}
                   {m.part && <span style={{ fontSize: 11, lineHeight: '14px', fontWeight: 500, color: C.ink2 }}>to {dom(t.today)}</span>}
                 </span>
@@ -158,23 +159,23 @@ export function RealizedPL({ t }: { t: Together }) {
           </div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', gap: '4px 12px', paddingTop: 10, borderTop: LINE }}>
-            <span style={{ fontSize: 14, lineHeight: '20px', fontWeight: 600, whiteSpace: 'nowrap' }}>
-              {lab(sel)} <span style={{ color: cl(sel.total) }}>{mask(money(sel.total))}</span>
+            <span style={{ fontSize: 14, lineHeight: '20px', fontWeight: 500, whiteSpace: 'nowrap' }}>
+              {lab(sel)} <span style={{ color: wordOf(cl(sel.total), 14) }}>{signBy(cl(sel.total), mask(money(sel.total)))}</span>
             </span>
             <span style={{ display: 'flex', flexWrap: 'wrap', gap: '0 12px', fontSize: 13, lineHeight: '18px', fontWeight: 500, color: C.ink2, whiteSpace: 'nowrap' }}>
               {names.map((nm, i) => {
                 const v = sel.per?.[i];
                 return (
                   <span key={nm}>{nm} {v == null
-                    ? <span style={{ fontWeight: 600, color: C.ink2 }}>not yet</span>
-                    : <span style={{ fontWeight: 600, color: cl(v) }}>{mask(money(v))}</span>}</span>
+                    ? <span style={{ fontWeight: 400, color: C.ink2 }}>not yet</span>
+                    : <span style={{ fontWeight: 400, color: wordOf(cl(v), 13) }}>{signBy(cl(v), mask(money(v)))}</span>}</span>
                 );
               })}
             </span>
           </div>
           {tr && (
             <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 500, color: C.ink2, textWrap: 'pretty' } as React.CSSProperties}>
-              <span style={{ fontWeight: 600, color: cl(tr.slope) }}>{mask(`Trend ${arrow(tr.slope)} ${money(tr.slope)} a month`)}</span>{trWords}
+              <span style={{ fontWeight: 400, color: wordOf(cl(tr.slope), 13) }}>{mask(`Trend ${arrow(tr.slope)} ${money(tr.slope)} a month`)}</span>{trWords}
             </span>
           )}
         </div>

@@ -59,7 +59,7 @@ export interface Tile {
 }
 /** Whole K and M, no decimals (Nik, 25 Nov 2026). */
 const m0 = (v: number) => { const a = Math.abs(v); return a >= 999_500 ? `$${Math.round(a / 1e6)}M` : a >= 999.5 ? `$${Math.round(a / 1e3)}K` : `$${Math.round(a)}`; };
-export const RING: Record<St, string> = { itm: `inset 0 0 0 1.5px ${RED}`, act: 'inset 0 0 0 1px rgba(101,196,102,.65)', run: 'inset 0 0 0 1px rgba(255,255,255,.06)' };
+export const RING: Record<St, string> = { itm: `inset 0 0 0 1.5px ${RED}`, act: 'inset 0 0 0 1px rgba(76,187,108,.65)', run: 'inset 0 0 0 1px rgba(255,255,255,.06)' };
 
 /** "Roll to Dec 7 157.5 · 7.50"; no strike (and so no premium) when the server has none for that day. */
 const rollTo = (nx: Next | null) => (nx ? `Roll to ${nx.exL}${nx.K != null ? ` ${fk(nx.K)}${nx.pr != null ? ` · ${f2(nx.pr)}` : ''}` : ''}` : 'Roll');
@@ -74,8 +74,9 @@ const rollWhy = (r: Rung) => {
   return g.join(' · ');
 };
 
-/** One rung (SunnyIncomeCal leg): the big % kept (grey running, green ready to roll, red in the money or at a
-    loss), the action only when it needs you, the why only when there is room (Week). */
+/** One rung (SunnyIncomeCal leg): the big % kept (`bc` grey running, green ready to roll, red in the money or at a
+    loss: on the page the ring carries the colour and the words are ink or grey, handoff 2026-11-25-focus §2), the
+    action only when it needs you, the why only when there is room (Week). */
 export function tileOf(n: IncName, r: Rung, why: boolean): Tile {
   const st: St = r.st === 'itm' ? 'itm' : r.st === 'roll' ? 'act' : 'run';
   const kp = r.kp ?? 0, lo = r.kp != null && r.kp < 0, bc = st === 'itm' || lo ? RED : st === 'act' ? GRN : QT;

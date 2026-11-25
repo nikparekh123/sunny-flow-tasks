@@ -9,6 +9,9 @@
 //  icon compares Sold, Bought, Shares and Dividends as P&L lines from $0; a
 //  legend name singles one out, and Sold and Bought split into Calls · Puts.
 //  × on the title pill steps back one level. The eye blurs every number.
+//  Focus (handoff 2026-11-25): every figure is ink (grey under 15 pt) and a gain or loss that was green or red carries
+//  + or − instead (none while the eye hides the numbers); the line and its dot keep green and red (marks); a chip that
+//  is on is the chip-on grey.
 //
 //  Geometry as the design file draws it: the line box is 148 tall, the line
 //  sits between 26 from the top and 8 from the bottom with 4% headroom, 240
@@ -265,7 +268,7 @@ struct AccountChart: View {
         let up = c >= p, side = up ? calls : puts
         let names = side.sorted { $0.value > $1.value }.map(\.key)
         let who = names.count <= 2 ? names.joined(separator: ", ") : "Stocks"
-        return up ? ("\(who) up", S.orangeDeep) : ("\(who) down", S.red)
+        return up ? ("\(who) up", SF.word(13)) : ("\(who) down", SF.word(13))   // a word: neutral (focus, 25 Nov)
     }
 
     // MARK: Where we are
@@ -299,10 +302,11 @@ struct AccountChart: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 10) {
                 let v = bigValue
-                SNumber(value: v, format: { F.money($0) })
+                // Focus (25 Nov): ink; a P&L below zero carries − where it was red (none under the eye's mask).
+                SNumber(value: v, format: { [pnl, hidden] x in pnl && !hidden && x.rounded() < 0 ? "\u{2212}" + F.money(x) : F.money(x) })
                     .transaction(still)
                     .sType(.largeNumber)
-                    .foregroundStyle(pnl ? S.lossInk(v) : S.ink)
+                    .foregroundStyle(S.ink)
                     .lineLimit(1).minimumScaleFactor(0.5)
                     .blur(radius: hidden ? 9 : 0)
                     .accessibilityLabel(hidden ? "hidden" : pnl ? Self.signedDollars(v) : Self.dollars(v))
@@ -365,9 +369,10 @@ struct AccountChart: View {
                 if pnl {
                     let cap = m.capital(single, i)
                     let roc = cap > 0 ? bigValue / cap * 100 : 0
-                    Text(F.pct(roc, places: 1))
+                    // Focus: ink with + or − (it was green or red); no sign under the eye's mask.
+                    Text(hidden ? F.pct(roc, places: 1) : SF.signed((roc * 10).rounded(), F.pct(roc, places: 1)))
                         .sType(Self.changeValue)
-                        .foregroundStyle(roc < 0 ? S.red : S.green)
+                        .foregroundStyle(S.ink)
                         .contentTransition(reduce ? .identity : .numericText(value: roc))
                         .blur(radius: hidden ? 9 : 0)
                     Text(scrubbing ? "on capital" : "on capital · \(range.words)")
@@ -375,9 +380,10 @@ struct AccountChart: View {
                 } else {
                     let first = m.nav(s), d = bigValue - first - m.deposited(s, i)
                     let p = Self.pctOn(d, first, m.deposited(s, i))
-                    Text("\(SampleEngine.fK(d)) · \(F.pct(p, places: 1))")
+                    // "−$2.6K · 2.7%": ink, the sign on the dollars (focus; it was green or red); none under the mask.
+                    Text(hidden ? "\(SampleEngine.fK(d)) · \(F.pct(p, places: 1))" : SF.signed(d.rounded(), "\(SampleEngine.fK(d)) · \(F.pct(p, places: 1))"))
                         .sType(Self.changeValue)
-                        .foregroundStyle(S.signed(d.rounded()))
+                        .foregroundStyle(S.ink)
                         .contentTransition(reduce ? .identity : .numericText(value: d))
                         .blur(radius: hidden ? 9 : 0)
                     if !scrubbing {
@@ -687,10 +693,10 @@ struct AccountChart: View {
                     toMorph { finger = nil; compare.toggle(); single = nil; half = .both }
                 } label: {
                     SFilterIcon()
-                        .stroke(compare ? S.chipOnInk : S.muted, style: StrokeStyle(lineWidth: 2.2 * 16 / 24, lineCap: .round))
+                        .stroke(compare ? SF.chipOnInk : S.muted, style: StrokeStyle(lineWidth: 2.2 * 16 / 24, lineCap: .round))
                         .frame(width: 16, height: 16)
                         .frame(width: 36, height: 28)
-                        .background(Capsule().fill(compare ? S.chipOn : .clear))
+                        .background(Capsule().fill(compare ? SF.chipOn : .clear))   // on: the chip-on grey (focus §2.6)
                         .contentShape(Rectangle().inset(by: -8))
                 }
                 .buttonStyle(SPressStyle())
@@ -740,7 +746,8 @@ struct AccountChart: View {
         let label: String
         var value: Double = 0
         var text: String? = nil
-        var color: Color = S.ink
+        /// A P&L figure: below zero it shows − (focus, 25 Nov: it was red; the figure itself is ink).
+        var loss = false
         /// Time value only, live (not while dragging): the word and its colour.
         var read: (word: String, color: Color)? = nil
     }
@@ -762,14 +769,14 @@ struct AccountChart: View {
             // Every sold leg, calls and puts, every expiry (Nik, 18 Nov 2026: not this week's): the server's timeValue.tvLeft.
             let allTv = home.brief?["timeValue"]["tvLeft"].double
             let tv = lastLive ? (allTv ?? home.account.timeValueSold ?? m.c.timeValue[i] ?? 0) : (m.c.timeValue[i] ?? 0)
-            return [Stat(label: "Realized", value: r, color: S.lossInk(r)),
-                    o.map { Stat(label: "Open P&L", value: $0, color: S.lossInk($0)) } ?? Stat(label: "Open P&L", text: "-"),
-                    Stat(label: "Time value", value: tv, color: S.lossInk(tv))]
+            return [Stat(label: "Realized", value: r, loss: true),
+                    o.map { Stat(label: "Open P&L", value: $0, loss: true) } ?? Stat(label: "Open P&L", text: "-"),
+                    Stat(label: "Time value", value: tv, loss: true)]
         case .shares?:
             let r = m.realized(.shares, .both, i) - m.realized(.shares, .both, s)
             let o = m.open(.shares, .both, i) ?? m.unreal(.shares, .both, i)   // the same for shares: value less cost
-            return [Stat(label: "Realized", value: r, color: S.lossInk(r)),
-                    Stat(label: "Open P&L", value: o, color: S.lossInk(o)),
+            return [Stat(label: "Realized", value: r, loss: true),
+                    Stat(label: "Open P&L", value: o, loss: true),
                     Stat(label: "Held", value: m.c.sharesValue[i] ?? 0)]
         case .dividends?:
             let paid = (m.c.dividendsCum[i] ?? 0) - (m.c.dividendsCum[s] ?? 0)
@@ -780,9 +787,9 @@ struct AccountChart: View {
         case let g?:
             let r = m.realized(g, half, i) - m.realized(g, half, s)
             let o = m.open(g, half, i), tv = m.tv(g, half, i)
-            return [Stat(label: "Realized", value: r, color: S.lossInk(r)),
-                    o.map { Stat(label: "Open P&L", value: $0, color: S.lossInk($0)) } ?? Stat(label: "Open P&L", text: "-"),
-                    Stat(label: "Time value", value: tv, color: S.lossInk(tv))]
+            return [Stat(label: "Realized", value: r, loss: true),
+                    o.map { Stat(label: "Open P&L", value: $0, loss: true) } ?? Stat(label: "Open P&L", text: "-"),
+                    Stat(label: "Time value", value: tv, loss: true)]
         }
     }
 
@@ -793,12 +800,13 @@ struct AccountChart: View {
                     Text(t)
                 } else {
                     // Money in K and M under the chart (Nov 8, the design's fmt): $4.9K, $176K; only the account value is exact.
-                    SNumber(value: st.value, format: { SampleEngine.fK($0) }, countUp: false)
+                    SNumber(value: st.value, format: { [loss = st.loss, hidden] x in
+                        loss && !hidden && x <= -0.5 ? "\u{2212}" + SampleEngine.fK(x) : SampleEngine.fK(x) }, countUp: false)
                         .transaction(still)
                 }
             }
             .sType(SType(size: 20, weight: 700, line: 24, tracking: -0.01))
-            .foregroundStyle(st.color)
+            .foregroundStyle(S.ink)
             .lineLimit(1)
             .blur(radius: hidden ? 9 : 0)
             // The read rolls in over "Time value" for a few seconds, then back.
@@ -851,7 +859,9 @@ struct AccountChart: View {
             let fees = (m.c.commissionCum[i] ?? 0) - (m.c.commissionCum[s] ?? 0)
             return [Minor(label: "Margin", text: SampleEngine.fK(margin)),
                     Minor(label: "Interest", text: SampleEngine.fK(interest)),
-                    Minor(label: "Fees", text: SampleEngine.fK(fees), color: fees.rounded() < 0 ? S.red : S.ink)]
+                    // Fees below zero: grey with − (focus: 13 pt was red); none under the eye's mask.
+                    Minor(label: "Fees", text: fees.rounded() < 0 && !hidden ? "\u{2212}" + SampleEngine.fK(fees) : SampleEngine.fK(fees),
+                          color: fees.rounded() < 0 ? SF.word(13) : S.ink)]
         case .shares?:
             return [Minor(label: "Tickers", text: "\(m.c.sharesTickers[safe: i] ?? 0)")]
         case .dividends?:
@@ -882,9 +892,9 @@ struct AccountChart: View {
                 Button { toMorph { finger = nil; half = h } } label: {
                     Text(h.rawValue)
                         .sType(SType(size: 11, weight: 600, line: 11, tracking: 0), tabular: false)
-                        .foregroundStyle(half == h ? S.chipOnInk : S.ink)
+                        .foregroundStyle(half == h ? SF.chipOnInk : S.ink)
                         .padding(.horizontal, 10).frame(height: 20)
-                        .background(Capsule().fill(half == h ? S.chipOn : .clear))
+                        .background(Capsule().fill(half == h ? SF.chipOn : .clear))   // three chips: on is chip-on grey (§2.6)
                         .contentShape(Rectangle().inset(by: -10))
                 }
                 .buttonStyle(SPressStyle())
@@ -913,8 +923,9 @@ struct AccountChart: View {
                                 .foregroundStyle(S.ink)
                         }
                         Spacer(minLength: 0)
-                        Text(SampleEngine.fK(v)).sType(SType(size: 13, weight: 700, line: 18, tracking: 0))
-                            .foregroundStyle(S.lossInk(v))
+                        // A loss: grey with − (focus: it was red at 13 pt); none under the eye's mask.
+                        Text(v.rounded() < 0 && !hidden ? "\u{2212}" + SampleEngine.fK(v) : SampleEngine.fK(v)).sType(SType(size: 13, weight: 700, line: 18, tracking: 0))
+                            .foregroundStyle(v.rounded() < 0 ? SF.word(13) : S.ink)
                             .contentTransition(reduce ? .identity : .numericText(value: v))
                             .blur(radius: hidden ? 9 : 0)
                     }

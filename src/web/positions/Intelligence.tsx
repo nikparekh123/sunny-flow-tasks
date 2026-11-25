@@ -4,13 +4,15 @@
 //   the read (D4: only the sale being picked), then the lanes on one price scale.
 // Data: the name's sunny-sd reply (useSd), the book's legs for Net Δ and Try in What if (Pricer, the What if store).
 // Escape closes it. No em dashes in any words here.
+// The focus look (handoff 2026-11-25-focus §2): no coloured words (ink at 15 px and up, grey under), the cash carries
+// its +, bold only at 20 px and up; the touched-today yellow stays on its pill's tint, ring and dot.
 import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
 import { sdColour, stepOf } from '../../../supabase/functions/_shared/positions-engine.ts';
 import { count, money, price } from '../lib/format';
 import { intelModel, ivAtStrike, ladder, rowAt, sdl, useIntelScroll, usePick, type IntelModel, type SdReply } from './intel';
 import { Lanes } from './Lanes';
 import type { ChainW, PLeg, Pricer, Trade } from './model';
-import { Fold, FoldAway, G, GLASS, K, MT, MU, O, SOFT, Segmented, kicker, tnum, useReducedMotion } from './ui';
+import { Fold, FoldAway, GLASS, K, MT, MU, SOFT, Segmented, kicker, sg, tnum, useReducedMotion, wd } from './ui';
 
 export interface IntelProps {
   book: string; t: string; d: SdReply | undefined; busy: boolean; failed: boolean; friday: string; chains: ChainW[];
@@ -48,13 +50,13 @@ export function Intelligence(props: IntelProps) {
         <button type="button" className="bare" onClick={() => setOpen(true)} aria-expanded={false}
           style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '14px 20px', borderRadius: 20, ...GLASS }}>
           <span style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 17, fontWeight: 600 }}>Intelligence</span>
+            <span style={{ fontSize: 17, fontWeight: 500 }}>Intelligence</span>
             <span style={{ fontSize: 13, color: MU }}>The SD calculator, the read and the lanes on one price scale{M ? `, for ${M.e.label}` : ''}</span>
           </span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 'none' }}>
-            {alS && <span style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 999, background: 'rgba(255,214,10,.12)', boxShadow: 'inset 0 0 0 1px rgba(255,214,10,.55)',
-              color: '#FFD60A', fontSize: 13, lineHeight: '18px', fontWeight: 600, whiteSpace: 'nowrap' }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#FFD60A' }} />{alS}</span>}
-            <span style={{ fontSize: 14, fontWeight: 600 }}>Open</span>
+            {alS && <span style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 999, background: 'rgba(252,192,10,.12)', boxShadow: 'inset 0 0 0 1px rgba(252,192,10,.55)',
+              color: wd(13), fontSize: 13, lineHeight: '18px', fontWeight: 400, whiteSpace: 'nowrap' }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#FCC00A' }} />{alS}</span>}
+            <span style={{ fontSize: 14, fontWeight: 500 }}>Open</span>
           </span>
         </button>
       </FoldAway>
@@ -66,7 +68,7 @@ export function Intelligence(props: IntelProps) {
               <span style={{ fontSize: 14, color: MU }}>{t} · one expiry, three layers</span>
             </span>
             <button type="button" className="bare" onClick={() => setOpen(false)} aria-label="Close Intelligence"
-              style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(118,118,128,.24)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: MT, flex: 'none' }}>✕</button>
+              style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(128,128,128,.24)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: MT, flex: 'none' }}>✕</button>
           </div>
           {M && d ? <Body {...props} d={d} M={M} pick={p} setPick={set} /> : (
             <span style={{ fontSize: 14, color: MU, padding: '12px 0' }} aria-busy={busy}>
@@ -112,32 +114,32 @@ function Body({ t, d, M, pick, setPick, pr, base, off, trades, setSd, mask }: In
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '16px 18px', borderRadius: 18, background: 'rgba(255,255,255,.04)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.08)', ...tnum }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
         <span style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-          <span style={{ fontSize: 17, fontWeight: 600 }}>SD calculator</span>
+          <span style={{ fontSize: 17, fontWeight: 500 }}>SD calculator</span>
           <span style={{ fontSize: 13, color: MU }}>{e.long} · ±{(M.m * 100).toFixed(1)}% priced</span>
         </span>
         <button type="button" className="bare" onClick={() => setPick({ why: !pick.why })} aria-expanded={pick.why} style={{ fontSize: 13, lineHeight: '18px', color: MT }}>
-          Rule for {e.label}: calls {sdl(M.ruleC)}, puts {sdl(M.ruleP)} · <span style={{ fontWeight: 600, color: K }}>{pick.why ? 'Hide' : 'Why'}</span>
+          Rule for {e.label}: calls {sdl(M.ruleC)}, puts {sdl(M.ruleP)} · <span style={{ fontWeight: 400, color: K }}>{pick.why ? 'Hide' : 'Why'}</span>
         </button>
       </div>
       {pick.why && (
         <div role="list" aria-label="Why the rule picks these strikes" style={{ display: 'flex', flexDirection: 'column', borderTop: '1px solid rgba(255,255,255,.08)' }}>
           {e.sig.map((g, i) => (
             <div key={g.key} role="listitem" style={{ display: 'grid', gridTemplateColumns: '24px 130px 170px minmax(0,1fr)', gap: 12, alignItems: 'baseline', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
-              <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 700, color: MU }}>{i + 1}</span>
-              <span style={{ fontSize: 14, lineHeight: '18px', fontWeight: 600 }}>{g.k}</span>
-              <span style={{ fontSize: 14, lineHeight: '18px', color: g.vTone === 'red' ? '#FF6961' : g.vTone === 'green' ? G : g.vTone === 'or' ? O : MT }}>
-                {g.v}{g.tag ? <span style={{ color: g.tagTone === 'or' ? O : MU }}> · {g.tag}</span> : null}
+              <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 400, color: MU }}>{i + 1}</span>
+              <span style={{ fontSize: 14, lineHeight: '18px', fontWeight: 500 }}>{g.k}</span>
+              <span style={{ fontSize: 14, lineHeight: '18px', color: g.vTone === 'ink' ? MT : wd(14) }}>
+                {g.v}{g.tag ? <span style={{ color: MU }}> · {g.tag}</span> : null}
               </span>
               <span style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 14, lineHeight: '18px', color: MT }}>
                 {g.s && <span>{g.s}</span>}
-                {g.fx.map(([kk, tx], j) => <span key={j} style={{ fontWeight: kk === 'n' ? 500 : 600, color: kk === 'n' ? MT : kk === 'x' ? O : K }}>{tx}</span>)}
+                {g.fx.map(([kk, tx], j) => <span key={j} style={{ fontWeight: 500, color: kk === 'n' ? MT : kk === 'x' ? wd(14) : K }}>{tx}</span>)}
               </span>
             </div>
           ))}
           <div style={{ display: 'grid', gridTemplateColumns: '24px 130px minmax(0,1fr)', gap: 12, alignItems: 'baseline', padding: '8px 0' }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: MU }}>{e.sig.length + 1}</span>
-            <span style={{ fontSize: 14, fontWeight: 600 }}>The rule</span>
-            <span style={{ fontSize: 14, fontWeight: 600, color: O }}>Call {sdl(M.ruleC)}, put {sdl(M.ruleP)}: {fmtK(e.sug.C.K)} and {fmtK(e.sug.P.K)}</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: MU }}>{e.sig.length + 1}</span>
+            <span style={{ fontSize: 14, fontWeight: 500 }}>The rule</span>
+            <span style={{ fontSize: 14, fontWeight: 500, color: wd(14) }}>Call {sdl(M.ruleC)}, put {sdl(M.ruleP)}: {fmtK(e.sug.C.K)} and {fmtK(e.sug.P.K)}</span>
           </div>
         </div>
       )}
@@ -154,12 +156,12 @@ function Body({ t, d, M, pick, setPick, pr, base, off, trades, setSd, mask }: In
           <div className="swp-scroll" style={{ display: 'flex', gap: 10, overflowX: 'auto', margin: -2, padding: 2 }}>
             {tiles.map((kk) => {
               const r = rowAt(e, kk, put)!, on = sel != null && Math.abs(sel - kk) < 1e-9, isRule = Math.abs(kk - rule) < 1e-9, pk = r.K / S - 1;
-              const fc = on ? '#000000' : K, sc = on ? '#3A3A3C' : MT, wr = Math.round((1 - r.itm) * 100), lv = levelAt(M, r.K, put), oi = oiText(r.oi);
+              const fc = on ? '#171717' : K, sc = on ? '#383838' : MT, wr = Math.round((1 - r.itm) * 100), lv = levelAt(M, r.K, put), oi = oiText(r.oi);
               return (
                 <button key={kk} type="button" className="bare" aria-pressed={on} onClick={() => setPick(put ? { selP: on ? null : kk } : { selC: on ? null : kk })}
                   aria-label={`${sdl(kk)}, strike ${fmtK(r.K)}, ${(Math.abs(pk) * 100).toFixed(1)}% ${pk >= 0 ? 'above' : 'below'} today, ${wr}% chance it finishes out of the money${oi ? ', open interest ' + oi.replace('OI ', '') : ''}${lv ? ', ' + lv : ''}${isRule ? ', the rule' : ''}`}
-                  style={{ flex: '1 0 124px', display: 'flex', flexDirection: 'column', gap: 6, padding: '14px 16px', borderRadius: 16, background: on ? K : 'rgba(118,118,128,.24)', transition: 'background .2s',
-                    boxShadow: !on && sel == null && isRule ? 'inset 0 0 0 1.5px rgba(245,245,247,.45)' : 'none' }}>
+                  style={{ flex: '1 0 124px', display: 'flex', flexDirection: 'column', gap: 6, padding: '14px 16px', borderRadius: 16, background: on ? K : 'rgba(128,128,128,.24)', transition: 'background .2s',
+                    boxShadow: !on && sel == null && isRule ? 'inset 0 0 0 1.5px rgba(242,242,242,.45)' : 'none' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, lineHeight: '18px', fontWeight: 500, color: sc, whiteSpace: 'nowrap' }}>
                     <span style={{ flex: 'none', width: 8, height: 8, borderRadius: '50%', background: sdColour(Math.max(0.25, Math.abs(kk))) }} />{sdl(kk)}{isRule ? ' · rule' : ''}
                   </span>
@@ -168,9 +170,9 @@ function Body({ t, d, M, pick, setPick, pr, base, off, trades, setSd, mask }: In
                     <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 500, color: sc, whiteSpace: 'nowrap' }}>{pk >= 0 ? '↑' : '↓'}{(Math.abs(pk) * 100).toFixed(1)}%</span>
                   </span>
                   <span style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 8, borderTop: `1px solid ${on ? 'rgba(0,0,0,.12)' : 'rgba(255,255,255,.08)'}` }}>
-                    <span title="Chance it finishes out of the money, from this expiry’s IV" style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600, color: fc, whiteSpace: 'nowrap' }}>{wr}% win</span>
+                    <span title="Chance it finishes out of the money, from this expiry’s IV" style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500, color: fc, whiteSpace: 'nowrap' }}>{wr}% win</span>
                     {oi && <span title="Open interest, contracts" style={{ fontSize: 13, lineHeight: '18px', fontWeight: 500, color: sc, whiteSpace: 'nowrap' }}>{oi}</span>}
-                    {lv && <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 600, color: fc, textWrap: 'balance' } as CSSProperties}>{lv}</span>}
+                    {lv && <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 400, color: fc, textWrap: 'balance' } as CSSProperties}>{lv}</span>}
                   </span>
                 </button>
               );
@@ -179,11 +181,11 @@ function Body({ t, d, M, pick, setPick, pr, base, off, trades, setSd, mask }: In
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>Contracts · {put ? 'puts' : 'calls'}</span>
-          <div style={{ display: 'grid', gridTemplateColumns: '40px minmax(0,1fr) 40px', alignItems: 'center', height: 48, borderRadius: 14, background: 'rgba(118,118,128,.24)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '40px minmax(0,1fr) 40px', alignItems: 'center', height: 48, borderRadius: 14, background: 'rgba(128,128,128,.24)' }}>
             <button type="button" className="bare" onClick={() => setN(n - 1)} aria-label="One fewer" style={{ textAlign: 'center', fontSize: 20, lineHeight: '48px', fontWeight: 500 }}>−</button>
             <input type="text" inputMode="numeric" aria-label={`Contracts, ${put ? 'puts' : 'calls'}`} value={String(n)}
               onChange={(ev) => { const v = ev.target.value.replace(/\D/g, '').slice(0, 3); setN(+v || 0); }}
-              style={{ width: '100%', minWidth: 0, border: 'none', background: 'transparent', color: K, textAlign: 'center', fontSize: 17, fontWeight: 600, outline: 'none' }} />
+              style={{ width: '100%', minWidth: 0, border: 'none', background: 'transparent', color: K, textAlign: 'center', fontSize: 17, fontWeight: 500, outline: 'none' }} />
             <button type="button" className="bare" onClick={() => setN(n + 1)} aria-label="One more" style={{ textAlign: 'center', fontSize: 20, lineHeight: '48px', fontWeight: 500 }}>+</button>
           </div>
         </div>
@@ -191,7 +193,7 @@ function Body({ t, d, M, pick, setPick, pr, base, off, trades, setSd, mask }: In
       {cv && (cv.sold > 0 || cv.capShares + cv.capOtm > 0) && (
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '4px 10px', fontSize: 14, lineHeight: '20px' }}>
           <span style={{ fontSize: 12, color: MU }}>Cover</span>
-          <span style={{ fontWeight: 600, color: cv.uncovered > 0 ? O : G }}>{cv.uncovered > 0 ? `${cv.uncovered} uncovered` : 'Covered'}</span>
+          <span style={{ fontWeight: 500, color: wd(14) }}>{cv.uncovered > 0 ? `${cv.uncovered} uncovered` : 'Covered'}</span>
           <span style={{ color: MT }}>
             {cv.sold} calls sold{cv.open && cv.sale ? ` (${cv.open} open, ${cv.sale} new)` : ''}, {cv.byShares + cv.byOtm} covered · {cv.byShares} from shares + {cv.byOtm} calls bought
           </span>
@@ -199,22 +201,22 @@ function Body({ t, d, M, pick, setPick, pr, base, off, trades, setSd, mask }: In
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 110px 140px auto', gap: 20, alignItems: 'center', paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.08)' }}>
         <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-          <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600 }}>{legs.length ? `Sell ${desc} · ${e.label}` : 'Nothing to sell yet: set a count'}</span>
+          <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500 }}>{legs.length ? `Sell ${desc} · ${e.label}` : 'Nothing to sell yet: set a count'}</span>
           <span style={{ fontSize: 13, lineHeight: '18px', color: MU }}>
             Editing the {put ? 'put' : 'call'} side{legs.length ? ' · ' + legs.map((l) => `${price(l.p)} a ${l.put ? 'put' : 'call'}`).join(', ') : ''}
           </span>
         </span>
         <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
           <span style={{ fontSize: 12, color: MU }}>Cash today</span>
-          <span style={{ fontSize: 17, fontWeight: 600, color: G }}>{mask(money(cash))}</span>
+          <span style={{ fontSize: 17, fontWeight: 500, color: K }}>{sg(cash, mask(money(cash)))}</span>
         </span>
         <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
           <span style={{ fontSize: 12, color: MU }}>Net Δ after</span>
-          <span style={{ fontSize: 17, fontWeight: 600, color: net != null && net < 0 ? O : K, whiteSpace: 'nowrap' }}>{net == null ? '-' : `${net < 0 ? 'Short' : 'Long'} ${count(net)}`}</span>
+          <span style={{ fontSize: 17, fontWeight: 500, color: K, whiteSpace: 'nowrap' }}>{net == null ? '-' : `${net < 0 ? 'Short' : 'Long'} ${count(net)}`}</span>
         </span>
         <button type="button" className="bare" onClick={tryIt} disabled={!legs.length && !tried}
-          style={{ padding: '10px 22px', borderRadius: 999, fontSize: 14, lineHeight: '18px', fontWeight: 600, whiteSpace: 'nowrap', transition: 'background .2s',
-            background: tried ? 'rgba(101,196,102,.18)' : 'rgba(118,118,128,.24)', color: tried ? G : K, opacity: legs.length || tried ? 1 : 0.4 }}>{tried ? 'In What if · Undo' : 'Try in What if'}</button>
+          style={{ padding: '10px 22px', borderRadius: 999, fontSize: 14, lineHeight: '18px', fontWeight: 500, whiteSpace: 'nowrap', transition: 'background .2s',
+            background: tried ? 'rgba(76,187,108,.18)' : 'rgba(128,128,128,.24)', color: tried ? wd(14) : K, opacity: legs.length || tried ? 1 : 0.4 }}>{tried ? 'In What if · Undo' : 'Try in What if'}</button>
       </div>
     </div>
     {M.alerts.length > 0 && (
@@ -223,9 +225,9 @@ function Body({ t, d, M, pick, setPick, pr, base, off, trades, setSd, mask }: In
         {M.alerts.map((a) => {
           const closed = a.s !== 'touch';
           return (
-            <span key={a.k} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 28, padding: '0 12px', borderRadius: 999, fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
-              background: closed ? K : 'rgba(255,214,10,.12)', boxShadow: closed ? 'none' : 'inset 0 0 0 1px rgba(255,214,10,.55)', color: closed ? '#000000' : '#FFD60A' }}>
-              {!closed && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#FFD60A' }} />}{a.text}
+            <span key={a.k} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 28, padding: '0 12px', borderRadius: 999, fontSize: 13, fontWeight: 400, whiteSpace: 'nowrap',
+              background: closed ? K : 'rgba(252,192,10,.12)', boxShadow: closed ? 'none' : 'inset 0 0 0 1px rgba(252,192,10,.55)', color: closed ? '#171717' : wd(13) }}>
+              {!closed && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#FCC00A' }} />}{a.text}
             </span>
           );
         })}
@@ -234,7 +236,7 @@ function Body({ t, d, M, pick, setPick, pr, base, off, trades, setSd, mask }: In
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 27 * 2 + 24, maxWidth: 980 }}>
       <span style={kicker}>The read · {e.long}{M.picked ? '' : ' · the rule’s strikes'}</span>
       <p key={M.read.lead + M.read.rest} className="swp-fade" style={{ margin: 0, fontSize: 19, lineHeight: '27px', letterSpacing: '-.01em', textWrap: 'pretty' }}>
-        <span style={{ fontWeight: 600, color: K }}>{M.read.lead}</span> <span style={{ fontWeight: 400, color: 'rgba(245,245,247,.72)' }}>{M.read.rest}</span>
+        <span style={{ fontWeight: 500, color: K }}>{M.read.lead}</span> <span style={{ fontWeight: 400, color: 'rgba(242,242,242,.72)' }}>{M.read.rest}</span>
       </p>
     </div>
     <Lanes d={d} M={M} t={t} mask={mask} />

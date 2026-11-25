@@ -35,6 +35,44 @@ enum BK {
         default: S.ink
         }
     }
+
+    /// The same role on WORDS (focus, 25 Nov §2.1): text is never red, green, orange or blue. A coloured role goes
+    /// neutral, ink at 15 pt and up and grey under (light: #212121 / #6E6E6E); secondary stays secondary.
+    /// `BK.color` stays for marks only (dots, rings, lines, fills).
+    static func word(_ c: String?, _ size: CGFloat) -> Color {
+        switch c {
+        case "green", "red", "orange", "teal": SF.word(size)
+        case "navy": SF.callsWord   // calls and puts on words: grey (§2.4)
+        case "brown": SF.putsWord
+        case "secondary", "muted": S.secondary
+        default: S.ink
+        }
+    }
+
+    /// A role on a thin chart line (§2.4): calls blue and puts brown go grey, a teal level the level grey; red, green
+    /// and orange lines are marks and keep their colour.
+    static func line(_ c: String?) -> Color {
+        switch c {
+        case "navy": SF.callsWord
+        case "brown": SF.putsWord
+        case "teal": SF.levelLine
+        default: color(c)
+        }
+    }
+
+    /// The sign the colour used to carry (§2.2): a red money figure or percentage starts with −, a green one with +.
+    /// "$13.7K" red → "−$13.7K", "0.4%" green → "+0.4%". A figure that already has a sign or an arrow, a masked
+    /// "$•••" (no sign under the privacy mask: pass the shown, masked string), and words stay as they are.
+    static func signed(_ s: String?, _ c: String?) -> String? {
+        guard let s, c == "red" || c == "green", isFigure(s) else { return s }
+        return SF.signed(c == "red" ? -1 : 1, s)
+    }
+
+    /// "$4.3K", "$12.2K · 10.3%", "0.6%", "12%": a dollar figure, or a bare percentage.
+    static func isFigure(_ s: String) -> Bool {
+        s.range(of: #"^\$\d"#, options: .regularExpression) != nil
+            || s.range(of: #"^\d[\d,]*(\.\d+)?%$"#, options: .regularExpression) != nil
+    }
 }
 
 // MARK: - Spoken words (VoiceOver, Pass 5)
@@ -61,7 +99,7 @@ enum BSay {
         words(BriefSpan.list(v).map(\.t).joined(), privacy: privacy)
     }
 
-    /// A move as the screen colours it: "0.40%" in green speaks "up 0.40%", in red "down 0.40%".
+    /// A move by its colour role: "0.40%" green speaks "up 0.40%", red "down 0.40%" (the screen shows it neutral, focus).
     static func move(_ text: String?, color: String?, signed: Double? = nil) -> String {
         guard let t = text, !t.isEmpty else { return "" }
         if t.contains(where: { "↑↓▲▼".contains($0) }) { return words(t) }
@@ -169,8 +207,9 @@ struct BTriangle: Shape {
     }
 }
 
-/// A move with its triangle, coloured: "▲ 0.40%" green, "▼ 0.18%" red. Content that already carries an arrow
-/// (↑ ↓) is shown as is. The triangle is the design's: 10 × 7.5, 4 before the figure, unless a card says otherwise.
+/// A move with its triangle: "▲ 0.40%", "▼ 0.18%". Content that already carries an arrow (↑ ↓) is shown as is.
+/// The triangle is the design's: 10 × 7.5, 4 before the figure, unless a card says otherwise. Focus (25 Nov §2.1):
+/// the triangle says up or down, so the move and its triangle are neutral (the design's currentColor), no sign.
 struct BMove: View {
     let text: String?
     let color: String?
@@ -196,7 +235,7 @@ struct BMove: View {
                     }
                 }
             }
-            .foregroundStyle(BK.color(color))
+            .foregroundStyle(BK.word(color, type.size))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(BSay.move(t, color: color, signed: signed))
         }
@@ -213,7 +252,7 @@ struct BLogo: View {
             if let t = ticker, let img = UIImage(named: "logo-\(t)") {
                 Image(uiImage: img).resizable().scaledToFit().frame(width: size * 0.74, height: size * 0.74)   // design: center/74%
             } else if let t = ticker {
-                Text(String(t.prefix(4))).font(.inter(size * 0.26, 700)).foregroundStyle(Color(hex: 0x1D1D1F))
+                Text(String(t.prefix(4))).font(.inter(size * 0.26, 700)).foregroundStyle(Color(hex: 0x212121))
             }
         }
         .frame(width: size, height: size)
@@ -224,7 +263,7 @@ struct BLogo: View {
 
 // MARK: - Stats
 
-/// Three stats side by side: the value (heavy, coloured), the label above or the sub under (12/15 secondary).
+/// Three stats side by side: the value (heavy, neutral with its sign), the label above or the sub under (12/15 secondary).
 /// The design's Results grid: 12 apart, 1 between lines, 22/27. Earnings ahead and Thesis check: 10 apart, 20/25.
 struct BStats: View {
     let stats: [JSONValue]
@@ -237,9 +276,10 @@ struct BStats: View {
             ForEach(Array(stats.enumerated()), id: \.offset) { _, s in
                 VStack(alignment: .leading, spacing: 1) {
                     if labelFirst, let l = s["label"].string { Text(l).sType(BK.label, tabular: false).foregroundStyle(S.secondary) }
-                    BriefWords.line(s["value"].string, privacy: privacy)
+                    // Focus: the value is a word (neutral), its red or green now a − or + (VoiceOver keeps "down").
+                    BriefWords.line(BK.signed(BriefWords.plain(s["value"].string, privacy: privacy), s["valueColor"].string), privacy: privacy)
                         .sType(value)
-                        .foregroundStyle(BK.color(s["valueColor"].string))
+                        .foregroundStyle(BK.word(s["valueColor"].string, value.size))
                         .lineLimit(1).minimumScaleFactor(0.7)
                     if let sub = s["sub"].string { BriefWords.line(sub, privacy: privacy).sType(BK.label, tabular: false).foregroundStyle(S.secondary) }
                     if !labelFirst, let l = s["label"].string { Text(l).sType(BK.label, tabular: false).foregroundStyle(S.secondary) }
@@ -278,7 +318,7 @@ struct BSegmented: View {
         .background(alignment: .leading) {
             // One thumb that slides between the segments (S.spring, 0.45 s), instant under Reduce Motion.
             GeometryReader { g in
-                Capsule().fill(S.dynA(0xFFFFFF, 0.88, 0xFFFFFF, 0.20))
+                Capsule().fill(S.dynA(0xFAFAFA, 0.88, 0xFAFAFA, 0.20))
                     .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
                     .frame(width: g.size.width / n)
                     .offset(x: g.size.width / n * CGFloat(at ?? 0))
@@ -287,14 +327,16 @@ struct BSegmented: View {
             }
         }
         .padding(2)
-        .background(Capsule().fill(S.dynA(0x767680, 0.12, 0x767680, 0.24)))
+        .background(Capsule().fill(S.dynA(0x808080, 0.12, 0x808080, 0.24)))
         .sensoryFeedback(.selection, trigger: selected)
     }
 }
 
 // MARK: - Bars
 
-/// A row of value bars with labels under them, 10 apart; the highlighted one is full green, the rest green at 35%.
+/// A row of value bars with labels under them, 10 apart; the highlighted one full, the rest at 35%.
+/// Focus (25 Nov): the bars are large green or red fills, so they go neutral (the marked one #707070, the rest #8C8C8C
+/// at 35%); the values over them are words, neutral, and a value whose colour said up or down carries + or −.
 struct BBars: View {
     let bars: [JSONValue]
     @Environment(\.dynamicTypeSize) private var dts
@@ -313,21 +355,26 @@ struct BBars: View {
         return BSay.join([title, items.joined(separator: ", ")], ": ")
     }
 
+    /// The value with the sign its colour carried: "−$1.2K", "+0.48%" (a masked "$•••" and words as they are).
+    static func signed(_ v: Double, _ shown: String) -> String { BK.isFigure(shown) ? SF.signed(v, shown) : shown }
+
     var body: some View {
-        // The signed number when the server sends one (`n` money, `signed` a yield): a month or week that lost draws
-        // red, its label without a minus sign. Else the label's own number.
+        // The signed number when the server sends one (`n` money, `signed` a yield): a month or week that lost carries
+        // a minus sign on its label (focus). Else the label's own number.
         let vals = bars.map { $0["n"].double ?? $0["signed"].double ?? $0["value"].double ?? 0 }
         let mx = max(vals.map(abs).max() ?? 1, 0.0001)
         HStack(alignment: .bottom, spacing: 10) {
             ForEach(Array(bars.enumerated()), id: \.offset) { i, b in
-                let hl = b["highlight"].bool, neg = vals[i] < 0, tint = neg ? S.red : S.green
+                let hl = b["highlight"].bool, neg = vals[i] < 0
                 VStack(spacing: 4) {
-                    BriefWords.line(b["value"].string, privacy: privacy)
+                    let role = hl ? (neg ? "red" : "green") : b["valueColor"].string
+                    let shown = BriefWords.plain(b["value"].string, privacy: privacy)
+                    BriefWords.line(role == "red" || role == "green" ? Self.signed(vals[i], shown) : shown, privacy: privacy)
                         .sType(SType(size: 11, weight: hl ? 800 : 700, line: 14, tracking: 0))
-                        .foregroundStyle(hl ? tint : BK.color(b["valueColor"].string))
+                        .foregroundStyle(BK.word(role, 11))
                         .lineLimit(1).minimumScaleFactor(0.7)
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(b["empty"].bool ? S.chip : hl ? tint : tint.opacity(0.35))
+                        .fill(b["empty"].bool ? S.chip : hl ? SF.fill : S.pNeutral.opacity(0.35))
                         .frame(height: max(4, height * CGFloat(abs(vals[i]) / mx)))
                         // Bar fills on the page curve (never the segmented spring), instant under Reduce Motion.
                         .animation(S.moving(S.page, reduce), value: vals[i])

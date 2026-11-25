@@ -37,19 +37,19 @@ import UIKit
 /// muted text #646469 (not #6E6E73), technicals #0F7F86 (not #0B6F75), tags on an 88% chip.
 enum TK {
     static let ink = S.ink
-    static let mu = S.dyn(0x646469, 0x98989D)
-    static let line = S.dynA(0x1D1D1F, 0.08, 0xFFFFFF, 0.10)
-    static let call = S.dyn(0x2F5AA8, 0x86A8F0)
+    static let mu = S.dyn(0x666666, 0x8C8C8C)
+    static let line = S.dynA(0x212121, 0.08, 0xFAFAFA, 0.10)
+    static let call = S.dyn(0x2F5AA8, 0x3E6AE1)
     static let put = S.dyn(0x995123, 0xE8975C)
-    static let tc = S.dyn(0x0F7F86, 0x4CC9D0)
-    static let chip = S.dynA(0xFFFFFF, 0.88, 0x1C1C1E, 0.88)
-    static let onink = S.dyn(0xFFFFFF, 0x1C1C1E)
-    static let ring = S.dyn(0xF1F2F4, 0x0A0B0D)
+    static let tc = S.dyn(0x6E6E6E, 0xAAAAAA)
+    static let chip = S.dynA(0xFAFAFA, 0.88, 0x212121, 0.88)
+    static let onink = S.dyn(0xFAFAFA, 0x212121)
+    static let ring = S.dyn(0xF2F2F2, 0x171717)
     /// Overbought / Oversold (the design's --or: #A34B00, dark #F2A93B).
-    static let or = S.dyn(0xA34B00, 0xF2A93B)
+    static let or = S.dyn(0xA34B00, 0xE8A33D)
     /// RSI's 70 to 30 band (--tc-t) and the Walls band, the move priced by Friday (--band).
-    static let tcTint = S.dynA(0x0F7F86, 0.10, 0x4CC9D0, 0.14)
-    static let band = S.dynA(0x767680, 0.14, 0x767680, 0.26)
+    static let tcTint = S.dynA(0x6E6E6E, 0.10, 0xAAAAAA, 0.14)
+    static let band = S.dynA(0x808080, 0.14, 0x808080, 0.26)
 
     /// The world markets Overnight lists (sunny-home WORLD), opened by symbol (10 Nov 2026): the name on the capsule,
     /// the line under it, and how its price reads (an index in points, the 10-year yield in %, the rest in dollars).
@@ -110,8 +110,8 @@ private struct TKBackground: View {
     var body: some View {
         let c = { (h: UInt32) in Color(UIColor(hex: h)) }
         LinearGradient(stops: scheme == .dark
-                       ? [.init(color: c(0x0E1217), location: 0), .init(color: c(0x0A0B0D), location: 0.45), .init(color: c(0x0D0C0B), location: 1)]
-                       : [.init(color: c(0xEEF2F0), location: 0), .init(color: c(0xF1F2F4), location: 0.38), .init(color: c(0xF3F1EE), location: 1)],
+                       ? [.init(color: c(0x171717), location: 0), .init(color: c(0x171717), location: 0.45), .init(color: c(0x171717), location: 1)]
+                       : [.init(color: c(0xF2F2F2), location: 0), .init(color: c(0xF2F2F2), location: 0.38), .init(color: c(0xF2F2F2), location: 1)],
                        startPoint: .top, endPoint: .bottom)
         .ignoresSafeArea()
         .accessibilityHidden(true)
@@ -377,7 +377,7 @@ struct TickerChartPage: View {
 
     /// The readout, 17/22 with its pieces 6 apart. At rest: the move over the range in dollars and percent (700, the
     /// line's colour) and the range (500 muted). Under the finger: the close's date (600 ink), its price (700 ink), the
-    /// move since the range's first close (700, green or red) and "since" that date (500 muted). Its height holds
+    /// move since the range's first close (700, ink with + or −) and "since" that date (500 muted). Its height holds
     /// whichever of the two needs more lines, so the chart never jumps while the finger scrubs.
     private func readout(pts: [Double], dates: [String], at: Int?, ch: Double, chp: Double, phrase: String, d0: String, width: CGFloat) -> some View {
         let tBold = SType(size: 17, weight: 700, line: 22, tracking: 0), tSemi = SType(size: 17, weight: 600, line: 22, tracking: 0)
@@ -387,21 +387,23 @@ struct TickerChartPage: View {
         let first = pts.first ?? 0
         // The 10-year yield moves in bp alone (as Overnight writes it), never a percent of a percent.
         let bp = TK.unit(t) == .yield
-        let rest = [w(TK.change(ch, t), tBold)] + (bp ? [] : [w(TK.pct(chp), tBold)]) + [w(phrase, tMed)]
+        // Focus (25 Nov): the move is ink with its sign (+ or −), not green or red.
+        let chT = SF.signed(ch, TK.change(ch, t)), chpT = SF.signed(ch, TK.pct(chp))
+        let rest = [w(chT, tBold)] + (bp ? [] : [w(chpT, tBold)]) + [w(phrase, tMed)]
         // The widest a scrub can read on this range: a wide date of its kind, the highest price, a two-digit move.
         let wide = range == "1W" ? "Wed May 28 close" : range == "1Y" || range == "All" ? "May 28, 2026" : "May 28"
-        let scrub = [w(wide, tSemi), w(TK.price(pts.max() ?? 0, t), tBold), w("88.8%", tBold), w("since " + d0, tMed)]
+        let scrub = [w(wide, tSemi), w(TK.price(pts.max() ?? 0, t), tBold), w("+88.8%", tBold), w("since " + d0, tMed)]
         let lines = max(1, TKFlow.lines(rest, maxW: width), TKFlow.lines(scrub, maxW: width))
         return TKFlow(spacing: 6) {
             if let i = at {
-                let up = pts[i] >= first, mvp = first > 0 ? (pts[i] / first - 1) * 100 : 0
+                let mvp = first > 0 ? (pts[i] / first - 1) * 100 : 0
                 Text(Self.scrubLabel(dates[i], range)).sType(tSemi, tabular: false).foregroundStyle(TK.ink)
                 Text(TK.price(pts[i], t)).sType(tBold).foregroundStyle(TK.ink)
-                Text(bp ? TK.change(pts[i] - first, t) : TK.pct(mvp)).sType(tBold).foregroundStyle(up ? S.green : S.red)
+                Text(SF.signed(pts[i] - first, bp ? TK.change(pts[i] - first, t) : TK.pct(mvp))).sType(tBold).foregroundStyle(TK.ink)
                 Text("since " + d0).sType(tMed, tabular: false).foregroundStyle(TK.mu)
             } else {
-                Text(TK.change(ch, t)).sType(tBold).foregroundStyle(ch < 0 ? S.red : S.green)
-                if !bp { Text(TK.pct(chp)).sType(tBold).foregroundStyle(ch < 0 ? S.red : S.green) }
+                Text(chT).sType(tBold).foregroundStyle(TK.ink)
+                if !bp { Text(chpT).sType(tBold).foregroundStyle(TK.ink) }
                 Text(phrase).sType(tMed, tabular: false).foregroundStyle(TK.mu)
             }
         }
@@ -431,7 +433,7 @@ struct TickerChartPage: View {
                 if held { BriefLogoDisc(t: t, size: 32, pct: 0.7) } else { Color.clear.frame(width: 6, height: 1).accessibilityHidden(true) }
                 Text(TK.markets[t]?.name ?? t).sType(SType(size: 15, weight: 800, line: 20, tracking: 0), tabular: false).foregroundStyle(TK.ink)
                 Text(TK.price(q.0, t)).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(TK.ink)
-                Text(TK.unit(t) == .yield ? TK.change(q.0 - q.1, t) : TK.pct(mv)).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(mv < 0 ? S.red : S.green)
+                Text(SF.signed(mv, TK.unit(t) == .yield ? TK.change(q.0 - q.1, t) : TK.pct(mv))).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(TK.ink)
             }
             .lineLimit(1)
             .padding(.leading, 6).padding(.trailing, 16).frame(height: 44).glassEffect(.regular, in: .capsule)
@@ -444,16 +446,16 @@ struct TickerChartPage: View {
     }
 
     /// Ranges: six equal 44 pt targets, 2 apart, padding 8 12 0; the chip 32 tall, 10 a side, 14/14, the one picked
-    /// 700 on ink, the rest 600 muted.
+    /// 700 on the chip-on grey (focus §2.6: #424242 with ink words in dark, ink in light), the rest 600 muted.
     private var ranges: some View {
         HStack(spacing: 2) {
             ForEach(["1W", "1M", "3M", "YTD", "1Y", "All"], id: \.self) { r in
                 // The chips' colour fades (S.fade); the line crossfades in TickerLine.
                 Button { si = nil; withAnimation(S.moving(S.fade, reduce)) { range = r } } label: {
                     Text(r).sType(SType(size: 14, weight: r == range ? 700 : 600, line: 14, tracking: 0), tabular: false)
-                        .foregroundStyle(r == range ? TK.onink : TK.mu)
+                        .foregroundStyle(r == range ? SF.chipOnInk : TK.mu)
                         .lineLimit(1).fixedSize()
-                        .padding(.horizontal, 10).frame(height: 32).background(Capsule().fill(r == range ? TK.ink : .clear))
+                        .padding(.horizontal, 10).frame(height: 32).background(Capsule().fill(r == range ? SF.chipOn : .clear))
                         .frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
                 }.buttonStyle(.plain)
                 .accessibilityLabel(Self.rangeWords[r] ?? r)
@@ -464,8 +466,8 @@ struct TickerChartPage: View {
         .sensoryFeedback(.selection, trigger: range)
     }
 
-    /// Layers: switches, 48 tall, 8 apart, padding 8 16; a 14 x 3 swatch 8 before the words (15/15 600). On: ink with
-    /// the words in the page colour; off: glass. Each chip is its own width and they share what is left (flex 1 0
+    /// Layers: switches, 48 tall, 8 apart, padding 8 16; a 14 x 3 swatch 8 before the words (15/15 600). On: the chip-on grey with
+    /// ink words (focus); off: glass. Each chip is its own width and they share what is left (flex 1 0
     /// auto); when they don't fit (a larger text size) the row scrolls instead of widening the page.
     private func layerRow(width: CGFloat) -> some View {
         let t15 = SType(size: 15, weight: 600, line: 15, tracking: 0)
@@ -498,18 +500,18 @@ struct TickerChartPage: View {
             HStack(spacing: 8) {
                 Group {
                     switch l {
-                    case .pos: RoundedRectangle(cornerRadius: 2).fill(isOn ? TK.onink : TK.ink)
+                    case .pos: RoundedRectangle(cornerRadius: 2).fill(isOn ? SF.chipOnInk : TK.ink)
                     case .tech: RoundedRectangle(cornerRadius: 2).fill(TK.tc)
-                    case .walls: HStack(spacing: 0) { Rectangle().fill(TK.call); Rectangle().fill(TK.put) }.clipShape(RoundedRectangle(cornerRadius: 2))
+                    case .walls: HStack(spacing: 0) { Rectangle().fill(SF.callsWord); Rectangle().fill(SF.putsWord) }.clipShape(RoundedRectangle(cornerRadius: 2))   // the walls' lines are grey (focus)
                     }
                 }
                 .frame(width: 14, height: 3)
                 .accessibilityHidden(true)
                 Text(l.rawValue).sType(SType(size: 15, weight: 600, line: 15, tracking: 0), tabular: false)
-                    .foregroundStyle(isOn ? TK.onink : TK.ink).lineLimit(1).fixedSize()
+                    .foregroundStyle(isOn ? SF.chipOnInk : TK.ink).lineLimit(1).fixedSize()
             }
             .frame(width: width, height: 48)
-            .background { if isOn { Capsule().fill(TK.ink) } }
+            .background { if isOn { Capsule().fill(SF.chipOn) } }   // a chip that is on: chip-on grey (focus §2.6)
             .glassEffect(isOn ? .identity : .regular, in: .capsule)
             .contentShape(Capsule())
         }
@@ -572,17 +574,18 @@ struct TickerChartPage: View {
     }
 
     /// Walls of the nearest weekly chain, on the right as the design writes them ("Ceiling 39", "Floor 38.5",
-    /// "Flip 40.85"): the ceiling in call navy, the floor in put brown, the accelerator dashed (5 4) in the colour of
-    /// its side, the flip dashed (2 4) muted. They run on through the room after today.
+    /// "Flip 40.85"): the ceiling in the calls grey, the floor in the puts grey (focus, 25 Nov: calls and puts on thin
+    /// lines and words go grey), the accelerator dashed (5 4) in the grey of its side, the flip dashed (2 4) muted.
+    /// They run on through the room after today.
     private func wallMarks(price: Double) -> [TKMark] {
         guard live, let w = wire else { return [] }
         return w.walls.map { x in
             let kind = x.label.components(separatedBy: " · ").first?.trimmingCharacters(in: .whitespaces) ?? x.label
             let id = "w|\(kind)|\(x.k)"
             switch kind {
-            case "Ceiling": return TKMark(id: id, k: x.k, label: "Ceiling " + TK.fk(x.k), color: TK.call, right: true, full: true)
-            case "Floor": return TKMark(id: id, k: x.k, label: "Floor " + TK.fk(x.k), color: TK.put, right: true, full: true)
-            case "Accelerator": return TKMark(id: id, k: x.k, label: "Accelerator " + TK.fk(x.k), color: x.k > price ? TK.call : TK.put,
+            case "Ceiling": return TKMark(id: id, k: x.k, label: "Ceiling " + TK.fk(x.k), color: SF.callsWord, right: true, full: true)
+            case "Floor": return TKMark(id: id, k: x.k, label: "Floor " + TK.fk(x.k), color: SF.putsWord, right: true, full: true)
+            case "Accelerator": return TKMark(id: id, k: x.k, label: "Accelerator " + TK.fk(x.k), color: x.k > price ? SF.callsWord : SF.putsWord,
                                               dash: [5, 4], right: true, full: true)
             case "Flip": return TKMark(id: id, k: x.k, label: "Flip " + String(format: "%.2f", x.k), color: TK.mu, width: 1.25,
                                        dash: [2, 4], right: true, full: true)
@@ -1024,7 +1027,7 @@ private struct TickerLine: View {
             HStack(spacing: 6) {
                 Text("RSI (14)").font(.inter(12, 600)).foregroundStyle(TK.mu)
                 Text(String(format: "%.2f", rv)).font(.inter(12, 700, tabular: true)).foregroundStyle(TK.ink)
-                if rv > 70 || rv < 30 { Text(rv > 70 ? "Overbought" : "Oversold").font(.inter(12, 700)).foregroundStyle(TK.or) }
+                if rv > 70 || rv < 30 { Text(rv > 70 ? "Overbought" : "Oversold").font(.inter(12, 700)).foregroundStyle(SF.word(12)) }
             }
             .lineLimit(1).fixedSize()
             .frame(height: 15)

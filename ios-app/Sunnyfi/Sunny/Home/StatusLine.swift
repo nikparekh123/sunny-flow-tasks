@@ -166,19 +166,20 @@ struct StatusLine: View {
         }
     }
 
+    /// The dot keeps the tone (a mark); the words are neutral (focus, 25 Nov: grey at 13 pt), ink stays ink.
     private func color(_ t: MarketStatus.Tone, dot: Bool) -> Color {
         switch t {
         case .grey: S.muted
-        case .amber: dot ? S.yellow : S.yellowDeep
-        case .red: S.red
-        case .green: S.green
+        case .amber: dot ? S.yellow : SF.word(13)
+        case .red: dot ? S.red : SF.word(13)
+        case .green: dot ? S.green : SF.word(13)
         case .ink: S.ink
         }
     }
 }
 
-/// "Updated 16:04" · green "Live · just now" for 2.5 s after an update · red
-/// with the reason when prices should be moving and updates stop. Closed,
+/// "Updated 16:04" · "Live · just now" (a green dot) for 2.5 s after an update · a red dot
+/// with the reason when prices should be moving and updates stop (the words stay grey, focus). Closed,
 /// it shows when prices last moved: "Updated 16:15", "Updated Fri 16:15", or
 /// the day alone on a market holiday. Tap = refresh.
 struct UpdatedPill: View {
@@ -191,7 +192,7 @@ struct UpdatedPill: View {
         Button { Task { await store.refresh(.pull) } } label: {
             HStack(spacing: 6) {
                 Circle().fill(color).frame(width: 6, height: 6)
-                Text(text).sType(.label, tabular: true).foregroundStyle(color)
+                Text(text).sType(.label, tabular: true).foregroundStyle(SF.word(SType.label.size))
             }
             .padding(.horizontal, 10)
             .frame(height: 28)

@@ -32,7 +32,8 @@ struct SunnyGlass: ViewModifier {
             // dark:  #1C1C1E, inset 0 0 0 1px rgba(255,255,255,.06), 0 8px 24px -12px rgba(0,0,0,.6)
             content
                 .background {
-                    shape.fill(dark ? Color(red: 28 / 255, green: 28 / 255, blue: 30 / 255) : Color.white)
+                    // Focus (25 Nov 2026): raised #212121 on the #171717 page, #FAFAFA on the light #F2F2F2 page.
+                    shape.fill(dark ? Color(red: 33 / 255, green: 33 / 255, blue: 33 / 255) : Color(red: 250 / 255, green: 250 / 255, blue: 250 / 255))
                         .overlay(shape.strokeBorder(dark ? Color.white.opacity(0.06) : Color(red: 29 / 255, green: 29 / 255, blue: 31 / 255).opacity(0.08),
                                                     lineWidth: dark ? 1 : 0.5))
                 }

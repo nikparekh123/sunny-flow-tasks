@@ -140,7 +140,7 @@ struct ActivityPage: View {
                                 Spacer()
                                 if g == 0 && nU > 0 {
                                     Button { reads.mark(book, all.compactMap { $0["key"].string }) } label: {
-                                        Text("Mark all read").sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.blue)
+                                        Text("Mark all read").sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)   // focus: a link is a word, ink
                                             .frame(minHeight: 44)
                                     }
                                     .buttonStyle(.plain)
@@ -170,7 +170,8 @@ struct ActivityPage: View {
         .onDisappear { HomeStore.need(.activity, false) }
     }
 
-    /// IBKR · both accounts: a row per book, synced when and what it picked up today (red when it stopped).
+    /// IBKR · both accounts: a row per book, synced when and what it picked up today (the dot red when it stopped; the
+    /// words stay neutral, focus 25 Nov).
     private var syncCard: some View {
         let rows = books.isEmpty ? [(name: "Your book", act: activity)] : books
         return VStack(alignment: .leading, spacing: 0) {
@@ -189,7 +190,7 @@ struct ActivityPage: View {
                     }
                     Spacer(minLength: 8)
                     Text(stopped ? "No data since \(ActivityWords.clock(sync?["at"].string))" : "Synced \(ActivityWords.clock(sync?["at"].string))")
-                        .sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(stopped ? S.red : S.ink)
+                        .sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(S.ink)
                 }
                 .frame(minHeight: 56)
                 .overlay(alignment: .top) { if i > 0 { Rectangle().fill(S.line).frame(height: 1) } }
@@ -239,7 +240,7 @@ struct ActivityPage: View {
                                     .sType(SType(size: 13, weight: 600, line: 18, tracking: 0), tabular: false)
                                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .heavy)).rotationEffect(.degrees(isOpen ? 90 : 0))
                             }
-                            .foregroundStyle(S.blue).padding(.top, 2)
+                            .foregroundStyle(SF.word(13)).padding(.top, 2)
                         }
                     }
                 }
@@ -266,7 +267,7 @@ struct ActivityPage: View {
                     }
                 }
                 .padding(.horizontal, 12).padding(.vertical, 2)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(S.dynA(0x767680, 0.08, 0x767680, 0.18)))
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(S.dynA(0x808080, 0.08, 0x808080, 0.18)))
                 .padding(.leading, 44).padding(.bottom, 12)
                 .transition(.opacity)
             }
@@ -338,7 +339,7 @@ struct LevelsCard: View {
                             VStack(alignment: .trailing, spacing: 1) {
                                 Text(String(format: "$%.2f", l["px"].double ?? 0)).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(S.ink)
                                 let mv = l["mv"].double ?? 0
-                                Text("\(mv < 0 ? "▼" : "▲") \(String(format: "%.1f", abs(mv)))%").sType(SType(size: 12, weight: 600, line: 16, tracking: 0)).foregroundStyle(mv < 0 ? S.red : S.green)
+                                Text("\(mv < 0 ? "▼" : "▲") \(String(format: "%.1f", abs(mv)))%").sType(SType(size: 12, weight: 600, line: 16, tracking: 0)).foregroundStyle(SF.word(12))   // the triangle says which way
                             }
                         }
                     }

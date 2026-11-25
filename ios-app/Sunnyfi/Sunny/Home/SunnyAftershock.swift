@@ -366,7 +366,8 @@ enum AftershockOrbit {
             g.fill(circle(x, y, 8), with: .color(red.opacity(0.18)))
             g.fill(circle(x, y, 3.4), with: .color(red))
             if labels {
-                g.draw(Text(tk).font(label.font()).foregroundColor(red), at: CGPoint(x: x + 9, y: y), anchor: .leading)
+                // The ticker is a word: grey (focus, 25 Nov); its dot and ring keep the red.
+                g.draw(Text(tk).font(label.font()).foregroundColor(SF.word(label.size)), at: CGPoint(x: x + 9, y: y), anchor: .leading)
             }
         }
     }
@@ -573,7 +574,8 @@ struct AftershockRow: View {
                 }
                 .lineLimit(1)
                 Spacer(minLength: 0)
-                Text(F.pct(e.dropPct, places: 1)).sType(SunnyAftershockPage.title20).foregroundStyle(S.red)
+                // Focus: ink with − (it was red).
+                Text(SF.signed(-abs(e.dropPct), F.pct(e.dropPct, places: 1))).sType(SunnyAftershockPage.title20).foregroundStyle(S.ink)
             }
             HStack(spacing: 16) {
                 HStack(spacing: 6) { DayTick(on: true); Text("Day 1") }
@@ -602,7 +604,7 @@ struct AftershockRow: View {
         }
         let move = p > 0 ? "up \(F.pct(p, places: 1))" : p < 0 ? "down \(F.pct(p, places: 1))" : "flat"
         return Text("Day 2 ").font(f.font())
-            + Text(move).font(f.weighted(600).font(tabular: true)).foregroundStyle(p > 0 ? S.green : p < 0 ? S.red : S.muted)
+            + Text(move).font(f.weighted(600).font(tabular: true)).foregroundStyle(S.muted)   // "up" or "down" says it: no colour (focus)
     }
 
     private func a11y(_ settled: Bool) -> String {
@@ -661,7 +663,7 @@ struct SunnyAftershockCard: View {
                 let w = Self.words(m, fr)
                 Button(action: onTap) {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("AFTERSHOCK").sType(SType(size: 13, weight: 700, line: 16, tracking: 0.06), tabular: false)
+                        Text("Aftershock").sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)   // a plain word (focus §2.5)
                         Spacer(minLength: 0)
                         HStack(alignment: .bottom, spacing: 0) {
                             VStack(alignment: .leading, spacing: 6) {

@@ -10,6 +10,10 @@
 //          the Greeks at that date. The table follows the slider. The hover reads the Greeks at the cursor (24 Nov 2026,
 //          r150x hv8): the top label adds the delta there and the Greeks row follows the hovered price, back on leave.
 //   The maths is supabase/functions/_shared/price-chart.ts (the Price chart, shared with the phone) and model.ts.
+// The focus look (handoff 2026-11-25-focus §2): words are ink or grey, a gain or loss carries + or −, a sold strike
+// under 0.5 SD keeps a red dot; calls blue and puts brown stay on fills (the cone dots) and go grey on words and thin
+// lines; the price line, the payoff curve, rings and the orange What if and peak lines keep their colour; the payoff's
+// area, the cone's bands and the room shading go grey; bold only at 20 px and up.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { CountUp } from '../components/CountUp';
 import { count, money, price } from '../lib/format';
@@ -19,15 +23,17 @@ import type { SoldRow } from '../../../supabase/functions/_shared/positions-engi
 import type { J } from '../lib/data';
 import { fk, type DPt, type PLeg, type PosModel, type Pricer } from './model';
 import { legWords } from './totals';
-import { G, K, MT, MU, O, QU, R, cl, kicker, tnum, useReducedMotion } from './ui';
+import { Dot, FILL } from '../lib/focus';
+import { G, K, MT, MU, O, QU, R, TW, kicker, sg, tnum, useReducedMotion, wd } from './ui';
 
 /* ── Price ─────────────────────────────────────────────────────────────── */
 /** Bright gray: the text on the tags that is not white (Nik 14 Nov: the gray % was hard to read). */
-const LT = '#D1D1D6';
+const LT = '#D2D2D2';
 const TAGW = 112, MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], WD3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-/** Calls blue, puts brown (Nov 16). */
-const TC = (ty: 'C' | 'P', a: number) => (ty === 'C' ? `rgba(134,168,240,${a})` : `rgba(200,148,106,${a})`);
-const TONE_C: Record<PCTone, string> = { red: R, orange: O, quiet: MU };
+/** Calls blue, puts brown (Nov 16): on fills only since the focus look; words and thin lines take TW. */
+const TC = (ty: 'C' | 'P', a: number) => (ty === 'C' ? `rgba(62,106,225,${a})` : `rgba(200,148,106,${a})`);
+/** A tone's word colour at `fs` (focus 2.1: red and orange words are neutral; red keeps a dot). */
+const TONE_C = (t: PCTone, fs: number) => (t === 'quiet' ? MU : wd(fs));
 const EZ = ' .55s cubic-bezier(.22,1,.36,1)';
 /** A sold leg's closeness from its Sold in SD row (same strike, side and expiry); none without a row. Used only when the
     name has no IV, so no SD on this week's move. */
@@ -66,8 +72,8 @@ export function ConeSwitch({ on, toggle }: { on: boolean; toggle: () => void }) 
   const rm = useReducedMotion();
   return (
     <button type="button" role="switch" aria-checked={on} className="bare" onClick={toggle} aria-label="1 SD cone, when the price could reach your strikes" title="1 SD cone: when the price could reach your strikes"
-      style={{ display: 'flex', alignItems: 'center', gap: 6, height: 30, padding: '0 12px', borderRadius: 999, fontSize: 13, lineHeight: '18px', fontWeight: on ? 600 : 500, whiteSpace: 'nowrap',
-        color: on ? '#000000' : K, background: on ? K : 'linear-gradient(160deg,rgba(255,255,255,.20) 0%,rgba(255,255,255,.09) 50%,rgba(255,255,255,.15) 100%)',
+      style={{ display: 'flex', alignItems: 'center', gap: 6, height: 30, padding: '0 12px', borderRadius: 999, fontSize: 13, lineHeight: '18px', fontWeight: 500, whiteSpace: 'nowrap',
+        color: on ? '#171717' : K, background: on ? K : 'linear-gradient(160deg,rgba(255,255,255,.20) 0%,rgba(255,255,255,.09) 50%,rgba(255,255,255,.15) 100%)',
         boxShadow: on ? '0 2px 8px rgba(0,0,0,.35)' : 'inset 0 0 0 .5px rgba(255,255,255,.32),inset 1px 1px 0 -.5px rgba(255,255,255,.45),0 2px 8px rgba(0,0,0,.35)',
         transition: rm ? 'none' : 'background .3s ease, color .3s ease' }}>
       <svg width="14" height="12" viewBox="0 0 14 12" aria-hidden="true" style={{ flex: 'none' }}>
@@ -115,27 +121,27 @@ export function PriceChart({ chart, failed, S0, closed, legs, trades, sold, rg, 
   };
   const hasSold = legs.some((l) => l.q < 0 && l.ty !== 'S');
   const note = !v ? '' : on && cn
-    ? `1 SD cone: a normal week, ${price(cn.lo)} to ${price(cn.hi)} by ${v.fridayWords}; about 2 weeks in 3 end inside.${hasSold ? ' Green: inside your sold strikes; red: where it spills past them. The dot marks the day it first reaches one.' : ''} Calls blue, puts brown; sold dashed, bought dotted.`
-    : `Calls blue, puts brown; sold dashed, bought dotted. ${v.m0 ? 'Each tag gives the strike’s SD on this week’s move: red under 0.5 SD or in the money, orange to 1 SD, gray past 1 SD.' : 'Each tag gives how far the strike is from today.'}${v.room ? ' Green is the room between your nearest sold put and call, faint red past them.' : ''} After the dot, the days left to ${v.fridayWords}. A trade you try in What if shows dashed orange.`;
+    ? `1 SD cone: a normal week, ${price(cn.lo)} to ${price(cn.hi)} by ${v.fridayWords}; about 2 weeks in 3 end inside.${hasSold ? ' The dot marks the day it first reaches a sold strike.' : ''} Sold dashed, bought dotted.`
+    : `Sold dashed, bought dotted. ${v.m0 ? 'Each tag gives the strike’s SD on this week’s move.' : 'Each tag gives how far the strike is from today.'} After the dot, the days left to ${v.fridayWords}. A trade you try in What if shows dashed orange.`;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {v ? <>
         <div role="img" aria-label={`${chart?.t ?? ''} price, ${v.aria}`} style={{ position: 'relative', height: CH }}>
           <div ref={plot} style={{ position: 'absolute', left: 0, top: 0, bottom: 0, right: TAGW }}>
             {v.room && <>
-              <span aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: v.room.top, height: Math.max(0, v.room.bottom - v.room.top), background: 'rgba(101,196,102,.10)', opacity: on ? 0 : 1, transition: glide, pointerEvents: 'none' }} />
-              {v.room.up && <span aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: 0, height: v.room.top, background: 'rgba(255,105,97,.08)', opacity: on ? 0 : 1, transition: glide, pointerEvents: 'none' }} />}
-              {v.room.dn && <span aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: v.room.bottom, height: CH - v.room.bottom, background: 'rgba(255,105,97,.08)', opacity: on ? 0 : 1, transition: glide, pointerEvents: 'none' }} />}
+              <span aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: v.room.top, height: Math.max(0, v.room.bottom - v.room.top), background: 'rgba(140,140,140,.10)', opacity: on ? 0 : 1, transition: glide, pointerEvents: 'none' }} />
+              {v.room.up && <span aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: 0, height: v.room.top, background: 'rgba(140,140,140,.08)', opacity: on ? 0 : 1, transition: glide, pointerEvents: 'none' }} />}
+              {v.room.dn && <span aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: v.room.bottom, height: CH - v.room.bottom, background: 'rgba(140,140,140,.08)', opacity: on ? 0 : 1, transition: glide, pointerEvents: 'none' }} />}
             </>}
             {cn && (
               <svg viewBox="0 0 400 100" preserveAspectRatio="none" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'hidden', pointerEvents: 'none',
                 opacity: on ? 1 : 0, transition: rm ? 'none' : on ? 'opacity .4s ease .15s' : 'opacity .2s ease' }}>
                 <g style={ride}>
-                  {cn.fG && <path d={poly(cn.fG)} style={{ fill: 'rgba(101,196,102,.24)', stroke: 'none' }} />}
-                  {cn.fU && <path d={poly(cn.fU)} style={{ fill: 'rgba(255,105,97,.45)', stroke: 'none' }} />}
-                  {cn.fD && <path d={poly(cn.fD)} style={{ fill: 'rgba(255,105,97,.45)', stroke: 'none' }} />}
-                  <path d={P(cn.YU)} style={{ fill: 'none', stroke: 'rgba(245,245,247,.8)', strokeWidth: 1, vectorEffect: 'non-scaling-stroke' }} />
-                  <path d={P(cn.YD)} style={{ fill: 'none', stroke: 'rgba(245,245,247,.8)', strokeWidth: 1, vectorEffect: 'non-scaling-stroke' }} />
+                  {cn.fG && <path d={poly(cn.fG)} style={{ fill: 'rgba(140,140,140,.24)', stroke: 'none' }} />}
+                  {cn.fU && <path d={poly(cn.fU)} style={{ fill: 'rgba(140,140,140,.45)', stroke: 'none' }} />}
+                  {cn.fD && <path d={poly(cn.fD)} style={{ fill: 'rgba(140,140,140,.45)', stroke: 'none' }} />}
+                  <path d={P(cn.YU)} style={{ fill: 'none', stroke: 'rgba(242,242,242,.8)', strokeWidth: 1, vectorEffect: 'non-scaling-stroke' }} />
+                  <path d={P(cn.YD)} style={{ fill: 'none', stroke: 'rgba(242,242,242,.8)', strokeWidth: 1, vectorEffect: 'non-scaling-stroke' }} />
                 </g>
               </svg>
             )}
@@ -144,27 +150,27 @@ export function PriceChart({ chart, failed, S0, closed, legs, trades, sold, rg, 
               <g style={ride}><path d={d} style={{ fill: 'none', stroke: c, strokeWidth: 2, strokeLinejoin: 'round', strokeLinecap: 'round', vectorEffect: 'non-scaling-stroke' }} /></g>
             </svg>
             {cn?.drops.map((q) => (
-              <span key={q.key} aria-hidden="true" style={{ position: 'absolute', left: `${(q.x * 100).toFixed(2)}%`, top: q.y, bottom: 0, borderLeft: `1px dotted ${TC(q.ty, 0.8)}`,
+              <span key={q.key} aria-hidden="true" style={{ position: 'absolute', left: `${(q.x * 100).toFixed(2)}%`, top: q.y, bottom: 0, borderLeft: `1px dotted ${TW(q.ty, 0.8)}`,
                 opacity: on ? 1 : 0, transition: glide, pointerEvents: 'none' }} />
             ))}
             {cn?.dots.map((q) => (
               <span key={q.key} aria-hidden="true" style={{ position: 'absolute', left: `${(q.x * 100).toFixed(2)}%`, top: q.y, width: 9, height: 9, margin: '-4.5px 0 0 -4.5px', borderRadius: '50%',
-                background: TC(q.ty, 1), boxShadow: '0 0 0 2px #060807', opacity: on ? 1 : 0, transition: glide, pointerEvents: 'none' }} />
+                background: TC(q.ty, 1), boxShadow: '0 0 0 2px #171717', opacity: on ? 1 : 0, transition: glide, pointerEvents: 'none' }} />
             ))}
             {v.lines.map((x) => {
               const ty = x.ty ?? 'C', name = x.name ?? '';
-              const bd = x.kind === 'w' ? `1.5px dashed ${O}` : x.kind === 'sold' ? `1.5px dashed ${TC(ty, 0.9)}` : `1px dotted ${TC(ty, 0.55)}`;
+              const bd = x.kind === 'w' ? `1.5px dashed ${O}` : x.kind === 'sold' ? `1.5px dashed ${TW(ty, 0.9)}` : `1px dotted ${TW(ty, 0.55)}`;
               return (
                 <span key={x.key} aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, top: x.y, borderTop: bd, transition: glide, pointerEvents: 'none' }}>
                   {name && (
-                    <span style={{ position: 'absolute', right: nameRight(x.key, name), top: x.lt ?? -16, zIndex: 1, padding: '0 3px', borderRadius: 3, background: on ? '#060807' : 'transparent',
-                      fontSize: 12, lineHeight: '14px', fontWeight: 600, color: x.kind === 'w' ? O : TC(ty, x.kind === 'sold' ? 1 : 0.85), opacity: x.lo === false ? 0 : 1, whiteSpace: 'nowrap' }}>{name}</span>
+                    <span style={{ position: 'absolute', right: nameRight(x.key, name), top: x.lt ?? -16, zIndex: 1, padding: '0 3px', borderRadius: 3, background: on ? '#171717' : 'transparent',
+                      fontSize: 12, lineHeight: '14px', fontWeight: 400, color: x.kind === 'w' ? wd(12) : TW(ty, x.kind === 'sold' ? 1 : 0.85), opacity: x.lo === false ? 0 : 1, whiteSpace: 'nowrap' }}>{name}</span>
                   )}
                 </span>
               );
             })}
             <span aria-hidden="true" style={{ position: 'absolute', left: `${(v.dotX * 100).toFixed(3)}%`, top: v.dotY, width: 13, height: 13, margin: '-6.5px 0 0 -6.5px', boxSizing: 'border-box',
-              borderRadius: '50%', border: `2.5px solid ${c}`, background: '#060807', boxShadow: '0 1px 4px rgba(0,0,0,.6)', transition: glide }} />
+              borderRadius: '50%', border: `2.5px solid ${c}`, background: '#171717', boxShadow: '0 1px 4px rgba(0,0,0,.6)', transition: glide }} />
             <Scrub top={0} bottom={0} read={(f) => {
               // The line follows the pointer (up to today's dot); the dot slides along the price line; the read is the
               // nearest point drawn.
@@ -175,30 +181,32 @@ export function PriceChart({ chart, failed, S0, closed, legs, trades, sold, rg, 
               return { x, y: v.y(a.v + (b.v - a.v) * w) / CH, dot: c, rows: [
                 { t: whenWords(near, rg), c: MU },
                 { t: price(near.v), b: true },
-                { t: `${mvp < 0 ? '▼' : '▲'} ${(Math.abs(mvp) * 100).toFixed(1)}% since ${whenWords(Q[0], rg).replace(/ close$/, '')}`, c: mvp < 0 ? R : G },
+                { t: `${mvp < 0 ? '▼' : '▲'} ${(Math.abs(mvp) * 100).toFixed(1)}% since ${whenWords(Q[0], rg).replace(/ close$/, '')}`, c: wd(12) },
               ] };
             }} />
           </div>
           <div aria-hidden="true" style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: TAGW }}>
             <svg width="10" height={CH} style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible' }}>
-              {v.conn.map((x, i) => <path key={i} d={`M0 ${x.y0.toFixed(1)} L8 ${x.y1.toFixed(1)}`} style={{ fill: 'none', stroke: 'rgba(245,245,247,.4)', strokeWidth: 1 }} />)}
+              {v.conn.map((x, i) => <path key={i} d={`M0 ${x.y0.toFixed(1)} L8 ${x.y1.toFixed(1)}`} style={{ fill: 'none', stroke: 'rgba(242,242,242,.4)', strokeWidth: 1 }} />)}
             </svg>
             {v.tags.map((x) => {
               if (x.px) return (
                 <span key={x.key} title={x.title} className="tnum" style={{ position: 'absolute', left: 10, top: x.top, height: v.TH, boxSizing: 'border-box', display: 'flex', alignItems: 'center',
                   padding: '0 8px', borderRadius: 999, whiteSpace: 'nowrap', pointerEvents: 'auto', background: K, transition: glide }}>
-                  <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 700, color: '#000000' }}>{x.n}</span>
+                  <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500, color: '#171717' }}>{x.n}</span>
                 </span>
               );
               // Round 162a: the strike in its type's colour, then its SD on this week's move (red under 0.5 SD or in the
               // money, orange to 1, gray past); without an IV, how far it is from today in its Sold in SD colour.
               const loud = x.sold || x.w, ty = x.ty ?? (x.put ? 'P' : 'C'), hasSd = x.sd != null;
-              const sc = hasSd ? (loud && !x.w && x.zTone ? TONE_C[x.zTone] : QU) : x.tone === 'red' ? R : x.tone === 'orange' ? O : loud ? LT : MT;
+              // Focus: the SD's red and orange are words now (grey at 13 px); red, a warning, keeps its dot.
+              const zt = hasSd ? (loud && !x.w && x.zTone ? x.zTone : null) : x.tone === 'red' || x.tone === 'orange' ? x.tone : null;
+              const sc = zt ? TONE_C(zt, 13) : hasSd ? QU : loud ? LT : MT;
               return (
                 <span key={x.key} title={x.title} className="tnum" style={{ position: 'absolute', left: 10, top: x.top, height: v.TH, boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: 5,
                   whiteSpace: 'nowrap', pointerEvents: 'auto', transition: glide }}>
-                  <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: loud ? 700 : 500, color: x.w ? O : TC(ty, loud ? 1 : 0.85) }}>{x.k ?? x.n}</span>
-                  <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 500, color: sc }}>{hasSd ? x.sd : x.s}</span>
+                  <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500, color: x.w ? wd(15) : TW(ty, loud ? 1 : 0.85) }}>{x.k ?? x.n}</span>
+                  <span style={{ fontSize: 13, lineHeight: '18px', fontWeight: 500, color: sc }}>{zt === 'red' && <Dot k="r" />}{hasSd ? x.sd : x.s}</span>
                 </span>
               );
             })}
@@ -207,14 +215,14 @@ export function PriceChart({ chart, failed, S0, closed, legs, trades, sold, rg, 
         <div aria-hidden="true" style={{ position: 'relative', height: 18, marginRight: TAGW }}>
           {v.xl.map((x) => (
             <span key={x.key} style={{ position: 'absolute', left: `${(x.x * 100).toFixed(2)}%`, top: 0, transform: x.b ? 'translateX(-50%)' : 'none', fontSize: 13, lineHeight: '18px',
-              fontWeight: x.b ? 700 : 400, color: x.b && x.c ? TC(x.c, 1) : x.now ? K : MU, whiteSpace: 'nowrap' }}>{x.t}</span>
+              fontWeight: 400, color: x.b && x.c ? TW(x.c, 1) : x.now ? K : MU, whiteSpace: 'nowrap' }}>{x.t}</span>
           ))}
         </div>
       </> : <div style={{ position: 'relative', height: 280 }}><span style={{ position: 'absolute', top: '45%', left: 0, fontSize: 13, color: MU }}>{chart || failed ? 'No price history for this name yet.' : 'Loading the price…'}</span></div>}
       <div style={{ display: 'flex', gap: 4 }} role="radiogroup" aria-label="Range">
         {PC_RANGES.map((r) => (
           <button key={r} type="button" role="radio" aria-checked={r === rg} className="bare" onClick={() => setRg(r)}
-            style={{ padding: '4px 10px', fontSize: 14, lineHeight: '20px', fontWeight: r === rg ? 700 : 500, color: r === rg ? K : MU, boxShadow: `inset 0 -2px 0 ${r === rg ? K : 'transparent'}` }}>{r}</button>
+            style={{ padding: '4px 10px', fontSize: 14, lineHeight: '20px', fontWeight: 500, color: r === rg ? K : MU, boxShadow: `inset 0 -2px 0 ${r === rg ? K : 'transparent'}` }}>{r}</button>
         ))}
       </div>
       {v?.near && v.near.length > 0 && (
@@ -222,9 +230,9 @@ export function PriceChart({ chart, failed, S0, closed, legs, trades, sold, rg, 
           background: 'rgba(255,255,255,.05)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.08)', ...tnum }}>
           {v.near.map((n) => (
             <div key={n.key} role="listitem" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <span aria-hidden="true" style={{ width: 18, height: 0, borderTop: `2px dashed ${TC(n.ty, 1)}` }} />
-              <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600, color: TC(n.ty, 1) }}>{n.name}</span>
-              <span style={{ fontSize: 14, lineHeight: '20px', fontWeight: 600, color: TONE_C[n.tone], whiteSpace: 'nowrap' }}>{n.d}</span>
+              <span aria-hidden="true" style={{ width: 18, height: 0, borderTop: `2px dashed ${TW(n.ty, 1)}` }} />
+              <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500, color: TW(n.ty, 1) }}>{n.name}</span>
+              <span style={{ fontSize: 14, lineHeight: '20px', fontWeight: 500, color: TONE_C(n.tone, 14), whiteSpace: 'nowrap' }}>{n.tone === 'red' && <Dot k="r" />}{n.d}</span>
               {on && !n.itm && <span style={{ fontSize: 13, lineHeight: '20px', color: MU, whiteSpace: 'nowrap' }}>· {n.reach != null ? `the cone reaches it ${n.day}` : `outside the cone to ${n.fri}`}</span>}
             </div>
           ))}
@@ -389,11 +397,12 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
   const gk = useMemo(() => (xH == null ? gk0 : pr.greeks(wi, xH, D)), [gk0, xH, pr, wi, D.tt, D.row]); // eslint-disable-line react-hooks/exhaustive-deps
   const peakPast = sh != null && sh <= S0 * 1.0005, top = m.topPct;
   const gkAt = xH == null ? sh8 : `at ${xH.toFixed(2)}`;
+  // In ink (focus 2.1); theta and vega carry their + or −, a short gamma its − (2.2).
   const gks = [
-    { l: 'Delta', v: (gk.d < 0 ? 'Short ' : 'Long ') + count(gk.d), c: gk.d < 0 ? O : K },
-    { l: 'Theta a day', v: mask(money(gk.th)), c: cl(gk.th) },
-    { l: 'Gamma', v: count(gk.g) + ' a $1', c: gk.g < 0 ? R : K },
-    { l: 'Vega', v: mask(money(gk.vg)), c: cl(gk.vg) },
+    { l: 'Delta', v: (gk.d < 0 ? 'Short ' : 'Long ') + count(gk.d), c: K },
+    { l: 'Theta a day', v: sg(gk.th, mask(money(gk.th))), c: K },
+    { l: 'Gamma', v: (gk.g < 0 && /[1-9]/.test(count(gk.g)) ? '−' : '') + count(gk.g) + ' a $1', c: K },
+    { l: 'Vega', v: sg(gk.vg, mask(money(gk.vg))), c: K },
   ];
   // The target: a dashed line, a ring on the curve and a pill; its P&L in the headline.
   const tgV = tg != null ? pr.pl(wi, tg, D) : 0, tgx = tg != null ? xp(tg) : -1, tgShow = tg != null && tgx >= 0 && tgx <= 100;
@@ -411,15 +420,15 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
         <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-          <CountUp v={mask(money(v0))} style={{ fontSize: 30, lineHeight: '36px', fontWeight: 700, letterSpacing: '-.02em', color: cl(v0) }} />
+          <CountUp v={sg(v0, mask(money(v0)))} style={{ fontSize: 30, lineHeight: '36px', fontWeight: 700, letterSpacing: '-.02em', color: K }} />
           <span style={{ fontSize: 13, color: MU }}>If {t} is at {price(S0)} {byT}, from today’s marks</span>
           {tg != null && (
-            <span className="tnum" style={{ fontSize: 13, color: '#C7C7CC' }}>At your target {price(tg)} · {fromToday(tg, S0)}, {byT}: <span style={{ fontWeight: 700, color: cl(tgV) }}>{mask(money(tgV))}</span></span>
+            <span className="tnum" style={{ fontSize: 13, color: '#C8C8C8' }}>At your target {price(tg)} · {fromToday(tg, S0)}, {byT}: <span style={{ fontWeight: 400, color: wd(13) }}>{sg(tgV, mask(money(tgV)))}</span></span>
           )}
-          {chg && <span style={{ fontSize: 13, color: '#AEAEB2' }}>Without your changes: <span style={{ fontWeight: 600, color: cl(vb0) }}>{mask(money(vb0))}</span></span>}
+          {chg && <span style={{ fontSize: 13, color: '#AAAAAA' }}>Without your changes: <span style={{ fontWeight: 400, color: wd(13) }}>{sg(vb0, mask(money(vb0)))}</span></span>}
         </span>
         <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', textAlign: 'right', gap: 2 }}>
-          <span style={{ fontSize: 15, fontWeight: 600, color: sh != null ? O : K }}>
+          <span style={{ fontSize: 15, fontWeight: 500, color: K }}>
             {sh == null ? `Keeps making more past ↑${top}% ${byT}` : peakPast ? `Already past its best ${byT}` : `Makes the most at ${price(sh)} ${byT}`}
           </span>
           <span style={{ fontSize: 13, color: MU }}>{sh == null ? `still rising at ↑${top}%` : peakPast ? `each $1 up costs you from ${price(S0)}` : `↑${((sh / S0 - 1) * 100).toFixed(1)}% from ${price(S0)}`}</span>
@@ -438,12 +447,12 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
             )}
             <div style={{ position: 'absolute', left: 0, right: 0, top: 10, bottom: 10, pointerEvents: 'none' }}>
               <svg viewBox="0 0 400 100" preserveAspectRatio="none" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible', clipPath: `inset(0 0 ${(100 - zy).toFixed(2)}% 0)` }}>
-                <defs><linearGradient id="swpPu" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={G} stopOpacity=".4" /><stop offset="1" stopColor={G} stopOpacity="0" /></linearGradient></defs>
+                <defs><linearGradient id="swpPu" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={FILL} stopOpacity=".4" /><stop offset="1" stopColor={FILL} stopOpacity="0" /></linearGradient></defs>
                 <path d={`${v.dW} L400 ${zy.toFixed(2)} L0 ${zy.toFixed(2)} Z`} fill="url(#swpPu)" />
                 <path d={v.dW} style={{ fill: 'none', stroke: G, strokeWidth: 2.5, strokeLinejoin: 'round', vectorEffect: 'non-scaling-stroke' }} />
               </svg>
               <svg viewBox="0 0 400 100" preserveAspectRatio="none" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible', clipPath: `inset(${zy.toFixed(2)}% 0 0 0)` }}>
-                <defs><linearGradient id="swpPd" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stopColor={R} stopOpacity=".4" /><stop offset="1" stopColor={R} stopOpacity="0" /></linearGradient></defs>
+                <defs><linearGradient id="swpPd" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stopColor={FILL} stopOpacity=".4" /><stop offset="1" stopColor={FILL} stopOpacity="0" /></linearGradient></defs>
                 <path d={`${v.dW} L400 ${zy.toFixed(2)} L0 ${zy.toFixed(2)} Z`} fill="url(#swpPd)" />
                 <path d={v.dW} style={{ fill: 'none', stroke: R, strokeWidth: 2.5, strokeLinejoin: 'round', vectorEffect: 'non-scaling-stroke' }} />
               </svg>
@@ -454,27 +463,27 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
               <span style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, borderLeft: '1px solid rgba(255,255,255,.3)' }} />
               {shx >= 0 && shx <= 100 && (
                 <span style={{ position: 'absolute', left: `${shx.toFixed(2)}%`, top: 0, bottom: 0, borderLeft: `1.5px dotted ${O}` }}>
-                  <span style={{ position: 'absolute', left: 0, bottom: 4, transform: 'translateX(-50%)', padding: '2px 6px', borderRadius: 6, background: 'rgba(6,8,7,.9)',
-                    fontSize: 12, lineHeight: '16px', fontWeight: 600, color: O, whiteSpace: 'nowrap' }}>Peaks at {price(sh!)}</span>
+                  <span style={{ position: 'absolute', left: 0, bottom: 4, transform: 'translateX(-50%)', padding: '2px 6px', borderRadius: 6, background: 'rgba(23,23,23,.9)',
+                    fontSize: 12, lineHeight: '16px', fontWeight: 400, color: wd(12), whiteSpace: 'nowrap' }}>Peaks at {price(sh!)}</span>
                 </span>
               )}
               {tgShow && <>
-                <span style={{ position: 'absolute', left: `${tgx.toFixed(2)}%`, top: 0, bottom: 0, borderLeft: '1.5px dashed rgba(245,245,247,.6)' }}>
+                <span style={{ position: 'absolute', left: `${tgx.toFixed(2)}%`, top: 0, bottom: 0, borderLeft: '1.5px dashed rgba(242,242,242,.6)' }}>
                   <span className="tnum" style={{ position: 'absolute', left: 0, bottom: shx >= 0 && Math.abs(shx - tgx) < 22 ? 30 : 4, transform: `translateX(${tgx < 12 ? '0' : tgx > 88 ? '-100%' : '-50%'})`,
-                    padding: '2px 8px', borderRadius: 999, background: 'rgba(6,8,7,.9)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.3)', fontSize: 12, lineHeight: '16px', fontWeight: 600, color: K, whiteSpace: 'nowrap' }}>Target {price(tg!)}</span>
+                    padding: '2px 8px', borderRadius: 999, background: 'rgba(23,23,23,.9)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.3)', fontSize: 12, lineHeight: '16px', fontWeight: 400, color: K, whiteSpace: 'nowrap' }}>Target {price(tg!)}</span>
                 </span>
                 <span style={{ position: 'absolute', left: `${tgx.toFixed(2)}%`, top: `${Math.max(0, Math.min(100, v.fy(tgV))).toFixed(2)}%`, width: 13, height: 13, margin: '-6.5px 0 0 -6.5px',
-                  boxSizing: 'border-box', borderRadius: '50%', border: `2.5px solid ${K}`, background: '#060807' }} />
+                  boxSizing: 'border-box', borderRadius: '50%', border: `2.5px solid ${K}`, background: '#171717' }} />
               </>}
               <span style={{ position: 'absolute', left: '50%', top: `${v.fy(v0).toFixed(2)}%`, width: 14, height: 14, margin: '-7px 0 0 -7px', borderRadius: '50%',
-                background: '#FFFFFF', boxShadow: '0 0 0 3px rgba(0,0,0,.6),0 0 14px rgba(255,255,255,.45)' }} />
+                background: '#FAFAFA', boxShadow: '0 0 0 3px rgba(0,0,0,.6),0 0 14px rgba(255,255,255,.45)' }} />
             </div>
             <PayHover f={hf} setF={setHf} read={(f, full) => {
               const k = f * (NP - 1), i = Math.min(NP - 2, Math.floor(k)), w = k - i, val = v.vW[i] + (v.vW[i + 1] - v.vW[i]) * w;
               const x = S0 * (1 - X + 2 * X * f);
               // The top label adds the delta at that price (r150x hv8): "$155.20 · ↑1.9% · Δ long 300".
               const dl = full ? pr.delta(wi, x, D) : 0;
-              return { y: Math.max(0, Math.min(100, v.fy(val))), top: `${price(x)} · ${fromToday(x, S0)}${full ? ` · Δ ${dl < 0 ? 'short' : 'long'} ${count(dl)}` : ''}`, val: mask(money(val)), c: cl(val) };
+              return { y: Math.max(0, Math.min(100, v.fy(val))), top: `${price(x)} · ${fromToday(x, S0)}${full ? ` · Δ ${dl < 0 ? 'short' : 'long'} ${count(dl)}` : ''}`, val: sg(val, mask(money(val))), c: K };
             }} />
           </div>
           <div className="tnum" style={{ position: 'relative', height: 18, borderTop: '1px solid rgba(255,255,255,.08)' }}>
@@ -490,7 +499,7 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', columnGap: 12, minHeight: 28 }}>
               <span className="tnum" style={{ fontSize: 14, lineHeight: '20px', whiteSpace: 'nowrap' }}>
-                <span style={{ fontWeight: 600 }}>{ti === 0 ? 'Today' : full}</span>
+                <span style={{ fontWeight: 500 }}>{ti === 0 ? 'Today' : full}</span>
                 <span style={{ color: MU }}> · {ti === 0 ? `${full} · now` : `close · ${P.cd === 0 ? 'today' : 'in ' + dayWords(P.cd)}`}</span>
               </span>
               {/* No "Calls sold, puts bought expire · At expiration" line (Nik, 18 Nov 2026): one line, so the date and range
@@ -507,7 +516,7 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
         {gks.map((g) => (
           <span key={g.l} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
             <span style={{ fontSize: 12, lineHeight: '16px', color: MU, whiteSpace: 'nowrap' }}>{g.l} · {gkAt}</span>
-            <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 600, color: g.c, whiteSpace: 'nowrap' }}>{g.v}</span>
+            <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 500, color: g.c, whiteSpace: 'nowrap' }}>{g.v}</span>
           </span>
         ))}
       </div>
@@ -539,7 +548,7 @@ function DateTicks({ pts, ti }: { pts: PayDay[]; ti: number }) {
       {pts.map((p, i) => {
         const ex = p.ends.length > 0;
         if (!few && !p.fri && !ex && i !== N) return null;
-        return <span key={'k' + i} style={{ position: 'absolute', top: 0, left: at(i), width: 1, height: ex ? 8 : p.fri ? 6 : 4, background: ex ? 'rgba(245,245,247,.7)' : 'rgba(255,255,255,.22)' }} />;
+        return <span key={'k' + i} style={{ position: 'absolute', top: 0, left: at(i), width: 1, height: ex ? 8 : p.fri ? 6 : 4, background: ex ? 'rgba(242,242,242,.7)' : 'rgba(255,255,255,.22)' }} />;
       })}
       {lbs.map((i) => (
         <span key={'b' + i} className="tnum" style={{ position: 'absolute', top: 11, left: i === 0 ? 0 : i === N ? '100%' : at(i), transform: `translateX(${i === 0 ? '0' : i === N ? '-100%' : '-50%'})`,
@@ -561,16 +570,16 @@ function RangeBox({ S0, xr, setXr, tg, setTarget }: { S0: number; xr: number; se
     <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
       <TargetPop open={open} S0={S0} tg={tg} close={(back) => { setOpen(false); if (back) btn.current?.focus(); }} set={(x) => { setTarget(x); setOpen(false); btn.current?.focus(); }} />
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '6px 8px', minHeight: 28 }}>
-        <span className="tnum" style={{ fontSize: 14, lineHeight: '20px', whiteSpace: 'nowrap' }}><span style={{ color: MU }}>Range </span><span style={{ fontWeight: 600 }}>±{xr}%</span></span>
+        <span className="tnum" style={{ fontSize: 14, lineHeight: '20px', whiteSpace: 'nowrap' }}><span style={{ color: MU }}>Range </span><span style={{ fontWeight: 500 }}>±{xr}%</span></span>
         <span style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
           {xr !== XR0 && (
             <button type="button" className="bare" onClick={() => setXr(XR0)} aria-label={`Reset the range to plus or minus ${XR0}%`}
-              style={{ padding: '1px 10px', borderRadius: 999, fontSize: 12, lineHeight: '18px', fontWeight: 600, color: K, ...GLASS_BTN }}>Reset</button>
+              style={{ padding: '1px 10px', borderRadius: 999, fontSize: 12, lineHeight: '18px', fontWeight: 400, color: K, ...GLASS_BTN }}>Reset</button>
           )}
           <button ref={btn} type="button" className="bare" onClick={() => setOpen(!open)} aria-haspopup="dialog" aria-expanded={open} title="Target price"
             aria-label={tg != null ? `Target ${price(tg)}, change it` : 'Set a target price'}
             style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 28, minWidth: 28, boxSizing: 'border-box', padding: tg != null ? '0 11px 0 9px' : 0,
-              borderRadius: 999, fontSize: 12, lineHeight: '16px', fontWeight: 600, color: K, ...tnum, ...GLASS_BTN }}>
+              borderRadius: 999, fontSize: 12, lineHeight: '16px', fontWeight: 400, color: K, ...tnum, ...GLASS_BTN }}>
             <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" style={{ flex: 'none' }}>
               <circle cx="7" cy="7" r="5.8" style={{ fill: 'none', stroke: 'currentColor', strokeWidth: 1.4 }} /><circle cx="7" cy="7" r="2.4" style={{ fill: 'none', stroke: 'currentColor', strokeWidth: 1.4 }} />
             </svg>{tg != null ? price(tg) : ''}
@@ -608,21 +617,21 @@ function TargetPop({ open, S0, tg, close, set }: { open: boolean; S0: number; tg
         transition: rm ? `opacity .18s ease, visibility 0s linear ${open ? '0s' : '.18s'}` : `opacity .18s ease, transform .26s cubic-bezier(.34,1.36,.64,1), visibility 0s linear ${open ? '0s' : '.18s'}` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <span style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 600 }}>Target price</span>
+          <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 500 }}>Target price</span>
           <span style={{ fontSize: 13, lineHeight: '18px', color: MU, textWrap: 'pretty' }}>Marks the price on the chart and reads your P&amp;L there.</span>
         </span>
         <button type="button" className="bare" onClick={() => close(true)} aria-label="Close" tabIndex={open ? 0 : -1}
-          style={{ flex: 'none', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#C7C7CC', ...GLASS_BTN }}>
+          style={{ flex: 'none', width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#C8C8C8', ...GLASS_BTN }}>
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" style={{ stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' }} /></svg>
         </button>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <span style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 2, width: 132, height: 40, boxSizing: 'border-box', padding: '0 12px', borderRadius: 12, background: 'rgba(118,118,128,.24)',
-          boxShadow: bad ? 'inset 0 0 0 1.5px #FF6961' : 'none' }}>
+        <span style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 2, width: 132, height: 40, boxSizing: 'border-box', padding: '0 12px', borderRadius: 12, background: 'rgba(128,128,128,.24)',
+          boxShadow: bad ? 'inset 0 0 0 1.5px #E82127' : 'none' }}>
           <span style={{ fontSize: 17, lineHeight: '22px', color: MU }}>$</span>
           <input ref={inp} type="text" inputMode="decimal" autoComplete="off" aria-label="Target price in dollars" value={txt} tabIndex={open ? 0 : -1}
             onChange={(e) => { setTxt(e.target.value); setBad(false); }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } }}
-            style={{ all: 'unset', width: '100%', minWidth: 0, fontFamily: 'inherit', fontSize: 17, lineHeight: '22px', fontWeight: 600, color: K, ...tnum }} />
+            style={{ all: 'unset', width: '100%', minWidth: 0, fontFamily: 'inherit', fontSize: 17, lineHeight: '22px', fontWeight: 500, color: K, ...tnum }} />
         </span>
         <span className="tnum" style={{ fontSize: 13, lineHeight: '18px', color: MT, whiteSpace: 'nowrap' }}>
           {val == null ? '' : Math.abs(ch) < 0.0005 ? 'today’s price' : `${fromToday(val, S0)} from today`}
@@ -630,9 +639,9 @@ function TargetPop({ open, S0, tg, close, set }: { open: boolean; S0: number; tg
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 8 }}>
         <button type="button" className="bare swp-press" onClick={go} tabIndex={open ? 0 : -1}
-          style={{ height: 38, borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 600, color: '#000000', background: K, boxShadow: '0 2px 8px rgba(0,0,0,.3)' }}>Set target</button>
+          style={{ height: 38, borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 500, color: '#171717', background: K, boxShadow: '0 2px 8px rgba(0,0,0,.3)' }}>Set target</button>
         <button type="button" className="bare swp-press" onClick={() => set(null)} tabIndex={open ? 0 : -1}
-          style={{ height: 38, borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 600, color: K, ...GLASS_BTN }}>Clear</button>
+          style={{ height: 38, borderRadius: 999, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 500, color: K, ...GLASS_BTN }}>Clear</button>
       </div>
     </div>
   );
@@ -663,7 +672,7 @@ function Slider({ label, min, max, value, onPick, text }: { label: string; min: 
         onPick(hm ?? Math.max(min, Math.min(max, value + st)));
       }}
       style={{ position: 'relative', height: 36, cursor: 'pointer', touchAction: 'pan-y', userSelect: 'none', WebkitUserSelect: 'none', outline: 'none', borderRadius: 10 }}>
-      <span style={{ position: 'absolute', left: 0, right: 0, top: 16, height: 4, borderRadius: 2, background: 'rgba(118,118,128,.32)' }} />
+      <span style={{ position: 'absolute', left: 0, right: 0, top: 16, height: 4, borderRadius: 2, background: 'rgba(128,128,128,.32)' }} />
       <span style={{ position: 'absolute', left: 0, top: 16, height: 4, borderRadius: 2, width: x, background: K }} />
       <span style={{ position: 'absolute', left: x, top: 18, width: 34, height: 22, borderRadius: 999, transform: `translate(-50%,-50%) scale(${drag && !rm ? 1.16 : 1})`,
         background: drag ? 'rgba(255,255,255,.2)' : K, backdropFilter: drag ? 'blur(6px) saturate(1.6)' : 'none', WebkitBackdropFilter: drag ? 'blur(6px) saturate(1.6)' : 'none',
@@ -674,7 +683,7 @@ function Slider({ label, min, max, value, onPick, text }: { label: string; min: 
 }
 
 /** The Payoff hover (round 168, OptionStrat's crosshair): a line at that price starting under the price and % from
-    today on top, a dot on the curve, the P&L beside it on the curve's open side (green or red, a dark halo, no box).
+    today on top, a dot on the curve, the P&L beside it on the curve's open side (ink with its sign, a dark halo, no box).
     A finger reads while it is down. A move with no movement (the page scrolled under a still mouse) is ignored. */
 function PayHover({ f, setF, read }: { f: number | null; setF: (f: number | null) => void; read: (f: number, full: boolean) => { y: number; top: string; val: string; c: string } }) {
   const touch = useRef(false);
@@ -695,12 +704,12 @@ function PayHover({ f, setF, read }: { f: number | null; setF: (f: number | null
       style={{ position: 'absolute', inset: 0, cursor: 'crosshair', touchAction: 'pan-y', userSelect: 'none', WebkitUserSelect: 'none' }}>
       {h && (
         <div style={{ position: 'absolute', left: 0, right: 0, top: 10, bottom: 10, pointerEvents: 'none' }}>
-          <span style={{ position: 'absolute', top: 12, bottom: -10, left: x, borderLeft: '1px solid rgba(245,245,247,.85)' }} />
+          <span style={{ position: 'absolute', top: 12, bottom: -10, left: x, borderLeft: '1px solid rgba(242,242,242,.85)' }} />
           <span style={{ position: 'absolute', top: -10, left: x, transform: `translateX(${f! < 0.14 ? '0' : f! > 0.86 ? '-100%' : '-50%'})`, padding: '0 2px',
-            textShadow: '0 1px 2px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.85)', fontSize: 13, lineHeight: '18px', fontWeight: 600, color: K, whiteSpace: 'nowrap', ...tnum }}>{h.top}</span>
-          <span style={{ position: 'absolute', left: x, top: `${h.y.toFixed(2)}%`, width: 11, height: 11, margin: '-5.5px 0 0 -5.5px', borderRadius: '50%', background: '#FFFFFF', boxShadow: '0 0 8px rgba(255,255,255,.35)' }} />
-          <span style={{ position: 'absolute', left: x, top: `${h.y.toFixed(2)}%`, transform: vt, padding: '0 2px', textShadow: '0 0 2px #060807,0 0 4px #060807,0 0 10px rgba(6,8,7,.95)',
-            fontSize: 17, lineHeight: '22px', fontWeight: 700, color: h.c, whiteSpace: 'nowrap', ...tnum }}>{h.val}</span>
+            textShadow: '0 1px 2px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.85)', fontSize: 13, lineHeight: '18px', fontWeight: 400, color: K, whiteSpace: 'nowrap', ...tnum }}>{h.top}</span>
+          <span style={{ position: 'absolute', left: x, top: `${h.y.toFixed(2)}%`, width: 11, height: 11, margin: '-5.5px 0 0 -5.5px', borderRadius: '50%', background: '#FAFAFA', boxShadow: '0 0 8px rgba(255,255,255,.35)' }} />
+          <span style={{ position: 'absolute', left: x, top: `${h.y.toFixed(2)}%`, transform: vt, padding: '0 2px', textShadow: '0 0 2px #171717,0 0 4px #171717,0 0 10px rgba(23,23,23,.95)',
+            fontSize: 17, lineHeight: '22px', fontWeight: 500, color: h.c, whiteSpace: 'nowrap', ...tnum }}>{h.val}</span>
         </div>
       )}
     </div>
@@ -731,7 +740,7 @@ function PayTable({ t, pr, set, pts, ti, pick, mask, tg, chg }: { t: string; pr:
           const on = idx >= 0 && idx === ti;
           return (
             <button key={c.i} type="button" className="bare" onClick={() => { if (idx >= 0) pick(idx); }} aria-pressed={on} aria-disabled={idx < 0}
-              style={{ textAlign: 'center', padding: '6px 0', fontSize: 13, lineHeight: '18px', fontWeight: on ? 700 : 500, color: on ? K : idx < 0 ? MU : MT,
+              style={{ textAlign: 'center', padding: '6px 0', fontSize: 13, lineHeight: '18px', fontWeight: 500, color: on ? K : idx < 0 ? MU : MT,
                 boxShadow: `inset 0 -2px 0 ${on ? K : 'transparent'}`, cursor: idx < 0 ? 'default' : 'pointer' }}>{c.label}</button>
           );
         })}
@@ -739,7 +748,7 @@ function PayTable({ t, pr, set, pts, ti, pick, mask, tg, chg }: { t: string; pr:
       {rows.map((r, ri) => (
         <div key={r.x.toFixed(2) + (r.tg ? 't' : '')} style={{ display: 'grid', gridTemplateColumns: tpl, gap: 2 }}>
           <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, padding: '4px 0' }}>
-            <span style={{ fontSize: 14, lineHeight: '18px', fontWeight: r.tg || Math.abs(r.p) < 0.0005 ? 700 : 500 }}>{price(r.x)}</span>
+            <span style={{ fontSize: 14, lineHeight: '18px', fontWeight: 500 }}>{price(r.x)}</span>
             <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>{r.tg ? 'target' : Math.abs(r.p) < 0.0005 ? 'today' : `${r.p > 0 ? '↑' : '↓'}${Math.round(Math.abs(r.p) * 10) / 10}%`}</span>
           </span>
           {grid[ri].map((val, j) => {
@@ -747,9 +756,9 @@ function PayTable({ t, pr, set, pts, ti, pick, mask, tg, chg }: { t: string; pr:
             return (
               <button key={j} type="button" className="bare swp-cell" onClick={() => { if (col.idx >= 0) pick(col.idx); }}
                 aria-label={`${price(r.x)} by ${col.c.label}, ${mask(money(val))}${val < 0 ? ' loss' : ''}`}
-                style={{ textAlign: 'center', padding: '4px 0', borderRadius: 6, fontSize: 13, lineHeight: '18px', fontWeight: on || r.tg ? 700 : 500,
-                  color: z ? MU : val > 0 ? G : R, background: z ? 'transparent' : `${val > 0 ? 'rgba(101,196,102,' : 'rgba(255,105,97,'}${(0.05 + a * 0.18).toFixed(3)})`,
-                  boxShadow: on ? 'inset 0 0 0 1.5px rgba(245,245,247,.8)' : r.tg ? 'inset 0 0 0 1px rgba(245,245,247,.35)' : 'none', cursor: col.idx < 0 ? 'default' : 'pointer' }}>{z ? '$0' : mask(money(val))}</button>
+                style={{ textAlign: 'center', padding: '4px 0', borderRadius: 6, fontSize: 13, lineHeight: '18px', fontWeight: 500,
+                  color: z ? MU : wd(13), background: z ? 'transparent' : `${val > 0 ? 'rgba(76,187,108,' : 'rgba(232,33,39,'}${(0.05 + a * 0.18).toFixed(3)})`,
+                  boxShadow: on ? 'inset 0 0 0 1.5px rgba(242,242,242,.8)' : r.tg ? 'inset 0 0 0 1px rgba(242,242,242,.35)' : 'none', cursor: col.idx < 0 ? 'default' : 'pointer' }}>{z ? '$0' : sg(val, mask(money(val)))}</button>
             );
           })}
         </div>
@@ -782,7 +791,7 @@ function Scrub({ top, bottom, read }: { top: number; bottom: number; read: (f: n
       <span style={{ position: 'absolute', top: 0, left: `${(q.x * 100).toFixed(3)}%`, transform: right ? 'translateX(calc(-100% - 10px))' : 'translateX(10px)',
         display: 'flex', flexDirection: 'column', gap: 1, padding: '6px 9px', borderRadius: 10, background: 'rgba(16,18,17,.94)', boxShadow: '0 0 0 1px rgba(255,255,255,.12)',
         whiteSpace: 'nowrap', pointerEvents: 'none', ...tnum }}>
-        {q.rows.map((x, i) => <span key={i} style={{ fontSize: x.b ? 15 : 12, lineHeight: x.b ? '20px' : '16px', fontWeight: x.b ? 700 : 500, color: x.c ?? K }}>{x.t}</span>)}
+        {q.rows.map((x, i) => <span key={i} style={{ fontSize: x.b ? 15 : 12, lineHeight: x.b ? '20px' : '16px', fontWeight: 500, color: x.c ?? K }}>{x.t}</span>)}
       </span>
     );
   }
@@ -791,9 +800,9 @@ function Scrub({ top, bottom, read }: { top: number; bottom: number; read: (f: n
       onPointerUp={(e) => { if (e.pointerType === 'touch') setF(null); }} aria-hidden="true"
       style={{ position: 'absolute', left: 0, right: 0, top, bottom, cursor: 'crosshair', touchAction: 'pan-y', userSelect: 'none' }}>
       {q && <>
-        <span style={{ position: 'absolute', top: 0, bottom: 0, left: `${(q.x * 100).toFixed(3)}%`, borderLeft: '1px solid rgba(245,245,247,.55)', pointerEvents: 'none' }} />
+        <span style={{ position: 'absolute', top: 0, bottom: 0, left: `${(q.x * 100).toFixed(3)}%`, borderLeft: '1px solid rgba(242,242,242,.55)', pointerEvents: 'none' }} />
         <span style={{ position: 'absolute', left: `${(q.x * 100).toFixed(3)}%`, top: `${(q.y * 100).toFixed(3)}%`, width: 11, height: 11, margin: '-5.5px 0 0 -5.5px',
-          borderRadius: '50%', background: q.dot, boxShadow: '0 0 0 2px #0B0D0C', pointerEvents: 'none' }} />
+          borderRadius: '50%', background: q.dot, boxShadow: '0 0 0 2px #171717', pointerEvents: 'none' }} />
         {tip}
       </>}
     </div>

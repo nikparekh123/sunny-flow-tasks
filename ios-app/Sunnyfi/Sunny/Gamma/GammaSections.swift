@@ -236,7 +236,7 @@ struct GammaHedges: View {
                 if let h = p.hedge { statement(h) }
                 if let c = p.hedge?.curve, c.count > 2 { curve(c) }
                 if let c = p.hedge?.curve, c.count > 2 { numbers(c) }
-                Text(costLine()).sType(SType(size: 13, weight: 500, line: 18, tracking: 0)).foregroundStyle(p.budget?.over == true ? S.orangeDeep : S.muted)
+                Text(costLine()).sType(SType(size: 13, weight: 500, line: 18, tracking: 0)).foregroundStyle(S.muted)   // focus §2.1
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -294,13 +294,13 @@ struct GammaHedges: View {
         let s = ok ? "Delta stays positive through \(px)." + (h.low.map { " The lowest point is \(sh($0.d)) shares at \(PF.price($0.px))." } ?? "")
                    : "Without more calls, net delta falls to \(sh(h.low?.d ?? 0)) shares at \(PF.price(h.low?.px ?? spot)). Add \(h.add) to stay positive through \(px)."
         return Text(s).sType(SType(size: 15, weight: 600, line: 20, tracking: 0))
-            .foregroundStyle(ok ? S.blue : S.red)
+            .foregroundStyle(S.ink)   // focus §2.1: the words in ink; the tinted box behind them stays
             .padding(14).frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill((ok ? S.blue : S.red).opacity(0.10)))
             .fixedSize(horizontal: false, vertical: true)
     }
     /// Shares, a plus when positive (the delta a hedge adds, README's exception), no minus: red does that.
-    private func sh(_ d: Double) -> String { (d >= 0 ? "+" : "") + PWays.us(d) }
+    private func sh(_ d: Double) -> String { (d >= 0 ? "+" : "\u{2212}") + PWays.us(d) }   // focus §2.2: the − that red used to say
 
     /// Net delta at Thursday's close across prices: now (ink), with the calls added (green, dashed when none).
     private func curve(_ c: [[Double]]) -> some View {
@@ -349,7 +349,7 @@ struct GammaHedges: View {
             ForEach(cells, id: \.0) { l, d in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(l).sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)
-                    Text(sh(d)).sType(SType(size: 17, weight: 700, line: 22, tracking: 0)).foregroundStyle(d < 0 ? S.red : S.ink)
+                    Text(sh(d)).sType(SType(size: 17, weight: 700, line: 22, tracking: 0)).foregroundStyle(S.ink)
                 }
                 .padding(10).frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(S.surface))
@@ -484,7 +484,7 @@ struct GammaWallsTable: View {
                 }
                 .foregroundStyle(S.ink).padding(.horizontal, 8).frame(height: 24).background(Capsule().fill(S.surface))
                 if let o = w.oiLabel, o != w.label, w.label != "unclear" {
-                    Text("OI said \(GammaText.label(o))").sType(SType(size: 11, weight: 600, line: 14, tracking: 0), tabular: false).foregroundStyle(S.orangeDeep)
+                    Text("OI said \(GammaText.label(o))").sType(SType(size: 11, weight: 600, line: 14, tracking: 0), tabular: false).foregroundStyle(S.muted)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {

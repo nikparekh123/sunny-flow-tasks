@@ -1,5 +1,6 @@
 // A small payoff line (README 1b "the payoff", the design's rail card and tile): P&L across a price range, green above
-// break even and red below (one path, clipped at the zero line), filled with the page's #sunGU / #sunGD, the zero line
+// break even and red below (one path, clipped at the zero line), filled with the page's #sunGU / #sunGD (neutral grey
+// since handoff 2026-11-25-focus §2.4), the zero line
 // rgba(255,255,255,.22), today a dashed vertical (rgba(255,255,255,.35), dash 2 3). Drawn in a 400 × 100 box stretched
 // to the size given, with `pad` (12%) of the range above and below. Generic: values are evenly spaced across x.
 import { useMemo, type CSSProperties } from 'react';
@@ -40,11 +41,11 @@ export default function PayoffMini({ values, height, stroke = 1.75, pad = 0.12, 
     <span aria-hidden="true" style={{ position: 'relative', display: 'block', height, ...style }}>
       <svg viewBox="0 0 400 100" preserveAspectRatio="none" style={{ ...box, clipPath: `inset(0 0 ${(100 - g.z).toFixed(1)}% 0)` }}>
         <path d={g.area} fill="url(#sunGU)" />
-        <path d={g.line} style={ln('#65C466')} />
+        <path d={g.line} style={ln('#4CBB6C')} />
       </svg>
       <svg viewBox="0 0 400 100" preserveAspectRatio="none" style={{ ...box, clipPath: `inset(${zs}% 0 0 0)` }}>
         <path d={g.area} fill="url(#sunGD)" />
-        <path d={g.line} style={ln('#FF6961')} />
+        <path d={g.line} style={ln('#E82127')} />
       </svg>
       <svg viewBox="0 0 400 100" preserveAspectRatio="none" style={box}>
         <line x1="0" y1={zs} x2="400" y2={zs} style={{ stroke: 'rgba(255,255,255,.22)', strokeWidth: 1, vectorEffect: 'non-scaling-stroke' }} />

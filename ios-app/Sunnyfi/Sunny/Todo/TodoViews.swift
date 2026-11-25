@@ -6,7 +6,8 @@
 //  right of the Positions title, the sheet, and the list (SunnyTodo.dc.html): the add field with typed dates and its
 //  preview line, rows with a circle, the text (the first book or watchlist ticker 600), the note and the date, a row
 //  opened for its note, date and Delete, our own date picker, and Done · N folded. High fidelity: the values below
-//  are the design's.
+//  are the design's. Focus (handoff 2026-11-25): dates and Delete are muted words, an overdue date and Delete keep an
+//  8 pt red dot before them, a done circle fills grey inside its green ring, a picked chip or day is the chip-on grey.
 //
 
 import SwiftUI
@@ -15,23 +16,25 @@ import SwiftUI
 
 enum TD {
     static let ink = S.ink
-    static let mu = S.dyn(0x6E6E73, 0x98989D)
-    static let rule = S.dynA(0x1D1D1F, 0.08, 0xFFFFFF, 0.10)
-    static let ring = S.dynA(0x3C3C43, 0.36, 0xEBEBF5, 0.36)
-    static let green = S.dyn(0x327133, 0x65C466)
-    static let red = S.dyn(0xBC2E30, 0xFF6961)
-    static let orange = S.dyn(0xA34B00, 0xF2A93B)
-    static let accent = S.dyn(0x2E5ECA, 0x86A8F0)
-    static let accentTint = S.dynA(0x2E5ECA, 0.10, 0x86A8F0, 0.16)
-    static let track = S.dynA(0x767680, 0.12, 0x767680, 0.24)
-    static let panel = S.dynA(0x767680, 0.08, 0x767680, 0.16)
-    static let btn = S.dyn(0x1D1D1F, 0xF5F5F7)
-    static let btnInk = S.dyn(0xFFFFFF, 0x000000)
+    static let mu = S.dyn(0x6E6E6E, 0x8C8C8C)
+    static let rule = S.dynA(0x212121, 0.08, 0xFAFAFA, 0.10)
+    static let ring = S.dynA(0x3C3C3C, 0.36, 0xEBEBEB, 0.36)
+    static let green = S.dyn(0x1C7840, 0x4CBB6C)
+    static let red = S.dyn(0xCC0000, 0xE82127)
+    static let orange = S.dyn(0xA34B00, 0xE8A33D)
+    static let accent = S.dyn(0x3E6AE1, 0x3E6AE1)
+    static let accentTint = S.dynA(0x3E6AE1, 0.10, 0x3E6AE1, 0.16)
+    static let track = S.dynA(0x808080, 0.12, 0x808080, 0.24)
+    static let panel = S.dynA(0x808080, 0.08, 0x808080, 0.16)
+    static let btn = S.dyn(0x212121, 0xF2F2F2)
+    static let btnInk = S.dyn(0xFAFAFA, 0x171717)
     /// The entry point: one very light gray for the count and the words (Nik asked for it quiet; under 4.5:1 on purpose).
-    static let link = S.dyn(0xAEAEB2, 0x636366)
+    static let link = S.dyn(0xAAAAAA, 0x636363)
 
-    /// A day's colour on a row: overdue red, today orange, else muted.
-    static func dateColor(_ d: String?, today t: String) -> Color { guard let d else { return mu }; return d < t ? red : d == t ? orange : mu }
+    /// A day's colour on a row: muted (focus, 25 Nov: words are never red or orange; an overdue day keeps a red dot).
+    static func dateColor(_ d: String?, today t: String) -> Color { mu }
+    /// Overdue: the date is a warning, so it carries the 8 pt red dot before it (README §2.3).
+    static func overdue(_ d: String?, today t: String) -> Bool { d.map { $0 < t } ?? false }
 }
 
 // MARK: - The entry point
@@ -162,7 +165,7 @@ struct TodoList: View {
     private func addField(_ t: String) -> some View {
         let empty = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let label = addDay.map { TodoDates.lab($0, today: t) } ?? "Date"
-        let color: Color = (addPick != nil && addPick != "") ? TD.ink : parsed != nil ? TD.accent : TD.mu
+        let color: Color = (addPick != nil && addPick != "") ? TD.ink : TD.mu   // a found date: grey words on the blue tint (focus)
         let bg: Color = parsed != nil ? TD.accentTint : pk == "add" ? TD.panel : .clear
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
@@ -202,7 +205,7 @@ struct TodoList: View {
             // The preview line while a date is found in the text: Adds “Call accountant”, due tomorrow.
             if let p = parsed {
                 (Text("Adds “") + Text(p.text).font(.inter(13, 500)).foregroundColor(TD.ink) + Text("”, due ")
-                 + Text(TodoDates.due(p.iso, today: t)).font(.inter(13, 600)).foregroundColor(TD.accent))
+                 + Text(TodoDates.due(p.iso, today: t)).font(.inter(13, 600)).foregroundColor(TD.mu))
                     .sType(SType(size: 13, weight: 400, line: 18, tracking: 0), tabular: false).foregroundStyle(TD.mu)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 16)
@@ -247,7 +250,8 @@ struct TodoList: View {
                 .buttonStyle(.plain)
                 .accessibilityHint(isOpen ? "Closes the note and date" : "Opens the note, date and Delete")
                 if let d = x.due {
-                    Text(TodoDates.lab(d, today: t)).font(.inter(13, 500, tabular: true)).foregroundStyle(TD.dateColor(d, today: t))
+                    (TD.overdue(d, today: t) ? SF.dot(.danger) + Text(TodoDates.lab(d, today: t)) : Text(TodoDates.lab(d, today: t)))
+                        .font(.inter(13, 500, tabular: true)).foregroundStyle(TD.dateColor(d, today: t))
                         .frame(height: 20).fixedSize()
                 }
             }
@@ -282,7 +286,8 @@ struct TodoList: View {
     private func circle(_ ck: Bool, _ tap: @escaping () -> Void) -> some View {
         Button(action: tap) {
             ZStack {
-                Circle().fill(ck ? TD.green : .clear)
+                // Done: the fill is neutral grey (focus §2.4, a large green fill with no text); the ring keeps its green.
+                Circle().fill(ck ? SF.fill : .clear)
                 Circle().strokeBorder(ck ? TD.green : TD.ring, lineWidth: 1.5)
                 if ck {
                     Path { p in p.move(to: CGPoint(x: 2.5, y: 6.2)); p.addLine(to: CGPoint(x: 4.8, y: 8.5)); p.addLine(to: CGPoint(x: 9.5, y: 3.6)) }
@@ -311,7 +316,8 @@ struct TodoList: View {
     /// The opened row: the note, then the date button and Delete, the picker under them.
     private func editor(_ x: TodoStore.Item, _ t: String) -> some View {
         let dLabel = x.due.map { TodoDates.lab($0, today: t) } ?? "Add a date"
-        let dColor: Color = x.due == nil ? TD.mu : x.due! < t ? TD.red : x.due! == t ? TD.orange : TD.ink
+        // Focus: overdue and today are muted words (overdue keeps a red dot in the chip); a later day is ink.
+        let dColor: Color = x.due == nil ? TD.mu : x.due! <= t ? TD.mu : TD.ink
         return VStack(alignment: .leading, spacing: 8) {
             TextField("", text: Binding(get: { notes[x.id] ?? x.note }, set: { notes[x.id] = $0; store.setNote(x.id, $0) }),
                       prompt: Text("Add a note").foregroundStyle(TD.mu), axis: .vertical)
@@ -323,6 +329,7 @@ struct TodoList: View {
             HStack(spacing: 10) {
                 Button { openPicker(x.id, current: x.due, today: t) } label: {
                     HStack(spacing: 6) {
+                        if TD.overdue(x.due, today: t) { SDot(kind: .danger).padding(.trailing, -6) }   // 7 before the icon
                         TodoCalendarIcon().frame(width: 15, height: 15)
                         Text(dLabel).font(.inter(13, 600)).lineLimit(1).fixedSize()
                     }
@@ -338,7 +345,8 @@ struct TodoList: View {
                     store.delete(x.id)
                     withAnimation(.easeOut(duration: 0.2)) { ex = nil; pk = nil }
                 } label: {
-                    Text("Delete").font(.inter(13, 500)).foregroundStyle(TD.red).frame(height: 44).contentShape(Rectangle())
+                    // Focus: a muted word with the red dot before it (it was red).
+                    (SF.dot(.danger) + Text("Delete")).font(.inter(13, 500)).foregroundStyle(TD.mu).frame(height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -417,7 +425,7 @@ struct TodoList: View {
         let padded = cells + Array(repeating: nil, count: (7 - cells.count % 7) % 7)
         return VStack(alignment: .leading, spacing: 10) {
             TodoFlow(spacing: 6) {
-                ForEach(chips, id: \.d) { c in chip(c.t, on: current == c.d, fg: current == c.d ? TD.btnInk : TD.ink) { pick(c.d) } }
+                ForEach(chips, id: \.d) { c in chip(c.t, on: current == c.d, fg: current == c.d ? SF.chipOnInk : TD.ink) { pick(c.d) } }
                 if current != nil { chip("No date", on: false, fg: TD.mu) { pick(nil) } }
             }
             HStack(spacing: 8) {
@@ -454,7 +462,7 @@ struct TodoList: View {
         Button(action: go) {
             Text(s).font(.inter(13, 600)).foregroundStyle(fg)
                 .padding(.horizontal, 12).frame(height: 30)
-                .background(Capsule().fill(on ? TD.btn : TD.track))
+                .background(Capsule().fill(on ? SF.chipOn : TD.track))   // on: the chip-on grey (focus §2.6)
                 .frame(minHeight: 44).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -482,9 +490,9 @@ struct TodoList: View {
             let on = s == current, td = s == t
             Button { pick(s) } label: {
                 Text("\(p.d)").font(.inter(15, on || td ? 700 : 400, tabular: true))
-                    .foregroundStyle(on ? TD.btnInk : td ? TD.accent : s < t ? TD.mu : TD.ink)
+                    .foregroundStyle(on ? SF.chipOnInk : s < t && !td ? TD.mu : TD.ink)   // today: ink, not blue (focus)
                     .frame(width: 36, height: 36)
-                    .background(Circle().fill(on ? TD.btn : .clear))
+                    .background(Circle().fill(on ? SF.chipOn : .clear))
                     .animation(.easeOut(duration: 0.15), value: on)
                     .frame(maxWidth: .infinity).frame(height: 40).contentShape(Rectangle())
             }

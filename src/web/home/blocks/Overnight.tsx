@@ -6,7 +6,7 @@
 // even columns with no group labels rather than guess.
 import { Fragment } from 'react';
 import type { J } from '../../lib/data';
-import { C, clean, named } from '../../lib/format';
+import { C, clean, named, wordOf } from '../../lib/format';
 import { BOX, TABLE_PAD } from './Card';
 import { move } from './util';
 
@@ -65,7 +65,7 @@ export default function Overnight({ card }: { card: J }) {
   return (
     <div style={{ ...BOX, display: 'flex', flexDirection: 'column', padding: TABLE_PAD }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, paddingBottom: 10 }}>
-        <span style={{ fontSize: 17, fontWeight: 600 }}>{clean(card.title) || 'Overnight'}</span>
+        <span style={{ fontSize: 17, fontWeight: 500 }}>{clean(card.title) || 'Overnight'}</span>
         {sub ? <span style={{ fontSize: 13, color: C.ink2 }}>{sub}</span> : null}
       </div>
       <div className="tnum" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 32 }}>
@@ -86,8 +86,8 @@ export default function Overnight({ card }: { card: J }) {
                     </span>
                     <span style={cell}>{r.trend ? <MonthLine t={r.trend} live={r.status === 'still trading'} /> : null}</span>
                     <span style={{ ...cell, alignItems: 'flex-end' }}>
-                      <span style={{ fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap' }}>{r.value}</span>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: r.m.c, whiteSpace: 'nowrap' }}>{r.m.t}</span>
+                      <span style={{ fontSize: 15, fontWeight: 500, whiteSpace: 'nowrap' }}>{r.value}</span>
+                      <span style={{ fontSize: 12, fontWeight: 400, color: wordOf(r.m.c, 12), whiteSpace: 'nowrap' }}>{r.m.t}</span>
                     </span>
                   </Fragment>
                 );

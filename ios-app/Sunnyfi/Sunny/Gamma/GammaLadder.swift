@@ -133,12 +133,12 @@ struct GammaLadder: View {
                 .frame(width: W - left + 6, height: max(0, H - split)).offset(x: left - 6, y: split)
             Text(calmAbove ? "Calmer: dealers absorb moves" : "Amplified: dealers chase moves")
                 .sType(SType(size: 11, weight: 600, line: 14, tracking: 0), tabular: false)
-                .foregroundStyle(calmAbove ? S.blue : S.orangeDeep)
+                .foregroundStyle(S.muted)   // focus §2.1: no blue or orange on words
                 .frame(width: W - left - 8, alignment: .trailing).offset(x: left, y: 2)
             if fy != nil {
                 Text(calmAbove ? "Amplified: dealers chase moves" : "Calmer: dealers absorb moves")
                     .sType(SType(size: 11, weight: 600, line: 14, tracking: 0), tabular: false)
-                    .foregroundStyle(calmAbove ? S.orangeDeep : S.blue)
+                    .foregroundStyle(S.muted)
                     .frame(width: W - left - 8, alignment: .trailing).offset(x: left, y: H - 18)
             }
         }
@@ -234,7 +234,7 @@ struct GammaLadder: View {
                     }
                     .frame(height: 4)
                     Text(oiSaid ?? change ?? "").sType(SType(size: 11, weight: 500, line: 14, tracking: 0), tabular: false)
-                        .foregroundStyle(oiSaid != nil ? S.orangeDeep : S.muted).lineLimit(1).fixedSize()
+                        .foregroundStyle(S.muted).lineLimit(1).fixedSize()
                 }
                 ForEach(trades, id: \.self) { s in
                     Text(s).sType(SType(size: 11, weight: 600, line: 14, tracking: 0), tabular: false).foregroundStyle(S.muted)

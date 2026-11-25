@@ -21,8 +21,10 @@ struct SBackground: View {
         GeometryReader { g in
             let w = g.size.width, h = g.size.height
             ZStack {
+                // Flat (handoff 2026-11-25-focus §1.3): the glows are gone on every page; `glows` is kept for the
+                // call sites and does nothing.
                 S.screen
-                if glows { glows3(w: w, h: h) }
+                let _ = (w, h)
             }
         }
         .ignoresSafeArea()

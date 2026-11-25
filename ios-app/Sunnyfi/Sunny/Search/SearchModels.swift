@@ -178,19 +178,22 @@ struct SXSuggestion: Decodable, Equatable, Identifiable {
 // MARK: - Text marks
 
 enum SXText {
-    /// {b:x} bold ink, {g:x} green, {r:x} red, {o:x} orange; all four bold.
+    /// {b:x} bold ink, {g:x} green, {r:x} red, {o:x} orange; all four bold. Focus (2026-11-25): the colours are gone
+    /// from words: every mark is the bold cut in ink (grey under 15 pt), and a green or red money figure or bare
+    /// percentage carries + or − instead ("{r:$4.3K}" reads "−$4.3K").
     static let mark = /\{([gbro]):([^}]*)\}/
 
     static func plain(_ s: String) -> String { s.replacing(mark) { String($0.output.2) } }
 
-    /// The text with its marks as bold, coloured runs.
-    static func styled(_ s: String, bold: Font? = nil) -> AttributedString {
+    /// The text with its marks as bold runs; `size` is the role's design size (ink at 15 and up, grey under).
+    static func styled(_ s: String, bold: Font? = nil, size: CGFloat = 15) -> AttributedString {
         var out = AttributedString()
         var rest = s[...]
         while let m = rest.firstMatch(of: mark) {
             out += AttributedString(String(rest[rest.startIndex..<m.range.lowerBound]))
-            var run = AttributedString(String(m.output.2))
-            run.foregroundColor = tone(String(m.output.1))
+            let k = String(m.output.1), w = String(m.output.2)
+            var run = AttributedString(k == "g" ? SX.signed(w, "up") : k == "r" ? SX.signed(w, "down") : w)
+            run.foregroundColor = tone(k, size)
             run.inlinePresentationIntent = .stronglyEmphasized
             if let bold { run.font = bold }
             out += run
@@ -202,10 +205,10 @@ enum SXText {
 
     /// The same, the marked runs in the bold cut of the role's own size.
     static func styled(_ s: String, _ t: SXType, _ dts: DynamicTypeSize) -> AttributedString {
-        styled(s, bold: SXScale.font(t.weighted(.bold), dts).monospacedDigit())
+        styled(s, bold: SXScale.font(t.weighted(.bold), dts).monospacedDigit(), size: t.size)
     }
 
-    static func tone(_ k: String) -> Color {
-        switch k { case "g": SX.up; case "r": SX.down; case "o": SX.thin; default: SX.ink }
+    static func tone(_ k: String, _ size: CGFloat = 15) -> Color {
+        switch k { case "g", "r", "o": SF.word(size); default: SX.ink }
     }
 }

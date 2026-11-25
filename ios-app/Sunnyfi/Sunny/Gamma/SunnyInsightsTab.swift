@@ -278,7 +278,7 @@ struct SunnyInsightsTab: View {
     /// The amber verdict card: a small label, the sentence, the chips.
     private func verdictCard<C: View>(label: String, text: String, @ViewBuilder chips: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(label).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(S.orangeDeep)
+            Text(label).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)   // focus §2.1
             Text(text).sType(SType(size: 20, weight: 700, line: 26, tracking: 0), tabular: false).foregroundStyle(S.ink)
                 .fixedSize(horizontal: false, vertical: true)
             PWrap(spacing: 8) { chips() }
@@ -329,7 +329,8 @@ struct SunnyInsightsTab: View {
                     Text(t).sType(SType(size: 22, weight: 800, line: 28, tracking: -0.01), tabular: false).foregroundStyle(S.ink)
                     Spacer()
                     if let p = w?.price { Text("$\(PF.price(p))").sType(SType(size: 17, weight: 600, line: 22, tracking: 0)).foregroundStyle(S.ink) }
-                    if let d = w?.ranges.d { Text(String(format: "%.1f%%", abs(d))).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(d >= 0 ? S.green : S.red) }
+                    // Focus §2.1, §2.2: ink with + or −, no green or red.
+                    if let d = w?.ranges.d { Text(SF.signed(d, String(format: "%.1f%%", abs(d)))).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(S.ink) }
                 }
                 Text("Not in your book. Walls from open interest only, no tape labels.")
                     .sType(SType(size: 15, weight: 400, line: 22, tracking: 0), tabular: false).foregroundStyle(S.ink)

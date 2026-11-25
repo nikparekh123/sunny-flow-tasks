@@ -8,13 +8,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { CountUp } from '../../components/CountUp';
 import type { J } from '../../lib/data';
-import { C, dollars, money } from '../../lib/format';
+import { C, dollars, money, sgn, wordOf } from '../../lib/format';
 import { estWords } from '../../lib/clock';
 import { useWeb } from '../../lib/state';
 import { changeText, chartModel, RANGES, rangeView, stats, WORDS, type Line, type Range } from './model';
 import { acctParts, changeParts, startingOn, statPart, type StatPart } from './parts';
 
 const HAIR = '1px solid rgba(255,255,255,.08)';
+/** A stat red for a loss (and grey or ink otherwise) now carries a − instead (handoff 2026-11-25-focus §2.2). */
+const loss = (c: string, s: string) => (c === C.red ? sgn(-1, s) : s);
 
 export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }) {
   const { mask, privacy, setTvOpen } = useWeb();
@@ -79,7 +81,7 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
     const hl = hlEl.current;
     if (hl) {
       const a = hl.firstElementChild as HTMLSpanElement | null, b2 = hl.lastElementChild as HTMLSpanElement | null;
-      if (a) { a.textContent = mk(changeText(ch, r.Sv, r.deps[j])); a.style.color = ch >= 0 ? C.green : C.red; }
+      if (a) a.textContent = mk(changeText(ch, r.Sv, r.deps[j]));
       if (b2) b2.textContent = r.labs[j];
       hl.style.display = 'block';
     }
@@ -164,7 +166,7 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
       </span>
       <div style={{ position: 'relative', marginTop: 4 }}>
         <span ref={hlEl} className="tnum" style={{ display: 'none', position: 'absolute', top: 0, left: 0, fontSize: 15, whiteSpace: 'nowrap' }}>
-          <span style={{ fontWeight: 600 }} /> <span style={{ color: C.ink2 }} />
+          <span style={{ fontWeight: 500 }} /> <span style={{ color: C.ink2 }} />
         </span>
         <div ref={linesEl} className="tnum" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {split.length > 1 && (
@@ -172,7 +174,7 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
           )}
           {lines.map((x) => (
             <span key={x.k} style={{ fontSize: 15 }}>
-              <span style={{ fontWeight: 600, color: x.c }}>{mask(x.v)}</span> <span style={{ color: C.ink2 }}>{x.l}{x.pt ? ' · ' + mask(x.pt) : ''}</span>
+              <span style={{ fontWeight: 500, color: wordOf(x.c, 15) }}>{mask(x.v)}</span> <span style={{ color: C.ink2 }}>{x.l}{x.pt ? ' · ' + mask(x.pt) : ''}</span>
             </span>
           ))}
           {/* Before the open and after the close: the value is priced from pre-market or after-hours trades. */}
@@ -203,7 +205,7 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
           const on = r === range;
           return (
             <button key={r} type="button" role="tab" aria-selected={on} className="bare swa-rg" onClick={() => setPick(r)}
-              style={{ padding: '10px 0 9px', fontSize: 14, fontWeight: on ? 600 : 500, color: on ? LC : C.ink2, boxShadow: on ? `inset 0 -2px 0 ${LC}` : 'none' }}>
+              style={{ padding: '10px 0 9px', fontSize: 14, fontWeight: 500, color: on ? wordOf(LC, 14) : C.ink2, boxShadow: on ? `inset 0 -2px 0 ${LC}` : 'none' }}>
               {r}
             </button>
           );
@@ -219,10 +221,10 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
           const inner = (
             <>
               <span style={{ fontSize: 12, color: C.ink2, whiteSpace: 'nowrap' }}>{x.l}</span>
-              <span className="tnum" style={{ fontSize: 19, lineHeight: '24px', fontWeight: 600, color: x.c }}>{mask(x.v)}</span>
+              <span className="tnum" style={{ fontSize: 19, lineHeight: '24px', fontWeight: 500, color: wordOf(x.c, 19) }}>{loss(x.c, mask(x.v))}</span>
               {pt && (
-                <span className="tnum" style={{ display: 'flex', flexDirection: 'column', fontSize: 12, lineHeight: '16px', color: '#8E8E93', whiteSpace: 'nowrap' }}>
-                  {pt.map((p) => <span key={p.ini}>{p.ini} <span style={{ color: p.c }}>{mask(p.v)}</span></span>)}
+                <span className="tnum" style={{ display: 'flex', flexDirection: 'column', fontSize: 12, lineHeight: '16px', color: '#8C8C8C', whiteSpace: 'nowrap' }}>
+                  {pt.map((p) => <span key={p.ini}>{p.ini} <span style={{ color: wordOf(p.c, 12) }}>{loss(p.c, mask(p.v))}</span></span>)}
                 </span>
               )}
             </>
@@ -234,7 +236,7 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
             : <div key={x.k} style={style}>{inner}</div>;
         })}
       </div>
-      <style>{'.sw .swa-rg:hover{color:#F5F5F7!important}'}</style>
+      <style>{'.sw .swa-rg:hover{color:#F2F2F2!important}'}</style>
     </>
   );
 }

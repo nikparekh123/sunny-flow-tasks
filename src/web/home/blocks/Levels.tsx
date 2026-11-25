@@ -18,7 +18,7 @@ import { strike } from '../rail/model';
 import { BOX } from './Card';
 
 type When = 'today' | 'yday' | 'week';
-const SUB = C.ink2, THIN = 'rgba(245,245,247,.72)', LN = '1px solid rgba(255,255,255,.08)';
+const SUB = C.ink2, THIN = 'rgba(242,242,242,.72)', LN = '1px solid rgba(255,255,255,.08)';
 const SPAN: Record<When, string> = { today: 'today', yday: 'yesterday', week: 'this week' };
 const HEAD: Record<When, string> = { today: 'Today', yday: 'Yesterday', week: 'This week' };
 /** The averages in plain words: '1' over, '0' under, for the 20, 50 and 200-day. */
@@ -42,7 +42,7 @@ function maWords(p: string): string {
 const andList = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
-interface LvRow { k: string; t: string; nm: string; w: string; tm: string; px: string; mv: string; mc: string; aria: string }
+interface LvRow { k: string; t: string; nm: string; w: string; tm: string; px: string; mv: string; aria: string }
 interface Chip { t: string; v: string; dot: boolean; aria: string }
 interface Block { k: string; h: string; rows: { k: string; l: string; names: Chip[] }[] }
 
@@ -68,7 +68,7 @@ export default function Levels({ card, payload }: { card: J; payload: J }) {
       const tm = nyTime(e.at, when === 'week');
       const px = l && l.px > 0 ? price(l.px) : '', up = (l?.mv ?? 0) >= 0;
       const mv = l?.mv != null ? `${up ? '▲' : '▼'} ${pct(l.mv)}` : '';
-      return { k: e.key, t, nm, w, tm, px, mv, mc: up ? C.green : C.red,
+      return { k: e.key, t, nm, w, tm, px, mv,
         aria: `${nm}, ${w.toLowerCase()} at ${tm}${px ? ', ' + px : ''}${mv ? `, ${up ? 'up' : 'down'} ${pct(l!.mv)}` : ''}. Opens Activity` };
     });
     const under = act.levels.filter((l) => l.ma === '000');
@@ -94,22 +94,22 @@ export default function Levels({ card, payload }: { card: J; payload: J }) {
     <section aria-label="Levels" className="lvc tnum" style={{ ...BOX, padding: '20px 24px 18px', minWidth: 0 }}>
       <style>{LV_CSS}</style>
       <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        <span style={{ fontSize: 17, lineHeight: '20px', fontWeight: 600 }}>Levels</span>
+        <span style={{ fontSize: 17, lineHeight: '20px', fontWeight: 500 }}>Levels</span>
         <p style={{ margin: '6px 0 10px', fontSize: 17, lineHeight: '24px', textWrap: 'pretty' } as CSSProperties}>
-          <span style={{ fontWeight: 600 }}>{m.thick}</span><span style={{ color: THIN }}>{m.thin}</span>
+          <span style={{ fontWeight: 500 }}>{m.thick}</span><span style={{ color: THIN }}>{m.thin}</span>
         </p>
-        {m.rows.length > 0 && <span style={{ padding: '2px 0 6px', fontSize: 12, lineHeight: '16px', fontWeight: 600, color: SUB }}>{HEAD[when]}</span>}
+        {m.rows.length > 0 && <span style={{ padding: '2px 0 6px', fontSize: 12, lineHeight: '16px', fontWeight: 400, color: SUB }}>{HEAD[when]}</span>}
         {m.rows.map((r) => (
           <button key={r.k} type="button" className="bare swb-row" onClick={() => openActivity(r.k)} aria-label={r.aria}
             style={{ display: 'grid', gridTemplateColumns: '28px minmax(0,1fr) auto 12px', gap: 10, alignItems: 'center', minHeight: 56, padding: '8px 0', borderTop: LN }}>
             <Logo t={r.t} size={28} />
             <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-              <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600 }}>{r.nm}</span>
+              <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500 }}>{r.nm}</span>
               <span style={{ fontSize: 13, lineHeight: '18px', color: SUB, textWrap: 'pretty' } as CSSProperties}>{r.w} · {r.tm}</span>
             </span>
             <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
-              {r.px && <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600 }}>{r.px}</span>}
-              {r.mv && <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: r.mc, whiteSpace: 'nowrap' }}>{r.mv}</span>}
+              {r.px && <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500 }}>{r.px}</span>}
+              {r.mv && <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 400, color: SUB, whiteSpace: 'nowrap' }}>{r.mv}</span>}
             </span>
             <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" style={{ color: SUB, fill: 'none', stroke: 'currentColor', strokeWidth: 3, strokeLinecap: 'round', strokeLinejoin: 'round' }}>
               <path d="M9 6l6 6-6 6" />
@@ -120,19 +120,19 @@ export default function Levels({ card, payload }: { card: J; payload: J }) {
       <div className="lvc-r" style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
         {m.blocks.map((b) => (
           <div key={b.k} role="group" aria-label={b.h} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, color: SUB }}>{b.h}</span>
+            <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 400, color: SUB }}>{b.h}</span>
             {b.rows.map((g) => (
               <div key={g.k} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, borderTop: LN }}>
                 <span style={{ fontSize: 14, lineHeight: '18px', fontWeight: 500 }}>{g.l}</span>
                 <div role="list" aria-label={g.l} style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   {g.names.map((n) => (
                     <span key={n.t} role="listitem" aria-label={n.aria}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, height: 28, padding: '0 10px 0 4px', borderRadius: 999, background: 'rgba(118,118,128,.24)',
-                        fontSize: 13, lineHeight: '16px', fontWeight: 600 }}>
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, height: 28, padding: '0 10px 0 4px', borderRadius: 999, background: 'rgba(128,128,128,.24)',
+                        fontSize: 13, lineHeight: '16px', fontWeight: 400 }}>
                       <Logo t={n.t} size={20} />
                       <span aria-hidden="true">{n.t}</span>
                       {n.v && <span aria-hidden="true" style={{ fontWeight: 500, color: SUB }}>{n.v}</span>}
-                      {n.dot && <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: '#0A84FF' }} />}
+                      {n.dot && <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: '#3E6AE1' }} />}
                     </span>
                   ))}
                 </div>

@@ -216,7 +216,7 @@ struct SXNamePage: View {
                 if let d = p.day {
                     Text((d.pct < 0 ? "▼ " : "▲ ") + (d.usd.map { String(format: "$%.2f · ", $0) } ?? "")
                          + String(format: "%.1f%% ", abs(d.pct)) + (p.live ? "today" : "at the close"))
-                        .sx(.question).foregroundStyle(d.pct < 0 ? SX.down : SX.up)
+                        .sx(.question).foregroundStyle(SX.ink)
                 }
             }
             .padding(.top, 10)
@@ -563,7 +563,8 @@ private struct SXSectorCard: View {
                 }
                 .animation(reduce ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.7).delay(0.22 + Double(i) * 0.045), value: grown)
             }
-            Text(arrowPct(r.pct)).sx(me ? .tableRow.weighted(.bold) : .tableRow).foregroundStyle(me ? tone : SX.muted)
+            // Focus: the bar keeps the move's colour (a chart bar); the figure is grey words with its arrow.
+            Text(arrowPct(r.pct)).sx(me ? .tableRow.weighted(.bold) : .tableRow).foregroundStyle(me ? SF.word(SXType.tableRow.size) : SX.muted)
                 .lineLimit(1).fixedSize()
                 .frame(width: 58, alignment: .trailing)
         }
@@ -584,7 +585,7 @@ private struct SXSaidCard: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(n.title).sx(.news).foregroundStyle(SX.ink)
                     Text(n.line).sx(.actSub.weighted(.regular)).foregroundStyle(SX.muted).lineLimit(3).fixedSize(horizontal: false, vertical: true)
-                    Text(n.src).sx(.tiny).foregroundStyle(SX.research).padding(.top, 2)
+                    Text(n.src).sx(.tiny).foregroundStyle(SX.muted).padding(.top, 2)
                 }
                 .padding(.vertical, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -612,7 +613,7 @@ private struct SXEarningsCard: View {
                     HStack(spacing: 0) {
                         ForEach(e.moves, id: \.rep) { m in
                             VStack(spacing: 3) {
-                                Text(arrowPct(m.pct)).sx(.tableRow.weighted(.bold)).foregroundStyle(m.pct < 0 ? SX.down : SX.up)
+                                Text(arrowPct(m.pct)).sx(.tableRow.weighted(.bold)).foregroundStyle(SF.word(SXType.tableRow.size))
                                 Text(m.m).sx(.axis).foregroundStyle(SX.muted)
                             }
                             .frame(maxWidth: .infinity)
@@ -651,7 +652,7 @@ private struct SXEarningsCard: View {
 
 private extension SX {
     /// Muted text on a tinted tile (block 31: #AEAEB2 in dark so it passes 4.5:1 on the tile).
-    static let mutedOnTile = S.dyn(0x646469, 0xAEAEB2)
+    static let mutedOnTile = S.dyn(0x666666, 0xAAAAAA)
 }
 
 private extension SXType {
@@ -659,8 +660,9 @@ private extension SXType {
     static let panelAmount = SXType(size: 20, line: 24, weight: .bold, style: .title3, tracking: 0)
 }
 
-/// Whole dollars, no sign: the color says up or down.
+/// Whole dollars, no sign (focus: a figure that stands alone gets SF.signed's + or −).
 private func dollars(_ v: Double) -> String { "$" + Int(abs(v).rounded()).formatted(.number.grouping(.automatic)) }
+/// A chart line's or bar's colour by the sign: marks only, never words.
 private func tone(_ v: Double) -> Color { v < 0 ? SX.down : SX.up }
 
 /// A folded act rises 6 and fades in (0.3 s).
@@ -844,7 +846,7 @@ private struct SXHoldCard: View {
                 Text(x.v).sx(.value).foregroundStyle(SX.ink).lineLimit(1).minimumScaleFactor(0.75)
                 ForEach(x.d, id: \.self) { Text($0).sx(.source).foregroundStyle(SX.mutedOnTile).fixedSize(horizontal: false, vertical: true) }
                 if let s = x.s {
-                    Text(s).sx(.tiny).foregroundStyle(x.tone == "up" ? SX.up : x.tone == "down" ? SX.down : SX.mutedOnTile)
+                    Text(SX.signed(s, x.tone)).sx(.tiny).foregroundStyle(SX.mutedOnTile)
                         .padding(.top, 2)
                 }
             }
@@ -888,7 +890,7 @@ private struct SXSinceCard: View {
                 Group {
                     if sel != nil { Text(dollars(shown)) } else { SXDollarCount(v: counted || reduce ? s.made : 0) }
                 }
-                .sx(.big).foregroundStyle(tone(shown))
+                .sx(.big).foregroundStyle(SX.ink)
             }
             .accessibilityElement(children: .combine)
             HStack(spacing: 14) {
@@ -928,7 +930,7 @@ private struct SXSinceCard: View {
         HStack(spacing: 6) {
             RoundedRectangle(cornerRadius: height / 2).fill(color).frame(width: width, height: height)
             Text(name).sx(.tiny).foregroundStyle(SX.muted)
-            if let v { Text((v < 0 ? "▼ " : "▲ ") + String(format: "%.1f%%", abs(v))).sx(.tiny).foregroundStyle(tone(v)) }
+            if let v { Text((v < 0 ? "▼ " : "▲ ") + String(format: "%.1f%%", abs(v))).sx(.tiny).foregroundStyle(SF.word(SXType.tiny.size)) }
         }
         .accessibilityElement(children: .combine)
     }
@@ -947,7 +949,8 @@ private struct SXSinceCard: View {
                     SXLineShape(v: stock, lo: lo, hi: hi).trim(from: 0, to: drawn || reduce ? 1 : 0)
                         .stroke(SX.muted, style: StrokeStyle(lineWidth: 1.75, lineCap: .round, lineJoin: .round))
                 }
-                SXAreaShape(v: mine, lo: lo, hi: hi, base: 0).fill(c.opacity(0.1)).opacity(fill || reduce ? 1 : 0)
+                // Focus §2.4: the area under the line is a large fill, so neutral grey; the line keeps its colour.
+                SXAreaShape(v: mine, lo: lo, hi: hi, base: 0).fill(Color(hex: 0x8C8C8C).opacity(0.1)).opacity(fill || reduce ? 1 : 0)
                 SXLineShape(v: mine, lo: lo, hi: hi).trim(from: 0, to: drawn || reduce ? 1 : 0)
                     .stroke(c, style: StrokeStyle(lineWidth: 2.75, lineCap: .round, lineJoin: .round))
                 if let i = sel {
@@ -993,7 +996,7 @@ private struct SXSinceCard: View {
     private func stat(_ l: String, _ v: Double) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(l).sx(.tiny).foregroundStyle(SX.muted)
-            Text(dollars(v)).sx(.value).foregroundStyle(tone(v)).lineLimit(1).minimumScaleFactor(0.8)
+            Text(SF.signed(v.rounded(), dollars(v))).sx(.value).foregroundStyle(SX.ink).lineLimit(1).minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
@@ -1137,13 +1140,14 @@ private struct SXWeeksCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 0) {
+                // Focus: ink, the + or − says kept or lost.
                 if let x {
-                    Text(dollars(x.kept)).sx(.panelAmount).foregroundStyle(tone(x.kept))
+                    Text(SF.signed(x.kept.rounded(), dollars(x.kept))).sx(.panelAmount).foregroundStyle(SX.ink)
                 } else if lost > 0 {
-                    Text(dollars(lostUsd)).sx(.panelAmount).foregroundStyle(SX.down)
+                    Text(SF.signed(lostUsd.rounded(), dollars(lostUsd))).sx(.panelAmount).foregroundStyle(SX.ink)
                     Text("lost in \(lost) week\(lost == 1 ? "" : "s")").sx(.source).foregroundStyle(SX.mutedOnTile)
                 } else {
-                    Text(dollars(kept)).sx(.panelAmount).foregroundStyle(SX.up)
+                    Text(SF.signed(kept.rounded(), dollars(kept))).sx(.panelAmount).foregroundStyle(SX.ink)
                 }
             }
             .fixedSize()
@@ -1160,14 +1164,14 @@ private struct SXWeeksCard: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("This week so far").sx(.question).foregroundStyle(SX.ink)
                 Spacer(minLength: 8)
-                Text(n.kept < 0 ? "\(dollars(n.kept)) behind · \(-n.pct)% lost" : "\(dollars(n.kept)) kept · \(n.pct)%")
-                    .sx(.question).foregroundStyle(tone(n.kept))
+                Text(SF.signed(n.kept.rounded(), n.kept < 0 ? "\(dollars(n.kept)) behind · \(-n.pct)% lost" : "\(dollars(n.kept)) kept · \(n.pct)%"))
+                    .sx(.question).foregroundStyle(SX.ink)
             }
             GeometryReader { g in
                 let k = Double(max(0, min(100, n.pct))) / 100
                 ZStack(alignment: .leading) {
                     Capsule().fill(SX.track)
-                    Capsule().fill(SX.up).frame(width: g.size.width * k * (filled || reduce ? 1 : 0))
+                    Capsule().fill(SF.fill).frame(width: g.size.width * k * (filled || reduce ? 1 : 0))
                     if let pc = n.pace {
                         Rectangle().fill(SX.ink).frame(width: 2, height: 14).position(x: g.size.width * min(1, max(0, pc / 100)), y: 4)
                     }

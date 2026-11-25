@@ -47,7 +47,7 @@ struct SunnyReceipt<Paper: View>: View {
                         // The slot the paper comes out of.
                         RoundedRectangle(cornerRadius: 4).fill(S.receiptSlot)
                             .frame(height: 8)
-                            .background(RoundedRectangle(cornerRadius: 4).fill(Color(hex: 0x2A2A2C)).offset(y: 2))
+                            .background(RoundedRectangle(cornerRadius: 4).fill(Color(hex: 0x2A2A2A)).offset(y: 2))
                             .padding(.horizontal, -6)
                             .zIndex(1)
                         VStack(spacing: 0) {

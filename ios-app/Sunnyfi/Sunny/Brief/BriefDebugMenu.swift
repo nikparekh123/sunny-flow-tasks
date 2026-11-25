@@ -110,16 +110,16 @@ struct BriefDebugMenu: View {
                         ForEach(brief.accounts) { a in row(a.name, brief.account == a) { brief.pick(a) } }
                     }
                 }
-                Section("Privacy") { Toggle("Hide book money", isOn: $privacy) }
+                Section("Privacy") { Toggle("Hide book money", isOn: $privacy).tint(SF.fill) }   // a switch's on: neutral (focus)
                 Section("Sound") {
-                    Toggle("Ring the opening bell", isOn: $bell)
+                    Toggle("Ring the opening bell", isOn: $bell).tint(SF.fill)
                     Button("Ring it now") { OpeningBell.ring() }.disabled(!bell)
                 }
                 Section {
                     Text("A pinned moment shows the book as it stands now, as Home would write it at that moment. Positions stays live. Sample data is a launch option (-sample).")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                if let e = brief.pinError { Text(e).foregroundStyle(S.red) }
+                if let e = brief.pinError { Text(e).foregroundStyle(S.ink) }
             }
             .navigationTitle("Debug")
             .navigationBarTitleDisplayMode(.inline)

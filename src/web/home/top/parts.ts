@@ -56,10 +56,11 @@ export function changeParts(parts: AcctPart[], f: (p: AcctPart) => number | null
   return v.map(({ p, d }) => `${p.name} ${arrow(d!)} ${money(d!)}`).join(' · ');
 }
 
-/** One stat's part: "Sunny $4.9K" (`ini` carries the account's full name), the figure red when it is a loss. */
+/** One stat's part: "Sunny $4.9K" (`ini` carries the account's full name); `c` red marks a loss, which the page
+    draws as a − in grey (handoff 2026-11-25-focus §2.2). */
 export interface StatPart { ini: string; v: string; c: string }
 export const statPart = (ini: string, x: number | null): StatPart | null =>
-  x == null || !Number.isFinite(x) ? null : { ini, v: money(x), c: Math.round(x) < 0 ? C.red : '#8E8E93' };
+  x == null || !Number.isFinite(x) ? null : { ini, v: money(x), c: Math.round(x) < 0 ? C.red : '#8C8C8C' };
 
 /** The key figure of each account's section headline ("$13.7K", "6.2%"), by the section's kicker. */
 export function headParts(payload: J, kicker: string): { name: string; v: string }[] {

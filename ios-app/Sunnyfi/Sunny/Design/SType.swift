@@ -22,6 +22,8 @@ struct SType {
     let weight: CGFloat          // the wght axis, 100...900
     let line: CGFloat            // CSS line height, in points
     let tracking: CGFloat        // fraction of the size (-0.02 = -2%)
+    /// Keeps its bold under 20 pt (Nik, 25 Nov 2026: the Positions leg card's 18 pt figure stays bold).
+    var hero = false
 
     static let display      = SType(size: 40, weight: 800, line: 40, tracking: -0.02)
     static let largeTitle   = SType(size: 34, weight: 800, line: 40, tracking: -0.02)
@@ -49,9 +51,20 @@ struct SType {
 
     /// The same style at another size (the deck's 200pt corner mark).
     func sized(_ s: CGFloat, line l: CGFloat? = nil) -> SType {
-        SType(size: s, weight: weight, line: l ?? s, tracking: tracking)
+        SType(size: s, weight: weight, line: l ?? s, tracking: tracking, hero: hero)
     }
-    func weighted(_ w: CGFloat) -> SType { SType(size: size, weight: w, line: line, tracking: tracking) }
+    func weighted(_ w: CGFloat) -> SType { SType(size: size, weight: w, line: line, tracking: tracking, hero: hero) }
+    /// The same style, its weight kept under 20 pt.
+    var heroic: SType { SType(size: size, weight: weight, line: line, tracking: tracking, hero: true) }
+
+    /// ⚠ FOCUS (handoff 2026-11-25-focus §2.5, Nik: one hero a screen, the rest is information): bold (600 and up)
+    /// only on text 20 pt and up; under 20 a weight of 600 and up is 500 at 14 pt and up, 400 under 14 (500 stays 500:
+    /// the plain 13 pt labels are 500). Every Inter
+    /// font in the app is built here, so the rule holds everywhere; `hero` keeps a weight.
+    static func focus(_ size: CGFloat, _ w: CGFloat, hero: Bool = false) -> CGFloat {
+        if hero || size >= 20 || w < 600 { return w }
+        return size >= 14 ? 500 : 400
+    }
 
     // MARK: fonts
 
@@ -60,7 +73,7 @@ struct SType {
     /// descriptor per Text on every redraw was the app's biggest cost
     /// (Planner audit, 14 Oct 2026).
     func uiFont(tabular: Bool = false) -> UIFont {
-        let key = "\(size)|\(weight)|\(tabular)"
+        let key = "\(size)|\(Self.focus(size, weight, hero: hero))|\(tabular)"
         Self.lock.lock(); defer { Self.lock.unlock() }
         if let f = Self.cache[key] { return f }
         let f = make(tabular: tabular)
@@ -77,10 +90,10 @@ struct SType {
     /// keyboard) keep the system font on their own.
     private func make(tabular: Bool) -> UIFont {
         guard let base = UIFont(name: "Inter", size: size) else {
-            return .systemFont(ofSize: size, weight: Self.systemWeight(weight))
+            return .systemFont(ofSize: size, weight: Self.systemWeight(Self.focus(size, weight, hero: hero)))
         }
         var attrs: [UIFontDescriptor.AttributeName: Any] = [
-            UIFontDescriptor.AttributeName(rawValue: "NSCTFontVariationAttribute"): [0x77676874: weight, 0x6F70737A: 14],
+            UIFontDescriptor.AttributeName(rawValue: "NSCTFontVariationAttribute"): [0x77676874: Self.focus(size, weight, hero: hero), 0x6F70737A: 14],
         ]
         if tabular {
             attrs[.featureSettings] = [[UIFontDescriptor.FeatureKey.type: kNumberSpacingType,

@@ -97,10 +97,10 @@ struct SunnyTabBar: View {
     /// The thumb slides 70 pt a tab: .45 s cubic-bezier(.3,1.5,.5,1) (handoff 2026-11-24 §5).
     private static let thumbMove: Animation = .timingCurve(0.3, 1.5, 0.5, 1, duration: 0.45)
     /// The open tab's thumb: white over the glass in light, a soft lift in dark.
-    private static let thumb = S.dynA(0xFFFFFF, 0.6, 0xFFFFFF, 0.14)
-    private static let thumbEdge = S.dynA(0x000000, 0.04, 0xFFFFFF, 0.10)
-    private static let thumbTop = S.dynA(0xFFFFFF, 1, 0xFFFFFF, 0.18)
-    private static let thumbShadow = S.dynA(0x000000, 0.10, 0x000000, 0)
+    private static let thumb = S.dynA(0xFAFAFA, 0.6, 0xFAFAFA, 0.14)
+    private static let thumbEdge = S.dynA(0x171717, 0.04, 0xFAFAFA, 0.10)
+    private static let thumbTop = S.dynA(0xFAFAFA, 1, 0xFAFAFA, 0.18)
+    private static let thumbShadow = S.dynA(0x171717, 0.10, 0x171717, 0)
 }
 
 /// Pressed: the tab or the button grows 8%; under Reduce Motion it dims instead.

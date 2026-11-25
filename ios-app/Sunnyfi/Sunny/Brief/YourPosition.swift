@@ -4,9 +4,11 @@
 //
 //  Your position (block 30): the whole book by Friday's close if the whole market moves together.
 //  Title, the moment's sub line, the sentence, the payoff from 10% down to 10% up (solid = by Friday, dashed =
-//  today, red below zero, green above, an orange line where the book turns short), the three numbers, the put
+//  today, the area above and below zero in grey (focus, 25 Nov), an orange line where the book turns short), the three numbers, the put
 //  cover line, the early assignment line (ex-dividend weeks only), then By name (short, thin, long) and the
 //  button into Positions. A row opens Positions on that name at the Friday close stop.
+//  Focus (25 Nov): words are neutral (ink 15 pt and up, grey under), the three numbers carry + or −, a name's
+//  "makes the most" line keeps a red dot when it is short (a warning); the Short / Thin pills keep their colour.
 //
 
 import SwiftUI
@@ -52,7 +54,7 @@ struct YourPositionCard: View {
             Text("Your position").sType(BK.title, tabular: false).foregroundStyle(S.ink).accessibilityAddTraits(.isHeader)
             Text(m.subtitle).sType(Self.sub, tabular: false).foregroundStyle(S.secondary).padding(.top, 4)
             if let t = asOf {
-                Text("As of \(PositionsTab.asOfWords(t)) · IBKR data is late").sType(BK.sub, tabular: false).foregroundStyle(S.act).padding(.top, 4)
+                Text("As of \(PositionsTab.asOfWords(t)) · IBKR data is late").sType(BK.sub, tabular: false).foregroundStyle(SF.word(BK.sub.size)).padding(.top, 4)
             }
             BriefSentence(m.sentence, base: SType(size: 17, weight: 500, line: 24, tracking: 0), privacy: privacy)
                 .fixedSize(horizontal: false, vertical: true)
@@ -87,8 +89,8 @@ struct YourPositionCard: View {
             HStack(alignment: .top, spacing: 8) {
                 ForEach(Array(m.stats.enumerated()), id: \.offset) { _, s in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(BriefWords.plain(s.value, privacy: privacy)).sType(SType(size: 17, weight: 700, line: 20, tracking: 0))
-                            .foregroundStyle(BK.color(s.color)).lineLimit(1)
+                        Text(BK.signed(BriefWords.plain(s.value, privacy: privacy), s.color) ?? "").sType(SType(size: 17, weight: 700, line: 20, tracking: 0))
+                            .foregroundStyle(BK.word(s.color, 17)).lineLimit(1)
                         Text(s.label).sType(SType(size: 12, weight: 500, line: 14, tracking: 0), tabular: false).foregroundStyle(S.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -100,7 +102,7 @@ struct YourPositionCard: View {
             Text(m.cover).sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false).foregroundStyle(S.secondary)
                 .fixedSize(horizontal: false, vertical: true).padding(.top, 10)
             if let a = m.assign {
-                Text(a).sType(SType(size: 13, weight: 600, line: 18, tracking: 0), tabular: false).foregroundStyle(S.act)
+                Text(a).sType(SType(size: 13, weight: 600, line: 18, tracking: 0), tabular: false).foregroundStyle(SF.word(13))
                     .fixedSize(horizontal: false, vertical: true).padding(.top, 10)
             }
             // By name under a rule: the header (4 under it), then rows of at least 56 with a rule between.
@@ -109,7 +111,7 @@ struct YourPositionCard: View {
                 Text("By name").sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
-                Text(m.count).sType(SType(size: 13, weight: 600, line: 18, tracking: 0), tabular: false).foregroundStyle(BK.color(m.countColor))
+                Text(m.count).sType(SType(size: 13, weight: 600, line: 18, tracking: 0), tabular: false).foregroundStyle(BK.word(m.countColor, 13))
                     .multilineTextAlignment(.trailing)
             }
             .padding(.top, 14)
@@ -166,7 +168,10 @@ struct YourPositionCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(r.name).sType(BK.row, tabular: false).foregroundStyle(S.ink)
                 if !r.line.isEmpty {
-                    Text(r.line).sType(SType(size: 13, weight: 600, line: 17, tracking: 0)).foregroundStyle(BK.color(r.lineColor)).fixedSize(horizontal: false, vertical: true)
+                    // A short name's line is a warning: neutral words with the red dot before them (§2.3); thin
+                    // (orange, a watch) has no dot.
+                    (r.lineColor == "red" ? SF.dot(.danger) + Text(r.line) : Text(r.line))
+                        .sType(SType(size: 13, weight: 600, line: 17, tracking: 0)).foregroundStyle(BK.word(r.lineColor, 13)).fixedSize(horizontal: false, vertical: true)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -177,9 +182,9 @@ struct YourPositionCard: View {
             VStack(alignment: .trailing, spacing: 2) {
                 let tone = r.rightColor == "red" ? S.red : r.rightColor == "orange" ? S.act : nil
                 Text(r.right).sType(SType(size: 14, weight: 600, line: 18, tracking: 0)).lineLimit(1)
-                    .foregroundStyle(tone == nil ? S.ink : S.dyn(0xFFFFFF, 0x000000))
+                    .foregroundStyle(tone == nil ? S.ink : S.dyn(0xFAFAFA, 0x171717))
                     .padding(.horizontal, 9).frame(minWidth: 68, minHeight: 30)
-                    .background(tone ?? S.dynA(0x767680, 0.16, 0x767680, 0.32), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(tone ?? S.dynA(0x808080, 0.16, 0x808080, 0.32), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 if !r.at.isEmpty {   // empty for a name with no option prices (no priced move)
                     Text(r.at).sType(SType(size: 12, weight: 500, line: 15, tracking: 0)).foregroundStyle(S.secondary).lineLimit(1)
                 }
@@ -212,7 +217,8 @@ struct YourPositionCard: View {
 }
 
 /// The payoff: x = every name moving the same %, −10% to +10%; y = P&L. Solid ink = by Friday, dashed = today,
-/// green fill above zero and red below at low alpha, the dot at today, the orange line where the book turns short.
+/// the area above and below zero neutral grey at low alpha (focus §2.4: it was green and red), the dot at today, the
+/// orange line where the book turns short.
 struct PayoffChart: View {
     let m: YourPositionModel
     var body: some View {
@@ -232,11 +238,11 @@ struct PayoffChart: View {
             area.addLine(to: CGPoint(x: W, y: y0)); area.addLine(to: CGPoint(x: 0, y: y0)); area.closeSubpath()
             ctx.drawLayer { c in
                 c.clip(to: Path(CGRect(x: -4, y: -30, width: W + 8, height: y0 + 30)))
-                c.fill(area, with: .color(S.green.opacity(0.14)))
+                c.fill(area, with: .color(S.pNeutral.opacity(0.14)))
             }
             ctx.drawLayer { c in
                 c.clip(to: Path(CGRect(x: -4, y: y0, width: W + 8, height: 240)))
-                c.fill(area, with: .color(S.red.opacity(0.12)))
+                c.fill(area, with: .color(S.pNeutral.opacity(0.12)))
             }
             ctx.stroke(Path { $0.move(to: CGPoint(x: 0, y: y0)); $0.addLine(to: CGPoint(x: W, y: y0)) }, with: .color(S.secondary.opacity(0.45)), lineWidth: 1)
             if let s = m.shortAt {
@@ -259,7 +265,7 @@ struct PayoffChart: View {
                 let f = CGFloat((s + 10) / 20)
                 BAxis(marks: [(f, f > 220 / 313 ? 1 : 0)]) {
                     Text("Makes the most at ↑" + SampleEngine.f1(s) + "%").sType(SType(size: 12, weight: 700, line: 15, tracking: 0))
-                        .foregroundStyle(S.act).lineLimit(1).padding(.horizontal, 4)
+                        .foregroundStyle(SF.word(12)).lineLimit(1).padding(.horizontal, 4)   // a word: grey; the line keeps its orange
                 }
                 .offset(y: -2)
                 .environment(\.sTypeScales, false)   // a chart label, drawn to the chart

@@ -79,7 +79,7 @@ struct SunnyMountain: View {
                         .padding(.top, 6)
                     Group {
                         if kind == .theta {
-                            Text("\(when) · \(h.sub) ") + Text("· \(h.trend)").foregroundStyle(h.trendColor)
+                            Text("\(when) · \(h.sub) ") + Text("· \(h.trend)")
                         } else {
                             Text("\(when) · \(h.sub)")
                         }
@@ -89,9 +89,9 @@ struct SunnyMountain: View {
                         .lineLimit(1).minimumScaleFactor(0.85)
                         .frame(height: 20)
                     if kind == .delta {
-                        // Hedge delta is negative: its number is red (no minus sign).
+                        // Hedge delta is negative: its number carries a − in ink (focus §2.2; it was red).
                         let hg = hedgeAt(idx, live: scrub == nil && pre == nil) ?? 0
-                        (Text("Hedge puts · ") + Text("\(nK(hg)) Δ").foregroundStyle(hg > 0 ? S.red : S.ink))
+                        (Text("Hedge puts · ") + Text("\(hg > 0 ? "\u{2212}" : "")\(nK(hg)) Δ").foregroundStyle(S.ink))
                             .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
                             .foregroundStyle(S.muted)
                             .contentTransition(.numericText(value: hg))
@@ -123,13 +123,14 @@ struct SunnyMountain: View {
         if kind == .theta {
             let tr = v < v0 * 0.95 ? "downslope" : v > v0 * 1.05 ? "climbing" : "steady"
             let L = Self.thetaLine
-            return (String(format: "%.2f×", v), v < L ? S.red : S.ink, v < L ? "below \(F.trim(L))×" : "above \(F.trim(L))×", tr, tr == "downslope" ? S.red : S.muted)
+            // Focus §2.1: no red on words; the "below" words say it.
+            return (String(format: "%.2f×", v), S.ink, v < L ? "below \(F.trim(L))×" : "above \(F.trim(L))×", tr, S.muted)
         }
         let live = i == V.count - 1 && scrub == nil
         let net = live ? (home.risk.delta.net ?? 0) : (home.history.delta.net?[safe: i] ?? nil) ?? 0
         let shares = live ? (home.risk.delta.shares ?? 0) : (home.history.delta.shares?[safe: i] ?? nil) ?? 0
-        // Ink; red only when the whole book is net short. Never a minus sign.
-        return ("\(Int(abs(v).rounded()))%", v < 0 ? S.red : S.ink, "\(nK(net)) Δ left of \(nK(shares))", "", S.muted)
+        // Ink; a − when the whole book is net short (focus §2.2: it was red).
+        return ("\(v <= -0.5 ? "\u{2212}" : "")\(Int(abs(v).rounded()))%", S.ink, "\(nK(net)) Δ left of \(nK(shares))", "", S.muted)
     }
     /// 1.7K · 860: whole hundreds above 1,000.
     private func nK(_ v: Double) -> String {
@@ -147,7 +148,7 @@ struct SunnyMountain: View {
         let X = { (i: Int) -> CGFloat in CGFloat(i) / CGFloat(max(1, n - 1)) * LW }
         let Y = { (v: Double) -> CGFloat in TOP + CGFloat(1 - (v - lo) / (hi - lo)) * (BOT - TOP) }
         let BL = Y(F), ey = Y(V[n - 1])
-        let upC: Color = kind == .theta ? Color(hex: 0x65C466) : S.ink
+        let upC: Color = kind == .theta ? Color(hex: 0x4CBB6C) : S.ink
         let upA: Double = kind == .theta ? 0.5 : (scheme == .dark ? 0.32 : 0.18)
         let faint: Color = kind == .delta ? S.pNeutral : scheme == .dark ? Color.white.opacity(0.45) : S.muted
         let brick = Color(hex: 0xC7454A)
@@ -164,11 +165,13 @@ struct SunnyMountain: View {
                 let area = { (f: @escaping (Double) -> Double, base: CGFloat) -> Path in
                     var p = line(f); p.addLine(to: CGPoint(x: LW, y: base)); p.addLine(to: CGPoint(x: 0, y: base)); p.closeSubpath(); return p
                 }
+                // Focus §2.4: the big green and red areas are grey at their own opacity; the dot keeps its colour.
+                let upF: Color = kind == .theta ? Color(hex: 0x8C8C8C) : upC
                 ctx.fill(area({ max(F, $0) }, BL),
-                         with: .linearGradient(Gradient(colors: [upC.opacity(upA), upC.opacity(0)]),
+                         with: .linearGradient(Gradient(colors: [upF.opacity(upA), upF.opacity(0)]),
                                                startPoint: CGPoint(x: 0, y: TOP), endPoint: CGPoint(x: 0, y: BL)))
                 ctx.fill(area({ min(F, $0) }, BL),
-                         with: .linearGradient(Gradient(colors: [Color(hex: 0xEB4B46).opacity(0.08), Color(hex: 0xEB4B46).opacity(0.55)]),
+                         with: .linearGradient(Gradient(colors: [Color(hex: 0x8C8C8C).opacity(0.08), Color(hex: 0x8C8C8C).opacity(0.55)]),
                                                startPoint: CGPoint(x: 0, y: BL), endPoint: CGPoint(x: 0, y: BOT)))
                 var b = Path(); b.move(to: CGPoint(x: 0, y: BL)); b.addLine(to: CGPoint(x: LW, y: BL))
                 ctx.stroke(b, with: .color(S.ink.opacity(0.22)), lineWidth: 1)
@@ -183,17 +186,17 @@ struct SunnyMountain: View {
                 .overlay(Circle().stroke(S.paper, lineWidth: 2))
                 .position(x: X(idx), y: Y(V[idx]))
             if showPk {
-                tag("Peak " + fmt(V[pk]), color: scheme == .dark ? S.yellow : S.yellowDeep, weight: 600)
+                tag("Peak " + fmt(V[pk]), color: S.muted, weight: 600)
                     .position(x: X(pk), y: Y(V[pk]) - 11)
             }
-            tag(fmt(V[n - 1]), color: V[n - 1] < F ? S.red : S.ink, weight: 700)
+            tag(fmt(V[n - 1]), color: V[n - 1] < F ? S.muted : S.ink, weight: 700)
                 .alignmentGuide(.leading) { _ in -(LW + 7) }.alignmentGuide(.top) { d in -(ey - d.height / 2) }
             let by = abs(BL - ey) < 11 ? BL + (BL > ey ? 11 : -11) : BL
             tag(kind == .theta ? Self.thetaLineTag : "20%", color: faint, weight: 600)
                 .alignmentGuide(.leading) { _ in -(LW + 7) }.alignmentGuide(.top) { d in -(by - d.height / 2) }
             // Delta labels a month only once it has five sessions (SunnyDelta).
             ForEach(months(days).filter { kind == .theta || $0.b - $0.a >= 4 }, id: \.m) { o in
-                tag(Periods.monthNames[o.m - 1].uppercased(), color: faint, weight: 600)
+                tag(Periods.monthNames[o.m - 1], color: faint, weight: 600)
                     .position(x: X((o.a + o.b) / 2), y: 190)
             }
         }
@@ -213,7 +216,7 @@ struct SunnyMountain: View {
     private func fmt(_ v: Double) -> String { kind == .theta ? String(format: "%.1f×", v) : "\(Int(v.rounded()))%" }
 
     private func tag(_ t: String, color: Color, weight: CGFloat) -> some View {
-        Text(t).sType(SType(size: 11, weight: weight, line: 13, tracking: 0.02)).foregroundStyle(color).fixedSize()
+        Text(t).sType(SType(size: 11, weight: weight, line: 13, tracking: 0)).foregroundStyle(color).fixedSize()
     }
 
     private func months(_ days: [String]) -> [(m: Int, a: Int, b: Int)] {
@@ -255,7 +258,7 @@ struct SunnyMountain: View {
         if kind == .theta {
             let hot = Dictionary((home.thetaChecks ?? []).map { ($0.ticker, $0.leg) }, uniquingKeysWith: { a, _ in a })
             var t = home.risk.theta.by.sorted { abs($0.net) > abs($1.net) }.map {
-                Tile(name: $0.ticker, value: PF.usd($0.net), tone: $0.net >= 0 ? S.green : S.red,
+                Tile(name: $0.ticker, value: PC.signed($0.net, PF.usd($0.net)), tone: S.ink,
                      sub: "\(PF.usd($0.collect)) collect · \(PF.usd($0.lose)) lose", hot: hot[$0.ticker])
             }
             // A dragging position moves to the front.
@@ -268,7 +271,7 @@ struct SunnyMountain: View {
         }
         return rows.sorted { ($0.1?.rank ?? 2, -$0.0.pct) < ($1.1?.rank ?? 2, -$1.0.pct) }.map { b, a in
             let sub = a == .red ? "net short" : a == .orange && b.earningsWeek == true ? "earnings week" : "\(nK(b.net ?? 0)) Δ left"
-            return Tile(name: b.ticker, value: "\(Int(abs(b.pct).rounded()))%", tone: a?.ink ?? S.ink, sub: sub,
+            return Tile(name: b.ticker, value: "\(Int(abs(b.pct).rounded()))%", tone: S.ink, sub: sub,
                         hot: nil, by: b, alert: a)
         }
     }
@@ -290,7 +293,7 @@ struct SunnyMountain: View {
                 Text(t.value).sType(SType(size: 20, weight: 800, line: 20, tracking: -0.02)).foregroundStyle(t.tone)
                     .contentTransition(.numericText(value: t.by?.pct ?? 0))
                 Text(t.sub).sType(SType(size: 11, weight: 500, line: 13, tracking: 0))
-                    .foregroundStyle(t.alert?.ink ?? S.muted)
+                    .foregroundStyle(S.muted)
                     .lineLimit(1).fixedSize()
             }
             .padding(12)
@@ -327,7 +330,7 @@ struct SunnyMountain: View {
                 Text(t.value).sType(SType(size: 20, weight: 800, line: 20, tracking: -0.02)).foregroundStyle(t.tone)
                 Text(t.hot != nil ? "losing faster · tap" : t.sub)
                     .sType(SType(size: 12, weight: 500, line: 14, tracking: 0))
-                    .foregroundStyle(t.hot != nil ? (scheme == .dark ? S.yellow : S.yellowDeep) : (scheme == .dark ? Color.white.opacity(0.86) : S.ink))
+                    .foregroundStyle(scheme == .dark ? Color.white.opacity(0.86) : S.ink)
                     .lineLimit(1).fixedSize()
             }
             .foregroundStyle(S.ink)

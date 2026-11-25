@@ -92,12 +92,12 @@ export default function Top({ payload, doc, tab, current, tabs, onTab, railSlot,
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 20, flexWrap: 'wrap' }}>
         <AccountMenu />
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, textAlign: 'right' }}>
-          <span style={{ fontSize: 22, lineHeight: '28px', fontWeight: 300, letterSpacing: '-.01em', color: 'rgba(245,245,247,.92)' }}>{mline}</span>
+          <span style={{ fontSize: 22, lineHeight: '28px', fontWeight: 300, letterSpacing: '-.01em', color: 'rgba(242,242,242,.92)' }}>{mline}</span>
           <div role="tablist" aria-label="Moment" style={{ display: 'flex', gap: 12 }}>
             {tabs.map((p) => (
               <button key={p.k} type="button" role="tab" aria-selected={p.on} aria-disabled={!p.enabled} disabled={!p.enabled}
                 className="bare" onClick={() => p.enabled && onTab(p.k)}
-                style={{ fontSize: 11, lineHeight: '14px', fontWeight: p.on ? 700 : 400, color: p.on ? C.ink : C.ink2, paddingBottom: 2,
+                style={{ fontSize: 11, lineHeight: '14px', fontWeight: 400, color: p.on ? C.ink : C.ink2, paddingBottom: 2,
                   boxShadow: `inset 0 -1px 0 ${p.on ? C.ink : 'transparent'}`, opacity: p.enabled ? 1 : 0.4, cursor: p.enabled ? 'pointer' : 'default' }}>
                 {p.l}
               </button>
@@ -119,8 +119,8 @@ export default function Top({ payload, doc, tab, current, tabs, onTab, railSlot,
         {doc?.dateLine && <span style={{ fontSize: 14, color: C.ink2 }}>{doc.dateLine}</span>}
       </div>
       {lede.length > 0 && (
-        <p style={{ margin: '14px 0 0', maxWidth: 860, fontSize: 20, lineHeight: '30px', color: 'rgba(245,245,247,.9)', textWrap: 'pretty' } as CSSProperties}>
-          <Runs spans={lede} mask={mask} />
+        <p style={{ margin: '14px 0 0', maxWidth: 860, fontSize: 20, lineHeight: '30px', color: 'rgba(242,242,242,.9)', textWrap: 'pretty' } as CSSProperties}>
+          <Runs spans={lede} mask={mask} fs={20} />
         </p>
       )}
     </>

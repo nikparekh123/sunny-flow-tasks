@@ -21,13 +21,13 @@ import { daysOf, eventTime, groupOf, readActivity, syncWords, unreadToday, useRe
 
 const INK = C.ink, SUB = C.ink2, LN = '1px solid rgba(255,255,255,.08)';
 /** The unread dot (the design's dark blue) and the badge red. */
-const BLUE = '#0A84FF', BADGE = '#FF3B30';
+const BLUE = '#3E6AE1', BADGE = '#E82127';
 const GROUPS: Group[] = ['today', 'yday', 'week', 'last'];
 type Filter = 'all' | Kind;
 const FILTERS: [Filter, string][] = [['all', 'All'], ['ibkr', 'IBKR'], ['lvl', 'Levels'], ['move', 'Moves']];
 /** The design's dark glass for the sync line. */
 const GLASS: CSSProperties = {
-  background: 'linear-gradient(160deg,#323234 0%,#1F1F21 55%,#28282A 100%)',
+  background: 'linear-gradient(160deg,#323232 0%,#1F1F1F 55%,#282828 100%)',
   boxShadow: 'inset 0 0 0 .5px rgba(255,255,255,.12),inset 1px 1px 0 -.5px rgba(255,255,255,.18),0 10px 24px -10px rgba(0,0,0,.6)',
 };
 
@@ -36,10 +36,10 @@ export function Logo({ t, size }: { t: string; size: number }) {
   const [bad, setBad] = useState(false);
   useEffect(() => setBad(false), [t]);
   return (
-    <span aria-hidden="true" style={{ flex: 'none', width: size, height: size, borderRadius: '50%', background: '#FFFFFF', boxShadow: 'inset 0 0 0 .5px rgba(0,0,0,.08)',
+    <span aria-hidden="true" style={{ flex: 'none', width: size, height: size, borderRadius: '50%', background: '#FAFAFA', boxShadow: 'inset 0 0 0 .5px rgba(0,0,0,.08)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
       {bad
-        ? <span style={{ fontSize: size > 28 ? 9 : 7, lineHeight: '10px', fontWeight: 700, color: '#1D1D1F' }}>{t.slice(0, 4)}</span>
+        ? <span style={{ fontSize: size > 28 ? 9 : 7, lineHeight: '10px', fontWeight: 400, color: '#212121' }}>{t.slice(0, 4)}</span>
         : <img src={`/logos/${encodeURIComponent(t)}.png`} alt="" draggable={false} onError={() => setBad(true)}
             style={{ width: '74%', height: '74%', objectFit: 'contain', pointerEvents: 'none' }} />}
     </span>
@@ -49,7 +49,7 @@ export function Logo({ t, size }: { t: string; size: number }) {
 /** An IBKR line with no name: trades coming in, a neutral circle with a down arrow. */
 function InIcon() {
   return (
-    <span aria-hidden="true" style={{ flex: 'none', width: 32, height: 32, borderRadius: '50%', background: 'rgba(118,118,128,.24)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: INK }}>
+    <span aria-hidden="true" style={{ flex: 'none', width: 32, height: 32, borderRadius: '50%', background: 'rgba(128,128,128,.24)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: INK }}>
       <svg width="16" height="16" viewBox="0 0 24 24" style={{ fill: 'none', stroke: 'currentColor', strokeWidth: 2.2, strokeLinecap: 'round', strokeLinejoin: 'round' }}><path d="M12 5v14M6 13l6 6 6-6" /></svg>
     </span>
   );
@@ -95,7 +95,7 @@ export function ActivityBell() {
         </svg>
         {(stopped || n > 0) && (
           <span aria-hidden="true" style={{ position: 'absolute', top: 6, left: 23, minWidth: 16, height: 16, padding: '0 4px', borderRadius: 8, background: BADGE,
-            color: '#FFFFFF', fontSize: 10, lineHeight: '16px', fontWeight: 700, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
+            color: '#FAFAFA', fontSize: 10, lineHeight: '16px', fontWeight: 400, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
             {stopped ? '!' : n > 99 ? '99+' : n}
           </span>
         )}
@@ -106,7 +106,7 @@ export function ActivityBell() {
       {/* Under 480 px the bar's gaps are 10; the bell's 44 px target overlaps them so the glyph sits 12 from To do and the
           eye. Under 400 px (a 390 phone) the bar needs about 12 px more for the clock to stay whole on two lines, so
           the bell overlaps a little more and the tabs close up a little, only while the bell is drawn. */}
-      <style>{`.sw .sw-bell:hover{color:#F5F5F7!important}
+      <style>{`.sw .sw-bell:hover{color:#F2F2F2!important}
 @media (max-width:480px){.sw .sw-hd .sw-bell{margin:0 -10px!important}}
 @media (max-width:400px){.sw .sw-hd .sw-bell{margin:0 -13px!important}.sw .sw-hd .sw-hd-l{gap:12px!important}.sw .sw-hd .sw-hd-tabs{gap:14px!important}}
 .sw .act-row:hover{background:rgba(255,255,255,.03)}.sw .act-mark:hover{opacity:.7}`}</style>
@@ -214,7 +214,7 @@ function Panel({ act, book, open, focus, read, mark, filter, setFilter, onClose,
       <div ref={sheet} role="dialog" aria-modal="true" aria-label="Activity" className="noscroll" onKeyDown={trap}
         style={{ position: 'relative', width: 440, maxWidth: '100%', height: '100%', overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain',
           padding: '28px 16px 40px', display: 'flex', flexDirection: 'column', gap: 20,
-          background: 'rgba(28,28,30,.9)', WebkitBackdropFilter: 'blur(30px) saturate(180%)', backdropFilter: 'blur(30px) saturate(180%)',
+          background: 'rgba(33,33,33,.9)', WebkitBackdropFilter: 'blur(30px) saturate(180%)', backdropFilter: 'blur(30px) saturate(180%)',
           boxShadow: 'inset 1px 0 0 rgba(255,255,255,.12),-20px 0 60px rgba(0,0,0,.5)' }}>
         <div style={{ flex: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '0 4px' }}>
           <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
@@ -229,7 +229,7 @@ function Panel({ act, book, open, focus, read, mark, filter, setFilter, onClose,
           <div style={{ display: 'grid', gridTemplateColumns: '8px minmax(0,1fr)', gap: 10, alignItems: 'center', minHeight: 56, padding: '8px 0' }}>
             <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: sy.dot === 'g' ? C.green : sy.dot === 'r' ? C.red : SUB }} />
             <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-              <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600 }}>{sy.title}</span>
+              <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500 }}>{sy.title}</span>
               <span style={{ fontSize: 12, lineHeight: '16px', color: SUB, textWrap: 'pretty' } as CSSProperties}>{sy.sub}</span>
             </span>
           </div>
@@ -257,7 +257,8 @@ function Panel({ act, book, open, focus, read, mark, filter, setFilter, onClose,
   );
 }
 
-const STATUS: Record<string, [string, string]> = { added: ['Added', C.green], match: ['Matched', C.green], matched: ['Matched', C.green], check: ['Check', C.orange] };
+/** A trade's state, in plain grey words (handoff 2026-11-25-focus §2.1: no colour on words). */
+const STATUS: Record<string, [string, string]> = { added: ['Added', SUB], match: ['Matched', SUB], matched: ['Matched', SUB], check: ['Check', SUB] };
 
 function Row({ e, first, tm, unread, open, name, onTap }: { e: ActEvent; first: boolean; tm: string; unread: boolean; open: boolean; name: string; onTap: () => void }) {
   const { mask } = useWeb();
@@ -275,14 +276,14 @@ function Row({ e, first, tm, unread, open, name, onTap }: { e: ActEvent; first: 
         {e.t ? <Logo t={e.t} size={32} /> : <InIcon />}
         <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
           <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
-            <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600, textWrap: 'pretty' } as CSSProperties}>{mask(e.title)}</span>
+            <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500, textWrap: 'pretty' } as CSSProperties}>{mask(e.title)}</span>
             <span style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, lineHeight: '18px', color: SUB, whiteSpace: 'nowrap' }}>
               {unread && <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: BLUE }} />}{tm}
             </span>
           </span>
           {body && <span style={{ fontSize: 14, lineHeight: '20px', color: SUB, textWrap: 'pretty' } as CSSProperties}>{mask(body)}</span>}
           {pickup && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4, paddingTop: 2, fontSize: 13, lineHeight: '18px', fontWeight: 600, color: INK }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, paddingTop: 2, fontSize: 13, lineHeight: '18px', fontWeight: 400, color: INK }}>
               {open ? 'Hide' : 'Show'} {n === 1 ? 'the trade' : `${n} trades`}<Chev open={open} />
             </span>
           )}
@@ -296,10 +297,10 @@ function Row({ e, first, tm, unread, open, name, onTap }: { e: ActEvent; first: 
               <div key={j} role="listitem" style={{ display: 'grid', gridTemplateColumns: '24px minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '10px 0', borderTop: j ? LN : 'none' }}>
                 {x.t ? <Logo t={x.t} size={24} /> : <span />}
                 <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: 14, lineHeight: '19px', fontWeight: 600, textWrap: 'pretty' } as CSSProperties}>{x.what}</span>
+                  <span style={{ fontSize: 14, lineHeight: '19px', fontWeight: 500, textWrap: 'pretty' } as CSSProperties}>{x.what}</span>
                   <span style={{ fontSize: 12, lineHeight: '16px', color: SUB }}>{x.at}</span>
                 </span>
-                <span style={{ flex: 'none', fontSize: 12, lineHeight: '16px', fontWeight: 600, color: sc, textAlign: 'right' }}>{st}</span>
+                <span style={{ flex: 'none', fontSize: 12, lineHeight: '16px', fontWeight: 400, color: sc, textAlign: 'right' }}>{st}</span>
               </div>
             );
           })}

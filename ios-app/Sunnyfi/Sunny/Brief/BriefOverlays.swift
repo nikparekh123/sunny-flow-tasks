@@ -192,12 +192,15 @@ struct TimeValueSheet: View {
 
     /// One sentence on what needs you (a tap opens the strikes to roll), then the week as a receipt: Coming in (calls
     /// sold, puts sold: time value left, % captured of what was collected), Going out (a week of decay on the hedge calls
-    /// and puts), Net by Friday, and In the money on its own line. No bars; a loss is a red number. Every line opens to
-    /// its names; privacy masks every dollar figure.
+    /// and puts), Net by Friday, and In the money on its own line. No bars; a loss is a − number (focus, 25 Nov: it was a
+    /// red one; words are neutral, the red pills keep their colour). Every line opens to its names; privacy masks every
+    /// dollar figure, and a masked figure has no sign.
     @State private var openLine: String?
     @State private var needsOpen = false
 
     private func k(_ v: Double) -> String { BriefWords.plain(SampleEngine.fK(v), privacy: privacy) }
+    /// A loss as shown: "−$559" (a masked "$•••" as it is).
+    private func lossK(_ v: Double) -> String { BK.signed(k(v), "red") ?? "" }
     /// Captured, signed (Nik, 18 Nov 2026: "show negatives"): "52.0% captured", or "2.1% lost" (red) when the legs carry
     /// more time value than they were sold for, as LULU's 110 calls after a 7% day.
     private static func capT(_ left: Double, _ col: Double) -> (t: String, lost: Bool) {
@@ -213,7 +216,7 @@ struct TimeValueSheet: View {
         f.dateFormat = "EEE MMM d"
         return "Ends " + f.string(from: d)
     }
-    private static let callTone = S.dyn(0x327133, 0x65C466), putTone = S.dyn(0x2E5ECA, 0x73B6F9)
+    private static let callTone = S.dyn(0x1C7840, 0x4CBB6C), putTone = S.dyn(0x3E6AE1, 0x3E6AE1)
 
     var body: some View {
         let all = rows, rows = all.filter(\.wk), hs = hedges
@@ -246,15 +249,15 @@ struct TimeValueSheet: View {
                         if !hs.isEmpty {
                             head("Going out · a week of your hedges").padding(.top, 14)
                             let hc = hs.filter { !$0.put }, hp = hs.filter(\.put)
-                            if !hc.isEmpty { hedgeLine("hc", "Hedge calls", S.dyn(0x65C466, 0x65C466), hc) }
-                            if !hp.isEmpty { hedgeLine("hp", "Hedge puts", S.dyn(0x73B6F9, 0x73B6F9), hp) }
+                            if !hc.isEmpty { hedgeLine("hc", "Hedge calls", S.dyn(0x4CBB6C, 0x4CBB6C), hc) }
+                            if !hp.isEmpty { hedgeLine("hp", "Hedge puts", S.dyn(0x3E6AE1, 0x3E6AE1), hp) }
                         }
                         // Net by Friday: time value left less that week of hedges.
                         let net = tvAll - hw
                         HStack(alignment: .firstTextBaseline) {
                             Text("Net by Friday").sType(SType(size: 17, weight: 700, line: 22, tracking: 0), tabular: false).foregroundStyle(S.ink)
                             Spacer()
-                            Text(k(net)).sType(SType(size: 20, weight: 800, line: 24, tracking: -0.01)).foregroundStyle(net < -0.5 ? S.red : S.ink)
+                            Text(net < -0.5 ? lossK(net) : k(net)).sType(SType(size: 20, weight: 800, line: 24, tracking: -0.01)).foregroundStyle(S.ink)
                         }
                         .padding(.top, 14).padding(.trailing, 22).padding(.top, 10)
                         .overlay(alignment: .top) { Rectangle().fill(S.ink).frame(height: 1.5).padding(.top, 10) }
@@ -302,13 +305,14 @@ struct TimeValueSheet: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 (Text(r.name).fontWeight(.semibold).foregroundStyle(S.ink) + Text("  \(r.leg.replacingOccurrences(of: " ×", with: " sold ×"))").foregroundStyle(S.secondary))
                                     .sType(SType(size: 15, weight: 500, line: 19, tracking: 0), tabular: true)
-                                Text(x ? "In the money by \(String(format: "%.2f", r.intrinsic))" : "\(Self.captured(r))% captured · \(k(r.left)) left")
-                                    .sType(SType(size: 13, weight: 600, line: 17, tracking: 0)).foregroundStyle(x ? S.red : S.act)
+                                // Focus: neutral words; in the money is a danger, so it keeps a red dot (§2.3).
+                                (x ? SF.dot(.danger) + Text("In the money by \(String(format: "%.2f", r.intrinsic))") : Text("\(Self.captured(r))% captured · \(k(r.left)) left"))
+                                    .sType(SType(size: 13, weight: 600, line: 17, tracking: 0)).foregroundStyle(SF.word(13))
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             Text("Roll").sType(SType(size: 12, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(S.act)
                                 .padding(.horizontal, 10).frame(height: 24)
-                                .background(Capsule().fill(Color(.sRGB, red: 242 / 255, green: 169 / 255, blue: 59 / 255, opacity: 0.18)))
+                                .background(Capsule().fill(S.orange.opacity(0.18)))   // the Roll pill keeps its colour
                         }
                         .padding(.vertical, 14)
                         .overlay(alignment: .top) { if i > 0 { Rectangle().fill(S.line).frame(height: 1) } }
@@ -343,7 +347,7 @@ struct TimeValueSheet: View {
 
     @ViewBuilder private func hedgeLine(_ key: String, _ label: String, _ color: Color, _ hs: [Hedge]) -> some View {
         let w = hs.reduce(0) { $0 + $1.week }, on = openLine == key
-        lineButton(key: key, color: color, label: label, sub: nil, value: k(w), valueTone: S.red, tail: "a week",
+        lineButton(key: key, color: color, label: label, sub: nil, value: lossK(w), valueTone: S.ink, tail: "a week",
                    aria: "\(label), \(SampleEngine.fK(w)) a week", on: on)
         if on {
             VStack(spacing: 0) {
@@ -356,7 +360,7 @@ struct TimeValueSheet: View {
 
     @ViewBuilder private func itmLine(_ rs: [Row]) -> some View {
         let v = rs.reduce(0) { $0 + $1.intrinsic * $1.q * 100 }, on = openLine == "itm"
-        lineButton(key: "itm", color: S.red, label: "In the money", sub: nil, value: k(v), valueTone: S.red, tail: "",
+        lineButton(key: "itm", color: S.red, label: "In the money", sub: nil, value: lossK(v), valueTone: S.ink, tail: "",
                    aria: "In the money, \(SampleEngine.fK(v))", on: on)
         if on {
             VStack(spacing: 0) {
@@ -376,7 +380,7 @@ struct TimeValueSheet: View {
                 RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 4, height: 32)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(label).sType(SType(size: 16, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.ink)
-                    if let sub { Text(sub).sType(SType(size: 12, weight: 500, line: 16, tracking: 0)).foregroundStyle(subRed ? S.red : S.secondary) }
+                    if let sub { Text(sub).sType(SType(size: 12, weight: 500, line: 16, tracking: 0)).foregroundStyle(subRed ? SF.word(12) : S.secondary) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 (Text(value).font(.inter(16, 600, tabular: true)).foregroundStyle(valueTone)
@@ -404,9 +408,9 @@ struct TimeValueSheet: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Text(value).sType(SType(size: 14, weight: 600, line: 18, tracking: 0))
-                .foregroundStyle(red ? S.dyn(0xFFFFFF, 0x000000) : S.ink)
+                .foregroundStyle(red ? S.dyn(0xFAFAFA, 0x171717) : S.ink)
                 .padding(.horizontal, 9).frame(minWidth: 68, minHeight: 30)
-                .background(red ? S.red : S.dynA(0x767680, 0.16, 0x767680, 0.32), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(red ? S.red : S.dynA(0x808080, 0.16, 0x808080, 0.32), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .padding(.vertical, 8)
         .accessibilityElement(children: .combine)

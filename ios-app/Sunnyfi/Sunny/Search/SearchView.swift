@@ -245,7 +245,7 @@ struct SunnySearchPage: View {
             if !page {
                 Button { speaker.toggle(e.id, a.spoken) } label: {
                     Image(systemName: reading ? "speaker.wave.2.fill" : "speaker.wave.2").font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(reading ? SX.web : SX.muted).frame(width: 44, height: 44).contentShape(.rect)
+                        .foregroundStyle(reading ? SX.ink : SX.muted).frame(width: 44, height: 44).contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(reading ? "Stop reading" : "Read aloud")
@@ -383,7 +383,7 @@ struct SunnySearchPage: View {
     private var heard: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { tl in
             let on = Int(tl.date.timeIntervalSinceReferenceDate * 2) % 2 == 0
-            (Text(voice.words) + Text(" |").foregroundColor(on ? SX.web : .clear))
+            (Text(voice.words) + Text(" |").foregroundColor(on ? SX.ink : .clear))
                 .sx(.field).foregroundStyle(SX.ink).lineLimit(5).truncationMode(.head)
                 .fixedSize(horizontal: false, vertical: true)
         }

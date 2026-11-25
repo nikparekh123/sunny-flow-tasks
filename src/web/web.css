@@ -1,25 +1,25 @@
-/* Sunny web (handoff 2026-11-08-web, README "Design tokens"). Dark only (D4).
+/* Sunny web (handoff 2026-11-08-web, README "Design tokens"; palette from handoff 2026-11-25-focus §1). Dark only (D4).
    Every value here is the design's exact one; do not round to a grid.
    Scoped to .sw so the hidden /payoff and /ask pages keep their own styles. */
 
 .sw {
-  --bg: linear-gradient(180deg, #0A0F0C 0%, #000000 38%, #0C0A08 100%);
-  --ink: #F5F5F7;
-  --ink-2: #98989D;
-  --ink-3: #AEAEB2;
-  --green: #65C466;
-  --red: #FF6961;
-  --orange: #FF9F0A;
-  --blue: #86A8F0;
+  --bg: #171717;
+  --ink: #F2F2F2;
+  --ink-2: #8C8C8C;
+  --ink-3: #AAAAAA;
+  --green: #4CBB6C;
+  --red: #E82127;
+  --orange: #E8A33D;
+  --blue: #3E6AE1;
   --blue-hover: #B3C8F6;
-  --teal: #4CC9D0;
+  --teal: #AAAAAA;
   --violet: #B9A3F0;
   --hair-strong: rgba(255, 255, 255, .14);
   --hair: rgba(255, 255, 255, .08);
-  --track: rgba(118, 118, 128, .24);
-  --tile: #1D1D1F;
-  --tile-hover: #2C2C2E;
-  --small-btn: #2C2C2E;
+  --track: rgba(128, 128, 128, .24);
+  --tile: #212121;
+  --tile-hover: #2A2A2A;
+  --small-btn: #2A2A2A;
 
   color-scheme: dark;
   box-sizing: border-box;
@@ -31,16 +31,16 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-html:has(.sw), body:has(.sw) { background: #000000; color-scheme: dark; }
+html:has(.sw), body:has(.sw) { background: #171717; color-scheme: dark; }
 .sw *, .sw *::before, .sw *::after { box-sizing: border-box; }
 .sw a { color: var(--blue); text-decoration: none; }
 .sw a:hover { color: var(--blue-hover); }
-.sw ::selection { background: rgba(134, 168, 240, .35); }
+.sw ::selection { background: rgba(62, 106, 225, .35); }
 .sw select, .sw input, .sw button { font-family: inherit; }
 .sw button:focus-visible, .sw select:focus-visible, .sw input:focus-visible {
-  outline: 2px solid #86A8F0; outline-offset: 2px; border-radius: 6px;
+  outline: 2px solid #3E6AE1; outline-offset: 2px; border-radius: 6px;
 }
-.sw option { background: #1C1C1E; color: #F5F5F7; }
+.sw option { background: #212121; color: #F2F2F2; }
 @media (prefers-reduced-motion: reduce) {
   .sw *, .sw *::before, .sw *::after { transition: none !important; animation: none !important; }
 }
@@ -49,17 +49,11 @@ html:has(.sw), body:has(.sw) { background: #000000; color-scheme: dark; }
 .sw .bare {
   all: unset; box-sizing: border-box; cursor: pointer;
 }
-.sw .bare:focus-visible { outline: 2px solid #86A8F0; outline-offset: 2px; border-radius: 6px; }
+.sw .bare:focus-visible { outline: 2px solid #3E6AE1; outline-offset: 2px; border-radius: 6px; }
 .sw .tnum { font-variant-numeric: tabular-nums; }
 
-/* Fixed glow behind the page. */
-.sw-ambient {
-  position: fixed; inset: 0; pointer-events: none; z-index: 0;
-  background:
-    radial-gradient(60vw 52vw at 4% -10%, rgba(101, 196, 102, .22), transparent 62%),
-    radial-gradient(52vw 52vw at 104% 30%, rgba(115, 182, 249, .18), transparent 60%),
-    radial-gradient(62vw 50vw at 30% 116%, rgba(247, 206, 70, .13), transparent 62%);
-}
+/* The glow behind the page is gone (handoff 2026-11-25-focus §1.3): every page is flat #171717. */
+.sw-ambient { display: none; }
 
 /* Page frame: max 1440, padding 104 48 112 (the top clears the 64 px header). */
 .sw-page {
@@ -91,7 +85,7 @@ html:has(.sw), body:has(.sw) { background: #000000; color-scheme: dark; }
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .08);
 }
 .sw .glass-sheet {
-  background: rgba(28, 28, 30, .86);
+  background: rgba(33, 33, 33, .86);
   -webkit-backdrop-filter: blur(30px) saturate(180%);
   backdrop-filter: blur(30px) saturate(180%);
   box-shadow: inset 1px 0 0 rgba(255, 255, 255, .12), -20px 0 60px rgba(0, 0, 0, .5);
@@ -120,15 +114,16 @@ html:has(.sw), body:has(.sw) { background: #000000; color-scheme: dark; }
 }
 
 /* ── Type ───────────────────────────────────────────────────────────────── */
+/* A label as Tesla writes it (handoff 2026-11-25-focus §2.5): the words as written, no capitals or tracking, 13/500 grey. */
 .sw .kicker {
-  font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-2);
+  font-size: 13px; font-weight: 500; color: var(--ink-2);
 }
 .sw .h2 {
   font-size: 28px; line-height: 36px; font-weight: 600; letter-spacing: -.02em;
   text-wrap: balance; max-width: 900px; margin: 0;
 }
-.sw .h2 .thin { font-weight: 400; color: rgba(245, 245, 247, .72); }
-.sw .lede { font-size: 20px; line-height: 30px; font-weight: 400; max-width: 860px; text-wrap: pretty; color: rgba(245, 245, 247, .9); }
+.sw .h2 .thin { font-weight: 400; color: rgba(242, 242, 242, .72); }
+.sw .lede { font-size: 20px; line-height: 30px; font-weight: 400; max-width: 860px; text-wrap: pretty; color: rgba(242, 242, 242, .9); }
 .sw .cap { font-size: 12px; line-height: 18px; color: var(--ink-2); }
 
 /* ── Controls (iOS 26 Liquid Glass) ─────────────────────────────────────── */
@@ -140,40 +135,40 @@ html:has(.sw), body:has(.sw) { background: #000000; color-scheme: dark; }
   transition: background .2s, box-shadow .2s;
 }
 .sw .seg > button[aria-checked="true"], .sw .seg > button[aria-selected="true"], .sw .seg > button.on {
-  background: rgba(255, 255, 255, .20); color: #FFFFFF; font-weight: 600;
+  background: rgba(255, 255, 255, .20); color: #FAFAFA; font-weight: 500;
   box-shadow: inset 0 0 0 .5px rgba(255, 255, 255, .22), inset 0 1px 0 rgba(255, 255, 255, .3), 0 2px 8px rgba(0, 0, 0, .35);
 }
-.sw .seg > button:focus-visible { outline: 2px solid #86A8F0; outline-offset: 2px; }
+.sw .seg > button:focus-visible { outline: 2px solid #3E6AE1; outline-offset: 2px; }
 /* The glass thumb on its own (for sliding segmented controls). */
 .sw .seg-thumb {
   background: rgba(255, 255, 255, .20);
   box-shadow: inset 0 0 0 .5px rgba(255, 255, 255, .22), inset 0 1px 0 rgba(255, 255, 255, .3), 0 2px 8px rgba(0, 0, 0, .35);
 }
-/* Switch 40×24, knob 20. */
+/* Switch 40×24, knob 20; on is the neutral fill #707070 (focus §2.4). */
 .sw .switch {
   all: unset; box-sizing: border-box; cursor: pointer; position: relative; flex: 0 0 auto;
-  width: 40px; height: 24px; border-radius: 12px; background: rgba(120, 120, 128, .32); transition: background .2s;
+  width: 40px; height: 24px; border-radius: 12px; background: rgba(128, 128, 128, .32); transition: background .2s;
 }
-.sw .switch[aria-checked="true"] { background: #65C466; }
+.sw .switch[aria-checked="true"] { background: #707070; }
 .sw .switch > span {
-  position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #FFFFFF;
+  position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #FAFAFA;
   box-shadow: 0 2px 4px rgba(0, 0, 0, .35); transition: left .2s cubic-bezier(.22, 1, .36, 1);
 }
 .sw .switch[aria-checked="true"] > span { left: 18px; }
-.sw .switch:focus-visible { outline: 2px solid #86A8F0; outline-offset: 2px; }
+.sw .switch:focus-visible { outline: 2px solid #3E6AE1; outline-offset: 2px; }
 /* Round ✕ buttons on sheets and trades. */
 .sw .xbtn {
   all: unset; box-sizing: border-box; cursor: pointer; border-radius: 50%; background: var(--small-btn);
   display: inline-flex; align-items: center; justify-content: center; color: var(--ink-3);
 }
-/* Outlined capsule chip (layers). */
+/* Outlined capsule chip (layers); on, it fills #424242 with ink words (focus §2.6). */
 .sw .chip {
   all: unset; box-sizing: border-box; cursor: pointer; border-radius: 999px; padding: 6px 12px;
   font-size: 13px; line-height: 16px; font-weight: 500; color: var(--ink-2);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18);
 }
-.sw .chip[aria-pressed="true"] { color: var(--ink); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .55); font-weight: 600; }
-.sw .chip:focus-visible { outline: 2px solid #86A8F0; outline-offset: 2px; }
+.sw .chip[aria-pressed="true"] { color: var(--ink); background: #424242; box-shadow: none; font-weight: 500; }
+.sw .chip:focus-visible { outline: 2px solid #3E6AE1; outline-offset: 2px; }
 
 /* Hide a scrollbar but keep the scroll. */
 .sw .noscroll { scrollbar-width: none; }

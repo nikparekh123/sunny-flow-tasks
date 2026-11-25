@@ -146,8 +146,9 @@ struct SunnyDeckCard: View {
                 .accessibilityHidden(true)
             Button(action: onTap) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(card.kicker.uppercased())
-                        .sType(SType(size: 13, weight: 700, line: 16, tracking: 0.06), tabular: false)
+                    // As written, no capitals, no tracking, 13 pt 500 (focus §2.5); the card's own ink, as it sits on a filled tone.
+                    Text(card.kicker)
+                        .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
                     Spacer(minLength: 0)
                     // CSS space-between with a 16 gap: one gap, not one each
                     // side of the spacer. Title balanced, sub never one word alone.

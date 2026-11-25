@@ -8,7 +8,8 @@
 //      a hairline, its names). A 3 pt track, pills 36 tall (13 pt, a 26 pt logo, a 7 pt dot red in the money, green
 //      ready to act); the picked one on the thumb. It scrolls sideways when it runs long.
 //    · the status line between hairlines, on one row: left the name (or All) 17/22 bold, truncating, and one grey line;
-//      right the big count that needs you (30 pt, red if any is in the money, else green) with "need you" 17/22, and
+//      right the big count that needs you (30 pt ink, after an 8 pt dot: red if any is in the money, else green)
+//      with "need you" 17/22, and
 //      "1 in the money · 1 to roll" grey; "All quiet" grey with the nearest roll when nothing needs you.
 //    · the range: "Nov 23 to Dec 18" 15/22 bold over "4 weeks · today Tue Nov 24" 12/16 grey.
 //    · the grid on the flat card (radius 20): M T W T F, then four weeks of compact days 66 tall (the day's pill, one
@@ -16,7 +17,9 @@
 //      the market holiday faded. Every day with something on it opens fully under its week: on one name a tile a rung
 //      (strike ×count, the big % kept, the action, one grey line) and the dashed next rung with its strike and
 //      premium; on All a line a name (a tap opens that name on the strip) and the quiet names behind one grey line.
-//  No explanation lines, no em dashes, no minus signs.
+//  No explanation lines, no em dashes. The focus look (25 Nov 2026): no red or green on words or numbers (IncC.word,
+//  grey under 15 pt); the marks keep them (the pill dots, the tile rings, the dots before the count and before All's
+//  In the money and Roll); a lost % on its own carries a minus.
 //
 
 import SwiftUI
@@ -138,7 +141,12 @@ struct IncCalView: View {
             VStack(alignment: .trailing, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     if s.need > 0 {
-                        Text("\(s.need)").sType(IncT.t(30, 34, 800, tr: -0.03)).foregroundStyle(IncC.of(s.tone))
+                        // Focus: the count is ink; its red (any in the money) or green (to roll) is the dot before it
+                        // (an overlay in its own 15 pt, so the count keeps the row's baseline).
+                        let d = IncC.dot(s.tone)
+                        Text("\(s.need)").sType(IncT.t(30, 34, 800, tr: -0.03)).foregroundStyle(IncC.word(s.tone, 30))
+                            .padding(.leading, d == nil ? 0 : 15)
+                            .overlay(alignment: .leading) { if let d { SDot(kind: d) } }
                     }
                     Text(s.word).sType(IncT.t(17, 22, 600), tabular: false).foregroundStyle(s.need > 0 ? IncC.ink : IncC.quiet)
                 }
@@ -188,8 +196,9 @@ struct IncCalView: View {
     private func grid(_ sc: IncCal.Scope) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
+                // Column heads (focus §2.5): plain grey words, 13 pt 500, no tracking.
                 ForEach(Array(["M", "T", "W", "T", "F"].enumerated()), id: \.offset) { _, l in
-                    Text(l).sType(IncT.t(12, 16, 600, tr: 0.05), tabular: false).foregroundStyle(IncC.mu)
+                    Text(l).sType(IncT.t(13, 16, 500), tabular: false).foregroundStyle(IncC.mu)
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -239,7 +248,7 @@ struct IncCalView: View {
                 .background(Capsule().fill(d.today ? IncC.ink : .clear))
                 .opacity(faded ? 0.45 : 1)
             if b.big.isEmpty { Color.clear.frame(height: 0) } else {
-                Text(b.big).sType(IncT.t(14, 17, 700)).foregroundStyle(IncC.of(b.bigTone))
+                Text(b.big).sType(IncT.t(14, 17, 700)).foregroundStyle(IncC.word(b.bigTone, 14))
                     .lineLimit(1).fixedSize()
                     .opacity(faded ? 0.45 : 1)
             }
@@ -277,7 +286,7 @@ struct IncCalView: View {
 
     /// A rung: padding 10 12 11, radius 14, the tile fill and its ring (1.5 pt red in the money, 1 pt green to roll,
     /// a 6% hairline running). "167.5 call ×3" 13/18 grey; the % kept 26 pt heavy with "kept" 13/18 grey; the action
-    /// 13/18 semibold in the %'s colour; one grey 12/16 line.
+    /// 13/18 semibold; one grey 12/16 line. Focus: the ring is the tile's only colour.
     private func tile(_ l: IncCal.Leg) -> some View {
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         let ring: Color = l.ring == .itm ? IncC.red : l.ring == .act ? IncC.actRing : IncC.line(0.06)
@@ -285,7 +294,7 @@ struct IncCalView: View {
             Text(l.lab).sType(IncT.t(13, 18)).foregroundStyle(IncC.mu).lineLimit(1).truncationMode(.tail)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if !l.big.isEmpty {
-                    Text(l.big).sType(IncT.t(26, 29, 800, tr: -0.03)).foregroundStyle(IncC.of(l.tone)).lineLimit(1).fixedSize()
+                    Text(l.big).sType(IncT.t(26, 29, 800, tr: -0.03)).foregroundStyle(IncC.word(l.tone, 26)).lineLimit(1).fixedSize()
                 }
                 Text(l.bw).sType(IncT.t(13, 18), tabular: false).foregroundStyle(IncC.mu)
             }
@@ -294,7 +303,7 @@ struct IncCalView: View {
              + Text(l.premLeft).font(.inter(12, 600, tabular: true)).foregroundStyle(IncC.ink) + Text(" to collect"))
                 .sType(IncT.t(12, 16)).foregroundStyle(IncC.mu).lineLimit(1).minimumScaleFactor(0.85)
             if let a = l.act {
-                Text(a).sType(IncT.t(13, 18, 600)).foregroundStyle(IncC.of(l.tone))
+                Text(a).sType(IncT.t(13, 18, 600)).foregroundStyle(IncC.word(l.tone, 13))
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
             }
@@ -311,17 +320,22 @@ struct IncCalView: View {
         .accessibilityLabel(l.speech)
     }
 
-    /// A name on All: the 28 pt logo, the ticker 15/20 semibold (grey when it runs on its own), the word 15/20 bold in
-    /// its colour, at least 44 tall; the strike and action 12/16 grey under the ticker. A tap opens the name.
+    /// A name on All: the 28 pt logo, the ticker 15/20 semibold (grey when it runs on its own), the word 15/20 bold
+    /// after its dot, at least 44 tall; the strike and action 12/16 grey under the ticker. A tap opens the name.
     private func row(_ r: IncCal.Row) -> some View {
         Button { open(r.t) } label: {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(alignment: .center, spacing: 10) {
                     IncLogo(t: r.t, size: 28, ring: true)
-                    Text(r.t).sType(IncT.t(15, 20, 600), tabular: false).foregroundStyle(IncC.of(r.tTone))
+                    Text(r.t).sType(IncT.t(15, 20, 600), tabular: false).foregroundStyle(IncC.word(r.tTone, 15))
                         .lineLimit(1).truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Text(r.word).sType(IncT.t(15, 20, 700)).foregroundStyle(IncC.of(r.wTone)).lineLimit(1).fixedSize()
+                    // Focus: the status word is ink; In the money keeps a red dot, Roll a green one.
+                    HStack(alignment: .center, spacing: 0) {
+                        if let d = IncC.dot(r.wTone) { SDot(kind: d) }
+                        Text(r.word).sType(IncT.t(15, 20, 700)).foregroundStyle(IncC.word(r.wTone, 15)).lineLimit(1)
+                    }
+                    .fixedSize()
                 }
                 Text(r.why).sType(IncT.t(12, 16)).foregroundStyle(IncC.mu)
                     .fixedSize(horizontal: false, vertical: true)

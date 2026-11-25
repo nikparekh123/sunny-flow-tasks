@@ -15,60 +15,71 @@ enum PC {
     static let ink = S.ink
     static let mu = S.secondary                          // #98989D: labels, sub lines
     static let muT = S.secondaryOnTint                   // #AEAEB2: muted on tints
-    static let quiet = S.dyn(0x6E6E73, 0x8E8E93)         // #8E8E93: quiet words, the empty dash
-    static let bright = S.dyn(0x3A3A3C, 0xD1D1D6)        // #D1D1D6: Price chart tag text that is not white (Nik 14 Nov)
-    static let pillSold = S.dyn(0xE5E5EA, 0x242426)      // the Price chart's put tags, solid (Nik 14 Nov: readable)
-    static let pillBought = S.dyn(0xF2F2F7, 0x18181A)
+    static let quiet = S.dyn(0x6E6E6E, 0x8C8C8C)         // #8E8E93: quiet words, the empty dash
+    static let bright = S.dyn(0x383838, 0xD2D2D2)        // #D1D1D6: Price chart tag text that is not white (Nik 14 Nov)
+    static let pillSold = S.dyn(0xE6E6E6, 0x242424)      // the Price chart's put tags, solid (Nik 14 Nov: readable)
+    static let pillBought = S.dyn(0xF2F2F2, 0x171717)
     static let green = S.green
     static let red = S.red
     static let orange = S.act                            // #FF9F0A
-    static let touched = S.dyn(0x8A6A00, 0xFFD60A)       // touched today
+    static let touched = S.dyn(0x8A6A00, 0xFCC00A)       // touched today
     static let touchedBright = Color(.sRGB, red: 1, green: 214 / 255, blue: 10 / 255, opacity: 1)
-    static let ceiling = S.dyn(0x2F5AA8, 0x86A8F0)
+    static let ceiling = S.dyn(0x2F5AA8, 0x3E6AE1)
     static let floor = S.dyn(0x995123, 0xC8946A)
-    static let teal = S.dyn(0x0B6F75, 0x4CC9D0)
-    static let teal2 = S.dyn(0x0B6F75, 0x8FDDE2)
-    static let tealLabel = S.dyn(0x0B6F75, 0x7FE0E5)
+    static let teal = S.dyn(0x6E6E6E, 0xAAAAAA)
+    static let teal2 = S.dyn(0x6E6E6E, 0xC8C8C8)
+    static let tealLabel = S.dyn(0x6E6E6E, 0xC8C8C8)
     static let ivLabel = S.dyn(0x5446B8, 0xD4CEFF)
     static let ivBracket = S.dynA(0x5446B8, 0.7, 0xBEB4FF, 0.7)
-    static let say = S.dyn(0x3A3A3C, 0xC7C7CC)
+    static let say = S.dyn(0x383838, 0xC8C8C8)
     /// The page under a dot's ring (#060807 in the design).
-    static let page = S.dyn(0xF1F2F4, 0x060807)
+    static let page = S.dyn(0xF2F2F2, 0x171717)
     /// Rules between rows (.08), the strong rule over a total (.2), a box's ring (.14).
-    static let rule = S.dynA(0x1D1D1F, 0.09, 0xFFFFFF, 0.08)
-    static let ruleStrong = S.dynA(0x1D1D1F, 0.2, 0xFFFFFF, 0.2)
-    static let boxRing = S.dynA(0x1D1D1F, 0.14, 0xFFFFFF, 0.14)
-    static let boxRingOn = S.dynA(0x1D1D1F, 0.7, 0xF5F5F7, 0.7)
+    static let rule = S.dynA(0x212121, 0.09, 0xFAFAFA, 0.08)
+    static let ruleStrong = S.dynA(0x212121, 0.2, 0xFAFAFA, 0.2)
+    static let boxRing = S.dynA(0x212121, 0.14, 0xFAFAFA, 0.14)
+    static let boxRingOn = S.dynA(0x212121, 0.7, 0xF2F2F2, 0.7)
     /// Soft cards: Intelligence (.04) and the Book totals cards (.05), each with a .08 edge.
-    static let cardFill = S.dynA(0x1D1D1F, 0.035, 0xFFFFFF, 0.04)
-    static let totalsFill = S.dynA(0xFFFFFF, 0.6, 0xFFFFFF, 0.05)
-    static let cardEdge = S.dynA(0x1D1D1F, 0.08, 0xFFFFFF, 0.08)
+    static let cardFill = S.dynA(0x212121, 0.035, 0xFAFAFA, 0.04)
+    static let totalsFill = S.dynA(0xFAFAFA, 0.6, 0xFAFAFA, 0.05)
+    static let cardEdge = S.dynA(0x212121, 0.08, 0xFAFAFA, 0.08)
     /// A box's detail (the web's pop-up), in place.
-    static let detailFill = S.dynA(0xFFFFFF, 0.97, 0x1C1C1E, 0.97)
-    static let detailEdge = S.dynA(0x1D1D1F, 0.12, 0xFFFFFF, 0.12)
-    static let closeFill = S.dynA(0x767680, 0.16, 0x767680, 0.24)
+    static let detailFill = S.dynA(0xFAFAFA, 0.97, 0x212121, 0.97)
+    static let detailEdge = S.dynA(0x212121, 0.12, 0xFAFAFA, 0.12)
+    static let closeFill = S.dynA(0x808080, 0.16, 0x808080, 0.24)
     /// The lanes' tints (.06 in the design; a touch more on light).
     static let tintIV = S.dynA(0x967CE8, 0.08, 0x967CE8, 0.06)
     static let tintSD = S.dynA(0x8080DC, 0.08, 0x8080DC, 0.06)
-    static let tintW = S.dynA(0x86A8F0, 0.10, 0x86A8F0, 0.06)
-    static let tintT = S.dynA(0x4CC9D0, 0.10, 0x4CC9D0, 0.06)
-    static let tintMv = S.dynA(0x1D1D1F, 0.03, 0xFFFFFF, 0.035)
-    static let tintH = S.dynA(0x65C466, 0.10, 0x65C466, 0.06)
+    static let tintW = S.dynA(0x3E6AE1, 0.10, 0x3E6AE1, 0.06)
+    static let tintT = S.dynA(0xAAAAAA, 0.10, 0xAAAAAA, 0.06)
+    static let tintMv = S.dynA(0x212121, 0.03, 0xFAFAFA, 0.035)
+    static let tintH = S.dynA(0x4CBB6C, 0.10, 0x4CBB6C, 0.06)
     /// Today's line through the lanes, and a closed-through line.
-    static let today = S.dynA(0x1D1D1F, 0.85, 0xF5F5F7, 0.85)
-    static let faint = S.dynA(0x1D1D1F, 0.06, 0xFFFFFF, 0.06)
+    static let today = S.dynA(0x212121, 0.85, 0xF2F2F2, 0.85)
+    static let faint = S.dynA(0x212121, 0.06, 0xFAFAFA, 0.06)
     /// The name strip's circles: a .07 fill, a 1.5 pt .2 ring (the selected one 3 pt in ink).
-    static let stripFill = S.dynA(0x1D1D1F, 0.05, 0xFFFFFF, 0.07)
-    static let stripRing = S.dynA(0x1D1D1F, 0.2, 0xFFFFFF, 0.2)
-    static let rangeBar = S.dynA(0x1D1D1F, 0.10, 0xFFFFFF, 0.10)
+    static let stripFill = S.dynA(0x212121, 0.05, 0xFAFAFA, 0.07)
+    static let stripRing = S.dynA(0x212121, 0.2, 0xFAFAFA, 0.2)
+    static let rangeBar = S.dynA(0x212121, 0.10, 0xFAFAFA, 0.10)
     static let sdBand = S.dynA(0x8080DC, 0.10, 0x8080DC, 0.08)
-    static let lossLine = S.dynA(0xBC2E30, 0.45, 0xFF6961, 0.45)
-    static let labelBg = S.dynA(0xF1F2F4, 0.9, 0x060807, 0.86)
-    static let onInk = S.dyn(0xFFFFFF, 0x000000)
-    static let dot = S.dyn(0x1D1D1F, 0xFFFFFF)
-    static let dotRing = S.dynA(0xFFFFFF, 0.9, 0x000000, 0.6)
+    static let lossLine = S.dynA(0xCC0000, 0.45, 0xE82127, 0.45)
+    static let labelBg = S.dynA(0xF2F2F2, 0.9, 0x171717, 0.86)
+    static let onInk = S.dyn(0xFAFAFA, 0x171717)
+    static let dot = S.dyn(0x212121, 0xFAFAFA)
+    static let dotRing = S.dynA(0xFAFAFA, 0.9, 0x171717, 0.6)
 
     static func tone(_ t: PE.Tone) -> Color { t == .red ? red : t == .orange ? orange : muT }
+
+    // The focus look (handoff 2026-11-25-focus §2): no colour on words, a sign on a gain or loss, grey big fills.
+    /// A large red or green fill (a band, the area under a curve) as neutral grey, used at the fill's old opacity.
+    static let band = S.dyn(0x8C8C8C, 0x8C8C8C)
+    /// Calls and puts on words and thin lines (strike lines, their names): grey; the blue and brown stay on fills.
+    static func legWord(_ put: Bool) -> Color { put ? SF.putsWord : SF.callsWord }
+    /// "+$5.6K" or "−$1.2K" where colour used to say up or down. No sign with the privacy mask on, or for a figure
+    /// that rounds to nothing (`dead`, the old colour's cut).
+    static func signed(_ v: Double, _ figure: String, privacy: Bool = false, dead: Double = 0.5) -> String {
+        privacy || abs(v) < dead ? figure : SF.signed(v, figure)
+    }
 
     /// oklch to sRGB (CSS Color 4), for the SD ramp and the IV strip.
     static func oklch(_ L: Double, _ C: Double, _ h: Double) -> Color {

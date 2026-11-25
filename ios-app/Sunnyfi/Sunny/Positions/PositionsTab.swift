@@ -378,7 +378,8 @@ struct PositionsTab: View {
             Text(subtitle).sType(PT.t(14, 20), tabular: false).foregroundStyle(PC.mu)
                 .accessibilityLabel(PosSay.words(subtitle))
             if let t = brief.asOf() {
-                Text("As of \(Self.asOfWords(t)) · IBKR data is late").sType(PT.t(13, 18, 500), tabular: false).foregroundStyle(PC.orange)
+                // Was orange: a watch state on a word goes grey under 15 pt, no dot (focus §2.1, §2.3).
+                Text("As of \(Self.asOfWords(t)) · IBKR data is late").sType(PT.t(13, 18, 500), tabular: false).foregroundStyle(PC.mu)
             }
         }
     }
@@ -544,8 +545,8 @@ struct PosPartCards: View {
 
 /// One leg of a book (Your book and the name's own book), one line under the label (Nik, 25 Nov 2026: "Now (change %),
 /// on tap change dollars, TV", kept on one line): what it is worth now big in ink (sold: what it costs to buy back),
-/// then the all-time change in brackets, green gained or kept, red lost, never a sign: the % (on cost; sold: the share
-/// of what was collected) or, after a tap on any card, the dollars; options end the line with their time value.
+/// then the all-time change in brackets, in ink with + gained or kept, − lost (focus, 25 Nov 2026): the % (on cost; sold:
+/// the share of what was collected) or, after a tap on any card, the dollars; options end the line with their time value.
 struct PosPartBlock: View {
     let p: PosBook.Part
     let privacy: Bool
@@ -554,16 +555,20 @@ struct PosPartBlock: View {
     @Environment(\.sTypeScales) private var scales
 
     var body: some View {
-        let up = p.all >= 0, c = tone(p.all)
+        let up = p.all >= 0
+        // The change in ink with its sign, + or − (focus §2.1, §2.2: no green or red on words); "$0" and "0%" bare.
+        let fig = inDollars ? money(p.all) : pc0(p.pct)
+        let chg = fig == "$0" || fig == "0%" ? fig : PC.signed(p.all, fig, privacy: privacy)
         let word = p.sold ? (up ? "kept" : "lost") : (up ? "gain" : "loss")
         let pctWord = p.sold ? "captured" : "return"
         VStack(alignment: .leading, spacing: 0) {
             Text(p.label).sType(PT.t(14, 18), tabular: false).foregroundStyle(PC.mu).lineLimit(1)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                // Big figure 18 (Nik, 25 Nov 2026). The time value never shrinks: it takes its room first, and a
+                // Big figure 18, kept bold under the focus rule (Nik, 25 Nov 2026). The time value never shrinks: it takes its room first, and a
                 // tight card shrinks the figures instead.
-                Text(money(p.now)).sType(PT.t(18, 24, 700, tr: -0.01)).foregroundStyle(PC.ink).layoutPriority(1)
-                Text("(\(inDollars ? money(p.all) : pc0(p.pct)))").sType(PT.t(17, 22, 600)).foregroundStyle(c)
+                Text(money(p.now)).sType(PT.t(18, 24, 700, tr: -0.01).heroic).foregroundStyle(PC.ink).layoutPriority(1)
+                // The card keeps its weights (Nik, 25 Nov 2026: "Don't change position card layout"), so `.heroic`.
+                Text("(\(chg))").sType(PT.t(17, 22, 600).heroic).foregroundStyle(PC.ink)
                     .contentTransition(.numericText()).layoutPriority(1)
                 Spacer(minLength: 6)
                 if let tv = p.tv {
@@ -586,7 +591,7 @@ struct PosPartBlock: View {
     /// Inter is one variable font, so the semibold is its own font (fontWeight cannot reach the wght axis).
     private func tvLine(_ tv: Double) -> Text {
         let size = scales ? SDynamic.scaled(14, dts) : 14
-        let semi = Font.inter(size, 600, tabular: true)
+        let semi = SType(size: size, weight: 600, line: size, tracking: 0, hero: true).font(tabular: true)
         return Text(Image(systemName: "clock")).font(.system(size: size - 1, weight: .medium)) + Text(" ")
             + Text(money(tv)).font(semi).foregroundStyle(PC.ink)
     }
@@ -598,7 +603,6 @@ struct PosPartBlock: View {
         return PosSay.words("\(p.label), \(fig(p.now)) now, \(word) \(PosSay.money(p.all, privacy)), \(pc0(p.pct)) \(pctWord)\(tv)")
     }
 
-    private func tone(_ v: Double) -> Color { v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink }
     /// Whole K and M, no decimals, no sign (Nik, 25 Nov 2026: "Round off the numbers also to be K M no decimals"):
     /// $92.3K reads $92K, $7.8K $8K; under $1K whole dollars.
     private func money(_ v: Double) -> String {
@@ -702,7 +706,7 @@ struct PosStrip: View {
                             if let img = UIImage(named: "logo-\(n.t)") {
                                 Image(uiImage: img).resizable().scaledToFit().frame(width: 34, height: 34)
                             } else {
-                                Text(n.t).font(.inter(n.t.count > 4 ? 11 : 12, 700)).tracking(-0.12).foregroundStyle(Color(hex: 0x1D1D1F))
+                                Text(n.t).font(.inter(n.t.count > 4 ? 11 : 12, 700)).tracking(-0.12).foregroundStyle(Color(hex: 0x212121))
                                     .lineLimit(1).minimumScaleFactor(0.7).padding(.horizontal, 4)
                             }
                         }
@@ -735,7 +739,8 @@ struct PosHeader: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(n.t).sType(PT.t(26, 32, 700, tr: -0.02), tabular: false).foregroundStyle(PC.ink)
                 Text(PosFmt.price(S0)).sType(PT.t(19, 24)).foregroundStyle(PC.mu)
-                Text("\(mv < 0 ? "▼" : "▲") \(PE.pcx(mv))").sType(PT.t(15, 20, 600)).foregroundStyle(mv < 0 ? PC.red : PC.green)
+                // The arrow says up or down: the move in ink, no colour (focus §2.1).
+                Text("\(mv < 0 ? "▼" : "▲") \(PE.pcx(mv))").sType(PT.t(15, 20, 600)).foregroundStyle(PC.ink)
             }
             .lineLimit(1)
             Text(strat.isEmpty ? n.company : "\(n.company) · \(strat)").sType(PT.t(14, 20), tabular: false).foregroundStyle(PC.mu)

@@ -185,11 +185,11 @@ struct BIndicatorCard: View {
             .frame(minHeight: 24)
             Text(c["value"].string ?? "").sType(BMk.big).foregroundStyle(S.ink)
                 .padding(.top, 10)
-            // Good or bad in plain words (sunny-home v134, Nik 8 Nov 2026): the read in its tone, then the trend
-            // coloured by whether its move is good (green) or bad (red) for markets.
+            // Good or bad in plain words (sunny-home v134, Nik 8 Nov 2026): the read, then the trend. Focus (25 Nov):
+            // words carry no colour, so both are neutral; the words and the arrow say good, bad or which way.
             if let read = c["read"].string {
                 Text(read).sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false)
-                    .foregroundStyle(BK.color(c["readTone"].string))
+                    .foregroundStyle(BK.word(c["readTone"].string, 15))
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 6)
             }
@@ -197,7 +197,7 @@ struct BIndicatorCard: View {
                 Text(c["arrow"].string ?? "").fixedSize().frame(width: 14).accessibilityHidden(true)
                 Text(c["trend"].string ?? "").fixedSize(horizontal: false, vertical: true)
             }
-            .sType(BMk.label, tabular: false).foregroundStyle(c["trendTone"].isNull ? S.ink : BK.color(c["trendTone"].string))
+            .sType(BMk.label, tabular: false).foregroundStyle(c["trendTone"].isNull ? S.ink : BK.word(c["trendTone"].string, BMk.label.size))
             .padding(.top, 4)
             let pts = c["chart"]["points"].array
             if !pts.isEmpty {
@@ -309,15 +309,14 @@ struct BEconomyRow: View {
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                     Text(r["value"].string ?? "").bLine(SType(size: 15, weight: 700, line: 20, tracking: 0)).foregroundStyle(S.ink)
                                 }
-                                // The read in its tone (green good, red bad, orange mixed), then the trend coloured
-                                // by whether its move is good or bad (Nik, 8 Nov 2026).
+                                // The read, then the trend (Nik, 8 Nov 2026); focus: neutral words, the words say good or bad.
                                 if let read = r["read"].string {
                                     Text(read).bLine(SType(size: 13, weight: 700, line: 17, tracking: 0), tabular: false)
-                                        .foregroundStyle(BK.color(r["readTone"].string))
+                                        .foregroundStyle(BK.word(r["readTone"].string, 13))
                                         .padding(.leading, 18)
                                 }
                                 Text(r["trend"].string ?? "").bLine(SType(size: 13, weight: 500, line: 17, tracking: 0), tabular: false)
-                                    .foregroundStyle(r["trendTone"].isNull ? S.secondary : BK.color(r["trendTone"].string))
+                                    .foregroundStyle(r["trendTone"].isNull ? S.secondary : BK.word(r["trendTone"].string, 13))
                                     .padding(.leading, 18)
                             }
                             // The yellow dot in words: one stop per row, "watching" on the ones worth watching.

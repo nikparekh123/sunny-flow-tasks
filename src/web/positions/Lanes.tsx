@@ -8,15 +8,21 @@
 //   Held / + New / = Both the profit zone, breakevens with % and SD, strikes ringed; the cross solid, each side alone dashed
 // Walls and technicals stay faint (.38) until today's session reaches them: touched = yellow, closed through = a white
 // capsule with ↑ or ↓ (positions-engine levelState, on the server's `day`).
+// The focus look (handoff 2026-11-25-focus §2): words are never coloured (ink at 15 px and up, grey under; the walls'
+// ceiling and floor names go to the calls and puts word greys), icons, dots, rings, tints and the touched yellow keep
+// their colour, teal is grey, the Held lane's red line grey, bold only at 20 px and up.
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { atSd, crossAdds, levelState, priceScale, sdColour, sdK, LV, SD_RAMP, zOf, type Lane as LaneM, type LevelState } from '../../../supabase/functions/_shared/positions-engine.ts';
 import { clock12, monthDay, ny } from '../lib/clock';
 import { money } from '../lib/format';
 import { stateWords, type IntelModel, type SdReply } from './intel';
-import { Box, CEIL, FLOOR, G, Hover, IVL, K, MT, MU, O, QU, R, TEAL, TEAL2, WallIcon, Y, tnum, type BoxQ, type Pop } from './ui';
+import { Box, CEIL, FLOOR, G, Hover, IVL, K, MT, MU, O, QU, R, TEAL, TEAL2, TW, WallIcon, Y, tnum, wd, type BoxQ, type Pop } from './ui';
+/** A mark's colour as a word (focus 2.1, 2.4): the ceiling's blue and the floor's brown to their word greys, orange and
+    yellow to grey at `fs`; anything neutral as it is. */
+const wc = (c: string, fs: number) => (c === CEIL ? TW('C') : c === FLOOR ? TW('P') : c === O || c === Y || c === R || c === G ? wd(fs) : c);
 
 const LANE_H = 96, TRACK = 'minmax(0,1fr)', COLS = `110px ${TRACK} 416px`;
-const TINT = { iv: 'rgba(150,124,232,.06)', sd: 'rgba(128,128,220,.06)', w: 'rgba(134,168,240,.06)', t: 'rgba(76,201,208,.06)', mv: 'rgba(255,255,255,.035)', h: 'rgba(101,196,102,.06)' };
+const TINT = { iv: 'rgba(150,124,232,.06)', sd: 'rgba(128,128,220,.06)', w: 'rgba(62,106,225,.06)', t: 'rgba(170,170,170,.06)', mv: 'rgba(255,255,255,.035)', h: 'rgba(76,187,108,.06)' };
 const p2 = (x: number) => `${(x * 100).toFixed(2)}%`;
 const f2 = (x: number) => '$' + x.toFixed(2);
 const pc1 = (x: number) => (Math.abs(x) * 100).toFixed(1) + '%';
@@ -29,7 +35,7 @@ function LaneRow({ name, sub, tint, track, boxes, empty, trackH = 84 }: LaneRowP
   return (
     <div style={{ display: 'grid', gridTemplateColumns: COLS, columnGap: 12, alignItems: 'center', height: LANE_H, borderTop: '1px solid rgba(255,255,255,.08)', background: tint }}>
       <span style={{ display: 'flex', flexDirection: 'column', paddingLeft: 12 }}>
-        <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600 }}>{name}</span>
+        <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500 }}>{name}</span>
         {sub && <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>{sub}</span>}
       </span>
       <span style={{ position: 'relative', display: 'block', height: trackH }}>{track}</span>
@@ -83,11 +89,11 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
   const hoverOf = (id: string, x: number, pop: Pop, w?: number) => (
     <Hover key={id} id={id} x={fr(x)} w={w} pop={pop} on={hv === id} set={setHv} aria={`${pop.t} ${pop.v}`} />
   );
-  const todayRow = (s: LevelState) => ({ l: 'Today', v: stateWords[s].replace(' today', ''), c: s === 'touch' ? Y : s === 'idle' ? MT : K });
+  const todayRow = (s: LevelState) => ({ l: 'Today', v: stateWords[s].replace(' today', ''), c: s === 'touch' ? wd(13) : s === 'idle' ? MT : K });
   const alertLine = (k: string, x: number, s: LevelState) => s === 'idle' ? null : (
     <span key={'al' + k} aria-hidden="true" style={{ pointerEvents: 'none' }}>
-      {s === 'touch' && <span style={{ position: 'absolute', top: '50%', left: p2(fr(x)), width: 56, height: 56, margin: '-28px 0 0 -28px', borderRadius: '50%', background: 'radial-gradient(circle,rgba(255,214,10,.32),rgba(255,214,10,0) 70%)' }} />}
-      <span style={{ position: 'absolute', top: -6, bottom: -6, left: p2(fr(x)), borderLeft: s === 'touch' ? '1.5px solid rgba(255,214,10,.8)' : '1.5px solid rgba(245,245,247,.9)' }} />
+      {s === 'touch' && <span style={{ position: 'absolute', top: '50%', left: p2(fr(x)), width: 56, height: 56, margin: '-28px 0 0 -28px', borderRadius: '50%', background: 'radial-gradient(circle,rgba(252,192,10,.32),rgba(252,192,10,0) 70%)' }} />}
+      <span style={{ position: 'absolute', top: -6, bottom: -6, left: p2(fr(x)), borderLeft: s === 'touch' ? '1.5px solid rgba(252,192,10,.8)' : '1.5px solid rgba(242,242,242,.9)' }} />
     </span>
   );
 
@@ -110,15 +116,15 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
     <span style={{ position: 'absolute', top: 20, height: 28, left: 0, right: 0, overflow: 'hidden', borderRadius: 8 }}>
       {cells.map((c) => (
         <span key={c.k} title={`${c.k} strike · IV ${pc1(c.v)}`} style={{ position: 'absolute', top: 0, bottom: 0, left: p2(fr(c.k - SP / 2)), width: p2(SP / sc.W),
-          background: `oklch(${(0.3 + 0.42 * rr(c.v)).toFixed(3)} ${(0.05 + 0.12 * rr(c.v)).toFixed(3)} 282)`, borderRight: '1px solid #0B0C10' }} />
+          background: `oklch(${(0.3 + 0.42 * rr(c.v)).toFixed(3)} ${(0.05 + 0.12 * rr(c.v)).toFixed(3)} 282)`, borderRight: '1px solid #171717' }} />
       ))}
     </span>
     <span style={{ position: 'absolute', top: 52, height: 6, left: p2(cl01(lo1)), width: p2(cl01(hi1) - cl01(lo1)), border: '1.5px solid rgba(190,180,255,.7)', borderTop: 'none', borderRadius: '0 0 4px 4px' }} />
-    <span style={{ position: 'absolute', top: 62, left: at(cl01(lo1), tx(`1 SD · ${f2(lo1)} to ${f2(hi1)}`), 0.1), fontSize: 12, lineHeight: '16px', fontWeight: 600, color: IVL, whiteSpace: 'nowrap' }}>1 SD · {f2(lo1)} to {f2(hi1)}</span>
+    <span style={{ position: 'absolute', top: 62, left: at(cl01(lo1), tx(`1 SD · ${f2(lo1)} to ${f2(hi1)}`), 0.1), fontSize: 12, lineHeight: '16px', fontWeight: 400, color: IVL, whiteSpace: 'nowrap' }}>1 SD · {f2(lo1)} to {f2(hi1)}</span>
   </> : <Quiet t={`No IV by strike for ${e.label} yet.`} />;
   const ivTone = M.iv.tone;
   const ivBoxes: BoxQ[] = [
-    { k: 'ivn', l: 'IV now', v: pc1(e.iv), s: M.earnIn ? `earnings ${d.events?.earnings ? md(d.events.earnings) : 'before expiry'}` : 'at the money', sc: M.earnIn ? O : undefined },
+    { k: 'ivn', l: 'IV now', v: pc1(e.iv), s: M.earnIn ? `earnings ${d.events?.earnings ? md(d.events.earnings) : 'before expiry'}` : 'at the money' },
     { k: 'ivr', l: 'IV rank', v: M.iv.rank != null ? String(M.iv.rank) : '-', s: M.iv.rank != null ? 'of 100, past year' : 'not sent yet' },
     { k: 'ivh', l: 'vs HV20', v: ivTone === 'rich' ? 'Rich' : ivTone === 'cheap' ? 'Cheap' : ivTone === 'fair' ? 'Fair' : '-', s: d.tech?.hv20 ? `HV20 ${pc1(d.tech.hv20)}` : 'not sent yet' },
   ];
@@ -126,12 +132,12 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
   /* ── SD ── */
   const mv = `±${pc1(m)}`;
   const sdTrack = <>
-    <span style={{ position: 'absolute', top: 0, left: 0, fontSize: 12, lineHeight: '16px', fontWeight: 700, color: K, whiteSpace: 'nowrap' }}>
+    <span style={{ position: 'absolute', top: 0, left: 0, fontSize: 12, lineHeight: '16px', fontWeight: 400, color: K, whiteSpace: 'nowrap' }}>
       {M.picked ? `Put at ${sdK(M.kp)} SD · call at ${sdK(M.kc)} SD` : `1 SD ${mv}`}
     </span>
     {!M.picked && (() => { const Kx = M.side === 'p' ? Kp : Kc, w = tx(`Sell ${+Kx.toFixed(2)} calls`) + 16; return inSc(Kx) ? (
-      <span style={{ position: 'absolute', top: 0, left: at(fr(Kx), w, 'c', tx(`1 SD ${mv}`) + 10), fontSize: 12, lineHeight: '16px', fontWeight: 700, whiteSpace: 'nowrap' }}>
-        <span style={{ padding: '1px 7px', borderRadius: 999, background: K, color: '#000000' }}>Sell {+Kx.toFixed(2)} {M.side === 'p' ? 'puts' : 'calls'}</span>
+      <span style={{ position: 'absolute', top: 0, left: at(fr(Kx), w, 'c', tx(`1 SD ${mv}`) + 10), fontSize: 12, lineHeight: '16px', fontWeight: 400, whiteSpace: 'nowrap' }}>
+        <span style={{ padding: '1px 7px', borderRadius: 999, background: K, color: '#171717' }}>Sell {+Kx.toFixed(2)} {M.side === 'p' ? 'puts' : 'calls'}</span>
       </span>) : null; })()}
     <span style={{ position: 'absolute', top: 24, height: 34, left: 0, right: 0, overflow: 'hidden' }}>
       {LV.slice().reverse().map((k) => (
@@ -140,16 +146,16 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
       ))}
       {M.picked && (() => {
         const a = cl01(Kp), b = cl01(Kc), sp = b > a ? Math.max(0, Math.min(100, ((fr(S) - a) / (b - a)) * 100)) : 50;
-        return <span style={{ position: 'absolute', top: 0, bottom: 0, left: p2(a), width: p2(Math.max(0, b - a)), borderRadius: 8, boxShadow: 'inset 0 0 0 1.5px #F5F5F7',
+        return <span style={{ position: 'absolute', top: 0, bottom: 0, left: p2(a), width: p2(Math.max(0, b - a)), borderRadius: 8, boxShadow: 'inset 0 0 0 1.5px #F2F2F2',
           background: `linear-gradient(90deg,${sdColour(M.kp || 0.25)} 0 ${sp.toFixed(1)}%,${sdColour(M.kc)} ${sp.toFixed(1)}% 100%)` }} />;
       })()}
-      {!M.picked && inSc(M.side === 'p' ? Kp : Kc) && <span style={{ position: 'absolute', top: 0, bottom: 0, left: p2(fr(M.side === 'p' ? Kp : Kc)), borderLeft: '2px solid #F5F5F7' }} />}
+      {!M.picked && inSc(M.side === 'p' ? Kp : Kc) && <span style={{ position: 'absolute', top: 0, bottom: 0, left: p2(fr(M.side === 'p' ? Kp : Kc)), borderLeft: '2px solid #F2F2F2' }} />}
     </span>
     {M.picked ? (() => {
       const wp = tx(`Put ${+Kp.toFixed(2)}`), wc = tx(`Call ${+Kc.toFixed(2)}`), lp = at(cl01(Kp), wp), lc = Math.min(tw - wc, Math.max(at(cl01(Kc), wc), lp + wp + 6));
       return <>
-        <span style={{ position: 'absolute', top: 64, left: lp, fontSize: 12, lineHeight: '16px', fontWeight: 600, whiteSpace: 'nowrap' }}>Put {+Kp.toFixed(2)}</span>
-        <span style={{ position: 'absolute', top: 64, left: lc, fontSize: 12, lineHeight: '16px', fontWeight: 600, whiteSpace: 'nowrap' }}>Call {+Kc.toFixed(2)}</span>
+        <span style={{ position: 'absolute', top: 64, left: lp, fontSize: 12, lineHeight: '16px', fontWeight: 400, whiteSpace: 'nowrap' }}>Put {+Kp.toFixed(2)}</span>
+        <span style={{ position: 'absolute', top: 64, left: lc, fontSize: 12, lineHeight: '16px', fontWeight: 400, whiteSpace: 'nowrap' }}>Call {+Kc.toFixed(2)}</span>
       </>;
     })() : (
       <span style={{ position: 'absolute', top: 64, left: 0, right: 0, display: 'flex', gap: 10, fontSize: 12, lineHeight: '16px', color: MT, whiteSpace: 'nowrap', overflow: 'hidden' }}>
@@ -173,13 +179,13 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
     if (!inSc(w.K)) return null;
     const s = st(w.K), L = look(s, base), lab = `${L.ar}${+w.K.toFixed(2)}`;
     const lw = tx(lab) + (L.closed ? 12 : 0), chip = { fontSize: 12, lineHeight: '16px', whiteSpace: 'nowrap' as const, borderRadius: 999, padding: L.closed ? '0 6px' : 0,
-      background: L.closed ? K : 'transparent', color: L.closed ? '#000000' : L.c };
+      background: L.closed ? K : 'transparent', color: L.closed ? '#171717' : wc(L.c, 12) };
     if (w.kind === 'accelerator') {
       const near = flip != null && Math.abs(fr(w.K) - fr(flip)) < 0.08, top = near ? 66 : 50;
       return (
         <span key="wmac" style={{ opacity: L.o, pointerEvents: 'none' }}>
           <span style={{ position: 'absolute', top, left: p2(fr(w.K)), marginLeft: -9, color: L.c }}><WallIcon kind="accelerator" size={18} color="currentColor" /></span>
-          <span style={{ position: 'absolute', top: top + 1, left: at(fr(w.K), lw, 'l'), fontWeight: 600, ...chip }}>{lab}</span>
+          <span style={{ position: 'absolute', top: top + 1, left: at(fr(w.K), lw, 'l'), fontWeight: 400, ...chip }}>{lab}</span>
         </span>
       );
     }
@@ -187,7 +193,7 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
     return (
       <span key={'wm' + w.kind} style={{ opacity: L.o, pointerEvents: 'none' }}>
         <span style={{ position: 'absolute', top: 0, left: p2(fr(w.K)), marginLeft: -sz / 2, color: L.c, lineHeight: 0 }}><WallIcon kind={w.kind} size={sz} color="currentColor" /></span>
-        <span style={{ position: 'absolute', top: sz + 2, left: at(fr(w.K), lw), fontWeight: 700, ...chip }}>{lab}</span>
+        <span style={{ position: 'absolute', top: sz + 2, left: at(fr(w.K), lw), fontWeight: 400, ...chip }}>{lab}</span>
       </span>
     );
   };
@@ -211,21 +217,21 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
     {flip != null && inSc(flip) && (() => { const s = st(flip), L = look(s, O), lab = `${L.ar}${f2(flip)}`, lw = tx(lab) + (L.closed ? 12 : 0), f = fr(flip); return (
       <span style={{ opacity: L.o, pointerEvents: 'none' }}>
         <span style={{ position: 'absolute', top: 50, left: p2(f), marginLeft: -9, color: L.c, lineHeight: 0 }}><WallIcon kind="flip" size={18} color="currentColor" /></span>
-        <span style={{ position: 'absolute', top: 51, left: at(f, lw, f * tw + 12 + lw <= tw ? 'r' : 'l'), fontSize: 12, lineHeight: '16px', fontWeight: 600, whiteSpace: 'nowrap', borderRadius: 999,
-          padding: L.closed ? '0 6px' : 0, background: L.closed ? K : 'transparent', color: L.closed ? '#000000' : L.c }}>{lab}</span>
+        <span style={{ position: 'absolute', top: 51, left: at(f, lw, f * tw + 12 + lw <= tw ? 'r' : 'l'), fontSize: 12, lineHeight: '16px', fontWeight: 400, whiteSpace: 'nowrap', borderRadius: 999,
+          padding: L.closed ? '0 6px' : 0, background: L.closed ? K : 'transparent', color: L.closed ? '#171717' : wc(L.c, 12) }}>{lab}</span>
       </span>); })()}
     {ac && wallMark(ac, MT)}
-    {rings.map((l, i) => <span key={i} style={{ position: 'absolute', top: 71, left: p2(fr(l.K)), width: 12, height: 12, marginLeft: -6, borderRadius: '50%', border: '2px solid #F5F5F7', background: '#0B0D0C' }} />)}
+    {rings.map((l, i) => <span key={i} style={{ position: 'absolute', top: 71, left: p2(fr(l.K)), width: 12, height: 12, marginLeft: -6, borderRadius: '50%', border: '2px solid #F2F2F2', background: '#171717' }} />)}
   </> : <Quiet t={`No gamma walls for ${e.label} yet.`} />;
   const wBox = (k: string, l: string, x: { K: number; gex: number; conf: 1 | 2 | 3 | null } | null, icon: ReactNode): BoxQ => {
     if (!x) return { k, l, v: 'none', vc: MT, icon };
     const s = st(x.K);
-    return { k, l, v: String(+x.K.toFixed(2)), s: s !== 'idle' ? stateWords[s] : `${money(x.gex)}${x.conf ? ' ' + dots(x.conf) : ''}`, sc: s === 'touch' ? Y : s === 'idle' ? undefined : K, icon };
+    return { k, l, v: String(+x.K.toFixed(2)), s: s !== 'idle' ? stateWords[s] : `${money(x.gex)}${x.conf ? ' ' + dots(x.conf) : ''}`, sc: s === 'touch' || s === 'idle' ? undefined : K, icon };
   };
   const gBoxes: BoxQ[] | null = hasW ? [
     wBox('ce', 'Ceiling', ce, <WallIcon kind="ceiling" size={13} color={CEIL} />),
     wBox('fl', 'Floor', fl, <WallIcon kind="floor" size={13} color={FLOOR} />),
-    flip != null ? { k: 'fp', l: 'Flip', v: f2(flip), s: st(flip) !== 'idle' ? stateWords[st(flip)] : 'calmer above', sc: st(flip) === 'touch' ? Y : undefined, icon: <WallIcon kind="flip" size={13} color={O} /> }
+    flip != null ? { k: 'fp', l: 'Flip', v: f2(flip), s: st(flip) !== 'idle' ? stateWords[st(flip)] : 'calmer above', icon: <WallIcon kind="flip" size={13} color={O} /> }
       : { k: 'fp', l: 'Flip', v: 'none', vc: MT, icon: <WallIcon kind="flip" size={13} color={O} /> },
   ] : null;
 
@@ -261,27 +267,27 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
     }, 14) : null))}
     {zones.map((z, i) => {
       const s = st(z.mid), L = look(s, ''), hold = z.kind === 'support', a = (0.35 + 0.5 * (z.strength / zmx)).toFixed(2);
-      const col = s === 'touch' ? '255,214,10' : '76,201,208';
+      const col = s === 'touch' ? '252,192,10' : '170,170,170';
       const bg = hold ? `rgba(${col},${a})` : `repeating-linear-gradient(135deg,rgba(${col},${a}) 0 2px,transparent 2px 5px)`;
       return (
         <span key={'zz' + i} style={{ pointerEvents: 'none', opacity: L.o }}>
           <span style={{ position: 'absolute', top: 0, height: 20, left: p2(cl01(z.lo)), width: `max(12px, ${p2(cl01(z.hi) - cl01(z.lo))})`, borderRadius: 5, background: bg, boxShadow: hold ? 'none' : `inset 0 0 0 1.5px rgba(${col},.8)` }} />
-          {zLab.has(i) && <span style={{ position: 'absolute', top: 22, left: zLab.get(i), fontSize: 12, lineHeight: '16px', fontWeight: 600, whiteSpace: 'nowrap', borderRadius: 999,
-            padding: L.closed ? '0 6px' : 0, background: L.closed ? K : 'transparent', color: L.closed ? '#000000' : s === 'touch' ? Y : K }}>{L.ar}{f2(z.mid)}</span>}
+          {zLab.has(i) && <span style={{ position: 'absolute', top: 22, left: zLab.get(i), fontSize: 12, lineHeight: '16px', fontWeight: 400, whiteSpace: 'nowrap', borderRadius: 999,
+            padding: L.closed ? '0 6px' : 0, background: L.closed ? K : 'transparent', color: L.closed ? '#171717' : s === 'touch' ? wd(12) : K }}>{L.ar}{f2(z.mid)}</span>}
         </span>
       );
     })}
     <span style={{ position: 'absolute', top: 40, left: 0, right: 0, borderTop: '1px solid rgba(255,255,255,.06)', pointerEvents: 'none' }} />
-    {MAs.map(([n, x, w, fw], i) => {
+    {MAs.map(([n, x, w], i) => {
       if (x == null) return null;
-      const s = st(x), L = look(s, ''), hold = x < S, f = cl01(x), inL = f < 0.1, col = s === 'touch' ? '255,214,10' : '76,201,208';
+      const s = st(x), L = look(s, ''), hold = x < S, f = cl01(x), inL = f < 0.1, col = s === 'touch' ? '252,192,10' : '170,170,170';
       return (
         <span key={n} style={{ pointerEvents: 'none', opacity: L.o }}>
           <span style={{ position: 'absolute', top: 44 + i * 10, height: 6, left: p2(f), right: 0, borderRadius: '3px 0 0 3px',
             background: hold ? `rgba(${col},${w})` : `repeating-linear-gradient(135deg,rgba(${col},${w}) 0 2px,transparent 2px 5px)`, boxShadow: hold ? 'none' : `inset 0 0 0 1px rgba(${col},${w})` }} />
           <span style={{ position: 'absolute', top: 42 + i * 10, left: inL ? f * tw + 4 : Math.max(0, f * tw - 5 - tx(L.ar + n, 11)), height: 10, display: 'inline-flex', alignItems: 'center',
-            padding: L.closed ? '0 4px' : 0, borderRadius: 999, background: L.closed ? K : 'transparent', fontSize: 11, lineHeight: '10px', fontWeight: fw, whiteSpace: 'nowrap',
-            color: L.closed ? '#000000' : s === 'touch' ? (inL && hold ? '#2A2200' : Y) : inL && hold ? '#04201F' : '#7FE0E5' }}>{L.ar}{n}</span>
+            padding: L.closed ? '0 4px' : 0, borderRadius: 999, background: L.closed ? K : 'transparent', fontSize: 11, lineHeight: '10px', fontWeight: 400, whiteSpace: 'nowrap',
+            color: L.closed ? '#171717' : s === 'touch' ? (inL && hold ? '#2A2200' : wd(11)) : inL && hold ? '#171717' : '#C8C8C8' }}>{L.ar}{n}</span>
         </span>
       );
     })}
@@ -289,11 +295,11 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
   const zBox = (k: string, l: string, x: number | null | undefined): BoxQ => {
     if (x == null) return { k, l, v: 'none', vc: MT, dot: TEAL2 };
     const s = st(x);
-    return { k, l, v: f2(x), s: s !== 'idle' ? stateWords[s] : sdz(x), sc: s === 'touch' ? Y : s === 'idle' ? undefined : K, dot: TEAL2 };
+    return { k, l, v: f2(x), s: s !== 'idle' ? stateWords[s] : sdz(x), sc: s === 'touch' || s === 'idle' ? undefined : K, dot: TEAL2 };
   };
   const tBoxes: BoxQ[] | null = tech ? [
     zBox('su', 'Support', lv.support), zBox('re', 'Resistance', lv.resistance),
-    M.exDivIn && d.events?.exDiv ? { k: 'xd', l: 'Ex-dividend', v: md(d.events.exDiv), vc: O, s: 'early assignment' }
+    M.exDivIn && d.events?.exDiv ? { k: 'xd', l: 'Ex-dividend', v: md(d.events.exDiv), s: 'early assignment' }
       : { k: 'rsi', l: 'RSI', v: tech.rsi14 != null ? String(Math.round(tech.rsi14)) : '-', s: tech.rsi14 != null ? rsiWord(tech.rsi14) : 'not sent yet' },
   ] : null;
 
@@ -302,14 +308,14 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
   const arrows = mo && (mo.lw || mo.tw || mo.pace) ? [
     ...(mo.lw ? [{ k: 'lw', y: 0, a: mo.lw.from, b: mo.lw.to, c: MT, dash: false, t: 'Last week', v: arw(mo.lw.r), vc: mo.lw.r < 0 ? R : G, rg: [mo.lw.lo, mo.lw.hi] as [number, number],
       pop: { t: 'Last week', v: arw(mo.lw.r), dc: mo.lw.r < 0 ? R : G, rows: [{ l: shortD(mo.lw.fromD), v: f2(mo.lw.from) }, { l: shortD(mo.lw.toD), v: f2(mo.lw.to) },
-        { l: 'Move', v: arw(mo.lw.r), c: mo.lw.r < 0 ? R : G }, { l: 'In SD', v: wkSd(mo.lw.to / mo.lw.from, e.iv) }, { l: 'Range of closes', v: `${f2(mo.lw.lo)} to ${f2(mo.lw.hi)}` }],
+        { l: 'Move', v: arw(mo.lw.r), c: wd(13) }, { l: 'In SD', v: wkSd(mo.lw.to / mo.lw.from, e.iv) }, { l: 'Range of closes', v: `${f2(mo.lw.lo)} to ${f2(mo.lw.hi)}` }],
         say: 'Close to close, against a one-week SD at today’s IV.' } }] : []),
     ...(mo.tw ? [{ k: 'tw', y: 28, a: mo.tw.from, b: S, c: K, dash: false, t: 'This week', v: arw(mo.tw.r), vc: mo.tw.r < 0 ? R : G, rg: null,
-      pop: { t: 'This week', v: arw(mo.tw.r), dc: mo.tw.r < 0 ? R : G, rows: [{ l: 'Fri close', v: f2(mo.tw.from) }, { l: 'Today', v: f2(S) }, { l: 'Move', v: arw(mo.tw.r), c: mo.tw.r < 0 ? R : G },
+      pop: { t: 'This week', v: arw(mo.tw.r), dc: mo.tw.r < 0 ? R : G, rows: [{ l: 'Fri close', v: f2(mo.tw.from) }, { l: 'Today', v: f2(S) }, { l: 'Move', v: arw(mo.tw.r), c: wd(13) },
         { l: 'In SD', v: mo.tw.sd.toFixed(1) + ' SD' }], say: 'Friday’s close to today.' } }] : []),
     ...(mo.pace ? [{ k: 'mo', y: 56, a: S, b: mo.pace.to, c: mo.pace.flat ? MT : mo.pace.r5 < 0 ? R : G, dash: true, t: mo.pace.flat ? `Flat to ${e.label}` : `Pace to ${e.label}`, v: f2(mo.pace.to), vc: K, rg: null,
       pop: { t: 'Momentum', v: mo.pace.flat ? 'Flat' : mo.pace.r5 < 0 ? 'Falling' : 'Rising', dc: mo.pace.flat ? MT : mo.pace.r5 < 0 ? R : G,
-        rows: [{ l: '5-day', v: arw(mo.pace.r5), c: mo.pace.r5 < 0 ? R : G }, ...(mo.pace.r20 != null ? [{ l: '20-day', v: arw(mo.pace.r20), c: mo.pace.r20 < 0 ? R : G }] : []),
+        rows: [{ l: '5-day', v: arw(mo.pace.r5), c: wd(13) }, ...(mo.pace.r20 != null ? [{ l: '20-day', v: arw(mo.pace.r20), c: wd(13) }] : []),
           ...(tech?.rsi14 != null ? [{ l: 'RSI', v: `${Math.round(tech.rsi14)}, ${rsiWord(tech.rsi14)}` }] : []), { l: `By ${e.label}`, v: f2(mo.pace.to) + (mo.pace.capped ? ', capped' : '') }],
         say: `Where the price lands by ${e.label} if the last 5 days’ pace holds. A guide, not a forecast.` } }] : []),
   ] : null;
@@ -335,15 +341,15 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
           borderLeft: up ? `7px solid ${a.c}` : '0 solid transparent', borderRight: up ? '0 solid transparent' : `7px solid ${a.c}` }} />
         <span style={{ position: 'absolute', top: 6, left: ll, display: 'flex', gap: 5,
           fontSize: 12, lineHeight: '16px', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
-          {full && <span style={{ color: MU }}>{a.t}</span>}<span style={{ fontWeight: 600, color: a.vc }}>{a.v}</span>
+          {full && <span style={{ color: MU }}>{a.t}</span>}<span style={{ fontWeight: 400, color: wc(a.vc, 12) }}>{a.v}</span>
         </span>
       </span>
     );
   })}</> : <Quiet t={`No recent closes for ${t} yet.`} />;
   const mvBoxes: BoxQ[] | null = mo ? [
-    mo.lw ? { k: 'lw', l: 'Last week', v: arw(mo.lw.r), vc: mo.lw.r < 0 ? R : G, s: `closed ${f2(mo.lw.to)}` } : { k: 'lw', l: 'Last week', v: '-', vc: MT },
-    mo.tw ? { k: 'tw', l: 'This week', v: arw(mo.tw.r), vc: mo.tw.r < 0 ? R : G, s: `since Fri · ${mo.tw.sd.toFixed(1)} SD` } : { k: 'tw', l: 'This week', v: '-', vc: MT },
-    mo.pace ? { k: 'mo', l: 'Momentum', v: mo.pace.flat ? 'Flat' : mo.pace.r5 < 0 ? 'Falling' : 'Rising', vc: mo.pace.flat ? K : mo.pace.r5 < 0 ? R : G, s: `5-day ${arw(mo.pace.r5)}` }
+    mo.lw ? { k: 'lw', l: 'Last week', v: arw(mo.lw.r), s: `closed ${f2(mo.lw.to)}` } : { k: 'lw', l: 'Last week', v: '-', vc: MT },
+    mo.tw ? { k: 'tw', l: 'This week', v: arw(mo.tw.r), s: `since Fri · ${mo.tw.sd.toFixed(1)} SD` } : { k: 'tw', l: 'This week', v: '-', vc: MT },
+    mo.pace ? { k: 'mo', l: 'Momentum', v: mo.pace.flat ? 'Flat' : mo.pace.r5 < 0 ? 'Falling' : 'Rising', s: `5-day ${arw(mo.pace.r5)}` }
       : { k: 'mo', l: 'Momentum', v: '-', vc: MT },
   ] : null;
 
@@ -360,10 +366,10 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
     const z = zbg(L), ab = L.callsAlone != null && L.putsAlone != null;
     const base = [{ l: 'Sold', v: sidesOf(L) }, { l: 'Premium', v: mask(money(L.inc)) }, { l: 'Chance of profit', v: pc1(L.cp) }];
     return <>
-      <span style={{ position: 'absolute', left: 0, right: 0, top: 39, height: 2, borderRadius: 1, background: 'rgba(255,105,97,.45)' }} />
-      {!L.none && <span style={{ position: 'absolute', top: 33, height: 14, left: p2(z.zl), width: p2(Math.max(0.004, z.zr - z.zl)), borderRadius: 7, background: z.bg, boxShadow: 'inset 0 0 0 1.5px rgba(245,245,247,.85)' }} />}
-      {ab && [L.callsAlone!, L.putsAlone!].filter(inSc).map((x, i) => <span key={'al' + i} style={{ position: 'absolute', top: 27, height: 26, left: p2(fr(x)), borderLeft: '1.5px dashed rgba(245,245,247,.6)' }} />)}
-      {L.strikes.filter(inSc).map((x) => <span key={'K' + x} style={{ position: 'absolute', top: 40, left: p2(fr(x)), width: 10, height: 10, margin: '-5px 0 0 -5px', borderRadius: '50%', border: '2px solid #F5F5F7', background: '#0B0D0C' }} />)}
+      <span style={{ position: 'absolute', left: 0, right: 0, top: 39, height: 2, borderRadius: 1, background: 'rgba(140,140,140,.45)' }} />
+      {!L.none && <span style={{ position: 'absolute', top: 33, height: 14, left: p2(z.zl), width: p2(Math.max(0.004, z.zr - z.zl)), borderRadius: 7, background: z.bg, boxShadow: 'inset 0 0 0 1.5px rgba(242,242,242,.85)' }} />}
+      {ab && [L.callsAlone!, L.putsAlone!].filter(inSc).map((x, i) => <span key={'al' + i} style={{ position: 'absolute', top: 27, height: 26, left: p2(fr(x)), borderLeft: '1.5px dashed rgba(242,242,242,.6)' }} />)}
+      {L.strikes.filter(inSc).map((x) => <span key={'K' + x} style={{ position: 'absolute', top: 40, left: p2(fr(x)), width: 10, height: 10, margin: '-5px 0 0 -5px', borderRadius: '50%', border: '2px solid #F2F2F2', background: '#171717' }} />)}
       {(() => {
         // The two breakevens' words: the price over the tick, how far under it; the down side leans left, the up side
         // right, never past the track or into each other.
@@ -374,8 +380,8 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
         const su = up != null ? Math.min(tw - sw(up), Math.max(at(fr(up), sw(up), 0.15), dn != null ? sd + sw(dn) + 6 : 0)) : 0;
         return [[dn, pd, sd], [up, pu, su]].map(([x, lp, ls], i) => (x != null ? (
           <span key={'be' + i}>
-            <span style={{ position: 'absolute', top: 28, height: 24, left: p2(fr(x)), marginLeft: -1, borderLeft: '2px solid #F5F5F7' }} />
-            <span style={{ position: 'absolute', top: 6, left: lp!, fontSize: 12, lineHeight: '16px', fontWeight: 700, whiteSpace: 'nowrap' }}>{f2(x)}</span>
+            <span style={{ position: 'absolute', top: 28, height: 24, left: p2(fr(x)), marginLeft: -1, borderLeft: '2px solid #F2F2F2' }} />
+            <span style={{ position: 'absolute', top: 6, left: lp!, fontSize: 12, lineHeight: '16px', fontWeight: 400, whiteSpace: 'nowrap' }}>{f2(x)}</span>
             <span style={{ position: 'absolute', bottom: 4, left: ls!, fontSize: 11, lineHeight: '14px', fontWeight: 500, color: MT, whiteSpace: 'nowrap' }}>{beT(x)}</span>
           </span>) : null));
       })()}
@@ -394,8 +400,7 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
     if (!L.has) return null;
     const d0 = ref && ref.has ? (L.cp - ref.cp) * 100 : null;
     return [beBox('lo', L.dn, true, L.none),
-      { k: 'cp', l: 'Chance of profit', v: L.none ? '0.0%' : pc1(L.cp), s: d0 != null ? (Math.abs(d0) < 0.05 ? 'same as Held' : `${d0 > 0 ? 'up' : 'down'} ${Math.abs(d0).toFixed(1)} pts`) : `${mask(money(L.inc))} premium`,
-        sc: d0 != null ? (d0 > 0.05 ? G : d0 < -0.05 ? R : QU) : undefined },
+      { k: 'cp', l: 'Chance of profit', v: L.none ? '0.0%' : pc1(L.cp), s: d0 != null ? (Math.abs(d0) < 0.05 ? 'same as Held' : `${d0 > 0 ? 'up' : 'down'} ${Math.abs(d0).toFixed(1)} pts`) : `${mask(money(L.inc))} premium` },
       beBox('hi', L.up, false, L.none)];
   };
 
@@ -404,8 +409,8 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
       <div style={{ display: 'grid', gridTemplateColumns: COLS, columnGap: 12, height: 26 }}>
         <span />
         <span style={{ position: 'relative' }}>
-          <span className="tnum" style={{ position: 'absolute', left: at(fr(S), tx(`Today ${f2(S)}`) + 16), bottom: 4, padding: '2px 8px', borderRadius: 999, background: K, color: '#000000',
-            fontSize: 12, lineHeight: '16px', fontWeight: 700, whiteSpace: 'nowrap' }}>Today {f2(S)}</span>
+          <span className="tnum" style={{ position: 'absolute', left: at(fr(S), tx(`Today ${f2(S)}`) + 16), bottom: 4, padding: '2px 8px', borderRadius: 999, background: K, color: '#171717',
+            fontSize: 12, lineHeight: '16px', fontWeight: 400, whiteSpace: 'nowrap' }}>Today {f2(S)}</span>
         </span>
         <span />
       </div>
@@ -421,7 +426,7 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
           boxes={lxBoxes(M.LN, null)} empty="Nothing to sell yet. Set a count in the calculator." trackH={80} />
         <LaneRow name="= Both" sub="Held and New" tint={TINT.h} track={M.LB.has ? hnb('b', M.LB, 'Both') : <Quiet t="Nothing held or new." />}
           boxes={lxBoxes(M.LB, M.LH)} empty="Nothing yet." trackH={80} />
-        <span aria-hidden="true" style={{ position: 'absolute', top: 0, bottom: 0, left: `calc(122px + (100% - 550px) * ${fr(S).toFixed(4)})`, borderLeft: '1.5px solid rgba(245,245,247,.85)', pointerEvents: 'none' }} />
+        <span aria-hidden="true" style={{ position: 'absolute', top: 0, bottom: 0, left: `calc(122px + (100% - 550px) * ${fr(S).toFixed(4)})`, borderLeft: '1.5px solid rgba(242,242,242,.85)', pointerEvents: 'none' }} />
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: COLS, columnGap: 12, height: 22, borderTop: '1px solid rgba(255,255,255,.14)' }}>
         <span />
@@ -432,7 +437,7 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
       </div>
       {rings.length > 0 && (
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 122, paddingTop: 8, fontSize: 12, lineHeight: '16px', color: MT }}>
-          <span style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid #F5F5F7' }} />
+          <span style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid #F2F2F2' }} />
           Your {M.held.map((l) => `${l.n} ${l.put ? 'puts' : 'calls'} at ${+l.K.toFixed(2)}`).join(' and ')}, sold for {e.label}
         </span>
       )}
@@ -442,12 +447,12 @@ export function Lanes({ d, M, t, mask }: { d: SdReply; M: IntelModel; t: string;
 
 function PopBox({ pop, tx }: { pop: Pop; tx: string }) {
   return (
-    <span role="tooltip" style={{ position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%', transform: tx, width: 252, padding: '12px 14px', borderRadius: 14, background: 'rgba(28,28,30,.97)',
+    <span role="tooltip" style={{ position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%', transform: tx, width: 252, padding: '12px 14px', borderRadius: 14, background: 'rgba(33,33,33,.97)',
       boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.12),0 12px 32px rgba(0,0,0,.55)', display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none', textAlign: 'left', whiteSpace: 'normal' }}>
       <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ flex: 'none', width: 8, height: 8, borderRadius: '50%', background: pop.dc }} />
         <span style={{ fontSize: 13, lineHeight: '18px', color: MT }}>{pop.t}</span>
-        <span style={{ marginLeft: 'auto', fontSize: 17, lineHeight: '22px', fontWeight: 600, color: K }}>{pop.v}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 17, lineHeight: '22px', fontWeight: 500, color: K }}>{pop.v}</span>
       </span>
       <span style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,.10)' }}>
         {pop.rows.map((r, i) => (
@@ -456,7 +461,7 @@ function PopBox({ pop, tx }: { pop: Pop; tx: string }) {
           </span>
         ))}
       </span>
-      <span style={{ fontSize: 13, lineHeight: '18px', color: '#C7C7CC' }}>{pop.say}</span>
+      <span style={{ fontSize: 13, lineHeight: '18px', color: '#C8C8C8' }}>{pop.say}</span>
     </span>
   );
 }

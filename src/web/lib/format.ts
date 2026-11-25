@@ -1,17 +1,19 @@
 // Numbers and words on the Sunny web, README "Rules that apply everywhere".
 // - Money in K and M: $624, $5.9K, $13.7K, $379K, $1.2M, no trailing .0 (the app's fK, one rule for app and web).
 // - Exact: the account value at the top of Home ($92,000), stock prices, strikes and index levels.
-// - Negative numbers: never a minus sign; red says it. Direction words or arrows only where the copy has them.
+// - A gain or a loss carries a sign (handoff 2026-11-25-focus §2.2): + up, − (U+2212) down, never a colour on the
+//   words (`wordOf`, `signBy`); no sign while privacy hides the figure. Arrows stay where the copy has them.
 // - Percentages: one decimal; two only under 0.1%.
 // - No em dashes anywhere.
 import { fK } from '../../../supabase/functions/_shared/book-engine.ts';
+import { signed, word } from './focus';
 
 export const C = {
-  ink: '#F5F5F7', ink2: '#98989D', ink3: '#AEAEB2',
-  green: '#65C466', red: '#FF6961', orange: '#FF9F0A', blue: '#86A8F0', teal: '#4CC9D0', violet: '#B9A3F0',
+  ink: '#F2F2F2', ink2: '#8C8C8C', ink3: '#AAAAAA',
+  green: '#4CBB6C', red: '#E82127', orange: '#E8A33D', blue: '#3E6AE1', teal: '#AAAAAA', violet: '#B9A3F0',
 } as const;
 
-/** Money in K and M, no sign: $624, $5.9K, $1.2M. Colour carries the sign. */
+/** Money in K and M, no sign: $624, $5.9K, $1.2M (`signBy` / `signed` put the sign on). */
 export const money = (x: number | null | undefined) => fK(+(x ?? 0));
 /** Whole dollars, exact, no sign: $92,000 (the account value at the top of Home). */
 export const dollars = (x: number | null | undefined) => '$' + Math.round(Math.abs(+(x ?? 0))).toLocaleString('en-US');
@@ -51,6 +53,21 @@ export const named = (c: string | null | undefined, fallback: string = C.ink) =>
     default: return fallback;
   }
 };
+
+/* ── The focus look (handoff 2026-11-25-focus §2.1, §2.2) ─────────────────────────────────────────────────────── */
+const HUES = new Set<string>([C.green, C.red, C.orange, C.blue, C.violet, '#FCC00A']);
+/** §2.1: a colour on words turns neutral, ink at 15 px and up, grey under; ink, grey or no colour stays as it is. */
+export const wordOf = (c: string | null | undefined, fs: number): string | undefined =>
+  (c && HUES.has(c.toUpperCase()) ? word(fs) : c ?? undefined);
+/** A bare money figure or a percentage: "$4.3K", "$9.4K left", "29.6%" (not "$•••", not words). */
+const FIG = (s: string) => /^\$\d/.test(s) || /^\d[\d,]*(?:\.\d+)?%$/.test(s);
+/** §2.2 by value: + up, − down before a bare money figure or percentage (the masked "$•••" and words stay). */
+export const sgn = (v: number, s: string) => {
+  const lead = /^\s*/.exec(s)![0], body = s.slice(lead.length);
+  return FIG(body.trim()) ? lead + signed(v, body) : s;
+};
+/** §2.2 by the colour the figure used to wear: green +, red −; any other colour, no sign. */
+export const signBy = (c: string | null | undefined, s: string) => sgn(c === C.green ? 1 : c === C.red ? -1 : 0, s);
 
 /** Privacy (README): every dollar figure about the book becomes $•••; a $ figure with two decimals (a share price)
     stays, as do prices, strikes and index levels. Same rule as the design's msk(). */

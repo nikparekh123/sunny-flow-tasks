@@ -4,11 +4,13 @@
 import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject } from 'react';
 import { due as dueWords, full, lab, month, parse, quick, shiftMonth, tk } from './parse';
 import type { Todo, TodoPatch } from './useTodos';
+import { CHIP_ON, Dot, FILL } from '../lib/focus';
 
-/** The web colour column of the README's table. */
+/** The web colour column of the README's table, in the focus look (handoff 2026-11-25-focus §2): no colour on words
+    (an overdue date keeps a red dot), the done circle the neutral "on" fill, a picked chip or day #424242 with ink. */
 const K = {
-  ink: '#F5F5F7', mu: '#98989D', rule: 'rgba(255,255,255,.08)', ring: 'rgba(235,235,245,.36)', G: '#65C466', RD: '#FF6961', OR: '#FF9F0A',
-  acc: '#86A8F0', accBg: 'rgba(134,168,240,.16)', trk: 'rgba(118,118,128,.24)', pkBg: 'rgba(255,255,255,.06)', btn: '#F5F5F7', btnI: '#000000',
+  ink: '#F2F2F2', mu: '#8C8C8C', rule: 'rgba(255,255,255,.08)', ring: 'rgba(235,235,235,.36)', G: FILL,
+  accBg: 'rgba(62,106,225,.16)', trk: 'rgba(128,128,128,.24)', pkBg: 'rgba(255,255,255,.06)', btn: '#F2F2F2', btnI: '#171717', on: CHIP_ON,
 };
 const PAD = '11px 0', CZ = 20, IND = 32, DAY_H = 36, DAY_Z = 32;
 const pretty = { textWrap: 'pretty' } as CSSProperties;
@@ -20,7 +22,7 @@ const CalIcon = () => (
 );
 const Check = () => (
   <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-    <path d="M2.5 6.2l2.3 2.3 4.7-4.9" style={{ fill: 'none', stroke: '#FFFFFF', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }} />
+    <path d="M2.5 6.2l2.3 2.3 4.7-4.9" style={{ fill: 'none', stroke: '#FAFAFA', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }} />
   </svg>
 );
 const Chev = ({ d }: { d: string }) => (
@@ -32,19 +34,19 @@ const Chev = ({ d }: { d: string }) => (
 /** The date picker (our own): quick chips, the month, the days Monday first. A pick closes it. */
 function Picker({ cur, today, base, onBase, onPick }: { cur: string | null; today: string; base: string; onBase: (b: string) => void; onPick: (s: string | null) => void }) {
   const { title, cells } = month(base);
-  const chip: CSSProperties = { height: 30, padding: '0 12px', borderRadius: 15, display: 'flex', alignItems: 'center', fontSize: 13, lineHeight: '16px', fontWeight: 600 };
+  const chip: CSSProperties = { height: 30, padding: '0 12px', borderRadius: 15, display: 'flex', alignItems: 'center', fontSize: 13, lineHeight: '16px', fontWeight: 400 };
   const nav: CSSProperties = { width: 32, height: 32, borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', color: K.ink };
   return (
     <div role="group" aria-label="Pick a date" style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, borderRadius: 16, background: K.pkBg }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {quick(today).map(([t, s]) => {
           const on = cur === s;
-          return <button key={s} type="button" className="bare" aria-pressed={on} onClick={() => onPick(s)} style={{ ...chip, background: on ? K.btn : K.trk, color: on ? K.btnI : K.ink }}>{t}</button>;
+          return <button key={s} type="button" className="bare" aria-pressed={on} onClick={() => onPick(s)} style={{ ...chip, background: on ? K.on : K.trk, color: K.ink }}>{t}</button>;
         })}
         {cur && <button type="button" className="bare" aria-pressed={false} onClick={() => onPick(null)} style={{ ...chip, background: K.trk, color: K.mu }}>No date</button>}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '2px 0 0 4px' }}>
-        <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600 }}>{title}</span>
+        <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500 }}>{title}</span>
         <div style={{ display: 'flex', gap: 2 }}>
           <button type="button" className="bare td-mo" aria-label="Previous month" onClick={() => onBase(shiftMonth(base, -1))} style={nav}><Chev d="M7.5 2 3.5 6l4 4" /></button>
           <button type="button" className="bare td-mo" aria-label="Next month" onClick={() => onBase(shiftMonth(base, 1))} style={nav}><Chev d="M4.5 2l4 4-4 4" /></button>
@@ -52,7 +54,7 @@ function Picker({ cur, today, base, onBase, onPick }: { cur: string | null; toda
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,minmax(0,1fr))', fontVariantNumeric: 'tabular-nums' }}>
         {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((t, i) => (
-          <span key={'w' + i} aria-hidden="true" style={{ height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, lineHeight: '14px', fontWeight: 600, color: K.mu }}>{t}</span>
+          <span key={'w' + i} aria-hidden="true" style={{ height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, lineHeight: '14px', fontWeight: 400, color: K.mu }}>{t}</span>
         ))}
         {cells.map((s, i) => {
           if (!s) return <span key={'b' + i} style={{ height: DAY_H }} />;
@@ -61,7 +63,7 @@ function Picker({ cur, today, base, onBase, onPick }: { cur: string | null; toda
             <button key={s} type="button" className="bare" aria-label={full(s) + (td ? ', today' : '')} aria-pressed={on} onClick={() => onPick(s)}
               style={{ height: DAY_H, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <span style={{ width: DAY_Z, height: DAY_Z, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, lineHeight: '20px',
-                fontWeight: on || td ? 700 : 400, background: on ? K.btn : 'transparent', color: on ? K.btnI : td ? K.acc : s < today ? K.mu : K.ink, transition: 'background .15s' }}>{+s.slice(8)}</span>
+                fontWeight: on || td ? 500 : 400, background: on ? K.on : 'transparent', color: !on && !td && s < today ? K.mu : K.ink, transition: 'background .15s' }}>{+s.slice(8)}</span>
             </button>
           );
         })}
@@ -137,13 +139,12 @@ export function TodoList({ items, today: T, known, add, set, note, remove, escRe
 
   const open = items.filter((x) => !x.done || lv.has(x.id)).sort(byDue);
   const done = items.filter((x) => x.done && !lv.has(x.id));
-  const dcol = (iso: string | null) => (!iso ? K.mu : iso < T ? K.RD : iso === T ? K.OR : K.mu);
 
-  // The add field: a date found in the text shows in accent until one is picked.
+  // The add field: a date found in the text shows on the accent tint until one is picked.
   const Pv = adM === null ? parse(draft, T) : null;
   const eff = adM === 'none' ? null : adM || (Pv ? Pv.iso : null);
   const adT = eff ? lab(eff, T) : 'Date';
-  const adC = adM && adM !== 'none' ? K.ink : Pv ? K.acc : K.mu;
+  const adC = adM && adM !== 'none' ? K.ink : K.mu;
   const adBg = Pv && adM === null ? K.accBg : pk === 'add' ? K.pkBg : 'transparent';
   const has = !!draft.trim();
 
@@ -182,7 +183,7 @@ export function TodoList({ items, today: T, known, add, set, note, remove, escRe
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addNew(); } }}
             style={{ flex: 1, minWidth: 0, fontSize: 15, lineHeight: '20px', color: K.ink }} />
           <button type="button" className="bare" aria-expanded={pk === 'add'} aria-label={'Date: ' + adT} onClick={() => openPk('add')}
-            style={{ flex: 'none', height: 32, padding: '0 10px', borderRadius: 16, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, lineHeight: '16px', fontWeight: 600,
+            style={{ flex: 'none', height: 32, padding: '0 10px', borderRadius: 16, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, lineHeight: '16px', fontWeight: 400,
               whiteSpace: 'nowrap', color: adC, background: adBg, transition: 'background .2s,color .2s' }}>
             <CalIcon /><span>{adT}</span>
           </button>
@@ -193,7 +194,7 @@ export function TodoList({ items, today: T, known, add, set, note, remove, escRe
         </div>
         {Pv && (
           <span style={{ padding: '0 16px', fontSize: 13, lineHeight: '18px', color: K.mu, ...pretty }}>
-            Adds “<span style={{ fontWeight: 500, color: K.ink }}>{Pv.t}</span>”, due <span style={{ fontWeight: 600, color: K.acc }}>{dueWords(Pv.iso, T)}</span>
+            Adds “<span style={{ fontWeight: 500, color: K.ink }}>{Pv.t}</span>”, due <span style={{ fontWeight: 400 }}>{dueWords(Pv.iso, T)}</span>
           </span>
         )}
         {pk === 'add' && picker}
@@ -214,24 +215,24 @@ export function TodoList({ items, today: T, known, add, set, note, remove, escRe
                 style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <span style={{ fontSize: 15, lineHeight: '20px', textDecoration: ck ? 'line-through' : 'none', overflowWrap: 'anywhere', ...pretty }}>
                   {/* The prototype's structure as is (an empty <b> when no ticker): it is what sets the line breaks. */}
-                  {m ? x.text.slice(0, m.i) : x.text}<b style={{ fontWeight: 600 }}>{m ? m.t : ''}</b>{m ? x.text.slice(m.i + m.t.length) : ''}
+                  {m ? x.text.slice(0, m.i) : x.text}<b style={{ fontWeight: 500 }}>{m ? m.t : ''}</b>{m ? x.text.slice(m.i + m.t.length) : ''}
                 </span>
                 {x.note && <span style={{ fontSize: 13, lineHeight: '18px', color: K.mu, ...pretty }}>{x.note}</span>}
               </button>
-              {x.due && <span style={{ flex: 'none', fontSize: 13, lineHeight: '20px', fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: dcol(x.due) }}>{lab(x.due, T)}</span>}
+              {x.due && <span style={{ flex: 'none', fontSize: 13, lineHeight: '20px', fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: K.mu }}>{x.due < T && <Dot k="r" />}{lab(x.due, T)}</span>}
             </div>
             {isEx && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: `0 0 14px ${IND}px` }}>
                 <NoteField x={x} onNote={note} />
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <button type="button" className="bare" aria-expanded={pk === x.id} onClick={() => openPk(x.id)}
-                    style={{ height: 32, padding: '0 12px 0 10px', borderRadius: 16, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, lineHeight: '16px', fontWeight: 600,
-                      whiteSpace: 'nowrap', background: K.trk, color: !x.due ? K.mu : x.due < T ? K.RD : x.due === T ? K.OR : K.ink }}>
+                    style={{ height: 32, padding: '0 12px 0 10px', borderRadius: 16, display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, lineHeight: '16px', fontWeight: 400,
+                      whiteSpace: 'nowrap', background: K.trk, color: !x.due || x.due <= T ? K.mu : K.ink }}>
                     <CalIcon />{x.due ? lab(x.due, T) : 'Add a date'}
                   </button>
                   <span style={{ flex: 1 }} />
                   <button type="button" className="bare" onClick={() => { remove(x.id); setEx(null); setPk(null); }}
-                    style={{ fontSize: 13, lineHeight: '16px', fontWeight: 500, color: K.RD }}>Delete</button>
+                    style={{ fontSize: 13, lineHeight: '16px', fontWeight: 500, color: K.mu }}><Dot k="r" />Delete</button>
                 </div>
                 {pk === x.id && picker}
               </div>
@@ -246,7 +247,7 @@ export function TodoList({ items, today: T, known, add, set, note, remove, escRe
 
       {done.length > 0 && (
         <button type="button" className="bare" aria-expanded={dOpen} onClick={() => setDOpen((o) => !o)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '12px 0 4px', borderTop: `1px solid ${K.rule}`, fontSize: 13, lineHeight: '18px', fontWeight: 600, color: K.mu }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '12px 0 4px', borderTop: `1px solid ${K.rule}`, fontSize: 13, lineHeight: '18px', fontWeight: 400, color: K.mu }}>
           {'Done · ' + done.length}
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true" style={{ transform: `rotate(${dOpen ? 90 : 0}deg)`, transition: 'transform .2s' }}>
             <path d="M3.5 1.5 7 5l-3.5 3.5" style={{ fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' }} />
