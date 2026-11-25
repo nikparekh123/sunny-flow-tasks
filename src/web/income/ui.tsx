@@ -47,7 +47,7 @@ export function FlipBody({ f, size }: { f: Flip; size: number }) {
       <span className="tnum" style={{ fontSize: size, lineHeight: 1.1, fontWeight: 700, letterSpacing: '-.02em', color: f.bigC, whiteSpace: 'nowrap' }}>{f.big}</span>
       <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
         <span className="tnum" style={{ fontSize: 14, lineHeight: '19px', fontWeight: 500, textWrap: 'pretty' } as CSSProperties}>{f.a}</span>
-        <span style={{ fontSize: 12, lineHeight: '16px', color: MU, textWrap: 'pretty' } as CSSProperties}>{f.b}</span>
+        {f.b ? <span style={{ fontSize: 12, lineHeight: '16px', color: MU, textWrap: 'pretty' } as CSSProperties}>{f.b}</span> : null}
       </span>
     </span>
   );

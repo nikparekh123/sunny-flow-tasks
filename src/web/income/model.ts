@@ -100,10 +100,10 @@ export function flipOf(n: IncName): Flip | null {
   if (n.cad !== 'ladder' || !n.flip) return null;
   const f = n.flip;
   // Already short at today's price (book-engine turnsShort `now`): a state the design does not draw; said plainly.
-  if (f.now) return { big: 'Now', bigC: RED, a: `${n.t} is short at today’s price`, b: 'Your calls sold outweigh your shares, so a rise costs you.' };
-  if (f.price == null || f.up == null) return { big: '↑40%+', bigC: QT, a: `${n.t} stays long`, b: 'Your shares outweigh your calls sold past a 40% rise.' };
+  if (f.now) return { big: 'Now', bigC: RED, a: `${n.t} is short at today’s price`, b: '' };
+  if (f.price == null || f.up == null) return { big: '↑40%+', bigC: QT, a: `${n.t} stays long`, b: '' };
   return { big: `↑${Math.abs(f.up).toFixed(1)}%`, bigC: f.up < 3 ? RED : QT, a: `until ${n.t} turns short, at ${f2(f.price)}`,
-    b: 'Above it your calls sold outweigh your shares, so a rise starts to cost you.' };
+    b: '' };
 }
 
 /** Income today's groups (README §1.3): in the money first (deepest first), then ready to roll (most kept first);

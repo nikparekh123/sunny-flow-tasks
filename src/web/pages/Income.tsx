@@ -45,9 +45,7 @@ export default function Income() {
     <div aria-busy={!payload} style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 1240 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <h1 style={{ margin: 0, fontSize: 28, lineHeight: '34px', fontWeight: 700, letterSpacing: '-.02em' }}>Income</h1>
-        <span style={{ fontSize: 14, lineHeight: '20px', color: MU, textWrap: 'pretty', maxWidth: 820 } as CSSProperties}>
-          Every call and put you sell for income. Green is ready to roll, red is in the money and yours to decide.
-        </span>
+        {/* No intro line (Nik, 25 Nov 2026: "remove both explanatory lines"). */}
       </div>
       {inc?.banner && <Banner b={inc.banner} today={inc.today} accounts={accounts} />}
       {inc && inc.names.length > 0 && <Strip inc={inc} pk={pk} go={go} />}

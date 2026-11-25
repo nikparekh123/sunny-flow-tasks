@@ -135,7 +135,7 @@ struct IncFlipView: View {
                 .foregroundStyle(IncC.of(flip.tone)).lineLimit(1).fixedSize()
             VStack(alignment: .leading, spacing: 1) {
                 Text(flip.a).sType(IncT.t(14, 19, 500)).foregroundStyle(IncC.ink)
-                Text(flip.b).sType(IncT.t(12, 16)).foregroundStyle(IncC.mu)
+                if !flip.b.isEmpty { Text(flip.b).sType(IncT.t(12, 16)).foregroundStyle(IncC.mu) }
             }
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -77,9 +77,7 @@ struct IncomeTab: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Income").sType(IncT.t(28, 34, 700, tr: -0.02), tabular: false).foregroundStyle(IncC.ink)
                     .accessibilityAddTraits(.isHeader)
-                Text("Every call and put you sell for income. Green is ready to roll, red is in the money and yours to decide.")
-                    .sType(IncT.t(14, 20), tabular: false).foregroundStyle(IncC.mu)
-                    .fixedSize(horizontal: false, vertical: true)
+                // No intro line (Nik, 25 Nov 2026: "remove both explanatory lines").
             }
             if let m = brief.incomeModel, pageReady || brief.book == nil {
                 content(m)

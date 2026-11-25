@@ -262,14 +262,14 @@ nonisolated struct IncModel {
     private static func flip(_ t: String, _ f: JSONValue, px: Double) -> IncName.Flip {
         if f["now"].bool {
             return .init(big: "Now", tone: .red, a: "\(t) is short now, at \(IncFmt.f2(px))",
-                         b: "Your calls sold outweigh your shares, so a rise costs you.")
+                         b: "")
         }
         if let price = f["price"].double, let up = f["up"].double ?? (px > 0 ? (price / px - 1) * 100 : nil) {
             return .init(big: "↑" + String(format: "%.1f", up) + "%", tone: up < 3 ? .red : .quiet,
                          a: "until \(t) turns short, at \(IncFmt.f2(price))",
-                         b: "Above it your calls sold outweigh your shares, so a rise starts to cost you.")
+                         b: "")
         }
-        return .init(big: "↑40%+", tone: .quiet, a: "\(t) stays long", b: "Your shares outweigh your calls sold past a 40% rise.")
+        return .init(big: "↑40%+", tone: .quiet, a: "\(t) stays long", b: "")
     }
 
     private static func banner(_ b: JSONValue, today: String) -> IncBanner? {
