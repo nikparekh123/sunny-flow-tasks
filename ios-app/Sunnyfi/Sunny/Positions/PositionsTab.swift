@@ -4,11 +4,12 @@
 //
 //  The Positions tab (handoff 2026-11-13-positions §2, 2026-11-18 §2, 2026-11-24 §4), top to bottom:
 //    the account strip · large title Positions, "Sunny’s book · Fri Nov 13 close" · Your book (one flat card, Long ·
-//    Hedge · Income with Today and All time; Income leads with what is left to earn; Together names each account under
-//    every total) · the name strip (Together: Sunny's names, a hairline, Nicolay's) · the name header · the name's own
-//    book · Share average · Payoff | Price (the Payoff's touch reads the Greeks at that price) · Every leg (SunnyBook,
-//    PositionsEvery.swift: Cards | List, switches and chips) · Intelligence (SunnyStrikes look card, PositionsStrikes.swift,
-//    with Try in Payoff kept in public.payoff_tries, PositionsTries.swift).
+//    Hedge · Income with Today and All time; Income leads with what is left to earn; Together names each account in one
+//    muted line under every total, never S or N) · the name strip (Together: Sunny's names, a hairline, Nicolay's) · the
+//    name header · the name's own book · Share average · Payoff | Price (the Payoff's touch reads the Greeks at that
+//    price) · Every leg (SunnyBook, PositionsEvery.swift: List only, switches and chips on three lines) · Intelligence
+//    (SunnyStrikes look card, PositionsStrikes.swift: strike tiles in one swiped row, the strike card, Try in Payoff kept
+//    in public.payoff_tries, PositionsTries.swift).
 //    Legs sold start on, shares and legs bought start off (Nik, 13 Nov 2026, every name). A leg counts in Payoff and its
 //    Greeks when its own switch and each of its chips are on, per book and name, for as long as the app is open; tried
 //    legs count too. The Price chart keeps every strike held; Your book stays whole.
@@ -33,12 +34,8 @@ struct PositionsTab: View {
     @State private var charts = PositionsCharts.shared
     @State private var targets = PositionsTargets.shared
     @State private var tries = PositionsTries.shared
-    /// Every leg's view, Cards ("tiles") or List, remembered on the phone (handoff 2026-11-24 §6: sunny.book196p).
-    @AppStorage("sunny.book196p") private var bookLook = "tiles"
     /// Every leg's chips switched off, per "book|TICKER" ("ex:2026-11-27", "kind:c", "role:inc"), for as long as the app is open.
     @State private var chips: [String: Set<String>] = [:]
-    /// Every leg's groups folded or opened by a tap, per "book|TICKER".
-    @State private var folds: [String: [String: Bool]] = [:]
     /// Intelligence: what is picked, and the contracts added in Your trade, per "book|TICKER".
     @State private var strikeSel: [String: PosStrikeSel] = [:]
     @State private var trades: [String: [String: Int]] = [:]
@@ -54,7 +51,7 @@ struct PositionsTab: View {
     @State private var name: String = BriefDebug.name ?? ""
     /// Payoff first and open on it, Price second (Nik, 20 Nov 2026).
     @State private var view: Band = .payoff
-    /// Legs switched away from how they start in Every leg (Income on, the rest off), per "book|TICKER".
+    /// Legs switched off in Every leg (every leg starts on), per "book|TICKER".
     @State private var flip: [String: Set<String>] = [:]
     @State private var scrolled: CGFloat = 0
     @State private var pos = ScrollPosition()
@@ -107,12 +104,11 @@ struct PositionsTab: View {
             .task {
                 #if DEBUG && targetEnvironment(simulator)
                 // Screens checked in the simulator: `-posOpen Hedge` opens a Your book group; `-posAt intel` (or every, pay)
-                // scrolls there; `-posView price` shows Price; `-posLook list` shows Every leg as a list.
+                // scrolls there; `-posView price` shows Price.
                 let a = ProcessInfo.processInfo.arguments
                 func arg(_ k: String) -> String? { a.firstIndex(of: k).flatMap { a.indices.contains($0 + 1) ? a[$0 + 1] : nil } }
                 if let v = arg("-posView") { view = v == "price" ? .price : .payoff }
                 if let g = arg("-posOpen") { bookOpen = [g] }
-                if let l = arg("-posLook") { bookLook = l }
                 if let at = arg("-posAt") { try? await Task.sleep(for: .milliseconds(1400)); proxy.scrollTo(at, anchor: .top) }
                 if let y = BriefDebug.scroll { try? await Task.sleep(for: .milliseconds(1200)); pos.scrollTo(y: y) }
                 #endif
@@ -300,8 +296,7 @@ struct PositionsTab: View {
         .padding(.horizontal, Self.margin)
         Group {
             if let mm = m, let every {
-                PosEveryBook(t: n.t, m: every, privacy: privacy, look: $bookLook, folds: folds[offK] ?? [:],
-                             fold: { k, open in folds[offK, default: [:]][k] = open },
+                PosEveryBook(t: n.t, m: every, privacy: privacy,
                              toggle: { l in withAnimation(S.fade) { toggleLeg(l, mm, book: b, t: n.t) } },
                              setL: { ls, v in withAnimation(S.fade) { setLegs(ls, v, mm, book: b, t: n.t) } },
                              chip: { id in
@@ -328,7 +323,7 @@ struct PositionsTab: View {
             .padding(.horizontal, Self.margin)
     }
 
-    /// A leg's own switch: a leg held flips from how it starts (sold on, the rest off); a tried leg saves its switch.
+    /// A leg's own switch: a leg held flips from how it starts (every leg on); a tried leg saves its switch.
     private func toggleLeg(_ l: PosEvery.Leg, _ m: PositionsModel, book b: String, t: String) {
         if let id = l.tryID { tries.setOn(book: b, t: t, ids: [id], !l.own); return }
         let k = "\(b)|\(t)"
@@ -341,8 +336,7 @@ struct PositionsTab: View {
         let k = "\(b)|\(t)"
         var s = flip[k] ?? []
         for l in ls where l.tryID == nil {
-            let starts = l.q < 0 && !l.sh
-            if v == starts { s.remove(l.id) } else { s.insert(l.id) }
+            if v { s.remove(l.id) } else { s.insert(l.id) }
         }
         flip[k] = s
         let ti = Set(ls.compactMap(\.tryID))
@@ -506,8 +500,9 @@ extension PositionsTab: Equatable {
 /// with collected and kept under it; its parts read left (Nik, 24 Nov 2026). Figures from sunny-home
 /// (brief_inputs.parts): Today is Home's today split by part, so the rows add up to it; All time is against IBKR's cost,
 /// or kept of what was sold.
-/// Together: each total carries its accounts in full words under it ("Sunny $248K · Nicolay $367K"); the narrow Today and
-/// All time columns keep "S $2.4K" and "N $27.7K", with a key in the header ("S Sunny · N Nicolay"; Nik, 24 Nov 2026).
+/// Together: each total carries its accounts in full words in one muted line under it ("Sunny $248K · Nicolay $367K").
+/// No S and N under Today and All time and no key for them (Nik, 24 Nov 2026: "very confusing and cluttered"). The
+/// muted lines run under the Today and All time columns too, so a 375 pt phone fits both names on one line.
 struct PosYourBook: View {
     let groups: [PosBook.Group]
     @Binding var open: Set<String>
@@ -522,12 +517,7 @@ struct PosYourBook: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) { title.fixedSize(); key.fixedSize() }
-                    // On a second line when it does not fit beside the title; scaled down, never wider than the column.
-                    VStack(alignment: .leading, spacing: 1) { title; key }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                title.frame(maxWidth: .infinity, alignment: .leading)
                 Text("Today").sType(PT.t(12, 16, 500), tabular: false).foregroundStyle(PC.mu).frame(width: 74, alignment: .trailing)
                 Text("All time").sType(PT.t(12, 16, 500), tabular: false).foregroundStyle(PC.mu).frame(width: 74, alignment: .trailing)
                 Color.clear.frame(width: 12, height: 1)
@@ -544,15 +534,6 @@ struct PosYourBook: View {
         Text("Your book").sType(PT.t(13, 16, 600), tabular: false).foregroundStyle(Self.label).lineLimit(1).minimumScaleFactor(0.6)
             .accessibilityAddTraits(.isHeader)
     }
-    /// "S Sunny · N Nicolay": the key to the S and N under Today and All time (Together only).
-    @ViewBuilder private var key: some View {
-        if accts.count > 1 {
-            Text(accts.map { "\($0.name.prefix(1)) \($0.name)" }.joined(separator: " · ")).sType(PT.t(12, 16, 500), tabular: false)
-                .foregroundStyle(PC.mu).lineLimit(1).minimumScaleFactor(0.5)
-                .accessibilityLabel(accts.map { "\($0.name.prefix(1)) is \($0.name)" }.joined(separator: ", "))
-        }
-    }
-
     @ViewBuilder private func row(_ g: PosBook.Group) -> some View {
         let one = g.parts.count == 1, isOpen = !one && open.contains(g.title), x = g.sum, inc = g.title == "Income"
         VStack(spacing: 0) {
@@ -562,39 +543,37 @@ struct PosYourBook: View {
                     if isOpen { open.remove(g.title) } else { open.insert(g.title) }
                 }
             } label: {
-                HStack(alignment: .center, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        let sub = inc ? "left to earn" : one && g.parts[0].label != g.title ? g.parts[0].label : ""
-                        (Text(g.title).foregroundStyle(Self.label)
-                         + Text(sub.isEmpty ? "" : " · \(sub)").font(.custom("Inter", size: 15).weight(.medium)).foregroundStyle(PC.mu))
-                            .sType(PT.t(15, 20, 600), tabular: false).lineLimit(1).minimumScaleFactor(0.8)
-                        Text(money(inc ? x.value - x.all : x.value)).sType(PT.t(24, 28, 700, tr: -0.02)).foregroundStyle(PC.ink)
-                            .lineLimit(1).minimumScaleFactor(0.7)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .center, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            let sub = inc ? "left to earn" : one && g.parts[0].label != g.title ? g.parts[0].label : ""
+                            (Text(g.title).foregroundStyle(Self.label)
+                             + Text(sub.isEmpty ? "" : " · \(sub)").font(.custom("Inter", size: 15).weight(.medium)).foregroundStyle(PC.mu))
+                                .sType(PT.t(15, 20, 600), tabular: false).lineLimit(1).minimumScaleFactor(0.8)
+                            Text(money(inc ? x.value - x.all : x.value)).sType(PT.t(24, 28, 700, tr: -0.02)).foregroundStyle(PC.ink)
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        figure(x.today, x.todayPct, big: true).frame(width: 74, alignment: .trailing)
+                        figure(x.all, x.allPct, big: true).frame(width: 74, alignment: .trailing)
+                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Self.chevron)
+                            .rotationEffect(.degrees(isOpen ? 90 : 0))
+                            .frame(width: 12)
+                            .opacity(one ? 0 : 1)
+                    }
+                    // The muted lines under the value, one line each, the full width of the row so both names fit
+                    // without a cut on a 375 pt phone (Nik, 24 Nov 2026).
+                    Group {
                         if let ps = partsOf(g.title) {
                             Text(ps.map { "\($0.name) \(money(inc ? $0.x.value - $0.x.all : $0.x.value))" }.joined(separator: " · "))
-                                .sType(PT.t(12, 16, 500), tabular: true).foregroundStyle(PC.mu).lineLimit(1).minimumScaleFactor(0.8)
                         }
-                        // The same small grey line as the accounts' line above it, one line (24 Nov 2026: it wrapped).
                         if inc {
                             Text((one ? g.parts[0].label + " · " : "") + "\(money(x.value)) collected · \(money(x.all)) kept")
-                                .sType(PT.t(12, 16, 500), tabular: true).foregroundStyle(PC.mu).lineLimit(1).minimumScaleFactor(0.8)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    VStack(alignment: .trailing, spacing: 0) {
-                        figure(x.today, x.todayPct, big: true)
-                        if let ps = partsOf(g.title) { ForEach(ps, id: \.name) { acctLine($0.name, $0.x.today, grey: inc) }.padding(.top, 3) }
-                    }
-                    .frame(width: 74, alignment: .trailing)
-                    VStack(alignment: .trailing, spacing: 0) {
-                        figure(x.all, x.allPct, big: true)
-                        if let ps = partsOf(g.title) { ForEach(ps, id: \.name) { acctLine($0.name, $0.x.all, grey: false) }.padding(.top, 3) }
-                    }
-                    .frame(width: 74, alignment: .trailing)
-                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Self.chevron)
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
-                        .frame(width: 12)
-                        .opacity(one ? 0 : 1)
+                    .sType(PT.t(12, 16, 500), tabular: true).foregroundStyle(PC.mu)
+                    .lineLimit(1).minimumScaleFactor(0.75)
+                    .padding(.trailing, 22)
                 }
                 .frame(minHeight: 44)      // at least 68 with the 12 above and below
                 .padding(.vertical, 12)
@@ -637,14 +616,6 @@ struct PosYourBook: View {
         guard accts.count > 1 else { return nil }
         return accts.map { a in (name: a.name, x: a.groups.first { $0.title == title }?.sum ?? PosBook.Part(key: title, label: title)) }
     }
-    /// "S $5.1K" (11/14 600): grey, red when down; Income's Today always grey (the design's pcol).
-    private func acctLine(_ name: String, _ v: Double, grey: Bool) -> some View {
-        Text("\(name.prefix(1)) \(money(v))").sType(PT.t(11, 14, 600), tabular: true)
-            .foregroundStyle(!grey && v < -0.5 ? PC.red : PC.mu)
-            .lineLimit(1).minimumScaleFactor(0.8)
-            .accessibilityLabel("\(name) \(PosSay.signed(v, privacy))")
-    }
-
     /// $ over %, green when up or kept, red when down; no sign.
     private func figure(_ v: Double, _ pct: Double, big: Bool) -> some View {
         let c = v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink
@@ -702,20 +673,29 @@ struct PosNameBook: View {
         .accessibilityLabel("\(t) in your book")
     }
 
-    /// Each account holding this group, with its value ("Sunny $48K · Nicolay $12K", or "Nicolay $229K" when only one
-    /// holds it); nil on one account.
-    private func acctWords(_ title: String, inc: Bool) -> String? {
+    /// Each account holding this group, with its value ("Sunny $48K", "Nicolay $12K"; one when only one holds it);
+    /// nil on one account. Names in full, never S or N (Nik, 24 Nov 2026).
+    private func acctParts(_ title: String, inc: Bool) -> [String]? {
         guard accts.count > 1 else { return nil }
         let ps = accts.compactMap { a -> String? in
             guard let x = a.groups.first(where: { $0.title == title })?.sum else { return nil }
             return "\(a.name) \(money(inc ? x.value - x.all : x.value))"
         }
-        return ps.isEmpty ? nil : ps.joined(separator: " · ")
+        return ps.isEmpty ? nil : ps
+    }
+    /// The accounts in one muted line ("Sunny $48K · Nicolay $12K"), or one account a line when the column is too
+    /// narrow, so a name is never cut.
+    private func acctLine(_ ps: [String]) -> some View {
+        ViewThatFits(in: .horizontal) {
+            Text(ps.joined(separator: " · ")).fixedSize()
+            VStack(alignment: .leading, spacing: 0) { ForEach(ps, id: \.self) { Text($0) } }
+        }
+        .sType(PT.t(12, 16, 500)).foregroundStyle(PC.mu)
     }
 
     private func cell(_ g: PosBook.Group) -> some View {
         let x = g.sum, two = g.parts.count > 1, on = two && open == g.title, inc = g.title == "Income"
-        let ac = acctWords(g.title, inc: inc)
+        let acs = acctParts(g.title, inc: inc), ac = acs?.joined(separator: " · ")
         return Button {
             guard two else { return }
             withAnimation(S.moving(.easeOut(duration: 0.2), reduce) ?? .linear(duration: 0)) { open = on ? nil : g.title }
@@ -724,7 +704,7 @@ struct PosNameBook: View {
                 Text(g.title).sType(PT.t(12, 16, 500), tabular: false).foregroundStyle(PC.mu)
                 Text(inc ? "\(money(x.value - x.all)) left" : money(x.value)).sType(PT.t(17, 22, 700)).foregroundStyle(PC.ink)
                 Text(inc ? "kept \(money(x.all)) of \(money(x.value))" : "\(money(x.all)) · \(PE.pcx(x.allPct))").sType(PT.t(12, 16, 600)).foregroundStyle(tone(x.all))
-                if let ac { Text(ac).sType(PT.t(12, 16, 500)).foregroundStyle(PC.mu).padding(.top, 2) }
+                if let acs { acctLine(acs).padding(.top, 2) }
             }
             .lineLimit(1).minimumScaleFactor(0.7)
             .frame(maxWidth: .infinity, minHeight: 46, alignment: .topLeading)
@@ -843,7 +823,6 @@ struct PosStrip: View {
                         .frame(width: 56, height: 56)
                     if n.dot != nil {
                         Circle().fill(PC.red).frame(width: 12, height: 12)
-                            .background(Circle().fill(Color(hex: 0x060807)).padding(-2))
                     }
                 }
                 Text(n.t).sType(PT.t(13, 16, on ? 700 : 500), tabular: false).foregroundStyle(on ? PC.ink : PC.mu)

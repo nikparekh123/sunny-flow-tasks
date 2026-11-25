@@ -100,7 +100,7 @@ function Logo({ t, dot }: { t: string; dot: string | null }) {
       {bad
         ? <span style={{ fontSize: 9, fontWeight: 700, color: '#1D1D1F' }}>{t.slice(0, 4)}</span>
         : <img src={`/logos/${encodeURIComponent(t)}.png`} alt="" onError={() => setBad(true)} style={{ width: '60%', height: '60%', objectFit: 'contain' }} />}
-      {dot && <span style={{ position: 'absolute', right: -2, top: -2, width: 9, height: 9, borderRadius: '50%', background: dot, boxShadow: '0 0 0 2px #050706' }} />}
+      {dot && <span style={{ position: 'absolute', right: -2, top: -2, width: 9, height: 9, borderRadius: '50%', background: dot }} />}
     </span>
   );
 }

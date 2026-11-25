@@ -123,7 +123,7 @@ export default function Positions() {
                       boxShadow: on ? 'inset 0 0 0 3px #F5F5F7' : 'inset 0 0 0 1.5px rgba(255,255,255,.2)', transition: rm ? 'none' : 'box-shadow .2s ease',
                       display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <Logo t={n.t} />
-                      {dot && <span style={{ position: 'absolute', right: 0, top: 0, width: 11, height: 11, borderRadius: '50%', background: dot === 'red' ? R : O, boxShadow: '0 0 0 2px #050706' }} />}
+                      {dot && <span style={{ position: 'absolute', right: 0, top: 0, width: 11, height: 11, borderRadius: '50%', background: dot === 'red' ? R : O }} />}
                     </span>
                     <span style={{ fontSize: 13, fontWeight: on ? 700 : 400, color: on ? K : MU }}>{n.t}</span>
                   </button>
@@ -232,8 +232,8 @@ function Detail({ book, t, grid, payload, mask }: { book: BookId; t: string; gri
   // The grid's dates (What if's default expiry reads this Friday from them).
   const segs = useMemo(() => m.segments(), [m]);
 
-  // The switches (Nik, 13 Nov 2026: "by default only keep income on and rest off", every name): a leg sold starts on,
-  // shares and legs bought start off; `flip` holds the legs switched away from that. Every leg's chips (24 Nov 2026)
+  // The switches (Nik, 24 Nov 2026: "keep all of them on"): every leg starts on; `flip` holds the legs switched
+  // off. Every leg's chips (24 Nov 2026)
   // each switch their legs off on their own: a leg counts when its own switch and each of its chips are on. Payoff,
   // its Greeks and Every leg follow. What if and Intelligence count only real changes (Nik: "Only what I flip"): an
   // income leg that no longer counts is closed there (bought back); a leg bought or the shares switched on is already
@@ -241,8 +241,9 @@ function Detail({ book, t, grid, payload, mask }: { book: BookId; t: string; gri
   const base = m.legs;
   const flip = useMemo(() => new Set(wf.flip.filter((k) => base.some((l) => l.k === k))), [wf.flip, base]);
   const cf = useMemo(() => new Set(wf.cf), [wf.cf]);
-  const startsOn = (l: PLeg) => l.q < 0;
-  const ownOn = useCallback((l: PLeg) => (l.trade != null ? !!allTrades.find((u) => u.id === l.trade)?.on : (l.q < 0) !== flip.has(l.k)), [allTrades, flip]);
+  // Every leg starts on (Nik, 24 Nov 2026); `flip` holds the ones switched off.
+  const startsOn = (_l: PLeg) => true;
+  const ownOn = useCallback((l: PLeg) => (l.trade != null ? !!allTrades.find((u) => u.id === l.trade)?.on : !flip.has(l.k)), [allTrades, flip]);
   const eff = useCallback((l: PLeg) => ownOn(l) && !chipIds(l).some((id) => cf.has(id)), [ownOn, cf]);
   const shut = useMemo(() => new Set(base.filter((l) => startsOn(l) && !eff(l)).map((l) => l.k)), [base, eff]);
   const tradesOn = useMemo(() => pr.trades.filter(eff), [pr, eff]);

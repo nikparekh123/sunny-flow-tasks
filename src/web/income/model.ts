@@ -129,12 +129,9 @@ export function todayGroups(inc: Income) {
   };
 }
 
-/** A name's rungs as the page lists them: calls then puts, each soonest first, then by strike. */
-export const rungsOf = (inc: Income, t: string) => inc.rungs.filter((r) => r.t === t)
-  .sort((a, b) => (a.ty === b.ty ? 0 : a.ty === 'c' ? -1 : 1) || a.ex.localeCompare(b.ex) || a.K - b.K);
-
-/** The cadence word under a name: "ladder" (three or more expiries sold; Nicolay sells Mon, Wed and Fri expiries, so
-    the design's "three Fridays" would be wrong; the same word as the phone), else "weekly" (or "daily"). */
+/** The cadence word (the calendar's status line on one ticker): "ladder" (three or more expiries sold; Nicolay sells
+    Mon, Wed and Fri expiries, so the design's "three Fridays" would be wrong; the same word as the phone), else
+    "weekly" (or "daily"). */
 export const cadWord = (n: IncName) => (n.cad === 'ladder' ? 'ladder' : n.cad === 'daily' ? 'daily' : 'weekly');
 
 /* ── The banner: realized income by week or by month ─────────────────────── */
@@ -154,12 +151,15 @@ export function barsOf(b: Banner, vw: 'w' | 'm', today: string, narrow: boolean)
       const range = w.range ?? `${md(w.k)} to ${md(addDays(w.k, 4))}`;
       const thisWk = w.k === m0;
       return { k: w.k, l: thisWk && !narrow ? 'This week' : w.l, c: +w.c || 0, p: +w.p || 0, t: (+w.c || 0) + (+w.p || 0), by: w.by ?? {}, bk: w.bk ?? {}, part: !!w.cur,
-        // Short (Nik, 25 Nov 2026: "This week so far · to Tue Nov 24 is too long"; the same in Monthly).
-        cap: w.cur ? 'This week so far' : thisWk ? 'This week' : w.k === prev ? 'Last week' : range,
+        // Short (Nik, 25 Nov 2026: "This week so far · to Tue Nov 24 is too long"; the same in Monthly): no dates on this
+        // week or last week; an older week is "Week of Nov 2 to 6", as SunnyIncome's caption.
+        cap: w.cur ? 'This week so far' : thisWk ? 'This week' : w.k === prev ? 'Last week' : `Week of ${range}`,
         pl: w.cur || thisWk ? 'This week' : `Week of ${md(w.k)}` };
     })
     : b.months.map((m) => ({ k: m.k, l: m.l, c: +m.c || 0, p: +m.p || 0, t: (+m.c || 0) + (+m.p || 0), by: m.by ?? {}, bk: m.bk ?? {}, part: !!m.cur,
-      cap: m.cur ? `${m.long} so far` : String(m.long ?? m.l), pl: String(m.long ?? m.l) }));
+      // "Nov so far" (README §1.2: the month abbreviated, no dates); a finished month in full ("October"), the first
+      // one with the day the book starts ("August · from Aug 31", SunnyIncome's "June · from Jun 15").
+      cap: m.cur ? `${m.l} so far` : m.from ? `${m.long ?? m.l} · from ${m.from}` : String(m.long ?? m.l), pl: String(m.long ?? m.l) }));
   const first = bars.findIndex((x) => Math.abs(x.c) >= 0.5 || Math.abs(x.p) >= 0.5);
   bars = first < 0 ? bars.slice(-1) : bars.slice(first);
   const last = bars.length - 1;

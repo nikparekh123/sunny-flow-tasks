@@ -461,9 +461,6 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
                 fontSize: 12, lineHeight: '14px', color: MU, whiteSpace: 'nowrap' }}>{price(S0 * (1 + r * X))}</span>
             ))}
           </div>
-          <span style={{ fontSize: 12, lineHeight: '16px', color: MU }}>
-            {chg ? 'Solid: with your changes. Dashed: without them (income only).' : `The ${t} legs switched on in Every leg (income to start), P&L from today’s marks.`} Shaded: the priced move. The dot is today’s price.
-          </span>
         </div>
       ) : <PayTable t={t} pr={pr} set={wi} pts={pts} ti={ti} pick={pick} mask={mask} tg={tg} chg={chg} />}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,260px),1fr))', columnGap: 28, rowGap: 12, paddingTop: 6 }}>

@@ -2,15 +2,15 @@
 //  IncBannerView.swift
 //  Sunny
 //
-//  The realized-income banner on top of the Income tab (handoff-2026-11-24-income README, SunnyIncome banner bars,
-//  narrow): realized income from calls and puts sold, Weekly | Monthly. Weekly opens on last week (the weekly names
-//  realize on Friday), Monthly on this month. The chart is the hero: 8 bars, 140 tall, every bar stacked in full colour
-//  (calls #86A8F0, puts #C8946A dark; #4F7BDA, #B5794A light), dashed grid and a value scale on the right; a tap picks
-//  a bar (a soft column behind it, its value on top). A week or month that lost money draws its loss below the line in
-//  red tones, never with a minus sign. Everything else is small: Realized income and the period 13 pt, the total 22,
-//  the yield grey ("about N% a year", or "so far" for one not finished), Calls and Puts beside the switch, Together's
-//  Sunny · Nicolay parts, then By ticker as thin 34 pt rows (logo, ticker, total, grey "avg $"), the top 5 then
-//  All N names | Fewer. Card padding 16, radius 20, 14 apart.
+//  The realized-income banner on top of the Income tab (handoff 2026-11-24 late §1.2; SunnyIncome only banner,
+//  banner bars, bvo m, part page, narrow): realized income from calls and puts sold, month by month. The app is
+//  Monthly only, with no Weekly | Monthly switch, and opens on this month ("Nov so far"). The chart is the hero: up to
+//  8 bars, 140 tall, every bar stacked in full colour (calls #86A8F0, puts #C8946A dark; #4F7BDA, #B5794A light),
+//  dashed grid and a value scale on the right; a tap picks a bar (a soft column behind it, its value on top). A month
+//  that lost money draws its loss below the line in red tones, never with a minus sign. Everything else is small:
+//  Realized income and the period 13 pt, the total 22, the yield grey ("about N% a year", or "so far" for the month
+//  under way), Together's Sunny · Nicolay parts, Calls and Puts under them, then By ticker as thin 34 pt rows (logo,
+//  ticker, total, grey "avg $"), the top 5 then All N names | Fewer. Card padding 16, radius 20, 14 apart.
 //
 
 import SwiftUI
@@ -21,9 +21,7 @@ struct IncBannerView: View {
     /// Together: Sunny's and Nicolay's parts under the total, in this order.
     let accounts: [String]
     @Environment(\.accessibilityReduceMotion) private var reduce
-    /// Weekly or Monthly, and the bar picked in each (nil: the one it opens on).
-    @State private var monthly = false
-    @State private var pickW: String?
+    /// The month picked (per session; nil: this month).
     @State private var pickM: String?
     @State private var allNames = false
 
@@ -31,8 +29,6 @@ struct IncBannerView: View {
     /// The bars' scale height (the rest above is room for the picked value).
     private static let plotH: CGFloat = 120
     private static let gutter: CGFloat = 32
-    /// The switch's thumb: white in light, a soft lift in dark, under the glass.
-    private static let thumb = S.dynA(0xFFFFFF, 1, 0xFFFFFF, 0.2)
 
     var body: some View {
         let per = periods
@@ -55,49 +51,46 @@ struct IncBannerView: View {
 
     // MARK: Periods
 
-    /// The last 8 weeks, or every month, from the first with any income.
+    /// The last 8 months, from the first with any income.
     private var periods: [IncBanner.Period] {
-        let all = monthly ? banner.months : Array(banner.weeks.suffix(8))
+        let all = Array(banner.months.suffix(8))
         guard let f = all.firstIndex(where: { abs($0.total) >= 0.5 }) else { return all }
         return Array(all[f...])
     }
+    /// Opens on this month.
     private func selectedIndex(_ per: [IncBanner.Period]) -> Int {
-        if let k = monthly ? pickM : pickW, let i = per.firstIndex(where: { $0.id == k }) { return i }
-        guard !per.isEmpty else { return 0 }
-        // Weekly opens on last week while this one is under way; Monthly on this month.
-        if !monthly, per.count > 1, per.last?.cur == true { return per.count - 2 }
-        return per.count - 1
+        if let k = pickM, let i = per.firstIndex(where: { $0.id == k }) { return i }
+        return max(0, per.count - 1)
     }
 
     // MARK: Header
 
+    /// SunnyIncome's header row (flex-wrap, 8 apart when it wraps): the caption, the total and yield, Together's parts;
+    /// then Calls and Puts, beside it when both fit, under it on the phone.
     @ViewBuilder private func header(_ sel: IncBanner.Period?) -> some View {
         let c = sel?.c ?? 0, p = sel?.p ?? 0, t = c + p
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(Text("Realized income").foregroundStyle(IncC.ink).fontWeight(.semibold))  \(Text(sel?.cap ?? "").foregroundStyle(IncC.mu))")
-                    .sType(IncT.t(13, 18), tabular: false)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) { total(t); yield(sel, t) }
-                    VStack(alignment: .leading, spacing: 2) { total(t); yield(sel, t) }
-                }
-                if accounts.count > 1, let sel {
-                    accountParts(sel)
-                }
-            }
-            // Calls and Puts beside the switch; the switch wraps under them when both do not fit (flex-wrap).
+        let left = VStack(alignment: .leading, spacing: 2) {
+            Text("\(Text("Realized income").foregroundStyle(IncC.ink).fontWeight(.semibold))  \(Text(sel?.cap ?? "").foregroundStyle(IncC.mu))")
+                .sType(IncT.t(13, 18), tabular: false)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 12) {
-                    legends(c, p)
-                    Spacer(minLength: 4)
-                    switcher
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    legends(c, p)
-                    switcher
-                }
+                HStack(alignment: .firstTextBaseline, spacing: 12) { total(t); yield(sel, t) }
+                VStack(alignment: .leading, spacing: 2) { total(t); yield(sel, t) }
+            }
+            if accounts.count > 1, let sel {
+                accountParts(sel)
+            }
+        }
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 16) {
+                left.fixedSize()
+                Spacer(minLength: 0)
+                legends(c, p)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                left
+                legends(c, p)
             }
         }
     }
@@ -109,13 +102,13 @@ struct IncBannerView: View {
             .accessibilityLabel(privacy ? "hidden" : (t < 0 ? "lost " : "") + IncFmt.dollars(t, false))
     }
 
-    /// Yield = the period's income ÷ what the shares cost; a full week × 52, a full month × 12; one not finished
-    /// says "so far". None while the period lost money.
+    /// Yield = the month's income ÷ what the shares cost; a full month × 12; the month under way says "so far". None
+    /// while the month lost money.
     @ViewBuilder private func yield(_ sel: IncBanner.Period?, _ t: Double) -> some View {
         if let sel, banner.capital > 0, t > 0 {
             let y = t / banner.capital * 100
             let v = String(format: y < 1 ? "%.2f" : "%.1f", y) + "%"
-            let a = sel.cur ? "so far" : "about \(Int((y * (monthly ? 12 : 52)).rounded()))% a year"
+            let a = sel.cur ? "so far" : "about \(Int((y * 12).rounded()))% a year"
             Text("\(v) yield · \(a)").sType(IncT.t(13, 18)).foregroundStyle(IncC.mu).lineLimit(1)
         }
     }
@@ -150,45 +143,6 @@ struct IncBannerView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(l) \(privacy ? "hidden" : (v < 0 ? "lost " : "") + IncFmt.dollars(v, false))")
-    }
-
-    /// Weekly | Monthly: a 2 pt track, 68 pt buttons 30 tall, the picked one on a glass thumb that slides.
-    private var switcher: some View {
-        HStack(spacing: 0) {
-            ForEach([false, true], id: \.self) { m in
-                let on = m == monthly
-                Button {
-                    guard !on else { return }
-                    // The figures, bars and names swap in place; only the thumb slides (Nik, 25 Nov 2026: a cross-fade
-                    // laid the old and new numbers over each other and the names slid through each other).
-                    monthly = m
-                } label: {
-                    Text(m ? "Monthly" : "Weekly")
-                        .sType(IncT.t(12, 16, on ? 600 : 500), tabular: false)
-                        .foregroundStyle(on ? IncC.ink : IncC.mu)
-                        .padding(.horizontal, 10)
-                        .frame(minWidth: 68, minHeight: 30)
-                        .contentShape(.capsule)
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(on ? .isSelected : [])
-            }
-        }
-        .background(alignment: .leading) {
-            GeometryReader { g in
-                Capsule().fill(Self.thumb)
-                    .shadow(color: .black.opacity(0.12), radius: 1.5, y: 1)
-                    .glassEffect(.regular, in: .capsule)
-                    .frame(width: g.size.width / 2, height: g.size.height)
-                    .offset(x: monthly ? g.size.width / 2 : 0)
-                    .animation(S.moving(S.spring, reduce) ?? S.fade, value: monthly)
-            }
-        }
-        .padding(2)
-        .background(Capsule().fill(IncC.segTrack))
-        .sensoryFeedback(.selection, trigger: monthly)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Weekly or monthly")
     }
 
     // MARK: The chart
@@ -233,7 +187,7 @@ struct IncBannerView: View {
         }
         .frame(height: Self.chartH)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Realized by \(monthly ? "month" : "week"), pick one to read it")
+        .accessibilityLabel("Realized by month")
     }
 
     private func gridValues(_ sc: Scale) -> [Double] {
@@ -249,7 +203,7 @@ struct IncBannerView: View {
         let cU = h(max(x.c, 0)), pU = h(max(x.p, 0)), cD = h(min(x.c, 0)), pD = h(min(x.p, 0))
         let empty = abs(x.total) < 0.5 && cU + pU + cD + pD < 0.5
         return Button {
-            if monthly { pickM = x.id } else { pickW = x.id }
+            pickM = x.id
         } label: {
             ZStack(alignment: .bottom) {
                 UnevenRoundedRectangle(topLeadingRadius: 8, topTrailingRadius: 8, style: .continuous)
@@ -286,12 +240,12 @@ struct IncBannerView: View {
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
-    /// The bars' labels: 10 pt, the picked one bold; past five bars every other one is left out so they never touch.
+    /// The bars' labels: 10 pt, the picked one bold; every other one is left out on the phone (SunnyIncome narrow).
     private func labels(_ per: [IncBanner.Period], _ si: Int) -> some View {
         HStack(spacing: 4) {
             ForEach(Array(per.enumerated()), id: \.element.id) { i, x in
                 let on = i == si
-                Text(on || i % 2 == 0 || per.count <= 5 ? x.l : "")
+                Text(on || i % 2 == 0 ? x.l : "")
                     .font(.inter(10, on ? 700 : 500, tabular: true))
                     .foregroundStyle(on ? IncC.ink : IncC.mu)
                     .lineLimit(1).fixedSize()
@@ -306,8 +260,10 @@ struct IncBannerView: View {
     // MARK: By ticker
 
     private func tickers(_ sel: IncBanner.Period) -> some View {
-        let rows = banner.tickers.map { t -> (t: String, v: Double) in (t, sel.by[t]?.total ?? 0) }
-            .sorted { $0.v != $1.v ? $0.v > $1.v : $0.t < $1.t }
+        // A month that lost money starts with the worst name; one that made money with the best (Nik, 24 Nov 2026).
+        let all = banner.tickers.map { t -> (t: String, v: Double) in (t, sel.by[t]?.total ?? 0) }
+        let lost = all.reduce(0) { $0 + $1.v } < 0
+        let rows = all.sorted { $0.v != $1.v ? (lost ? $0.v < $1.v : $0.v > $1.v) : $0.t < $1.t }
         let shown = allNames ? rows : Array(rows.prefix(5))
         return VStack(alignment: .leading, spacing: 6) {
             VStack(spacing: 0) {
@@ -325,7 +281,8 @@ struct IncBannerView: View {
                     .lineLimit(1)
                     .frame(minHeight: 34)
                     .overlay(alignment: .bottom) { Rectangle().fill(IncC.line(0.06)).frame(height: 1) }
-                    .opacity(r.v > 0 ? 1 : 0.5)
+                    // Only a name with nothing realized is faded (as the web): a losing month leads with its worst names.
+                    .opacity(abs(r.v) < 0.5 ? 0.5 : 1)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("\(r.t), \(privacy ? "hidden" : (r.v < 0 ? "lost " : "") + IncFmt.dollars(r.v, false)) realized"
                                         + (banner.avg[r.t].map { ", share average \(IncFmt.f2($0)) dollars" } ?? ", no shares"))

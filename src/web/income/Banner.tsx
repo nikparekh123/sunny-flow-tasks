@@ -16,14 +16,20 @@ import { Disc } from './ui';
 const ROOM = 20;
 const WIDE = { pd: '18px 22px', g: 16, H: 200, bw: 40, gap: 10, AG: 40, xf: 11, top: 8, tg: 'repeat(auto-fill,minmax(220px,1fr))' };
 const NARROW = { pd: '16px', g: 14, H: 140, bw: 20, gap: 4, AG: 32, xf: 10, top: 5, tg: 'minmax(0,1fr)' };
+const KEY = 'sw-inc-bn';
+const saved = (): { vw?: 'w' | 'm'; pick?: Record<string, string> } => { try { return JSON.parse(sessionStorage.getItem(KEY) || '{}') || {}; } catch { return {}; } };
+const keep = (v: { vw: 'w' | 'm'; pick: Record<string, string> }) => { try { sessionStorage.setItem(KEY, JSON.stringify(v)); } catch { /* private window */ } };
 /** A figure's colour: red when it lost, else the text's own. */
 const red = (v: number) => (v < -0.5 ? RED : undefined);
 
 export function Banner({ b, today, accounts }: { b: B; today: string; accounts: string[] | null }) {
   const { mask } = useWeb();
   const cw = useContentWidth(), nw = cw > 0 && cw < 600, L = nw ? NARROW : WIDE, H = L.H, PH = H - ROOM, AG = L.AG;
-  const [vw, setVw] = useState<'w' | 'm'>('w');
-  const [pick, setPick] = useState<Record<string, string>>({});
+  // The picked bar (and so Weekly or Monthly) lasts the session (README §4).
+  const [vw, setVwS] = useState<'w' | 'm'>(() => (saved().vw === 'm' ? 'm' : 'w'));
+  const [pick, setPickS] = useState<Record<string, string>>(() => saved().pick ?? {});
+  const setVw = (v: 'w' | 'm') => { setVwS(v); keep({ vw: v, pick }); };
+  const setPick = (f: (p: Record<string, string>) => Record<string, string>) => setPickS((p) => { const n = f(p); keep({ vw, pick: n }); return n; });
   const [all, setAll] = useState(false);
   const { bars, def } = useMemo(() => barsOf(b, vw, today, nw), [b, vw, today, nw]);
   const sc = useMemo(() => scaleOf(bars), [bars]);
@@ -36,10 +42,12 @@ export function Banner({ b, today, accounts }: { b: B; today: string; accounts: 
   const y0 = y(0);
   const yl = yieldOf(sel.t, b.capital, sel.part, vw);
 
-  // By ticker: what each name realized in the period picked, biggest first, with its share average.
-  const rows = Object.keys(sel.by).map((t) => { const [c, p] = sel.by[t] ?? [0, 0]; return { t, c, p, tot: c + p, sh: b.shares[t] }; })
-    .filter((x) => Math.abs(x.tot) >= 0.5 || Math.abs(x.c) >= 0.5 || Math.abs(x.p) >= 0.5)
-    .sort((a, c) => c.tot - a.tot || a.t.localeCompare(c.t));
+  // By ticker: what each name realized in the period picked, with its share average. A period at a profit starts with
+  // the best name, a period at a loss with the worst (Nik, 24 Nov 2026).
+  const rows0 = Object.keys(sel.by).map((t) => { const [c, p] = sel.by[t] ?? [0, 0]; return { t, c, p, tot: c + p, sh: b.shares[t] }; })
+    .filter((x) => Math.abs(x.tot) >= 0.5 || Math.abs(x.c) >= 0.5 || Math.abs(x.p) >= 0.5);
+  const lossFirst = rows0.reduce((s, x) => s + x.tot, 0) < 0;
+  const rows = rows0.sort((a, c) => (lossFirst ? a.tot - c.tot : c.tot - a.tot) || a.t.localeCompare(c.t));
   const shown = all ? rows : rows.slice(0, L.top);
   const parts = accounts && accounts.length > 1 ? accounts.map((nm) => { const v = sel.bk[nm] ?? [0, 0]; return { nm, v: v[0] + v[1] }; }) : null;
 
@@ -145,7 +153,7 @@ export function Banner({ b, today, accounts }: { b: B; today: string; accounts: 
               return (
                 <div key={x.t} role="listitem" title={av != null ? `Share average after every premium kept${pd != null ? ` · paid $${f2(pd)}` : ''}` : undefined}
                   aria-label={mask(`${x.t}, ${x.tot < -0.5 ? 'lost ' : ''}${money(x.tot)} realized, calls ${money(x.c)}, puts ${money(x.p)}${av != null ? `, share average $${f2(av)}` : ''}`)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, height: 34, borderBottom: `1px solid ${ln(0.06)}`, fontSize: 13, lineHeight: '18px', whiteSpace: 'nowrap',
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, height: 34, boxSizing: 'content-box', borderBottom: `1px solid ${ln(0.06)}`, fontSize: 13, lineHeight: '18px', whiteSpace: 'nowrap',
                     opacity: Math.abs(x.tot) < 0.5 ? 0.5 : 1 }}>
                   <Disc t={x.t} size={18} fs={5} pct={62} />
                   <span style={{ fontWeight: 600 }}>{x.t}</span>

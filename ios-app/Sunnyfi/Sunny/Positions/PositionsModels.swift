@@ -182,8 +182,8 @@ struct PosName {
         let soFar: Double
         /// q × 100 × Δ (shares q), from the grid at today's price.
         let delta: Double
-        /// Switched on in Every leg (Nik 13 Nov 2026: "we should be able to switch on and switch off"; "by default only
-        /// keep income on and rest off"). Legs sold start on, shares and legs bought start off. An off leg drops out of
+        /// Switched on in Every leg (Nik 13 Nov 2026: "we should be able to switch on and switch off"; 24 Nov 2026: "keep
+        /// all of them on"). Every leg starts on. An off leg drops out of
         /// the Whole TICKER book row and the Payoff with its Greeks; the Price chart keeps every strike held.
         let on: Bool
     }
@@ -221,7 +221,7 @@ struct PosName {
     let cashIn: Double, cashOut: Double
     let strikes: [Strike]
     let payoff: Payoff?
-    /// Some leg is switched away from how they start (Income on, the rest off).
+    /// Some leg is switched off (every leg starts on).
     let changed: Bool
     /// The Payoff's date slider (handoff 2026-11-17 round 168b, 2026-11-18; Nik, 20 Nov 2026, option 1: the full picture
     /// past the first expiry): the server's stops from today (or Monday over a weekend) to the day the LAST sold legs
@@ -241,10 +241,9 @@ struct PosName {
     /// The slider's last stop.
     var dateEnd: Int { max(0, dates.count - 1) }
 
-    /// `flip`: the legs switched away from the start.
-    /// The legs switched off: sold legs start on, the rest off; `flip` turns a leg the other way.
+    /// The legs switched off: every leg starts on (Nik, 24 Nov 2026), `flip` holds the ones switched off.
     static func offs(_ m: PositionsModel, flip: Set<String>) -> Set<String> {
-        Set(m.legs.filter { ($0.q < 0) == flip.contains($0.id) }.map(\.id))
+        Set(m.legs.filter { flip.contains($0.id) }.map(\.id))
     }
 
     static func build(_ m: PositionsModel, inputs: JSONValue?, flip: Set<String> = []) -> PosName {

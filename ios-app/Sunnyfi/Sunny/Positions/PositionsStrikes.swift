@@ -2,19 +2,22 @@
 //  PositionsStrikes.swift
 //  Sunny
 //
-//  Phone Intelligence is SunnyStrikes, look card (handoff 2026-11-24 §4, round 186a; reference/SunnyStrikes.dc.html):
-//  it replaces the Intelligence lanes. Every expiry sunny-sd sends as chips, Calls | Puts, the strikes from 0.25 to 2 SD
-//  as tiles 4 a row (SD, strike, win rate, open interest, the level it meets), then the picked strike's story in a flat
+//  Phone Intelligence is SunnyStrikes, look card (handoff 2026-11-24-final-2 §2.3; reference/SunnyStrikes.dc.html):
+//  the title alone (no explainer under it), every expiry sunny-sd sends as chips, Calls | Puts, the strikes from 0.25 to
+//  2 SD as tiles in one row you swipe (140 × 172, snapping to each tile, the next one peeking), then the picked strike's
 //  card, then Your trade with Try in Payoff.
+//    A tile, left aligned: the SD, the strike, the win rate, OI, and the level at its foot.
 //    Win rate = the chance it finishes out of the money = 1 − the row's itm (the chain, this expiry).
-//    OI = the chain's open interest at the strike (sunny-sd rows[].oi, Theta's chain snapshot).
+//    OI = the chain's open interest at the strike (sunny-sd rows[].oi, Theta's chain snapshot); left out when not sent.
 //    The level: "At 20-day" when a level sits on the strike (within half a strike step, at least 0.4% of the price),
 //    "Hits ceiling first" for the first one the stock meets on the way; the priced move is left out of the tile.
 //    Levels: the gamma walls for this expiry (ceiling, floor, flip; Home's walls when the reply has none), the nearest
 //    resistance above and support below (the technicals' zones), the 20, 50, 100 and 200-day averages.
-//    The card's facts: Away, Win rate (replaces Ends past it), Delta, IV here (the chain's IV at the strike), Breakeven,
-//    Open interest with the gamma weight under it (replaces Call gamma): the most gamma here at this side's biggest
-//    wall, else heavy, medium or light against the side's biggest open interest × gamma.
+//  The strike card, top to bottom: the title ("Sell the 36 call") with one grey line ("Oct 30 · 3 days · 2.0% above
+//  today") and what it collects a contract on the right; one soft box with the priced move and the trend (each with its
+//  why in grey), and "Earnings Nov 18 come first." when they do; On the way up | down, the levels as rows (the name with
+//  on the strike, in the way or past the strike; the price and its SD); then Contracts with Add. No win rate tile, no
+//  in-the-way sentence and no Details fold (Nik, 24 Nov 2026: the tile shows the win rate and OI, the rows say it).
 //  Everything is worked out once per reply (PositionsMemo.strikes); the view only picks.
 //  No em dashes in any words here; no minus signs.
 //
@@ -23,9 +26,12 @@ import SwiftUI
 
 struct PosStrikes {
     struct Exp: Identifiable { let id: String; let i: Int; let l1: String; let l2: String; let label: String }
-    struct Fact: Identifiable { let id: String; let l: String; let v: String; let s: String }
     enum LvKind { case at, way, past }
-    struct Lv: Identifiable { let id: String; let n: String; let p: String; let z: String; let kind: LvKind }
+    /// A level as a row: its name ("Ceiling", "20-day average"), where it sits ("on the strike", "in the way",
+    /// "past the strike"), its price and how far it is from today in SD.
+    struct Lv: Identifiable { let id: String; let n: String; let w: String; let p: String; let z: String; let kind: LvKind; let price: Double }
+    /// A line in the card's soft box: bold, with its why in grey under it ("" for none).
+    struct Line: Identifiable { let id: String; let a: String; let b: String }
     struct Strike: Identifiable {
         let id: String
         let ex: String
@@ -41,12 +47,8 @@ struct PosStrikes {
         let pr: Double
         let title: String
         let when: String
-        let h1: String
-        let h2: String
-        let facts: [Fact]
-        let lvT: String
         let lv: [Lv]
-        let lines: [(a: String, b: String)]
+        let lines: [Line]
     }
     let t: String
     let S: Double
@@ -58,8 +60,6 @@ struct PosStrikes {
     /// Calls still covered at each expiry (the engine's cover check), and the calls already sold for it.
     let free: [Int: Int]
     let soldAt: [Int: Int]
-    /// "updated today · 7:53 PM": when the chains were read.
-    let upd: String
 
     func tiles(_ ei: Int, _ side: String) -> [Strike] { strikes["\(ei):\(side)"] ?? [] }
 
@@ -68,7 +68,7 @@ struct PosStrikes {
     static func build(_ d: SDReply, friday: String, today: String, homeWalls: JSONValue?) -> PosStrikes? {
         guard d.ok != false, !d.exps.isEmpty, d.price > 0 else { return nil }
         let S = d.price, t0 = PE.dayNum(today) ?? 0
-        let tech = d.tech, rank = tech?.ivRank.map { Int(PE.jsRound($0)) }
+        let tech = d.tech
         let f2 = { (x: Double) in String(format: "%.2f", abs(x)) }
         let lst = { (a: [String]) -> String in a.count <= 1 ? (a.first ?? "") : a.dropLast().joined(separator: ", ") + " and " + a.last! }
         let sup = tech?.zones?.filter { $0.kind == "support" && $0.mid < S }.max { $0.mid < $1.mid }?.mid
@@ -79,11 +79,12 @@ struct PosStrikes {
         let hold = have.filter { $0.1 < S }.map { String($0.0) }, under = have.filter { $0.1 >= S }.map { String($0.0) }
         let rsi = tech?.rsi14.map { Int(PE.jsRound($0)) }
         let rsT = rsi.map { $0 <= 30 ? " oversold" : $0 >= 70 ? " overbought" : "" } ?? ""
-        let trend: (a: String, b: String)? = have.isEmpty ? nil : (
-            hold.count == have.count ? "Healthy trend." : hold.isEmpty ? "Weak trend." : "Mixed trend.",
-            (hold.isEmpty ? "Under all \(have.count == 4 ? "four" : String(have.count)) averages" : "Above the \(lst(hold))-day")
+        let trend: Line? = have.isEmpty ? nil : Line(id: "tr",
+            a: hold.count == have.count ? "Healthy trend." : hold.isEmpty ? "Weak trend." : "Mixed trend.",
+            b: (hold.isEmpty ? "Under all \(have.count == 4 ? "four" : String(have.count)) averages" : "Above the \(lst(hold))-day")
                 + (!hold.isEmpty && !under.isEmpty ? ", under the \(lst(under))-day" : "") + (rsi.map { ", RSI \($0)\(rsT)" } ?? "") + ".")
-        let ernL = d.events?.earnings.map { PosFmt.dmd(String($0.prefix(10))) }
+        // "Earnings Nov 18 come first." (handoff §2.3: the line alone, no why under it).
+        let ernL = d.events?.earnings.map { PosFmt.md(String($0.prefix(10))) }
         let SN: [String: String] = ["Ceiling": "ceiling", "Floor": "floor", "Flip": "flip", "Resistance": "resistance", "Support": "support",
                                     "20-day average": "20-day", "50-day average": "50-day", "100-day average": "100-day", "200-day average": "200-day"]
         // The cover check (sd-engine cover()): calls covered by the shares, then the hedge calls that last to each.
@@ -118,11 +119,10 @@ struct PosStrikes {
                 flip = c["flip"].double; ceil = c["c"]["k"].double; floor = c["f"]["k"].double
             }
             let mv = e.m
-            let LV: [(String, String, Double)] = ([("the ceiling", "Ceiling", ceil), ("the floor", "Floor", floor), ("the flip", "Flip", flip),
-                                                   ("resistance", "Resistance", res), ("support", "Support", sup)]
-                + MA.map { ("the \($0.0)-day", "\($0.0)-day average", $0.1) }
-                + [("the priced move", "IV move", mv > 0 ? S * exp(mv) : nil), ("the priced move", "IV move", mv > 0 ? S * exp(-mv) : nil)])
-                .compactMap { a, b, v in (v ?? 0) > 0 ? (a, b, v!) : nil }
+            let LV: [(String, Double)] = ([("Ceiling", ceil), ("Floor", floor), ("Flip", flip), ("Resistance", res), ("Support", sup)]
+                + MA.map { ("\($0.0)-day average", $0.1) }
+                + [("IV move", mv > 0 ? S * exp(mv) : nil), ("IV move", mv > 0 ? S * exp(-mv) : nil)])
+                .compactMap { b, v in (v ?? 0) > 0 ? (b, v!) : nil }
             let zOf = { (p: Double) in mv > 0 ? String(format: "%.2f SD", abs(log(p / S)) / mv) : "" }
             let ks = (e.ks ?? []).sorted()
             let stepAt = { (K: Double) -> Double in
@@ -130,73 +130,43 @@ struct PosStrikes {
                 let a = j > 0 ? K - ks[j - 1] : .infinity, b = j + 1 < ks.count ? ks[j + 1] - K : .infinity
                 let s = min(a, b); return s.isFinite && s > 0 ? s : PE.stepOf(S)
             }
-            let T = e.cd / 365
+            // The soft box: the priced move by this expiry, the trend, and the earnings when they come first.
+            var lines: [Line] = []
+            if mv > 0 { lines.append(Line(id: "mv", a: "Priced to move ±$\(f2(S * mv)) (\(String(format: "%.1f", mv * 100))%)", b: "by \(e.label).")) }
+            if let trend { lines.append(trend) }
+            if e.earn == true, let ernL { lines.append(Line(id: "er", a: "Earnings \(ernL) come first.", b: "")) }
             for side in ["c", "p"] {
                 let c = side == "c"
                 let rows = (c ? e.rows?.c : e.rows?.p) ?? []
-                // The gamma weight: open interest × gamma at each strike on this side, against the biggest; the side's
-                // biggest wall reads "the most gamma here".
-                let gv = { (r: SDReply.Row) -> Double in (r.oi ?? 0) * PE.bs(put: !c, S: S, K: r.K, T: T, iv: PosTryLeg.ivAt(e, r.K)).g }
-                let peak = rows.map(gv).max() ?? 0
-                let W = c ? ceil : floor
                 var seen = Set<Double>(), out: [Strike] = []
                 for r in rows where r.k > 0 {
                     let K = r.K
                     guard c ? K > S : K < S, !seen.contains(K), let li = LVS.firstIndex(where: { abs($0 - r.k) < 1e-6 }) else { continue }
                     seen.insert(K)
-                    let iv = PosTryLeg.ivAt(e, K), b = PE.bs(put: !c, S: S, K: K, T: T, iv: iv)
-                    let z = mv > 0 ? abs(log(K / S)) / mv : (r.kA.map(abs) ?? r.k), pct = abs(K / S - 1) * 100
-                    let dl = abs(b.d), wr = Int(PE.jsRound((1 - r.itm) * 100)), pr = max(0.01, r.pr), be = c ? K + pr : K - pr
+                    let pct = abs(K / S - 1) * 100
+                    let wr = Int(PE.jsRound((1 - r.itm) * 100)), pr = max(0.01, r.pr)
                     let tol = max(stepAt(K) * 0.5, S * 0.004)
-                    let at = LV.filter { abs($0.2 - K) <= tol }
-                    let atN = Set(at.map(\.1))
-                    let way = LV.filter { !atN.contains($0.1) && (c ? $0.2 > S && $0.2 < K : $0.2 < S && $0.2 > K) }.sorted { abs($0.2 - S) < abs($1.2 - S) }
-                    let nx = LV.filter { !atN.contains($0.1) && (c ? $0.2 > K : $0.2 < K) }.min { abs($0.2 - K) < abs($1.2 - K) }
-                    let w3 = way.prefix(3).map(\.0) + (way.count > 3 ? ["\(way.count - 3) more"] : [])
-                    var h1 = [at.isEmpty ? "" : "On " + lst(at.map(\.0)), way.isEmpty ? "" : "behind " + lst(w3)].filter { !$0.isEmpty }.joined(separator: ", ")
-                    h1 = h1.isEmpty ? "Nothing in the way." : h1.prefix(1).uppercased() + h1.dropFirst() + "."
-                    let wall = at.contains { $0.1 == (c ? "Ceiling" : "Floor") }
-                    let h2 = wall ? (c ? " The most call gamma for \(e.label): dealers sell into a rally here, so it tends to hold."
-                                       : " The most put gamma for \(e.label): dealers buy a dip here, so it tends to hold.")
-                        : !way.isEmpty ? " The stock has to get through \(lst(way.prefix(3).map { f2($0.2) })) first." : " No wall or average between today and \(PE.fk(K))."
-                    var lv: [Lv] = at.map { Lv(id: "a" + $0.1 + f2($0.2), n: $0.1 + " · at the strike", p: f2($0.2), z: zOf($0.2), kind: .at) }
-                        + way.map { Lv(id: "w" + $0.1 + f2($0.2), n: $0.1, p: f2($0.2), z: zOf($0.2), kind: .way) }
-                    if let nx { lv.append(Lv(id: "x" + nx.1, n: nx.1 + " · past it", p: f2(nx.2), z: zOf(nx.2), kind: .past)) }
-                    lv.sort { c ? (Double($0.p) ?? 0) < (Double($1.p) ?? 0) : (Double($0.p) ?? 0) > (Double($1.p) ?? 0) }
-                    var lines: [(a: String, b: String)] = []
-                    if mv > 0 { lines.append(("Priced to move ±$\(f2(S * mv)) (\(String(format: "%.1f", mv * 100))%)", "by \(e.label).")) }
-                    if let trend { lines.append(trend) }
-                    if e.earn == true, let ernL { lines.append(("Earnings \(ernL) come first.", "The move can run past the walls; premiums are up for it.")) }
-                    let lvA = at.first { SN[$0.1] != nil }, lvW = way.first { SN[$0.1] != nil }
-                    let tl = lvA.map { "At " + SN[$0.1]! } ?? lvW.map { "Hits " + SN[$0.1]! + " first" } ?? ""
+                    let at = LV.filter { abs($0.1 - K) <= tol }
+                    let atN = Set(at.map(\.0))
+                    let way = LV.filter { !atN.contains($0.0) && (c ? $0.1 > S && $0.1 < K : $0.1 < S && $0.1 > K) }.sorted { abs($0.1 - S) < abs($1.1 - S) }
+                    let nx = LV.filter { !atN.contains($0.0) && (c ? $0.1 > K : $0.1 < K) }.min { abs($0.1 - K) < abs($1.1 - K) }
+                    var lv: [Lv] = at.map { Lv(id: "a" + $0.0 + f2($0.1), n: $0.0, w: "on the strike", p: f2($0.1), z: zOf($0.1), kind: .at, price: $0.1) }
+                        + way.map { Lv(id: "w" + $0.0 + f2($0.1), n: $0.0, w: "in the way", p: f2($0.1), z: zOf($0.1), kind: .way, price: $0.1) }
+                    if let nx { lv.append(Lv(id: "x" + nx.0 + f2(nx.1), n: nx.0, w: "past the strike", p: f2(nx.1), z: zOf(nx.1), kind: .past, price: nx.1)) }
+                    lv.sort { c ? $0.price < $1.price : $0.price > $1.price }
+                    let lvA = at.first { SN[$0.0] != nil }, lvW = way.first { SN[$0.0] != nil }
+                    let tl = lvA.map { "At " + SN[$0.0]! } ?? lvW.map { "Hits " + SN[$0.0]! + " first" } ?? ""
                     let oiT: String? = r.oi.map { $0 >= 999.5 ? PE.num($0 / 1000, 1) + "K" : String(Int($0.rounded())) }
-                    let g = gv(r)
-                    let gl = r.oi == nil ? "" : (W.map { abs($0 - K) <= tol } ?? (peak > 0 && g >= peak)) ? "the most gamma here"
-                        : peak > 0 && g >= 0.6 * peak ? "heavy gamma" : peak > 0 && g >= 0.25 * peak ? "medium gamma" : "light gamma"
-                    let facts = [Fact(id: "z", l: "Away", v: String(format: "%.2f SD", z), s: String(format: "%.1f%% ", pct) + (c ? "above" : "below")),
-                                 Fact(id: "p", l: "Win rate", v: "\(wr)%", s: "out of the money \(PosFmt.md(e.ex))"),
-                                 Fact(id: "d", l: "Delta", v: String(String(format: "%.2f", dl).drop { $0 == "0" }), s: "a contract \(Int(PE.jsRound(dl * 100)))"),
-                                 Fact(id: "iv", l: "IV here", v: "\(Int(PE.jsRound(iv * 100)))%", s: rank.map { "rank \($0)" + ($0 >= 60 ? ", rich" : "") } ?? ""),
-                                 Fact(id: "be", l: "Breakeven", v: f2(be), s: "\(c ? "↑" : "↓")\(f2(pr)) from \(PE.fk(K))"),
-                                 Fact(id: "g", l: "Open interest", v: oiT ?? "none sent", s: gl)]
                     out.append(Strike(id: "\(e.ex):\(side):\(PE.jsNum(K))", ex: e.ex, ty: side, K: K, i: li, sd: PE.sdK(r.k) + " SD", wr: wr, oi: oiT,
                                       tl: tl, tlAt: lvA != nil, pr: pr, title: "Sell the \(PE.fk(K)) \(c ? "call" : "put")",
-                                      when: "\(e.label) · \(cd) \(cd == 1 ? "day" : "days") · \(String(format: "%.2f", z)) SD",
-                                      h1: h1, h2: h2, facts: facts,
-                                      lvT: lv.isEmpty ? "Nothing between today and the strike" : (c ? "Between today and the strike, going up" : "Between today and the strike, going down"),
+                                      when: "\(e.label) · \(cd) \(cd == 1 ? "day" : "days") · \(String(format: "%.1f", pct))% \(c ? "above" : "below") today",
                                       lv: lv, lines: lines))
                 }
                 strikes["\(ei):\(side)"] = out
             }
         }
         let openIso = PE.openExpiry(d.exps.map(\.ex), friday: friday, today: today)
-        var upd = ""
-        if let c = d.chainAt, let at = SXClient.parseDate(c) {
-            let f = DateFormatter(); f.timeZone = MarketClock.ny; f.dateFormat = "h:mm a"
-            let day = MarketClock.ny(at).date
-            upd = "updated \(day == today ? "today" : PosFmt.md(day)) · \(f.string(from: at))"
-        }
-        return PosStrikes(t: d.t, S: S, exps: exps, strikes: strikes, open: d.exps.firstIndex { $0.ex == openIso } ?? 0, free: free, soldAt: soldAt, upd: upd)
+        return PosStrikes(t: d.t, S: S, exps: exps, strikes: strikes, open: d.exps.firstIndex { $0.ex == openIso } ?? 0, free: free, soldAt: soldAt)
     }
 }
 
@@ -222,12 +192,15 @@ struct PosStrikesView: View {
     private static let tileFill = S.dynA(0xFFFFFF, 0.9, 0xFFFFFF, 0.06)
     private static let tileRing = S.dynA(0x1D1D1F, 0.08, 0xFFFFFF, 0.10)
     private static let stepFill = Color(.sRGB, red: 118 / 255, green: 118 / 255, blue: 128 / 255, opacity: 0.24)
+    /// The card's soft box (rgba(255,255,255,.05) in the design) and its section rules (.10).
+    private static let softFill = S.dynA(0x1D1D1F, 0.04, 0xFFFFFF, 0.05)
+    private static let cardRule = S.dynA(0x1D1D1F, 0.10, 0xFFFFFF, 0.10)
 
     private func km(_ x: Double) -> String { PosFmt.money(x) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // The title alone, then the content (Nik, 24 Nov 2026: no how-to line under it).
+            // The title alone, then the content (Nik, 24 Nov 2026: no explainer under it).
             Text("Intelligence").sType(PT.t(22, 28, 700), tabular: false).foregroundStyle(PC.ink).accessibilityAddTraits(.isHeader)
             if let m, !m.exps.isEmpty {
                 content(m)
@@ -253,7 +226,7 @@ struct PosStrikesView: View {
         if tiles.isEmpty {
             Text("No strikes from 0.25 to 2 SD for \(e.label) yet.").sType(PT.t(14, 20), tabular: false).foregroundStyle(PC.mu)
         } else {
-            tileGrid(tiles, pick?.id)
+            tileRow(tiles, pick?.id, page: "\(ei):\(sel.side)")
             if let s = pick { card(m, e, ei, s) }
         }
         // Your trade shows once a contract is added (no empty-state how-to line).
@@ -291,37 +264,60 @@ struct PosStrikesView: View {
         .sensoryFeedback(.selection, trigger: sel.ex)
     }
 
-    private func tileGrid(_ tiles: [PosStrikes.Strike], _ picked: String?) -> some View {
-        let rows = stride(from: 0, to: tiles.count, by: 4).map { Array(tiles[$0..<min($0 + 4, tiles.count)]) }
-        return Grid(horizontalSpacing: 8, verticalSpacing: 8) {
-            ForEach(rows.indices, id: \.self) { r in
-                GridRow {
-                    ForEach(rows[r]) { s in tile(s, on: s.id == picked) }
-                    ForEach(0..<(4 - rows[r].count), id: \.self) { _ in Color.clear.frame(height: 1) }
+    /// The strikes in one row you swipe (handoff §2.3): it snaps to each tile, no scrollbar, the next tile peeks at the
+    /// edge. The design's row reaches 6 pt past the content on each side (the count badge sits over a tile's corner).
+    /// A new expiry or side brings the picked tile into view; a tap never moves the row.
+    private func tileRow(_ tiles: [PosStrikes.Strike], _ picked: String?, page: String) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(tiles) { s in tile(s, on: s.id == picked).id(s.id) }
                 }
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8).padding(.bottom, 10)
+                .scrollTargetLayout()
+            }
+            .scrollIndicators(.hidden)
+            .scrollTargetBehavior(.viewAligned)
+            .contentMargins(.horizontal, 6, for: .scrollContent)
+            .padding(.horizontal, -6)
+            .padding(.top, -8).padding(.bottom, -10)
+            .onAppear { if let picked { proxy.scrollTo(picked, anchor: .leading) } }
+            .onChange(of: page) { _, _ in
+                guard let picked else { return }
+                withAnimation(S.moving(.easeOut(duration: 0.3), reduce)) { proxy.scrollTo(picked, anchor: .leading) }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Strikes from 0.25 to 2 SD")
     }
 
+    /// A strike tile, 140 × 172, radius 18, left aligned: the SD 14 grey, the strike 30 bold, the win rate 17 bold, OI 14
+    /// grey, the level 14 at the foot. The picked tile is filled (white in dark, as the design).
     private func tile(_ s: PosStrikes.Strike, on: Bool) -> some View {
         let n = trade[s.id] ?? 0, fg = on ? PC.onInk : PC.ink, sc = on ? Self.selSub : PC.mu
-        let lc = on ? (s.tlAt ? PC.onInk : Self.selSub) : (s.tlAt ? PC.ink : PEC.quiet)
+        let lc = on ? (s.tlAt ? PC.onInk : Self.selSub) : (s.tlAt ? PC.ink : PC.muT)
         return Button { sel.lv = s.i } label: {
-            VStack(spacing: 2) {
-                Text(s.sd).sType(PT.t(12, 14), tabular: true).foregroundStyle(sc)
-                Text(PE.fk(s.K)).sType(PT.t(16, 20, 700)).foregroundStyle(fg)
-                Text("\(s.wr)% win").sType(PT.t(12, 16, 600)).foregroundStyle(fg).padding(.top, 2)
-                if let oi = s.oi { Text("OI \(oi)").sType(PT.t(11, 14)).foregroundStyle(sc) }
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(s.sd).sType(PT.t(14, 18, 500), tabular: true).foregroundStyle(sc)
+                    Text(PE.fk(s.K)).sType(PT.t(30, 34, 700, tr: -0.02)).foregroundStyle(fg).minimumScaleFactor(0.7)
+                    Text("\(s.wr)% win").sType(PT.t(17, 22, 700)).foregroundStyle(fg).padding(.top, 6)
+                    if let oi = s.oi { Text("OI \(oi)").sType(PT.t(14, 18)).foregroundStyle(sc) }
+                }
+                Spacer(minLength: 0)
+                // At the foot (the design's margin-top: auto; 4 of gap and 10 above it).
                 if !s.tl.isEmpty {
-                    Text(s.tl).sType(PT.t(11, 13, s.tlAt ? 600 : 500), tabular: false).foregroundStyle(lc)
-                        .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true).padding(.top, 2)
+                    Text(s.tl).sType(PT.t(14, 19, s.tlAt ? 600 : 500), tabular: false).foregroundStyle(lc)
+                        .lineLimit(2).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
                 }
             }
-            .lineLimit(1).minimumScaleFactor(0.8)
-            .padding(.vertical, 8).padding(.horizontal, 4)
-            .frame(maxWidth: .infinity, minHeight: 56, maxHeight: .infinity, alignment: .top)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(on ? PC.ink : Self.tileFill))
-            .overlay { if !on { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Self.tileRing, lineWidth: 1) } }
+            .lineLimit(1)
+            .padding(.top, 14).padding(.horizontal, 14).padding(.bottom, 16)
+            .frame(width: 140, alignment: .topLeading)
+            .frame(minHeight: 172, maxHeight: .infinity, alignment: .topLeading)
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(on ? PC.ink : Self.tileFill))
+            .overlay { if !on { RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Self.tileRing, lineWidth: 1) } }
             .overlay(alignment: .topTrailing) {
                 if n > 0 {
                     Text("\(n)").sType(PT.t(11, 13, 700)).foregroundStyle(PC.onInk)
@@ -339,8 +335,7 @@ struct PosStrikesView: View {
         .sensoryFeedback(.selection, trigger: on)
     }
 
-    /// The strike's story (186a): title and price, the read, six facts, the levels between today and it, three lines,
-    /// then how many and what it collects.
+    /// The picked strike's card (handoff §2.3): the header, the soft box, On the way up | down, then Contracts with Add.
     private func card(_ m: PosStrikes, _ e: PosStrikes.Exp, _ ei: Int, _ s: PosStrikes.Strike) -> some View {
         let n = trade[s.id] ?? 0, c = s.ty == "c"
         let nCx = trade.filter { $0.key.hasPrefix(e.id + ":c:") }.reduce(0) { $0 + $1.value }
@@ -348,66 +343,79 @@ struct PosStrikesView: View {
             free > 0 ? "\(free) more \(free == 1 ? "call" : "calls") covered for \(e.l1)" + (nCx > free ? ": \(nCx - free) of yours not" : "")
                 : "No covered calls left for \(e.l1)" + ((m.soldAt[ei] ?? 0) > 0 ? ", \(m.soldAt[ei]!) already sold" : "")
         } ?? "") : "Sets aside \(km(s.K * 100)) a contract" + (n > 0 ? ", \(km(s.K * 100 * Double(n))) in all" : "")
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
+        return VStack(alignment: .leading, spacing: 16) {
+            // 1. The title and one grey line; what it collects a contract, big, on the right.
+            HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(s.title).sType(PT.t(20, 26, 700), tabular: true).foregroundStyle(PC.ink)
-                    Text(s.when).sType(PT.t(13, 18), tabular: true).foregroundStyle(PC.mu)
-                    if !m.upd.isEmpty { Text(m.upd).sType(PT.t(12, 16), tabular: true).foregroundStyle(PC.mu) }
+                    Text(s.when).sType(PT.t(14, 20), tabular: true).foregroundStyle(PC.mu).fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text(PE.f2(s.pr)).sType(PT.t(28, 32, 700, tr: -0.01)).foregroundStyle(PC.ink)
-                    Text("a share · \(km(s.pr * 100)) a contract").sType(PT.t(12, 16), tabular: true).foregroundStyle(PC.mu).lineLimit(1)
+                .accessibilityElement(children: .combine)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(km(s.pr * 100)).sType(PT.t(34, 38, 800, tr: -0.03)).foregroundStyle(PC.ink)
+                    Text("a contract").sType(PT.t(13, 18), tabular: false).foregroundStyle(PC.mu)
                 }
+                .lineLimit(1)
+                .fixedSize()
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(PosSay.words("Collects \(km(s.pr * 100)) a contract"))
             }
-            (Text(s.h1).fontWeight(.semibold).foregroundStyle(PC.ink) + Text(s.h2).foregroundStyle(PEC.quiet))
-                .sType(PT.t(15, 21), tabular: true).fixedSize(horizontal: false, vertical: true)
-            Grid(alignment: .topLeading, horizontalSpacing: 10, verticalSpacing: 12) {
-                ForEach(0..<2, id: \.self) { r in
-                    GridRow {
-                        ForEach(s.facts[(r * 3)..<min(r * 3 + 3, s.facts.count)]) { f in
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(f.l).sType(PT.t(12, 16), tabular: false).foregroundStyle(PC.mu)
-                                Text(f.v).sType(PT.t(17, 22, 700)).foregroundStyle(PC.ink).lineLimit(1).minimumScaleFactor(0.7)
-                                Text(f.s).sType(PT.t(12, 16), tabular: true).foregroundStyle(PC.mu).lineLimit(1).truncationMode(.tail)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel(PosSay.words("\(f.l), \(f.v), \(f.s)"))
+            // 2. The priced move and the trend, each with its why in grey.
+            if !s.lines.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(s.lines) { ln in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(ln.a).sType(PT.t(17, 23, 600), tabular: true).foregroundStyle(PC.ink)
+                            if !ln.b.isEmpty { Text(ln.b).sType(PT.t(14, 20), tabular: true).foregroundStyle(PC.mu) }
                         }
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityElement(children: .combine)
                     }
                 }
+                .padding(.vertical, 14).padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Self.softFill))
             }
-            .padding(.vertical, 12)
-            .overlay(alignment: .top) { Rectangle().fill(PC.rule).frame(height: 1) }
-            .overlay(alignment: .bottom) { Rectangle().fill(PC.rule).frame(height: 1) }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(s.lvT).sType(PT.t(13, 18, 600), tabular: false).foregroundStyle(PC.ink).padding(.bottom, 4)
+            // 3. On the way up | down: the levels as rows.
+            VStack(alignment: .leading, spacing: 0) {
+                Text(c ? "ON THE WAY UP" : "ON THE WAY DOWN").sType(PT.t(13, 18, 600, tr: 0.05), tabular: false).foregroundStyle(PC.mu)
+                    .padding(.bottom, 4)
+                    .accessibilityLabel(c ? "On the way up" : "On the way down")
+                    .accessibilityAddTraits(.isHeader)
+                if s.lv.isEmpty {
+                    Text("Nothing between today and the strike.").sType(PT.t(15, 21), tabular: false).foregroundStyle(PC.muT).padding(.vertical, 8)
+                }
                 ForEach(s.lv) { v in
                     let col = v.kind == .at ? PC.ink : v.kind == .way ? PC.bright : PC.mu
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text(v.n).sType(PT.t(14, 20, v.kind == .at ? 600 : 500), tabular: false).foregroundStyle(col)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Text(v.p).sType(PT.t(14, 20, 600)).foregroundStyle(col)
-                        Text(v.z).sType(PT.t(12, 16)).foregroundStyle(PC.mu).frame(width: 64, alignment: .trailing)
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(v.n).sType(PT.t(17, 22, 600), tabular: false).foregroundStyle(col)
+                            Text(v.w).sType(PT.t(13, 18), tabular: false).foregroundStyle(PC.mu)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(v.p).sType(PT.t(17, 22, 600)).foregroundStyle(col)
+                            Text(v.z).sType(PT.t(13, 18)).foregroundStyle(PC.mu)
+                        }
+                        .fixedSize()
                     }
-                    .padding(.vertical, 6)
-                    .overlay(alignment: .top) { Rectangle().fill(PEC.rowRule).frame(height: 1) }
+                    .lineLimit(1)
+                    .frame(minHeight: 56)
+                    .padding(.vertical, 8)
+                    .padding(.bottom, 1)
+                    .overlay(alignment: .bottom) { Rectangle().fill(PEC.rowRule).frame(height: 1) }
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(PosSay.words("\(v.n), \(v.p), \(v.z)"))
+                    .accessibilityLabel(PosSay.words("\(v.n), \(v.w), \(v.p), \(v.z)"))
                 }
             }
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(s.lines.enumerated()), id: \.offset) { _, ln in
-                    (Text(ln.a).fontWeight(.semibold).foregroundStyle(PC.ink) + Text(" " + ln.b).foregroundStyle(PEC.quiet))
-                        .sType(PT.t(13, 18), tabular: true).fixedSize(horizontal: false, vertical: true)
-                }
-            }
+            .padding(.top, 14)
+            .overlay(alignment: .top) { Rectangle().fill(Self.cardRule).frame(height: 1) }
+            // 4. Contracts with Add.
             HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(n > 0 ? "Collects \(km(s.pr * 100 * Double(n)))" : "Contracts").sType(PT.t(15, 20, 600), tabular: true).foregroundStyle(PC.ink)
-                    if !cov.isEmpty { Text(cov).sType(PT.t(12, 16), tabular: true).foregroundStyle(PC.mu).fixedSize(horizontal: false, vertical: true) }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(n > 0 ? "Collects \(km(s.pr * 100 * Double(n)))" : "Contracts").sType(PT.t(16, 21, 600), tabular: true).foregroundStyle(PC.ink)
+                    if !cov.isEmpty { Text(cov).sType(PT.t(13, 18), tabular: true).foregroundStyle(PC.mu).fixedSize(horizontal: false, vertical: true) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if n == 0 {
@@ -434,10 +442,10 @@ struct PosStrikesView: View {
                     .accessibilityLabel("\(n) contracts")
                 }
             }
-            .padding(.top, 12)
-            .overlay(alignment: .top) { Rectangle().fill(PC.rule).frame(height: 1) }
+            .padding(.top, 14)
+            .overlay(alignment: .top) { Rectangle().fill(Self.cardRule).frame(height: 1) }
         }
-        .padding(.top, 18).padding(.horizontal, 16).padding(.bottom, 16)
+        .padding(.top, 20).padding(.horizontal, 18).padding(.bottom, 18)
         .sunnyGlass(radius: 22)
         .sensoryFeedback(.increase, trigger: n)
         .accessibilityElement(children: .contain)

@@ -31,7 +31,7 @@ import { buildTogether, type Side, type SideEvent, type SideLeg } from './togeth
 import { buildIncome, chainKey, rollTargets, type Chain, type IncLeg, type IncReal } from './income.ts';
 import { type ActEvent, type ActName, activityEvents, levelsOf } from './activity.ts';
 import { bsDelta, bsValue, fK, NameBook } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-25.3';
+const BUILD = '2026-11-25.5';
 import { BOOKS, partsOf } from '../_shared/books.ts';
 /* A book's heartbeat feed: book S keeps the old names, others add theirs (sunny-home-N). */
 const feedOf = (feed: string, book: string) => (book === 'S' ? feed : `${feed}-${book}`);
@@ -3329,8 +3329,19 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const divNames = [...new Set([...book, ...[...sharesHeld].filter(([, n]) => n > 0).map(([t]) => t)])];
     const divHist = divNames.length ? await get(`dividends?ticker=in.(${divNames.join(',')})&ex_date=gte.${addDays(today, -400)}`
       + '&select=ticker,ex_date,cash_amount,frequency&order=ex_date.asc') : [];
+    /* The average paid: IBKR's last daily report, plus the lots bought after it, so a name bought today has its
+       real cost the same day (IWM, 24 Nov 2026: 100 at $267.70 read "at $0.00"). A sale keeps the average. */
     const shareAvg = new Map<string, number>();
-    for (const [t, n] of sharesNow) if (n > 0 && (shareCost.get(t) ?? 0) > 0) shareAvg.set(t, (shareCost.get(t) ?? 0) / n);
+    {
+      const q = new Map(sharesNow), c = new Map(shareCost);
+      for (const l of lots) {
+        if (!(String(l.acquired_date) > lastPosDay)) continue;
+        const t = String(l.ticker).toUpperCase(), n = Number(l.qty_original ?? 0);
+        q.set(t, (q.get(t) ?? 0) + n);
+        c.set(t, (c.get(t) ?? 0) + n * Number(l.cost_per_share ?? 0));
+      }
+      for (const [t, n] of q) if (n > 0 && (c.get(t) ?? 0) > 0) shareAvg.set(t, (c.get(t) ?? 0) / n);
+    }
     const out = buildBrief({ today, wd: now.wd, mins: now.mins, isTrading, addDays, cal, legs, isLeap: (l) => isLeap(l as Leg),
       shares: sharesHeld, shareAvg, spot: spotOf, closes, chain: chainRows, earnings: earn as Row[], divRows: divHist, strategies, posDaily: posAll,
       dayPct: new Map(quotes.filter((q) => q.day_change_pct != null).map((q) => [String(q.ticker).toUpperCase(), Number(q.day_change_pct)])) });
@@ -3378,7 +3389,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const readyT = [...new Set(soldLegs.filter((l) => (kpOf(l) ?? 0) >= 90 && !itmOf(l)).map((l) => l.t))];
     const expiries = new Map<string, string[]>();
     if (THETA) {
-      for (const t of [...new Set([...ladders, ...readyT])]) {
+      // Every name with a call or put sold: the calendar shows where each one's next rung lands (cached 6 h).
+      for (const t of [...new Set([...soldLegs.map((l) => l.t), ...ladders, ...readyT])]) {
         const xs = await cacheGet(`exp|${t}`, 360, async () => {
           const rows = await thetaJson(`/v3/option/list/expirations?symbol=${t}`);
           const out = rows.map((r) => String(r.expiration ?? r.date ?? '')).filter(Boolean)

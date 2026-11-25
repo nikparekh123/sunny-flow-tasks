@@ -60,7 +60,9 @@ export function rollTargets(x: Pick<IncIn, 'today' | 'legs' | 'expiries' | 'addD
   const out = new Map<string, { t: string; ex: string }>();
   for (const l of x.legs) {
     const k = x.kp(l);
-    if (k == null || k < 90 || x.itm(l)) continue;
+    // A ready rung, or one on its name's nearest expiry (the calendar's dashed "next" day shows where those land).
+    const nearest = l.ex === x.legs.filter((y) => y.t === l.t).map((y) => y.ex).sort()[0];
+    if (!nearest && (k == null || k < 90 || x.itm(l))) continue;
     const ex = targetOf(l, x.legs, x.expiries.get(l.t) ?? [], x.addDays);
     if (ex) out.set(chainKey(l.t, ex), { t: l.t, ex });
   }
@@ -101,7 +103,10 @@ export function buildIncome(x: IncIn): Row {
     const kp = kpOf(l), itm = sN != null && sN < 0;
     const st: 'itm' | 'roll' | 'hold' = itm ? 'itm' : kp != null && kp >= 90 ? 'roll' : 'hold';
     let next: Row | null = null;
-    if (st === 'roll') {
+    /* The next rung: for a ready one (where it rolls), and for every rung on its name's nearest expiry (the Income
+       calendar's dashed landing day, handoff 2026-11-24 late §1.3: "on one ticker it shows the strike and premium"). */
+    const nearest = l.ex === x.legs.filter((y) => y.t === l.t).map((y) => y.ex).sort()[0];
+    if (st === 'roll' || nearest) {
       const ex = targetOf(l, x.legs, x.expiries.get(l.t) ?? [], addDays);
       if (ex) {
         const ch = x.chains.get(chainKey(l.t, ex)), tdN = tradingDays(ex);
@@ -129,6 +134,8 @@ export function buildIncome(x: IncIn): Row {
     const flip = cad !== 'ladder' ? null : !fl ? { now: false, price: null, up: null }
       : { now: fl.now, price: r2(fl.price), up: fl.now ? 0 : r2((fl.price / S - 1) * 100) };
     // Where the next roll goes, for the dashed day: the first ready rung's target, else the ladder's next expiry.
+    // Where the next rung lands: the nearest rungs' target (a ladder's next listed expiry after its last open one, a
+    // weekly name's next week), else a ladder's next listed expiry.
     const nextEx = rs.find((r) => r.next?.ex)?.next?.ex
       ?? (cad === 'ladder' ? (x.expiries.get(t) ?? []).find((e) => e > (rs.map((r) => r.ex).sort().at(-1) ?? today)) ?? null : null);
     const weeks = cad === 'ladder' ? 4 : 2, cal: Row[] = [];

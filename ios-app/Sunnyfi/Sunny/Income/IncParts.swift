@@ -2,8 +2,9 @@
 //  IncParts.swift
 //  Sunny
 //
-//  The parts Income today and the Income tab share (SunnyIncome.dc.html, narrow): the colours and type, the logo
-//  disc, the rung row (README 1.2, narrow: a 52 pt big number column, 12 apart) and the delta line.
+//  The parts Income today and the Income tab share (SunnyIncome.dc.html and SunnyIncomeCal.dc.html, narrow): the
+//  colours and type, the logo disc, Income today's rung row (README 1.2, narrow: a 52 pt big number column, 12 apart)
+//  and its delta line.
 //  Tokens (README 7): ink #F5F5F7 / #1D1D1F, muted #98989D / #6E6E73, quiet grey #AEAEB2 / #8E8E93, red #FF6961 /
 //  #BC2E30, green #65C466 / #327133, on-colour text #000000 / #FFFFFF, track #2C2C2E / #E5E5EA.
 //
@@ -29,9 +30,15 @@ enum IncC {
     /// The picked bar's soft column.
     static let soft = S.dynA(0x000000, 0.05, 0xFFFFFF, 0.08)
     static let segTrack = S.dynA(0x767680, 0.12, 0x767680, 0.24)
-    /// The page under a logo's dot (#F1F2F4 / #0A0C0B), and the 2 pt gap outside a picked logo's ring (#FFFFFF / #0A0C0B).
-    static let page = S.dyn(0xF1F2F4, 0x0A0C0B)
-    static let ringGap = S.dyn(0xFFFFFF, 0x0A0C0B)
+    /// The calendar (SunnyIncomeCal T): a tile and a filled day rgba(29,29,31,.035) / rgba(255,255,255,.04); the dashed
+    /// landing day ln(.3) / ln(.28); a picked pill's thumb #FFFFFF / rgba(255,255,255,.2); a logo's light ring
+    /// inset .5px rgba(29,29,31,.14), none in dark.
+    static let tile = S.dynA(0x1D1D1F, 0.035, 0xFFFFFF, 0.04)
+    static let dash = S.dynA(0x1D1D1F, 0.3, 0xFFFFFF, 0.28)
+    static let thumb = S.dynA(0xFFFFFF, 1, 0xFFFFFF, 0.2)
+    static let logoRing = S.dynA(0x1D1D1F, 0.14, 0xFFFFFF, 0)
+    /// A ready rung's ring: 1 px rgba(50,113,51,.5) / rgba(101,196,102,.65).
+    static let actRing = S.dynA(0x327133, 0.5, 0x65C466, 0.65)
 
     static func of(_ t: IncTone) -> Color {
         switch t { case .ink: ink; case .mu: mu; case .quiet: quiet; case .red: red; case .green: green }
@@ -54,11 +61,13 @@ extension View {
     func incRule(_ a: Double) -> some View { modifier(IncRule(a: a)) }
 }
 
-/// The company's logo at `ratio` on a white disc; a name without a logo has its ticker in the circle.
+/// The company's logo at `ratio` on a white disc; a name without a logo has its ticker in the circle. `ring`: the
+/// calendar's .5 pt hairline in light (none in dark).
 struct IncLogo: View {
     let t: String
     let size: CGFloat
     var ratio: CGFloat = 0.6
+    var ring = false
     var body: some View {
         Circle().fill(.white)
             .overlay {
@@ -69,6 +78,7 @@ struct IncLogo: View {
                         .lineLimit(1).minimumScaleFactor(0.6).padding(.horizontal, 3)
                 }
             }
+            .overlay { if ring { Circle().strokeBorder(IncC.logoRing, lineWidth: 0.5) } }
             .frame(width: size, height: size)
             .accessibilityHidden(true)
     }

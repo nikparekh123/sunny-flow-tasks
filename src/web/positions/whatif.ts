@@ -2,8 +2,7 @@
 // switching names, and leaving the page, for the session (sessionStorage when the browser allows it). Nothing here
 // is ever sent anywhere.
 //
-// 13 Nov 2026 (Nik: "by default only keep income on and rest off", for every name): Every leg starts with the legs
-// sold on and the shares and legs bought off. The store keeps `flip`, the legs switched away from that start; the
+// 24 Nov 2026 (Nik: "keep all of them on"): every leg starts on. The store keeps `flip`, the legs switched off; the
 // page works out what is on. Only a flip counts as a What if change (Nik picked "Only what I flip").
 //
 // 24 Nov 2026 (handoff 2026-11-24 §4, Every leg is SunnyBook): Every leg's chips are kept here too (`cf`, the chips
@@ -16,7 +15,7 @@ import type { Trade } from './model';
 export interface Draft { side?: 's' | 'b'; ty?: 'c' | 'p'; K?: number; ex?: string; n?: number }
 export interface NameWhatIf { flip: string[]; trades: Trade[]; draft: Draft; cf: string[] }
 
-const KEY = 'sw-whatif2';
+const KEY = 'sw-whatif3';
 const EMPTY: NameWhatIf = { flip: [], trades: [], draft: {}, cf: [] };
 const store = new Map<string, NameWhatIf>();
 const subs = new Set<() => void>();
@@ -55,7 +54,7 @@ export function useWhatIf(book: string | null | undefined, t: string | null | un
   const toggleTrade = useCallback((id: number) => set(k, (x) => ({ ...x, trades: x.trades.map((u) => (u.id === id ? { ...u, on: !u.on } : u)) })), [k]);
   const remove = useCallback((id: number) => set(k, (x) => ({ ...x, trades: x.trades.filter((u) => u.id !== id) })), [k]);
   const setDraft = useCallback((d: Draft) => set(k, (x) => ({ ...x, draft: { ...x.draft, ...d } })), [k]);
-  /** Back to the book: the legs as they start (Income on), every trade gone, every chip on (the design's reset keeps
+  /** Back to the book: the legs as they start (every leg on), every trade gone, every chip on (the design's reset keeps
       the form). */
   const reset = useCallback(() => set(k, (x) => ({ ...x, flip: [], trades: [], cf: [] })), [k]);
   /** Several legs' own switches at once (a group's switch, Switch on all): `flip` says, per leg, whether it should sit
