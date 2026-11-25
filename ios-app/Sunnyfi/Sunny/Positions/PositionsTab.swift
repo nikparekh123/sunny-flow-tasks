@@ -34,7 +34,7 @@ struct PositionsTab: View {
     @State private var charts = PositionsCharts.shared
     @State private var targets = PositionsTargets.shared
     @State private var tries = PositionsTries.shared
-    /// Every leg's chips switched off, per "book|TICKER" ("ex:2026-11-27", "kind:c", "role:inc"), for as long as the app is open.
+    /// Every leg's chips switched off, per "book|TICKER" ("ex:2026-11-27", "kind:s", "leg:c:sold"), for as long as the app is open.
     @State private var chips: [String: Set<String>] = [:]
     /// Intelligence: what is picked, and the contracts added in Your trade, per "book|TICKER".
     @State private var strikeSel: [String: PosStrikeSel] = [:]
@@ -100,7 +100,7 @@ struct PositionsTab: View {
             .task {
                 #if DEBUG && targetEnvironment(simulator)
                 // Screens checked in the simulator: `-posAt intel` (or every, pay) scrolls there; `-posView price` shows Price;
-                // `-posChips role:sold,kind:s` switches those Every leg chips off for the name on screen.
+                // `-posChips leg:c:sold,kind:s` switches those Every leg chips off for the name on screen.
                 let a = ProcessInfo.processInfo.arguments
                 func arg(_ k: String) -> String? { a.firstIndex(of: k).flatMap { a.indices.contains($0 + 1) ? a[$0 + 1] : nil } }
                 if let v = arg("-posView") { view = v == "price" ? .price : .payoff }

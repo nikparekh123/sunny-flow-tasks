@@ -302,10 +302,10 @@ function Detail({ book, t, grid, payload, mask }: { book: BookId; t: string; gri
   const legIv = useMemo(() => new Map((inputs?.names.find((n) => n.t === t)?.legs ?? []).map((l) => [l.k, l.iv] as [string, number])), [inputs, t]);
   const tradeOf = useCallback((l: PLeg) => allTrades.find((u) => u.id === l.trade), [allTrades]);
   const chipName = useCallback((id: string) => {
-    const [b, v] = id.split(':');
+    const [b, v, side] = id.split(':');
     if (b === 'ex') return exShort(v, m.wholeDays(v));
-    if (b === 'kind') return v === 'C' ? 'Calls' : v === 'P' ? 'Puts' : 'Shares';
-    return v === 'sold' ? 'Sold' : 'Bought';
+    if (b === 'kind') return 'Shares';
+    return `${v === 'C' ? 'Calls' : 'Puts'} ${side === 'sold' ? 'sold' : 'bought'}`;
   }, [m]);
   const items: BookItem[] = useMemo(() => {
     const n0 = ny();
@@ -325,7 +325,8 @@ function Detail({ book, t, grid, payload, mask }: { book: BookId; t: string; gri
     const ls = [...base, ...pr.trades], has = (id: string) => ls.some((l) => chipIds(l).includes(id));
     const chip = (id: string): BookChip => ({ k: id, l: chipName(id), on: !cf.has(id), go: () => wf.toggleChip(id) });
     const exs = [...new Set(ls.filter((l) => l.ty !== 'S').map((l) => l.ex))].sort();
-    return [exs.map((x) => chip('ex:' + x)), ['kind:C', 'kind:P', 'kind:S'].filter(has).map(chip), ['side:sold', 'side:bought'].filter(has).map(chip)].filter((r) => r.length);
+    // The expiries, then Shares, Calls sold, Puts sold, Calls bought, Puts bought (Nik, 25 Nov 2026).
+    return [exs.map((x) => chip('ex:' + x)), ['kind:S', 'leg:C:sold', 'leg:P:sold', 'leg:C:bought', 'leg:P:bought'].filter(has).map(chip)].filter((r) => r.length);
   }, [base, pr, cf, chipName, wf]);
   // A group's switch, Switch on all: each leg's own switch to `v` (held legs as flips from where they start, What if
   // trades, the tries on the server).

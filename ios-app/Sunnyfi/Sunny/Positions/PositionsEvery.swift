@@ -5,10 +5,10 @@
 //  Every leg on the phone is SunnyBook, tone calm, List only (handoff 2026-11-24-final-2 §2.1; reference/SunnyBook.dc.html,
 //  phone; Nik, 24 Nov 2026: "remove the card view from mobile"). A saved sunny.book196p is ignored; the web keeps Rows | List.
 //    The header "Every leg · N legs · N off", the whole book in a 2-column grid (So far, Theta a day, Delta, Nearest
-//    call sold, Nearest put sold, To roll), then the chips on three lines: (1) the expiries, (2) Calls, Puts, Shares,
-//    (3) Sold, Bought (options only; Nik, 24 Nov 2026: never Long, Hedge or Income) with Switch off all (or on all) at
-//    the right end. No dividers between chips; a line too long for the screen scrolls sideways with no scroll
-//    indicator. A chip changes only itself (filled on, outlined off).
+//    call sold, Nearest put sold, To roll), then the chips on two lines (Nik, 25 Nov 2026): (1) the expiries,
+//    (2) Shares, Calls sold, Puts sold, Calls bought, Puts bought (only what the name holds) with Switch off all (or on
+//    all) at the end. No dividers between chips; the expiries scroll sideways with no scroll indicator when they run
+//    past the screen, the second line wraps (Nik, 25 Nov 2026). A chip changes only itself (filled on, outlined off).
 //    Then the legs, grouped by what each needs (In the money, Danger, Roll, Watch, Safe, Bought, Shares), nearest the
 //    strike first.
 //    No explanation or how-to lines anywhere (Nik, 24 Nov 2026): no hint under the chips and no definitions under the
@@ -93,8 +93,10 @@ struct PosEvery {
     /// The chips Switch off all turns off: every expiry and Shares (View by Expiry, the prototype's LIVE.all).
     var allOffChips: Set<String> { Set(chipRows.first?.filter { $0.id.hasPrefix("ex:") }.map(\.id) ?? []).union(legs.contains(where: \.sh) ? ["kind:s"] : []) }
 
+    /// The chip ids a leg answers to: shares "kind:s"; an option its expiry "ex:2026-11-27" and its kind and side,
+    /// "leg:c:sold" (Calls sold), "leg:p:bought" (Puts bought).
     static func chipOff(_ l: (ty: String, iso: String, role: Role), _ chips: Set<String>) -> Bool {
-        (l.ty != "s" && chips.contains("ex:" + l.iso)) || chips.contains("kind:" + l.ty) || chips.contains("role:" + l.role.rawValue)
+        l.ty == "s" ? chips.contains("kind:s") : chips.contains("ex:" + l.iso) || chips.contains("leg:\(l.ty):\(l.role.rawValue)")
     }
 
     /// `offs`: the legs switched off (PosName.offs); `chips`: the chips off; `sold`: this name's Sold in SD rows.
@@ -185,15 +187,17 @@ struct PosEvery {
             return Group(id: "L" + st.rawValue, title: "\(t) · \(ls.count)", sub: s, legs: ls,
                          sf: x.0, th: x.1, dl: x.2, none: !ls.contains(where: \.eff), own: own(ls), tone: st)
         }
-        // The chips: every expiry, then Calls, Puts, Shares, then Sold, Bought (only what the name holds).
+        // The chips: every expiry, then Shares, Calls sold, Puts sold, Calls bought, Puts bought (only what the name
+        // holds; Nik, 25 Nov 2026).
         let exChips = isos.map { Chip(id: "ex:" + $0, label: label($0), on: !chips.contains("ex:" + $0)) }
-        let kinds = [("c", "Calls"), ("p", "Puts"), ("s", "Shares")].filter { k in legs.contains { $0.ty == k.0 } }
-            .map { Chip(id: "kind:" + $0.0, label: $0.1, on: !chips.contains("kind:" + $0.0)) }
-        let roles = [(Role.sold, "Sold"), (.bought, "Bought")].filter { r in legs.contains { $0.role == r.0 } }
-            .map { Chip(id: "role:" + $0.0.rawValue, label: $0.1, on: !chips.contains("role:" + $0.0.rawValue)) }
+        let kinds: [(String, String, Role?, String)] = [("kind:s", "s", nil, "Shares"), ("leg:c:sold", "c", .sold, "Calls sold"),
+                                                        ("leg:p:sold", "p", .sold, "Puts sold"), ("leg:c:bought", "c", .bought, "Calls bought"),
+                                                        ("leg:p:bought", "p", .bought, "Puts bought")]
+        let legChips = kinds.filter { k in legs.contains { $0.ty == k.1 && (k.2 == nil || $0.role == k.2) } }
+            .map { Chip(id: $0.0, label: $0.3, on: !chips.contains($0.0)) }
         let all = sums(legs)
         let soldOn = legs.filter { $0.eff && $0.sold && $0.sN != nil }
-        return PosEvery(legs: legs, byStatus: byStatus, chipRows: [exChips, kinds, roles].filter { !$0.isEmpty },
+        return PosEvery(legs: legs, byStatus: byStatus, chipRows: [exChips, legChips].filter { !$0.isEmpty },
                         offGrid: Set(legs.filter { $0.tryID == nil && !$0.eff }.map(\.id)), onTries: onTries,
                         sfT: all.0, thT: all.1, dlT: all.2,
                         nearC: soldOn.filter(\.call).min { $0.sN! < $1.sN! }, nearP: soldOn.filter { !$0.call }.min { $0.sN! < $1.sN! },
@@ -285,12 +289,13 @@ struct PosEveryBook: View {
 
     // MARK: The chips (handoff 2026-11-24-final-2 §2.1)
 
-    /// Three lines: the expiries, then Calls Puts Shares, then Sold Bought with Switch off all at the right end of the
-    /// last line. No dividers; each line scrolls sideways on its own when it runs past the screen (no indicator).
+    /// The expiries on one line that scrolls sideways when it runs past the screen (no indicator), then Shares, Calls
+    /// sold, Puts sold, Calls bought, Puts bought and Switch off all, wrapping onto more lines (Nik, 25 Nov 2026: no
+    /// chip cut off at the edge). No dividers.
     private var chips: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(m.chipRows.enumerated()), id: \.offset) { i, row in
-                HStack(alignment: .center, spacing: 6) {
+                if i < m.chipRows.count - 1 {
                     ScrollView(.horizontal) {
                         HStack(spacing: 6) { ForEach(row) { chipButton($0) } }
                             .padding(.horizontal, 2)
@@ -298,9 +303,13 @@ struct PosEveryBook: View {
                     .scrollIndicators(.hidden)
                     .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
                     .padding(.horizontal, -2)
-                    if i == m.chipRows.count - 1 { allButton }
+                    .frame(height: 44)
+                } else {
+                    SXFlowGaps(column: 6, row: 0) {
+                        ForEach(row) { chipButton($0) }
+                        allButton
+                    }
                 }
-                .frame(height: 44)
             }
         }
         .accessibilityElement(children: .contain)

@@ -2,7 +2,7 @@
 // legs. It replaces the old Every leg table and its Whole book row, and Sold, in SD lives in it now.
 //   Header: Every leg and how many legs (no how-to line: Nik, 24 Nov 2026); Rows | List (kept per computer in localStorage sunny.book196w)
 //   and the name's price. The whole book on one line: So far, Theta a day, Delta, the nearest call and put sold, To
-//   roll. The chips (Expiry · Type · Sold | Bought), each its own switch; Switch off all (Switch on all when nothing counts);
+//   roll. The chips (Expiry · Shares, Calls sold, Puts sold, Calls bought, Puts bought), each its own switch; Switch off all (Switch on all when nothing counts);
 //   Reset when a chip is off. The status legend.
 //   Rows: a group an expiry (its switch, a fold, So far, Delta and Theta of what counts), each a ladder: calls above
 //   today's price, puts below, the highest strike first. Shares last.
@@ -372,5 +372,5 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
   );
 }
 
-/** The chip ids a leg answers to: its expiry and its side, Sold or Bought (not for shares), and its type. */
-export const chipIds = (l: PLeg) => { const s = sideOf(l); return [...(s ? ['ex:' + l.ex] : []), 'kind:' + l.ty, ...(s ? ['side:' + s] : [])]; };
+/** The chip ids a leg answers to: shares "kind:S"; an option its expiry and its kind and side ("leg:C:sold", Calls sold). */
+export const chipIds = (l: PLeg) => { const s = sideOf(l); return s ? ['ex:' + l.ex, `leg:${l.ty}:${s}`] : ['kind:' + l.ty]; };

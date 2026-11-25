@@ -9,7 +9,8 @@
 // switched off: "ex:2026-11-27", "kind:C", "side:sold"). Each chip is its own switch and changes only itself; a leg
 // counts when its own switch and each of its chips are on. Back to the book clears the chips with the rest.
 // sw-whatif4 (24 Nov 2026): the Long, Hedge and Income chips became Sold and Bought; the new key leaves the old
-// role: ids behind.
+// role: ids behind. 25 Nov 2026 (Nik): the type and side chips became one row, Shares, Calls sold, Puts sold,
+// Calls bought, Puts bought ("kind:S", "leg:C:sold"); the old "kind:C", "kind:P" and "side:" ids are dropped on load.
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import type { Trade } from './model';
 
@@ -25,7 +26,9 @@ const subs = new Set<() => void>();
 try {
   sessionStorage.removeItem('sw-whatif3');
   const raw = sessionStorage.getItem(KEY);
-  if (raw) for (const [k, v] of Object.entries(JSON.parse(raw) as Record<string, NameWhatIf>)) store.set(k, { ...EMPTY, ...v });
+  if (raw) for (const [k, v] of Object.entries(JSON.parse(raw) as Record<string, NameWhatIf>)) {
+    store.set(k, { ...EMPTY, ...v, cf: (v.cf ?? []).filter((id) => !/^kind:[CP]$|^side:/.test(id)) });
+  }
 } catch { /* a private window: this session only */ }
 
 const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify(Object.fromEntries(store))); } catch { /* ignore */ } };
