@@ -31,10 +31,10 @@ function Block({ k, p, mask, who }: { k: PKey; p: Part; mask: (s: string) => str
   const segs: [string, string, string][] = [[nowS, 'now', K], [pct(x), xw, c], ...(tvS ? [[tvS, 'time value', K] as [string, string, string]] : [])];
   return (
     <div role="group" aria-label={aria} style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-      <span aria-hidden="true" style={{ fontSize: 15, lineHeight: '20px', color: MU, whiteSpace: 'nowrap' }}>{def.l} · {word}</span>
-      <span aria-hidden="true" style={{ marginTop: 2, fontSize: 40, lineHeight: '44px', fontWeight: 700, letterSpacing: '-0.02em', color: c, whiteSpace: 'nowrap' }}>{big}</span>
+      <span aria-hidden="true" style={{ fontSize: 14, lineHeight: '18px', color: MU, whiteSpace: 'nowrap' }}>{def.l} · {word}</span>
+      <span aria-hidden="true" style={{ marginTop: 2, fontSize: 30, lineHeight: '36px', fontWeight: 700, letterSpacing: '-0.02em', color: c, whiteSpace: 'nowrap' }}>{big}</span>
       <span aria-hidden="true" style={{ marginTop: 4, display: 'block', overflow: 'hidden' }}>
-        <span style={{ display: 'flex', flexWrap: 'wrap', marginLeft: -SEP, fontSize: 15, lineHeight: '20px', fontWeight: 400, color: MU }}>
+        <span style={{ display: 'flex', flexWrap: 'wrap', marginLeft: -SEP, fontSize: 14, lineHeight: '18px', fontWeight: 400, color: MU }}>
           {segs.map(([v, w, col]) => (
             <span key={w} style={{ whiteSpace: 'nowrap' }}>
               <span style={{ display: 'inline-block', width: SEP, textAlign: 'center', userSelect: 'none' }}>·</span>

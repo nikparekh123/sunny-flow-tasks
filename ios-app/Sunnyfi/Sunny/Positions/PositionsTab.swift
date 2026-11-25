@@ -525,12 +525,12 @@ struct PosPartBlock: View {
         let word = p.sold ? (up ? "kept" : "lost") : (up ? "gain" : "loss")
         let pctWord = p.sold ? "captured" : "return"
         VStack(alignment: .leading, spacing: 0) {
-            Text("\(p.label) · \(word)").sType(PT.t(15, 20), tabular: false).foregroundStyle(PC.mu).lineLimit(1)
-            Text(money(p.all)).sType(PT.t(40, 44, 700, tr: -0.02)).foregroundStyle(c)
+            Text("\(p.label) · \(word)").sType(PT.t(14, 18), tabular: false).foregroundStyle(PC.mu).lineLimit(1)
+            Text(money(p.all)).sType(PT.t(30, 36, 700, tr: -0.02)).foregroundStyle(c)
                 .lineLimit(1).minimumScaleFactor(0.6)
                 .padding(.top, 2)
             sub(c, pctWord: pctWord)
-                .sType(PT.t(15, 20), tabular: true).foregroundStyle(PC.mu)
+                .sType(PT.t(14, 18), tabular: true).foregroundStyle(PC.mu)
                 .lineLimit(1).minimumScaleFactor(0.75)
                 .padding(.top, 4)
         }
@@ -542,7 +542,7 @@ struct PosPartBlock: View {
     /// "$92.3K now · 33.3% return · $91.3K time value": figures semibold in ink, the % in its colour, words muted.
     /// Inter is one variable font, so the semibold is its own font (fontWeight cannot reach the wght axis).
     private func sub(_ c: Color, pctWord: String) -> Text {
-        let semi = Font.inter(scales ? SDynamic.scaled(15, dts) : 15, 600, tabular: true)
+        let semi = Font.inter(scales ? SDynamic.scaled(14, dts) : 14, 600, tabular: true)
         var t = Text(money(p.now)).font(semi).foregroundStyle(PC.ink) + Text(" now · ")
             + Text(PE.pcx(p.pct)).font(semi).foregroundStyle(c) + Text(" \(pctWord)")
         if let tv = p.tv {
