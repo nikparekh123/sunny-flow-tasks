@@ -2,21 +2,23 @@
 // legs. It replaces the old Every leg table and its Whole book row, and Sold, in SD lives in it now.
 //   Header: Every leg and how many legs (no how-to line: Nik, 24 Nov 2026); Rows | List (kept per computer in localStorage sunny.book196w)
 //   and the name's price. The whole book on one line: So far, Theta a day, Delta, the nearest call and put sold, To
-//   roll. The chips (Expiry · Type · Role), each its own switch; Switch off all (Switch on all when nothing counts);
+//   roll. The chips (Expiry · Type · Sold | Bought), each its own switch; Switch off all (Switch on all when nothing counts);
 //   Reset when a chip is off. The status legend.
 //   Rows: a group an expiry (its switch, a fold, So far, Delta and Theta of what counts), each a ladder: calls above
 //   today's price, puts below, the highest strike first. Shares last.
-//   List: a group by what each leg needs (In the money, Danger, Roll, Watch, Safe, Hedges, Shares), nearest first.
+//   List: a group by what each leg needs (In the money, Danger, Roll, Watch, Safe, Bought, Shares), nearest first.
 // Each leg: its switch, SD sold → now (sunny-sd sold[].z0 when sold; now from the leg's own IV over the trading days
 // left, positions-engine), the breakeven under 0.5 SD, the status (Danger under 0.5 SD, Watch to 1 SD, Safe past it,
-// Roll at 90% kept, In the money, Hedge), sold at → now with kept, So far, Delta, Theta a day.
+// Roll at 90% kept, In the money, Bought), sold at → now with kept, So far, Delta, Theta a day.
+// Each leg by what it is (Nik, 24 Nov 2026): Shares, Calls bought, Calls sold, Puts bought, Puts sold; never Long, Hedge
+// or Income (Long and Short stay only as a delta's direction).
 // Calm: colour only on Danger, In the money, Roll and losses; legs with nothing to do read grey. A leg counts when
 // its own switch and each of its chips are on; off legs fade and leave Payoff and the Greeks (the page's sets).
 // No em dashes, no minus signs on money.
 import { useMemo, useState, type CSSProperties } from 'react';
 import { count, money } from '../lib/format';
 import { fk, type PLeg, type Pricer } from './model';
-import { roleOf } from './totals';
+import { sideOf } from './totals';
 
 const W = '#F5F5F7', MU = '#98989D', TX = '#AEAEB2', QG = '#8E8E93', RED = '#FF6961', GRN = '#65C466';
 const VKEY = 'sunny.book196w';
@@ -47,7 +49,7 @@ type St = '' | 'itm' | 'dan' | 'wat' | 'safe' | 'roll' | 'hed';
 const ST: Record<Exclude<St, ''>, [string, string, string, string]> = {
   itm: ['In the money', RED, '#000000', 'none'], dan: ['Danger', 'rgba(255,105,97,.18)', RED, 'none'],
   wat: ['Watch', 'transparent', QG, 'none'], safe: ['Safe', 'transparent', QG, 'none'],
-  roll: ['Roll', GRN, '#000000', 'none'], hed: ['Hedge', 'transparent', MU, 'inset 0 0 0 1px rgba(255,255,255,.22)'],
+  roll: ['Roll', GRN, '#000000', 'none'], hed: ['Bought', 'transparent', MU, 'inset 0 0 0 1px rgba(255,255,255,.22)'],
 };
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** "Nov 27", or "Mar 19 ’27" past six months (chips name a day, never only a month). */
@@ -101,7 +103,7 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
     const s0 = it.s0 ?? (it.added ? it.sN : null);
     const dS = sold && s0 != null ? Math.round(it.sN * 100) - Math.round(s0 * 100) : 0;
     const nm = sh ? 'Shares' : `${fk(l.K)} ${l.ty === 'C' ? 'call' : 'put'}`;
-    const cnt = sh ? `${count(l.q)} at $${f2(l.K)}` : `${sold ? 'Sold ×' : 'Hedge ×'}${count(l.q)}${it.tried ? ' · from Intelligence' : it.added ? ' · a what if' : ''}`;
+    const cnt = sh ? `${count(l.q)} at $${f2(l.K)}` : `${sold ? 'Sold ×' : 'Bought ×'}${count(l.q)}${it.tried ? ' · from Intelligence' : it.added ? ' · a what if' : ''}`;
     const sdN = sh ? '' : it.sN < 0 ? 'In the money' : `${f2(it.sN)} SD`;
     const gn = hd && l.at ? Math.round((l.now / l.at - 1) * 100) : 0;
     const px2 = sold && r.kp != null ? (r.kp >= 0 ? `${r.kp}% kept` : `${Math.abs(r.kp)}% lost`) : hd && l.at ? `${gn >= 0 ? 'Up' : 'Down'} ${Math.abs(gn)}%` : '';
@@ -142,7 +144,7 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
     ...(nR ? [{ k: 'nr', l: 'To roll', v: `${nR} at 90% kept`, c: GRN }] : []),
   ];
   const nS = rows.filter((r) => r.sold).length, nH = rows.filter((r) => r.hd).length, hasSh = rows.some((r) => r.sh), nOff = rows.filter((r) => !r.it.eff).length;
-  const cnt = `${rows.length} ${rows.length === 1 ? 'leg' : 'legs'} · ` + [nS ? `${nS} sold` : '', nH ? `${nH} ${nH === 1 ? 'hedge' : 'hedges'}` : '', hasSh ? 'shares' : ''].filter(Boolean).join(', ') + (nOff ? ` · ${nOff} off` : '');
+  const cnt = `${rows.length} ${rows.length === 1 ? 'leg' : 'legs'} · ` + [nS ? `${nS} sold` : '', nH ? `${nH} bought` : '', hasSh ? 'shares' : ''].filter(Boolean).join(', ') + (nOff ? ` · ${nOff} off` : '');
   const ch = P0 > 0 ? (S0 / P0 - 1) * 100 : 0, mvA = Math.abs(ch) < 0.05 ? '' : ch > 0 ? '↑' : '↓', mvT = Math.abs(ch) < 0.05 ? 'Flat today' : `${Math.abs(ch).toFixed(1)}% today`;
 
   /* ── Rows: a group an expiry ── */
@@ -166,7 +168,7 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
 
   /* ── List: a group by what each leg needs ── */
   const SG: [St, string, string, string][] = [['itm', 'In the money', 'past the strike', RED], ['dan', 'Danger', 'under 0.5 SD from the strike', RED], ['roll', 'Roll', '90% or more kept, ready to roll', GRN],
-    ['wat', 'Watch', '0.5 to 1 SD from the strike', W], ['safe', 'Safe', 'over 1 SD from the strike', W], ['hed', 'Hedges', 'bought, nearest first', W], ['', 'Shares', 'no expiry', W]];
+    ['wat', 'Watch', '0.5 to 1 SD from the strike', W], ['safe', 'Safe', 'over 1 SD from the strike', W], ['hed', 'Bought', 'nearest first', W], ['', 'Shares', 'no expiry', W]];
   const lst = view !== 'list' ? [] : SG.map(([sk, tt, sub, tc]) => {
     const rs = rows.filter((r) => r.st === sk).sort((a, b) => (sk === 'roll' ? (b.kp ?? 0) - (a.kp ?? 0) : a.it.sN - b.it.sN));
     return { k: 'L' + sk, rs, s: sums(rs), t: `${tt} · ${rs.length}`, sub, tc, tt };
@@ -249,7 +251,7 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
   const tri = (s: ReturnType<typeof sums>) => ({
     sf: km(s.sf), sfc: s.none ? MU : cl(s.sf), dl: s.none ? 'off' : dTx(s.dl), dlc: s.none ? MU : s.dl < 0 ? RED : W, th: km(s.th), thc: s.none ? MU : cl(s.th),
   });
-  const legend: [Exclude<St, ''>, string][] = [['dan', 'under 0.5 SD'], ['wat', '0.5 to 1 SD'], ['safe', 'over 1 SD'], ['roll', '90% kept'], ['itm', ''], ['hed', 'bought']];
+  const legend: [Exclude<St, ''>, string][] = [['dan', 'under 0.5 SD'], ['wat', '0.5 to 1 SD'], ['safe', 'over 1 SD'], ['roll', '90% kept'], ['itm', ''], ['hed', '']];
 
   return (
     <div role="region" aria-label="Every leg" className="tnum" style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
@@ -370,5 +372,5 @@ export function Book({ t, S0, P0, pr, items, chips, mL, mGo, reset, setL, mask }
   );
 }
 
-/** The chip ids a leg answers to: its expiry (not for shares), its type and its role. */
-export const chipIds = (l: PLeg) => [...(l.ty !== 'S' ? ['ex:' + l.ex] : []), 'kind:' + l.ty, 'role:' + roleOf(l)];
+/** The chip ids a leg answers to: its expiry and its side, Sold or Bought (not for shares), and its type. */
+export const chipIds = (l: PLeg) => { const s = sideOf(l); return [...(s ? ['ex:' + l.ex] : []), 'kind:' + l.ty, ...(s ? ['side:' + s] : [])]; };

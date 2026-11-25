@@ -3,8 +3,8 @@
 //  Sunny
 //
 //  DEBUG, simulator only: `-yourbook <file.json>` shows Your book (Positions) alone, from a saved brief_inputs.parts
-//  ({book: {sh, hc, ip, sc, sp}}), with no sign-in, so the card can be checked against real figures.
-//  `-yourbookOpen Hedge` opens a group. Under it, each name's own book (§2.3) with Hedge open.
+//  ({book: {sh, hc, ip, sc, sp}, names: {...}}), with no sign-in, so the card can be checked against real figures.
+//  Under it, each name's own book (§2.3).
 //  `-payoffCheck <file.json>` ({wire, name, inputs}: a sunny-positions reply and its brief_inputs) shows that name's
 //  Payoff with the date and range sliders; `-payAt 0` and `-payRange 30` set them, `-payTarget 37.5` adds a target.
 //
@@ -14,10 +14,6 @@ import SwiftUI
 
 struct YourBookCheck: View {
     let path: String
-    @State private var open: Set<String> = Set(ProcessInfo.processInfo.arguments.firstIndex(of: "-yourbookOpen")
-        .flatMap { i in ProcessInfo.processInfo.arguments.indices.contains(i + 1) ? [ProcessInfo.processInfo.arguments[i + 1]] : nil } ?? [])
-
-    @State private var own: String? = "Hedge"
 
     static let file: String? = {
         let a = ProcessInfo.processInfo.arguments
@@ -30,12 +26,12 @@ struct YourBookCheck: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Positions").sType(PT.title, tabular: false).foregroundStyle(PC.ink).padding(.horizontal, 16)
-                PosYourBook(groups: PosBook.groups(j?["book"] ?? .null), open: $open, privacy: false, reduce: false)
+                PosYourBook(parts: PosBook.parts(j?["book"] ?? .null), tickers: (j?["names"] ?? .null).object.count, privacy: false)
                     .padding(.horizontal, 16)
                 ForEach(["NKE", "BABA", "FIS", "NVDA", "SPCX"], id: \.self) { t in
                     if case .object = j?["names"][t] ?? .null {
                         Text(t).sType(PT.t(20, 26, 700), tabular: false).foregroundStyle(PC.ink).padding(.horizontal, 16)
-                        PosNameBook(t: t, groups: PosBook.groups(j?["names"][t] ?? .null), open: $own, privacy: false, reduce: false)
+                        PosNameBook(t: t, parts: PosBook.parts(j?["names"][t] ?? .null), privacy: false)
                             .padding(.horizontal, 16)
                     }
                 }

@@ -28,8 +28,16 @@
  * before. A median over invented rows is worse than a median over fewer real ones,
  * and the card already knows how to say nothing.
  *
+ * ⚠ THETA MODE (24 Nov 2026, Nik: "rebuild IWM's past IV from Theta so IV rank shows now"). Polygon's option
+ * history went thin (IWM: 2 of 9 days solved), and the live reading itself has come from Theta since 12 Oct. With
+ * {"source":"theta"} each past session is read EXACTLY as ticker-iv-snapshot reads today: the expiry nearest 30
+ * days (16 to 44), Theta's end-of-day bid and ask on it, the stock price from put-call parity at the strike where
+ * call and put are closest, the call nearest that price, Black-Scholes at r 4% and no dividend, T from 4:15 PM.
+ * Same method, same number, so an IV rank over the rebuilt days compares like with like.
+ *
  * Trigger:
  *   POST {"tickers":["BABA","PEP"],"from":"2026-06-01","to":"2026-08-20"}
+ *   POST {"tickers":["IWM"],"source":"theta","from":"2025-11-24"}   (dry_run: true to check first)
  * `to` defaults to the day before the name's earliest row on file, so the default
  * run extends history backwards rather than rewriting what the cron already took.
  */
@@ -122,20 +130,129 @@ async function contractsAsOf(tk: string, spot: number, asOf: string, key: string
   return out;
 }
 
+// ── Theta mode: ticker-iv-snapshot's own reading, on a past session ────────────────────────────
+const THETA_URL = Deno.env.get('THETA_URL') ?? '';
+const THETA_KEY = Deno.env.get('THETA_PROXY_KEY') ?? '';
+const LIVE_DTE = 30, LIVE_WIN = 14, LIVE_R = 0.04;
+async function thetaJson(path: string): Promise<Array<Record<string, unknown>>> {
+  const r = await fetch(`${THETA_URL}${path}&format=json`, { headers: { 'x-proxy-key': THETA_KEY }, signal: AbortSignal.timeout(30_000) });
+  if (r.status === 472) return [];                       // no data for that request
+  if (!r.ok) throw new Error(`theta ${r.status}`);
+  const j = await r.json();
+  return (Array.isArray(j) ? j : (j?.response ?? [])) as Array<Record<string, unknown>>;
+}
+/** ticker-iv-snapshot's normal CDF and call price, unchanged, so the rebuilt days match the live ones. */
+function liveNcdf(x: number): number {
+  const t = 1 / (1 + 0.3275911 * Math.abs(x) / Math.SQRT2);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
+    + 0.254829592) * t * Math.exp(-x * x / 2);
+  return x >= 0 ? (1 + y) / 2 : (1 - y) / 2;
+}
+function liveBsCall(S: number, K: number, T: number, v: number, r = LIVE_R): number {
+  const sq = v * Math.sqrt(T), d1 = (Math.log(S / K) + (r + v * v / 2) * T) / sq;
+  return S * liveNcdf(d1) - K * Math.exp(-r * T) * liveNcdf(d1 - sq);
+}
+const iso = (e: string) => (e.includes('-') ? e : `${e.slice(0, 4)}-${e.slice(4, 6)}-${e.slice(6, 8)}`);
+/** The live reading on session `day` from one expiry's end-of-day quotes; null when it cannot be read. */
+async function thetaIvOn(tk: string, day: string, exp: string): Promise<{ iv: number; occ: string } | null> {
+  const T = (Date.parse(`${exp}T20:00:00Z`) - Date.parse(`${day}T21:15:00Z`)) / 864e5 / 365;
+  if (!(T > 0)) return null;
+  const D = day.replaceAll('-', '');
+  const rows = await thetaJson(`/v3/option/history/eod?symbol=${tk}&expiration=${exp.replaceAll('-', '')}&start_date=${D}&end_date=${D}`);
+  const by = new Map<number, { c?: number; p?: number }>();
+  for (const r of rows) {
+    const c = r.contract as { right: string; strike: number } | undefined;
+    const d = ((r.data as Array<Record<string, number>>) ?? []).at(-1);
+    if (!c || !d || !(d.bid > 0 && d.ask > 0)) continue;
+    const e = by.get(Number(c.strike)) ?? {}; e[String(c.right).toLowerCase().startsWith('c') ? 'c' : 'p'] = (d.bid + d.ask) / 2;
+    by.set(Number(c.strike), e);
+  }
+  let S: number | null = null, gap = Infinity;
+  for (const [k, e] of by) {
+    if (e.c == null || e.p == null) continue;
+    if (Math.abs(e.c - e.p) < gap) { gap = Math.abs(e.c - e.p); S = e.c - e.p + k * Math.exp(-LIVE_R * T); }
+  }
+  if (S == null) return null;
+  const calls = [...by.entries()].filter(([, e]) => e.c != null).sort((a, b) => Math.abs(a[0] - S!) - Math.abs(b[0] - S!));
+  if (!calls.length) return null;
+  const [K, e] = calls[0];
+  const mid = e.c!;
+  if (!(mid > Math.max(0, S - K * Math.exp(-LIVE_R * T)) + 0.005)) return null;
+  let lo = 0.01, hi = 4;
+  for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (liveBsCall(S, K, T, m) < mid) lo = m; else hi = m; }
+  const occ = `O:${tk}${exp.slice(2, 4)}${exp.slice(5, 7)}${exp.slice(8, 10)}C${String(Math.round(K * 1000)).padStart(8, '0')}`;
+  return { iv: (lo + hi) / 2, occ };
+}
+const THETA_CAP = 110;   // sessions per call (about 1 s each); pass `next_to` back as `to` to go on
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   try {
-    const key = Deno.env.get('POLYGON_API_KEY');
-    if (!key) return json(200, { ok: false, error: 'POLYGON_API_KEY is not set' });
+    const key = Deno.env.get('POLYGON_API_KEY') ?? '';
     const admin = createClient(Deno.env.get('SUPABASE_URL')!,
                                Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
     const body = await req.json().catch(() => ({})) as
-      { tickers?: string[]; from?: string; to?: string; dry_run?: boolean };
+      { tickers?: string[]; from?: string; to?: string; dry_run?: boolean; source?: string };
     const tickers = body.tickers?.length ? body.tickers : [];
     if (!tickers.length) return json(200, { ok: false, error: 'pass {"tickers":[...]}' });
-    const from = body.from ?? ymd(addDays(new Date(), -160));
+    const from = body.from ?? ymd(addDays(new Date(), body.source === 'theta' ? -366 : -160));
 
+    if (body.source === 'theta') {
+      if (!THETA_URL || !THETA_KEY) return json(200, { ok: false, error: 'THETA_URL / THETA_PROXY_KEY not set' });
+      const report: Record<string, unknown>[] = [];
+      for (const tk0 of tickers) {
+        const tk = tk0.toUpperCase();
+        let to = body.to ?? null;
+        if (!to) {
+          const { data } = await admin.from('ticker_iv_daily').select('snapshot_date').eq('ticker', tk)
+            .order('snapshot_date', { ascending: true }).limit(1);
+          const first = (data ?? [])[0]?.snapshot_date as string | undefined;
+          to = first ? ymd(addDays(new Date(first + 'T00:00:00Z'), -1)) : ymd(new Date());
+        }
+        if (to < from) { report.push({ ticker: tk, skipped: 'nothing to fill', from, to }); continue; }
+        // The sessions: the name's own daily closes (newest first, so a capped run stays next to the live rows).
+        const { data: cl } = await admin.from('daily_closes').select('date').eq('ticker', tk)
+          .gte('date', from).lte('date', to).order('date', { ascending: false }).limit(1000);
+        const days = (cl ?? []).map((r) => String(r.date));
+        if (!days.length) { report.push({ ticker: tk, error: 'no daily closes in range', from, to }); continue; }
+        const listed = [...new Set((await thetaJson(`/v3/option/list/expirations?symbol=${tk}`))
+          .map((x) => iso(String(x.expiration ?? x.date ?? ''))).filter((e) => e.length === 10))].sort();
+        const rows: Record<string, unknown>[] = [], misses: string[] = [];
+        let processed = 0;
+        for (const day of days) {
+          if (processed >= THETA_CAP) break;
+          processed++;
+          const dte = (e: string) => (Date.parse(`${e}T20:00:00Z`) - Date.parse(`${day}T21:15:00Z`)) / 864e5;
+          const cands = listed.filter((e) => Math.abs(dte(e) - LIVE_DTE) <= LIVE_WIN)
+            .sort((a, b) => Math.abs(dte(a) - LIVE_DTE) - Math.abs(dte(b) - LIVE_DTE));
+          if (!cands.length) { misses.push(`${day} no expiry 16 to 44 days out`); continue; }
+          // The live reading takes the nearest one only; a past day whose nearest has no quotes tries the next two.
+          let got: { iv: number; occ: string } | null = null;
+          try {
+            for (const e of cands.slice(0, 3)) { got = await thetaIvOn(tk, day, e); if (got) break; }
+          } catch (e) { misses.push(`${day} ${(e as Error).message}`); continue; }
+          if (!got || !(got.iv > 0.02 && got.iv < 3)) { misses.push(`${day} no reading`); continue; }
+          rows.push({ ticker: tk, snapshot_date: day, atm_iv: Math.round(got.iv * 10000) / 10000,
+            source: 'backfill', contract_used: `theta ${got.occ}`, captured_at: new Date().toISOString() });
+        }
+        if (rows.length && !body.dry_run) {
+          for (let i = 0; i < rows.length; i += 100) {
+            const { error } = await admin.from('ticker_iv_daily').upsert(rows.slice(i, i + 100), { onConflict: 'ticker,snapshot_date' });
+            if (error) throw new Error(`write ${error.message}`);
+          }
+        }
+        const oldest = days[Math.min(processed, days.length) - 1];
+        report.push({ ticker: tk, source: 'theta', from, to, processed, solved: rows.length, missed: misses.length,
+          next_to: processed >= THETA_CAP && processed < days.length && oldest ? ymd(addDays(new Date(oldest + 'T00:00:00Z'), -1)) : null,
+          range: rows.length ? [rows[rows.length - 1].snapshot_date, rows[0].snapshot_date] : null,
+          sample: (body.dry_run ? rows : rows.slice(0, 3)).map((r) => [r.snapshot_date, r.atm_iv, r.contract_used]),
+          misses: misses.slice(0, 6) });
+      }
+      return json(200, { ok: true, dry_run: !!body.dry_run, report });
+    }
+
+    if (!key) return json(200, { ok: false, error: 'POLYGON_API_KEY is not set' });
     const report: Record<string, unknown>[] = [];
     for (const tk of tickers) {
       /* ⚠ THE DEFAULT `to` IS THE DAY BEFORE THE FIRST ROW ON FILE. The cron's

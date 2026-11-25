@@ -5,13 +5,15 @@
 //  Share average (handoff 2026-11-18, round 157a; Nik's rule of 15 Nov 2026): one card per name holding shares, on the
 //  weekend Home (section "Share average" after Your book, cards 341 wide that snap sideways, only the names whose
 //  average moved this week, biggest move first, the rest in one quiet line) and in Search. Never on Positions.
-//  New average = (shares × average paid − realized) ÷ shares; realized = every close on the ticker since the book
-//  started. On this card down is good: a lower average is a win. Data: sunny-home `share_avg` (index.ts).
+//  New average = (shares × average paid − premium kept) ÷ shares; premium kept = every close of a call or put sold on
+//  the ticker since the book started (Nik, 24 Nov 2026: premium kept only). On this card down is good: a lower average
+//  is a win. Data: sunny-home `share_avg` (index.ts), s2 = [calls sold, puts sold] a share.
 //    Header: logo, ticker, N shares; "Down $8.13" green, "Up" red, "Held" grey.
-//    Summary: "Ahead of the price by $X a share." then "Closed trades took $Y off the $Z you paid."
+//    Summary: "Ahead of the price by $X a share." then "Sold calls and puts took $Y off the $Z you paid."
 //    Chart: the week's closes, the average from last Friday to now, the gap shaded (green under the price, red over),
 //    Paid dashed, tags Avg · Price · Paid on the right.
-//    What moved it · a share · since Sep 1: five tiles in the Performance legend colours (up is a loss, red).
+//    What moved it · a share · since Sep 1: two tiles, Calls sold and Puts sold, in the Performance legend colours
+//    (up is a loss, red).
 //  No em dashes in any words here.
 //
 
@@ -47,8 +49,8 @@ struct ShareAvgCard: View {
     let a: JSONValue
     let privacy: Bool
 
-    static let labels = ["Calls sold", "Puts sold", "Calls bought", "Puts bought", "Shares sold"]
-    static let colors: [Color] = [S.dyn(0x327133, 0x327133), S.dyn(0x2E5ECA, 0x2E5ECA), S.dyn(0x65C466, 0x65C466), S.dyn(0x73B6F9, 0x73B6F9), S.dyn(0xF2A93B, 0xF2A93B)]
+    static let labels = ["Calls sold", "Puts sold"]
+    static let colors: [Color] = [S.dyn(0x327133, 0x327133), S.dyn(0x2E5ECA, 0x2E5ECA)]
     private let H: CGFloat = 140
 
     private func m2(_ v: Double) -> String { String(format: "$%.2f", abs(v)) }
@@ -87,8 +89,8 @@ struct ShareAvgCard: View {
         let first: Text = at ? Text("At the price.").fontWeight(.semibold)
             : Text("\(ahead ? "Ahead of" : "Behind") the price by ").fontWeight(.semibold) + Text(m2(gap)).fontWeight(.semibold).foregroundStyle(ahead ? S.green : S.red)
                 + Text(" a share.").fontWeight(.semibold)
-        let rest: Text = even ? Text(" Closed trades left the \(m2(paid)) you paid where it was.")
-            : Text(" Closed trades \(pd0 > 0 ? "added " : "took ")") + Text(m2(pd0)).foregroundStyle(pd0 > 0 ? S.red : S.green)
+        let rest: Text = even ? Text(" Sold calls and puts left the \(m2(paid)) you paid where it was.")
+            : Text(" Sold calls and puts \(pd0 > 0 ? "added " : "took ")") + Text(m2(pd0)).foregroundStyle(pd0 > 0 ? S.red : S.green)
                 + Text("\(pd0 > 0 ? " to" : " off") the \(m2(paid)) you paid.")
         return (first + rest).sType(SType(size: 15, weight: 400, line: 21, tracking: 0)).foregroundStyle(S.ink)
             .fixedSize(horizontal: false, vertical: true)
@@ -170,11 +172,12 @@ struct ShareAvgCard: View {
         .accessibilityLabel("Share average by Friday, \(String(format: "%.2f", avg0)) to \(String(format: "%.2f", avg1)); paid \(String(format: "%.2f", paid)), price \(String(format: "%.2f", px)). The average is \(avg1 < px ? "under" : "over") the price.")
     }
 
-    /// What moved it · a share · since the book started: five tiles, the Performance legend colours; up is a loss.
+    /// What moved it · a share · since the book started: Calls sold and Puts sold, the Performance legend colours; up is
+    /// a loss.
     private func tiles(_ s2: [Double]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("What moved it · a share · since Sep 1").sType(SType(size: 12, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(S.secondary)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .leading), count: 3), alignment: .leading, spacing: 10) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .leading), count: Self.labels.count), alignment: .leading, spacing: 10) {
                 ForEach(Array(Self.labels.enumerated()), id: \.offset) { j, l in
                     let v = s2.indices.contains(j) ? s2[j] : 0, z = v == 0, tz = !z && abs(v) < 0.005
                     VStack(alignment: .leading, spacing: 2) {
@@ -187,7 +190,7 @@ struct ShareAvgCard: View {
                     }
                     .opacity(z ? 0.35 : 1)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(l), " + (z ? "nothing closed yet" : tz ? "under a cent" : v > 0 ? "pushed the average up \(m2(v)) a share" : "took \(m2(v)) a share off the average"))
+                    .accessibilityLabel("\(l), " + (z ? "nothing kept yet" : tz ? "under a cent" : v > 0 ? "pushed the average up \(m2(v)) a share" : "took \(m2(v)) a share off the average"))
                 }
             }
         }

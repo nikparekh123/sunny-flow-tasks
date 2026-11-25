@@ -3,10 +3,10 @@
 //  Sunny
 //
 //  The Positions tab (handoff 2026-11-13-positions §2, 2026-11-18 §2, 2026-11-24 §4), top to bottom:
-//    the account strip · large title Positions, "Sunny’s book · Fri Nov 13 close" · Your book (one flat card, Long ·
-//    Hedge · Income with Today and All time; Income leads with what is left to earn; no account lines on Together) · the
-//    name strip (Together: Sunny's names, a hairline, Nicolay's) · the
-//    name header · the name's own book · Share average · Payoff | Price (the Payoff's touch reads the Greeks at that
+//    the account strip · large title Positions, "Sunny’s book · Fri Nov 13 close" · Your book (one flat card, a block
+//    per leg: Shares, Calls bought, Calls sold, Puts bought, Puts sold, all time only; no account lines on Together) ·
+//    the name strip (Together: Sunny's names, a hairline, Nicolay's) · the
+//    name header · the name's own book (the same blocks) · Share average · Payoff | Price (the Payoff's touch reads the Greeks at that
 //    price) · Every leg (SunnyBook, PositionsEvery.swift: List only, switches and chips on three lines) · Intelligence
 //    (SunnyStrikes look card, PositionsStrikes.swift: strike tiles in one swiped row, the strike card, Try in Payoff kept
 //    in public.payoff_tries, PositionsTries.swift).
@@ -56,10 +56,6 @@ struct PositionsTab: View {
     @State private var scrolled: CGFloat = 0
     @State private var pos = ScrollPosition()
     @State private var picks = 0
-    /// Your book's open groups.
-    @State private var bookOpen: Set<String> = []
-    /// The name's own book: its open group (one at a time).
-    @State private var ownOpen: String?
     // The account switch, as Home does it: the page at 15% and 28 pt toward the new account, then back.
     @State private var faded = false
     @State private var slid = false
@@ -103,12 +99,15 @@ struct PositionsTab: View {
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, v in scrolled = v }
             .task {
                 #if DEBUG && targetEnvironment(simulator)
-                // Screens checked in the simulator: `-posOpen Hedge` opens a Your book group; `-posAt intel` (or every, pay)
-                // scrolls there; `-posView price` shows Price.
+                // Screens checked in the simulator: `-posAt intel` (or every, pay) scrolls there; `-posView price` shows Price;
+                // `-posChips role:sold,kind:s` switches those Every leg chips off for the name on screen.
                 let a = ProcessInfo.processInfo.arguments
                 func arg(_ k: String) -> String? { a.firstIndex(of: k).flatMap { a.indices.contains($0 + 1) ? a[$0 + 1] : nil } }
                 if let v = arg("-posView") { view = v == "price" ? .price : .payoff }
-                if let g = arg("-posOpen") { bookOpen = [g] }
+                if let c = arg("-posChips") {
+                    try? await Task.sleep(for: .milliseconds(800))
+                    chips["\(bookID ?? "S")|\(name)"] = Set(c.split(separator: ",").map(String.init))
+                }
                 if let at = arg("-posAt") { try? await Task.sleep(for: .milliseconds(1400)); proxy.scrollTo(at, anchor: .top) }
                 if let y = BriefDebug.scroll { try? await Task.sleep(for: .milliseconds(1200)); pos.scrollTo(y: y) }
                 #endif
@@ -142,12 +141,11 @@ struct PositionsTab: View {
         }
         .onChange(of: brief.built) { _, _ in arrive() }
         .onChange(of: name) { _, t in
-            ownOpen = nil
             payAt = nil; payRange = 12
             if !t.isEmpty, let b = bookID { UserDefaults.standard.set(t, forKey: "positions.last.\(b)") }
             load()
         }
-        .onChange(of: pageBook) { _, _ in bookOpen = []; dip() }
+        .onChange(of: pageBook) { _, _ in dip() }
         // Back from Overview, even to the same account, the page plays the same move (handoff 2026-11-18 §1.2).
         .onChange(of: pageReady) { _, ready in if ready && faded { settle(wait: false) } }
     }
@@ -182,8 +180,8 @@ struct PositionsTab: View {
         }
         let n = book.names.first { $0.t == name } ?? book.names.first
         let tog = brief.account == .together
-        if !book.groups.isEmpty {
-            PosYourBook(groups: book.groups, open: $bookOpen, privacy: privacy, reduce: reduce)
+        if !book.parts.isEmpty {
+            PosYourBook(parts: book.parts, tickers: book.names.count, privacy: privacy)
                 .padding(.horizontal, Self.margin)
         }
         // Together: Sunny's names, a hairline, then Nicolay's (each account's names, payload.split[i].names).
@@ -194,7 +192,7 @@ struct PositionsTab: View {
         }
         .sensoryFeedback(.selection, trigger: picks)
         if let n {
-            nameSection(n, book: b, sold: book.sold, own: book.nameGroups[n.t] ?? [])
+            nameSection(n, book: b, sold: book.sold, own: book.nameParts[n.t] ?? [])
         }
     }
 
@@ -206,7 +204,7 @@ struct PositionsTab: View {
     }
 
     /// The header, the name's own book, Share average, Payoff | Price, Every leg and Intelligence for the name on screen.
-    @ViewBuilder private func nameSection(_ n: PosBook.Name, book b: String, sold: [PE.SoldRow], own: [PosBook.Group]) -> some View {
+    @ViewBuilder private func nameSection(_ n: PosBook.Name, book b: String, sold: [PE.SoldRow], own: [PosBook.Part]) -> some View {
         let m = brief.positions.model(b, n.t)
         let built = brief.positions.models["\(b)|\(n.t)"]?.built ?? ""
         let offK = "\(b)|\(n.t)", offs = flip[offK] ?? [], cf = chips[offK] ?? []
@@ -233,7 +231,7 @@ struct PositionsTab: View {
         }
         PosHeader(n: n, S0: S0).padding(.horizontal, Self.margin)
         if !own.isEmpty {
-            PosNameBook(t: n.t, groups: own, open: $ownOpen, privacy: privacy, reduce: reduce)
+            PosNameBook(t: n.t, parts: own, privacy: privacy)
                 .padding(.horizontal, Self.margin)
                 .padding(.top, -4)
         }
@@ -483,215 +481,108 @@ extension PositionsTab: Equatable {
 
 // MARK: - Your book
 
-/// Your book (handoff 2026-11-18 §2.1, 2026-11-24 §4): one flat card. A header row (Your book · Today · All time), then
-/// Long, Hedge and Income, the groups the book holds, each its value under its name and its Today and All time ($ over %,
-/// green up or kept, red down, never a sign). A tap opens the group's parts in the same columns; a group with one part
-/// names it ("Long · Shares") and has no chevron. Income leads with what is left to earn (collected less kept so far),
-/// with collected and kept under it; its parts read left (Nik, 24 Nov 2026). Figures from sunny-home
-/// (brief_inputs.parts): Today is Home's today split by part, so the rows add up to it; All time is against IBKR's cost,
-/// or kept of what was sold.
-/// Together shows the sums only: no account lines, no S or N (Nik, 24 Nov 2026: "remove Sunny and Nicolay").
+/// Your book (Nik, 24 Nov 2026: "Move away from Long, Hedge and Income to each leg"; "No need for Today and All time,
+/// just all time"): one flat card. "Your book" with "9 tickers · 57 legs" on the right, then one block per leg the book
+/// holds, in Nik's order (Shares, Calls bought, Calls sold, Puts bought, Puts sold), all time only (PosPartBlock).
+/// Figures from sunny-home (brief_inputs.parts). Together shows the sums only: no account lines, no S or N.
 struct PosYourBook: View {
-    let groups: [PosBook.Group]
-    @Binding var open: Set<String>
+    let parts: [PosBook.Part]
+    let tickers: Int
     let privacy: Bool
-    let reduce: Bool
-    private static let label = PC.say                          // #C7C7CC
-    private static let chevron = S.dyn(0x8E8E93, 0x636366)
 
     var body: some View {
-        VStack(spacing: 0) {
+        let legs = parts.reduce(0) { $0 + $1.nl }
+        let count = "\(tickers) \(tickers == 1 ? "ticker" : "tickers") · \(legs) \(legs == 1 ? "leg" : "legs")"
+        VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                title.frame(maxWidth: .infinity, alignment: .leading)
-                Text("Today").sType(PT.t(12, 16, 500), tabular: false).foregroundStyle(PC.mu).frame(width: 74, alignment: .trailing)
-                Text("All time").sType(PT.t(12, 16, 500), tabular: false).foregroundStyle(PC.mu).frame(width: 74, alignment: .trailing)
-                Color.clear.frame(width: 12, height: 1)
+                Text("Your book").sType(PT.t(20, 24, 700), tabular: false).foregroundStyle(PC.ink).lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                Text(count).sType(PT.t(15, 20), tabular: true).foregroundStyle(PC.mu).lineLimit(1)
+                    .accessibilityLabel(PosSay.words(count))
             }
-            .padding(.bottom, 4)
-            .accessibilityElement(children: .combine)
-            ForEach(groups) { g in row(g) }
+            VStack(alignment: .leading, spacing: 20) {
+                ForEach(parts) { PosPartBlock(p: $0, privacy: privacy) }
+            }
         }
-        .padding(.top, 16).padding(.horizontal, 16).padding(.bottom, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 16).padding(.horizontal, 16).padding(.bottom, 18)
         .sunnyGlass(radius: 22)
-    }
-
-    private var title: some View {
-        Text("Your book").sType(PT.t(13, 16, 600), tabular: false).foregroundStyle(Self.label).lineLimit(1).minimumScaleFactor(0.6)
-            .accessibilityAddTraits(.isHeader)
-    }
-    @ViewBuilder private func row(_ g: PosBook.Group) -> some View {
-        let one = g.parts.count == 1, isOpen = !one && open.contains(g.title), x = g.sum, inc = g.title == "Income"
-        VStack(spacing: 0) {
-            Button {
-                guard !one else { return }
-                withAnimation(S.moving(.easeInOut(duration: 0.25), reduce) ?? .linear(duration: 0)) {
-                    if isOpen { open.remove(g.title) } else { open.insert(g.title) }
-                }
-            } label: {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .center, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            let sub = inc ? "left to earn" : one && g.parts[0].label != g.title ? g.parts[0].label : ""
-                            (Text(g.title).foregroundStyle(Self.label)
-                             + Text(sub.isEmpty ? "" : " · \(sub)").font(.custom("Inter", size: 15).weight(.medium)).foregroundStyle(PC.mu))
-                                .sType(PT.t(15, 20, 600), tabular: false).lineLimit(1).minimumScaleFactor(0.8)
-                            Text(money(inc ? x.value - x.all : x.value)).sType(PT.t(24, 28, 700, tr: -0.02)).foregroundStyle(PC.ink)
-                                .lineLimit(1).minimumScaleFactor(0.7)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        figure(x.today, x.todayPct, big: true).frame(width: 74, alignment: .trailing)
-                        figure(x.all, x.allPct, big: true).frame(width: 74, alignment: .trailing)
-                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Self.chevron)
-                            .rotationEffect(.degrees(isOpen ? 90 : 0))
-                            .frame(width: 12)
-                            .opacity(one ? 0 : 1)
-                    }
-                    // Income's muted line under the value, the full width of the row.
-                    Group {
-                        if inc {
-                            Text((one ? g.parts[0].label + " · " : "") + "\(money(x.value)) collected · \(money(x.all)) kept")
-                        }
-                    }
-                    .sType(PT.t(12, 16, 500), tabular: true).foregroundStyle(PC.mu)
-                    .lineLimit(1).minimumScaleFactor(0.75)
-                    .padding(.trailing, 22)
-                }
-                .frame(minHeight: 44)      // at least 68 with the 12 above and below
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .allowsHitTesting(!one)   // a one-part group does not open (not .disabled: that dims it)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(said(g, one: one, inc: inc))
-            .accessibilityHint(one ? "" : (isOpen ? "Hides its parts" : "Shows its parts"))
-            .accessibilityAddTraits(one ? [] : .isButton)
-            if isOpen {
-                VStack(spacing: 0) {
-                    ForEach(g.parts) { p in
-                        HStack(alignment: .center, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text(p.label).sType(PT.t(13, 17), tabular: false).foregroundStyle(PC.mu)
-                                Text(inc ? "\(money(p.value - p.all)) left" : money(p.value)).sType(PT.t(15, 20, 600)).foregroundStyle(PC.ink)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            figure(p.today, p.todayPct, big: false).frame(width: 74, alignment: .trailing)
-                            figure(p.all, p.allPct, big: false).frame(width: 74, alignment: .trailing)
-                            Color.clear.frame(width: 12, height: 1)
-                        }
-                        .padding(.vertical, 6)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(PosSay.words("\(p.label), " + (inc ? "\(PosSay.money(p.value - p.all, privacy)) left to earn" : PosSay.money(p.value, privacy))
-                                                         + ", today \(PosSay.signed(p.today, privacy)), \(PE.pcx(p.todayPct)), all time \(PosSay.signed(p.all, privacy)), \(PE.pcx(p.allPct))"))
-                    }
-                }
-                .padding(.bottom, 8)
-                .transition(.opacity)
-            }
-        }
-        .overlay(alignment: .top) { Rectangle().fill(PC.rule).frame(height: 1) }
-    }
-
-    /// $ over %, green when up or kept, red when down; no sign.
-    private func figure(_ v: Double, _ pct: Double, big: Bool) -> some View {
-        let c = v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink
-        return VStack(alignment: .trailing, spacing: 0) {
-            Text(money(v)).sType(big ? PT.t(15, 20, 600) : PT.t(14, 18, 600))
-            Text(PE.pcx(pct)).sType(big ? PT.t(12, 16, 600) : PT.t(11, 14, 600))
-        }
-        .foregroundStyle(c)
-        .lineLimit(1).minimumScaleFactor(0.8)
-    }
-
-    private func money(_ v: Double) -> String { privacy ? BriefMask.shown : PosFmt.money(v) }
-
-    /// "Income, 11.5 thousand dollars left to earn of 16.2 thousand collected, today up 820 dollars, 5.1 percent, ...".
-    private func said(_ g: PosBook.Group, one: Bool, inc: Bool) -> String {
-        let x = g.sum
-        let what = one ? "\(g.title), \(g.parts[0].label)" : g.title
-        let v = inc ? "\(PosSay.money(x.value - x.all, privacy)) left to earn, of \(PosSay.money(x.value, privacy)) collected" : PosSay.money(x.value, privacy)
-        return PosSay.words("\(what), \(v), today \(PosSay.signed(x.today, privacy)), \(PE.pcx(x.todayPct)), all time \(PosSay.signed(x.all, privacy)), \(PE.pcx(x.allPct))")
     }
 }
 
-/// The picked name's own book (handoff 2026-11-18 §2.3), under the name: Long · Hedge · Income in as many columns as
-/// the name holds (never None or To do), each its value and its all-time gain ($ · %, green or red). Income reads what
-/// is left to earn, "kept $X of $Y" under it (2026-11-24). A tap on a group with two parts opens them under the row; the
-/// open cell sits on a soft tile. No account lines on Together (Nik, 24 Nov 2026).
-struct PosNameBook: View {
-    let t: String
-    let groups: [PosBook.Group]
-    @Binding var open: String?
+/// One leg of a book (Your book and the name's own book): "Calls bought · loss", the all-time figure big (green
+/// gained or kept, red lost, never a sign), then what it is worth now (sold: to buy back), the return on cost (sold: the
+/// share captured) and the time value left (options only).
+struct PosPartBlock: View {
+    let p: PosBook.Part
     let privacy: Bool
-    let reduce: Bool
+    @Environment(\.dynamicTypeSize) private var dts
+    @Environment(\.sTypeScales) private var scales
+
     var body: some View {
-        let shown = groups.first { $0.title == open && $0.parts.count > 1 }
+        let up = p.all >= 0, c = tone(p.all)
+        let word = p.sold ? (up ? "kept" : "lost") : (up ? "gain" : "loss")
+        let pctWord = p.sold ? "captured" : "return"
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 4) {
-                ForEach(groups) { g in cell(g) }
-            }
-            .padding(.vertical, 6)
-            .overlay(alignment: .top) { Rectangle().fill(PC.rule).frame(height: 1) }
-            .overlay(alignment: .bottom) { Rectangle().fill(PC.rule).frame(height: 1) }
-            if let g = shown {
-                VStack(spacing: 8) {
-                    ForEach(g.parts) { p in partRow(p, inc: g.title == "Income") }
-                }
-                .padding(.top, 12).padding(.bottom, 4)
-                .transition(.opacity)
-            }
+            Text("\(p.label) · \(word)").sType(PT.t(15, 20), tabular: false).foregroundStyle(PC.mu).lineLimit(1)
+            Text(money(p.all)).sType(PT.t(40, 44, 700, tr: -0.02)).foregroundStyle(c)
+                .lineLimit(1).minimumScaleFactor(0.6)
+                .padding(.top, 2)
+            sub(c, pctWord: pctWord)
+                .sType(PT.t(15, 20), tabular: true).foregroundStyle(PC.mu)
+                .lineLimit(1).minimumScaleFactor(0.75)
+                .padding(.top, 4)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(t) in your book")
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(said(word, pctWord))
     }
 
-    private func cell(_ g: PosBook.Group) -> some View {
-        let x = g.sum, two = g.parts.count > 1, on = two && open == g.title, inc = g.title == "Income"
-        return Button {
-            guard two else { return }
-            withAnimation(S.moving(.easeOut(duration: 0.2), reduce) ?? .linear(duration: 0)) { open = on ? nil : g.title }
-        } label: {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(g.title).sType(PT.t(12, 16, 500), tabular: false).foregroundStyle(PC.mu)
-                Text(inc ? "\(money(x.value - x.all)) left" : money(x.value)).sType(PT.t(17, 22, 700)).foregroundStyle(PC.ink)
-                Text(inc ? "kept \(money(x.all)) of \(money(x.value))" : "\(money(x.all)) · \(PE.pcx(x.allPct))").sType(PT.t(12, 16, 600)).foregroundStyle(tone(x.all))
-            }
-            .lineLimit(1).minimumScaleFactor(0.7)
-            .frame(maxWidth: .infinity, minHeight: 46, alignment: .topLeading)
-            .padding(.horizontal, 8).padding(.vertical, 6)
-            .background(on ? S.dynA(0x1D1D1F, 0.06, 0xFFFFFF, 0.08) : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .contentShape(Rectangle())
+    /// "$92.3K now · 33.3% return · $91.3K time value": figures semibold in ink, the % in its colour, words muted.
+    /// Inter is one variable font, so the semibold is its own font (fontWeight cannot reach the wght axis).
+    private func sub(_ c: Color, pctWord: String) -> Text {
+        let semi = Font.inter(scales ? SDynamic.scaled(15, dts) : 15, 600, tabular: true)
+        var t = Text(money(p.now)).font(semi).foregroundStyle(PC.ink) + Text(" now · ")
+            + Text(PE.pcx(p.pct)).font(semi).foregroundStyle(c) + Text(" \(pctWord)")
+        if let tv = p.tv {
+            t = t + Text(" · ") + Text(money(tv)).font(semi).foregroundStyle(PC.ink) + Text(" time value")
         }
-        .buttonStyle(.plain)
-        .allowsHitTesting(two)
-        .padding(.horizontal, -2)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(PosSay.words("\(t) \(g.title), " + (inc ? "\(PosSay.money(x.value - x.all, privacy)) left, kept \(PosSay.money(x.all, privacy)) of \(PosSay.money(x.value, privacy))"
-                                                                 : "\(PosSay.money(x.value, privacy)), \(PosSay.signed(x.all, privacy)), \(PE.pcx(x.allPct))")))
-        .accessibilityHint(two ? (on ? "Hides its parts" : "Shows its parts") : "")
-        .accessibilityAddTraits(two ? .isButton : [])
+        return t
     }
 
-    private func partRow(_ p: PosBook.Part, inc: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(p.label).sType(PT.t(14, 18), tabular: false).foregroundStyle(PC.say)
-            Spacer(minLength: 8)
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(inc ? "\(money(p.value - p.all)) left" : money(p.value)).sType(PT.t(14, 18, 600)).foregroundStyle(PC.ink)
-                Text(inc ? "kept \(money(p.all)) of \(money(p.value))" : "\(money(p.all)) · \(PE.pcx(p.allPct))").sType(PT.t(12, 16, 600)).foregroundStyle(tone(p.all))
-            }
-            .lineLimit(1)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(PosSay.words("\(p.label), " + (inc ? "\(PosSay.money(p.value - p.all, privacy)) left, kept \(PosSay.money(p.all, privacy)) of \(PosSay.money(p.value, privacy))"
-                                                           : "\(PosSay.money(p.value, privacy)), \(PosSay.signed(p.all, privacy)), \(PE.pcx(p.allPct))")))
+    /// "Calls bought, loss 46 thousand dollars, 92.3 thousand now, 33.3 percent return, 91.3 thousand time value".
+    private func said(_ word: String, _ pctWord: String) -> String {
+        let fig = { (v: Double) in PosSay.money(v, privacy).replacingOccurrences(of: " dollars", with: "") }
+        let tv = p.tv.map { ", \(fig($0)) time value" } ?? ""
+        return PosSay.words("\(p.label), \(word) \(PosSay.money(p.all, privacy)), \(fig(p.now)) now, \(PE.pcx(p.pct)) \(pctWord)\(tv)")
     }
 
     private func tone(_ v: Double) -> Color { v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink }
     private func money(_ v: Double) -> String { privacy ? BriefMask.shown : PosFmt.money(v) }
 }
 
-/// The name's share average after every closed trade (handoff 2026-11-24 §4, SunnyPositionsPhone sa189), under the name's
+/// The picked name's own book (handoff 2026-11-18 §2.3; Nik, 24 Nov 2026), under the name: the same blocks as Your book
+/// for the legs this name holds, in the same order, between two rules. No card and no header row; no account lines on
+/// Together.
+struct PosNameBook: View {
+    let t: String
+    let parts: [PosBook.Part]
+    let privacy: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            ForEach(parts) { PosPartBlock(p: $0, privacy: privacy) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 14)
+        .overlay(alignment: .top) { Rectangle().fill(PC.rule).frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(PC.rule).frame(height: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(t) in your book")
+    }
+}
+
+/// The name's share average after the premium kept on sold calls and puts (Nik, 24 Nov 2026; handoff 2026-11-24 §4, SunnyPositionsPhone sa189), under the name's
 /// own book: "Share average" and the average on one line, "Paid $Y" under it. Only names that have one.
 struct PosShareAvg: View {
     let avg: Double
@@ -705,8 +596,8 @@ struct PosShareAvg: View {
             }
             Text("Paid \(PosFmt.price(paid))").sType(PT.t(13, 18), tabular: true).foregroundStyle(PC.mu)
         }
+        // No rule of its own: the name's book above ends on one (two lines 12 pt apart read as a mistake).
         .padding(.top, 12).padding(.bottom, 4)
-        .overlay(alignment: .top) { Rectangle().fill(PC.rule).frame(height: 1) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Share average \(PosFmt.price(avg)), paid \(PosFmt.price(paid))")
     }

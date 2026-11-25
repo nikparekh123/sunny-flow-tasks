@@ -20,7 +20,7 @@
 //    the fingers: their spread sideways scales the days, up and down the prices, around the point between them. Held
 //    within 25° of flat it moves only the days, within 25° of upright only the prices, in between both. Same limits as
 //    the two drags; Auto or a double tap goes back.
-//  · A tag per leg ("Sold call 40 ×50"), 19 apart so none overlaps; off the scale it pins to the edge with an arrow.
+//  · A tag per leg ("Call sold 40 ×50"), 19 apart so none overlaps; off the scale it pins to the edge with an arrow.
 //  · ⚠ THE PAGE IS EXACTLY THE SCREEN. The layer chips sat at their own width in a plain HStack: one text size up
 //    they summed wider than the phone, the page grew past the screen and, centred, lost both edges (the price
 //    numbers on the right, the X on the left). Now the chips scroll (the design's overflow-x: auto), the page is
@@ -265,7 +265,7 @@ struct TickerChartPage: View {
         return format(d, range == "1W" ? "EEE MMM d" : range == "1Y" || range == "All" ? "MMM d, yyyy" : "MMM d")
     }
 
-    /// The chart as one spoken line: "Nike price, past 3 months, from $33.10 to $35.28. Lines: Sold call 36 ×72, ...".
+    /// The chart as one spoken line: "Nike price, past 3 months, from $33.10 to $35.28. Lines: Call sold 36 ×72, ...".
     private func chartSays(_ name: String, _ pts: [Double], _ now: Double, _ phrase: String, _ marks: [TKMark]) -> String {
         guard let a = pts.first, let b = pts.last else { return "\(name) price chart, no data" }
         let f = { (v: Double) in TK.price(v, t) }
@@ -521,16 +521,17 @@ struct TickerChartPage: View {
 
     // MARK: Layer lines
 
-    /// Positions: a tag per leg the way the design writes it ("Sold call 40 ×50", "Hedge 40 ×14", "Put 37.5 ×30"),
-    /// in ink on the left, sold solid and bought dotted. The server joins the legs on one strike ("Hedge 40 ×14 · Sold
-    /// call 40 ×50, Nov 13 · Sold put 40 ×16, Nov 20"): one line for the strike (solid when a leg is sold) and a tag
-    /// for each leg, sold first. The expiry stays on a tag only when two legs would otherwise read the same.
+    /// Positions: a tag per leg, each by what it is (Nik, 24 Nov 2026: never Long, Hedge or Income): "Call sold 40 ×50",
+    /// "Call bought 40 ×14", "Put bought 37.5 ×30", in ink on the left, sold solid and bought dotted. The server joins the
+    /// legs on one strike ("Hedge 40 ×14 · Sold call 40 ×50, Nov 13 · Sold put 40 ×16, Nov 20", its own words, put in
+    /// ours by legWords): one line for the strike (solid when a leg is sold) and a tag for each leg, sold first. The
+    /// expiry stays on a tag only when two legs would otherwise read the same.
     private func positionMarks() -> [TKMark] {
         let src: [(k: Double, label: String, solid: Bool)] = live
             ? (wire?.positions ?? []).map { ($0.k, $0.label, $0.solid ?? false) } : samplePositions()
         var byK: [(k: Double, solid: Bool, legs: [String])] = []
         for p in src {
-            let legs = p.label.components(separatedBy: " · ").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            let legs = p.label.components(separatedBy: " · ").map { Self.legWords($0.trimmingCharacters(in: .whitespaces)) }.filter { !$0.isEmpty }
             if let i = byK.firstIndex(where: { abs($0.k - p.k) < 1e-9 }) { byK[i].solid = byK[i].solid || p.solid; byK[i].legs += legs }
             else { byK.append((p.k, p.solid, legs)) }
         }
@@ -539,7 +540,7 @@ struct TickerChartPage: View {
             let short = s.legs.map(Self.shortLeg)
             let named = s.legs.indices.map { i in short.filter { $0 == short[i] }.count > 1 ? s.legs[i] : short[i] }
             let order = named.indices.sorted { a, b in
-                let sa = named[a].hasPrefix("Sold"), sb = named[b].hasPrefix("Sold")
+                let sa = named[a].contains(" sold "), sb = named[b].contains(" sold ")
                 return sa != sb ? sa : a < b
             }
             for (j, i) in order.enumerated() {
@@ -552,12 +553,22 @@ struct TickerChartPage: View {
         return out
     }
 
-    /// "Sold call 40 ×50, Nov 13" → "Sold call 40 ×50"; "Puts 37.5 ×30" → "Put 37.5 ×30" (the design's tags).
+    /// "Call sold 40 ×50, Nov 13" → "Call sold 40 ×50" (the design's tags).
     static func shortLeg(_ s: String) -> String {
         var x = s
         if let r = x.range(of: #",\s*[A-Z][a-z]{2} \d{1,2}$"#, options: .regularExpression) { x.removeSubrange(r) }
-        if x.hasPrefix("Puts ") { x = "Put " + x.dropFirst(5) }
         return x
+    }
+
+    /// sunny-chart's words for a leg in ours: "Sold call 40 ×50, Nov 13" → "Call sold 40 ×50, Nov 13", "Sold put" →
+    /// "Put sold", "Hedge 40 ×14" and "LEAPS 70 ×17" → "Call bought", "Puts 37.5 ×30" → "Put bought 37.5 ×30".
+    /// "Shares cost 39.41" stays.
+    static func legWords(_ s: String) -> String {
+        for (a, b) in [("Sold call ", "Call sold "), ("Sold put ", "Put sold "), ("Hedge ", "Call bought "), ("LEAPS ", "Call bought "),
+                       ("Puts ", "Put bought ")] where s.hasPrefix(a) {
+            return b + s.dropFirst(a.count)
+        }
+        return s
     }
 
     /// Walls of the nearest weekly chain, on the right as the design writes them ("Ceiling 39", "Floor 38.5",
@@ -593,13 +604,13 @@ struct TickerChartPage: View {
         }
     }
 
-    /// The sample book's legs in this name (a -sample run): hedge calls and LEAPS dotted, sold legs solid, puts dotted.
+    /// The sample book's legs in this name (a -sample run): calls bought dotted, sold legs solid, puts bought dotted.
     private func samplePositions() -> [(k: Double, label: String, solid: Bool)] {
         guard let b = SampleBook.book(acct)[t] else { return [] }
         var out: [(Double, String, Bool)] = []
-        for x in b.bought where x.kind != .ins { out.append((x.k, "\(x.kind == .leaps ? "LEAPS" : "Hedge") \(TK.fk(x.k)) ×\(x.q)", false)) }
-        for s in b.sold { out.append((s.k, "Sold \(s.put ? "put" : "call") \(TK.fk(s.k)) ×\(s.q)", true)) }
-        for x in b.bought where x.kind == .ins { out.append((x.k, "Put \(TK.fk(x.k)) ×\(x.q)", false)) }
+        for x in b.bought where x.kind != .ins { out.append((x.k, "Call bought \(TK.fk(x.k)) ×\(x.q)", false)) }
+        for s in b.sold { out.append((s.k, "\(s.put ? "Put" : "Call") sold \(TK.fk(s.k)) ×\(s.q)", true)) }
+        for x in b.bought where x.kind == .ins { out.append((x.k, "Put bought \(TK.fk(x.k)) ×\(x.q)", false)) }
         return out
     }
 }

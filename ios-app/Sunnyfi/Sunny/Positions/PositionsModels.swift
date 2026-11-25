@@ -16,8 +16,9 @@
 //    sunny-sd (SDStore): each sold leg's SD when sold (z0) and the name's Intelligence (PositionsIntel.swift).
 //  The maths is PositionsEngine.swift (PE), the web's positions-engine.ts line for line.
 //
-//  ⚠ NIK'S GROUPING RULE (11 Nov 2026, D7 13 Nov): Long = shares only; Hedge = every call bought (LEAPS too) and every
-//  put bought; Income = everything sold. Legs read strike first ("40 call · Nov 13"), never "OTM calls".
+//  ⚠ NIK'S RULE (24 Nov 2026): every leg by what it is, Shares, Calls bought (LEAPS too), Calls sold, Puts bought,
+//  Puts sold; never Long, Hedge or Income ("Finding Long, Hedge and Income very confusing"). Legs read strike first
+//  ("40 call · Nov 13"), never "OTM calls".
 //  No em dashes in any words here.
 //
 
@@ -70,43 +71,41 @@ struct PosBook {
         /// The strip's red dot (handoff 2026-11-18 §2.2): a strike sold for this week within 0.5 SD or in the money.
         let dot: PE.Tone?
     }
-    /// One part of Your book (handoff 2026-11-18 §2.1), as sunny-home sends it (brief_inputs.parts): value (what was
-    /// sold reads the premium collected), today against IBKR's last close, all time against IBKR's cost (sold: kept of
-    /// what was collected). tbase and abase are what the two percentages divide by, so a group's % is its sums divided.
+    /// One leg of Your book (Nik, 24 Nov 2026), as sunny-home sends it (brief_inputs.parts, all time only):
+    ///   Shares, Calls bought, Puts bought: value = worth now, all = gain or loss against IBKR's cost, return = all ÷ abase.
+    ///   Calls sold, Puts sold: value = premium collected, all = kept so far, now (to buy back) = value less all,
+    ///   captured = all ÷ value.
+    /// tv: the time value left (every option part, none on shares); nl: how many legs.
     struct Part: Identifiable {
         var id: String { key }
         let key: String; let label: String
-        var value = 0.0, today = 0.0, tbase = 0.0, all = 0.0, abase = 0.0
-        /// What was sold: the time value still in it (the name's own book shows it in brackets).
+        var value = 0.0, all = 0.0, abase = 0.0
         var tv: Double? = nil
-        var todayPct: Double { tbase > 0 ? today / tbase : 0 }
-        var allPct: Double { abase > 0 ? all / abase : 0 }
+        var nl = 0
+        var sold: Bool { key == "sc" || key == "sp" }
+        /// Worth now; what was sold: what it costs to buy back.
+        var now: Double { sold ? value - all : value }
+        /// Bought and shares: the return on cost; sold: the share of the premium captured.
+        var pct: Double { sold ? (value > 0 ? all / value : 0) : (abase > 0 ? all / abase : 0) }
     }
-    /// Long, Hedge or Income with the parts the book holds (Nik's groups of 11 Nov 2026: LEAPS are hedge calls).
-    struct Group: Identifiable {
-        var id: String { title }
-        let title: String; let parts: [Part]
-        var sum: Part {
-            parts.reduce(into: Part(key: title, label: title)) { a, x in
-                a.value += x.value; a.today += x.today; a.tbase += x.tbase; a.all += x.all; a.abase += x.abase
-            }
-        }
-    }
+    /// The legs in Nik's order (24 Nov 2026): Shares, Calls bought, Calls sold, Puts bought, Puts sold.
+    static let order: [(key: String, label: String)] = [("sh", "Shares"), ("hc", "Calls bought"), ("sc", "Calls sold"),
+                                                        ("ip", "Puts bought"), ("sp", "Puts sold")]
 
     let names: [Name]
-    /// Your book: only the groups and parts the book holds (never None).
-    let groups: [Group]
-    /// Each name's own book (§2.3), the same groups from that name's parts.
-    let nameGroups: [String: [Group]]
+    /// Your book: only the legs the book holds (never None).
+    let parts: [Part]
+    /// Each name's own book (§2.3), the same legs from that name's parts.
+    let nameParts: [String: [Part]]
     /// Every sold leg on its SD (the strip's dots and the Price chart's strike tones).
     let sold: [PE.SoldRow]
     /// The names with something sold (their sunny-sd replies carry the SD when sold).
     let soldNames: [String]
 
     static func build(brief: BriefLive, inputs: JSONValue?, calendar: [CalendarDay], replies: (String) -> SDReply?, now: Date) -> PosBook {
-        let groups = Self.groups(inputs?["parts"]["book"] ?? .null)
-        var nameGroups: [String: [Group]] = [:]
-        for (t, j) in (inputs?["parts"]["names"] ?? .null).object { nameGroups[t] = Self.groups(j) }
+        let parts = Self.parts(inputs?["parts"]["book"] ?? .null)
+        var nameParts: [String: [Part]] = [:]
+        for (t, j) in (inputs?["parts"]["names"] ?? .null).object { nameParts[t] = Self.parts(j) }
         // Sold, in SD: every sold option leg from Home's legs; the SD when sold from each name's sunny-sd reply.
         let legs = soldLegs(inputs: inputs, calendar: calendar, replies: replies, now: now)
         let so = PE.soldInSd(legs)
@@ -118,23 +117,17 @@ struct PosBook {
         }
         var sn: [String] = []
         for l in legs where !sn.contains(l.t) { sn.append(l.t) }
-        return PosBook(names: names, groups: groups, nameGroups: nameGroups, sold: so.rows, soldNames: sn)
+        return PosBook(names: names, parts: parts, nameParts: nameParts, sold: so.rows, soldNames: sn)
     }
 
-    /// Your book's groups from one parts object ({sh, hc, ip, sc, sp}); a part or group not held is left out.
-    static func groups(_ j: JSONValue) -> [Group] {
-        func part(_ k: String, _ label: String) -> Part? {
+    /// The legs held, in Nik's order, from one parts object ({sh, hc, ip, sc, sp}); a part not held is left out.
+    static func parts(_ j: JSONValue) -> [Part] {
+        order.compactMap { k, label in
             let x = j[k]
             guard case .object = x else { return nil }
-            return Part(key: k, label: label, value: x["value"].double ?? 0, today: x["today"].double ?? 0,
-                        tbase: x["tbase"].double ?? 0, all: x["all"].double ?? 0, abase: x["abase"].double ?? 0, tv: x["tv"].double)
+            return Part(key: k, label: label, value: x["value"].double ?? 0, all: x["all"].double ?? 0, abase: x["abase"].double ?? 0,
+                        tv: x["tv"].double, nl: Int((x["nl"].double ?? 0).rounded()))
         }
-        let gs = [
-            Group(title: "Long", parts: [part("sh", "Shares")].compactMap { $0 }),
-            Group(title: "Hedge", parts: [part("hc", "Hedge calls"), part("ip", "Hedge puts")].compactMap { $0 }),
-            Group(title: "Income", parts: [part("sc", "Calls sold"), part("sp", "Puts sold")].compactMap { $0 }),
-        ]
-        return gs.filter { !$0.parts.isEmpty }
     }
 
     /// Every sold leg of the book (the web's soldLegs): strike, count, sold at, the mark, the leg's own IV, the
@@ -168,12 +161,10 @@ struct PosBook {
 struct PosName {
     struct Leg: Identifiable {
         let id: String
-        /// Long, Hedge or Income (Nik's rule).
-        let group: String
         /// "40.5 call" or "NKE shares"; "50 sold", "15 bought", "3,000".
         let contract: String
         let qty: String
-        /// The line under the contract (handoff 2026-11-18, as the web): "Nov 20 (2 days) · Sold calls · −72";
+        /// The line under the contract (handoff 2026-11-18, as the web): "Nov 20 (2 days) · Calls sold · −72";
         /// shares "Shares · +3,000".
         let sub: String
         /// What the leg brought in (sold) or paid out (bought) at its average: at × count × 100. Shares 0.
@@ -187,7 +178,7 @@ struct PosName {
         /// the Whole TICKER book row and the Payoff with its Greeks; the Price chart keeps every strike held.
         let on: Bool
     }
-    /// A strike on the Price chart (legs switched on only): its leg in full, "Sold calls 36 ×72 · Oct 30".
+    /// A strike on the Price chart (legs switched on only): its leg in full, "Calls sold 36 ×72 · Oct 30".
     struct Strike: Identifiable { let id: String; let K: Double; let put: Bool; let q: Double; let label: String
         /// The expiry ("2026-11-20") and, for a sold leg, how close it is (its Sold in SD row's tone; set by PosPrice.toned).
         var iso = ""; var tone: PE.Tone? = nil }
@@ -235,7 +226,7 @@ struct PosName {
         let i: Int; let full: String; let tick: String; let days: Int; let friday: Bool
         /// "Wed Nov 18" (the stop's day, also for Today) and its weekday ("Wed").
         let date: String; let wd: String
-        /// The legs that expire at this stop ("Sold calls and puts, hedge puts expire").
+        /// The legs that expire at this stop ("Calls and puts sold, puts bought expire").
         let ends: String
     }
     /// The slider's last stop.
@@ -278,7 +269,7 @@ struct PosName {
         for l in ordered {
             let exL = l.title.components(separatedBy: ", ").last ?? l.ex
             if l.ty == .shares {
-                legs.append(Leg(id: l.id, group: "Long", contract: "\(m.t) shares", qty: PosFmt.count(l.q),
+                legs.append(Leg(id: l.id, contract: "\(m.t) shares", qty: PosFmt.count(l.q),
                                 sub: "Shares · \(signed(l.q))", cashIn: 0, cashOut: 0, soFar: l.q * (m.S0 - l.K), delta: l.q,
                                 on: !off.contains(l.id)))
                 continue
@@ -286,15 +277,15 @@ struct PosName {
             let kind = l.ty == .put ? "put" : "call"
             let now = mark[l.id], entry = at[l.id]
             let sf = entry != nil && now != nil ? (now! - entry!) * l.q * 100 : 0
-            let name = l.q < 0 ? "Sold \(kind)s" : "Hedge \(kind)s"
+            let name = "\(l.ty == .put ? "Puts" : "Calls") \(l.q < 0 ? "sold" : "bought")"
             let cash = (entry ?? 0) * abs(l.q) * 100
-            legs.append(Leg(id: l.id, group: l.q < 0 ? "Income" : "Hedge", contract: "\(PE.fk(l.K)) \(kind)",
+            legs.append(Leg(id: l.id, contract: "\(PE.fk(l.K)) \(kind)",
                             qty: "\(PosFmt.count(l.q)) \(l.q < 0 ? "sold" : "bought")",
                             sub: "\(exL) \(left(l.iso)) · \(name) · \(signed(l.q))",
                             cashIn: l.q < 0 ? cash : 0, cashOut: l.q > 0 ? cash : 0,
                             soFar: sf, delta: m.legDelta(l, m.S0, 0), on: !off.contains(l.id)))
             strikes.append(Strike(id: l.id, K: l.K, put: l.ty == .put, q: l.q,
-                                  label: "\(l.q < 0 ? "Sold" : "Bought") \(kind)s \(PE.fk(l.K)) ×\(PosFmt.count(abs(l.q))) · \(exL)", iso: l.iso))
+                                  label: "\(name) \(PE.fk(l.K)) ×\(PosFmt.count(abs(l.q))) · \(exL)", iso: l.iso))
         }
         let live = legs.filter(\.on)
         let dates = dateStops(m)
@@ -333,16 +324,16 @@ struct PosName {
             let full = s.tt < 0.01 && i == 0 ? "Today" : s.long.replacingOccurrences(of: " close", with: "")
             let at = opts.filter { abs($0.T - s.tt) < 0.6 }
             let so = at.filter { $0.q < 0 }, bo = at.filter { $0.q > 0 }
-            let ends = [so.isEmpty ? "" : "Sold \(names(so))", bo.isEmpty ? "" : (so.isEmpty ? "Hedge " : "hedge ") + names(bo)]
+            let ends = [so.isEmpty ? "" : "\(names(so)) sold", bo.isEmpty ? "" : "\(names(bo)) bought"]
                 .filter { !$0.isEmpty }.joined(separator: ", ")
             let date = s.long.replacingOccurrences(of: " close", with: "")
             return DateStop(i: i, full: full, tick: i == 0 ? "Today" : s.short, days: days, friday: s.friday,
-                            date: date, wd: String(date.prefix(3)), ends: ends.isEmpty ? "" : ends + " expire")
+                            date: date, wd: String(date.prefix(3)), ends: ends.isEmpty ? "" : String(ends.prefix(1)).uppercased() + String(ends.dropFirst()) + " expire")
         }
     }
 
-    /// What has expired by a stop (Nik, 20 Nov 2026, option 1; the web's goneWords): "Nov 20: 20 sold calls and 10 sold
-    /// puts expired", "Nov 20 and Nov 27: ...", "Nov 20 to Dec 4, 3 expiries: ...". Legs switched off drop out; empty
+    /// What has expired by a stop (Nik, 20 Nov 2026, option 1; the web's goneWords): "Nov 20: 20 calls sold and 10 puts
+    /// sold expired", "Nov 20 and Nov 27: ...", "Nov 20 to Dec 4, 3 expiries: ...". Legs switched off drop out; empty
     /// before the first expiry.
     static func gone(_ m: PositionsModel, off: Set<String>, stop: Int) -> String {
         guard m.stops.indices.contains(stop) else { return "" }
@@ -351,7 +342,7 @@ struct PosName {
         let days = Array(Set(past.map(\.iso))).sorted()
         guard let first = days.first, let last = days.last else { return "" }
         let md = { (iso: String) in PositionsModel.md(iso) }
-        let kinds: [(SampleEngine.Ty, Bool, String)] = [(.call, true, "sold calls"), (.put, true, "sold puts"), (.call, false, "hedge calls"), (.put, false, "hedge puts")]
+        let kinds: [(SampleEngine.Ty, Bool, String)] = [(.call, true, "calls sold"), (.put, true, "puts sold"), (.call, false, "calls bought"), (.put, false, "puts bought")]
         let parts = kinds.compactMap { ty, sold, w -> String? in
             let n = past.filter { $0.ty == ty && ($0.q < 0) == sold }.reduce(0) { $0 + abs($1.q) }
             return n > 0 ? "\(PosFmt.count(n)) \(w)" : nil
@@ -439,7 +430,7 @@ struct PosPrice {
         /// (sold strikes only: red under 0.5 SD or in the money, orange to 1 SD, quiet past), and "+2" when a side's
         /// farther sold strikes this week fold into it (164, phone).
         var k = ""; var sd: String? = nil; var zTone: PE.Tone? = nil; var fold = 0 }
-    /// 162a: each line's type, its name at the right end ("Sold call 36", "Hedge put 33"), where the name sits (16 above
+    /// 162a: each line's type, its name at the right end ("Call sold 36", "Put bought 33"), where the name sits (16 above
     /// or 2 below the line) and whether it fits.
     struct Line: Identifiable { let id: String; let y: CGFloat; let sold: Bool; var put = false; var name = ""; var lt: CGFloat = -16; var shown = true }
     struct Conn: Identifiable { let id: Int; let y0: CGFloat; let y1: CGFloat }
@@ -624,7 +615,7 @@ struct PosPrice {
         let zOf = { (K: Double) -> Double? in m0 > 0 ? abs(log(K / S0)) / m0 : nil }
         let itmOf = { (g: G) -> Bool in g.put ? S0 < g.K : S0 > g.K }
         let zTone = { (g: G) -> PE.Tone in let z = zOf(g.K) ?? .infinity; return itmOf(g) || z < 0.5 ? .red : z < 1 ? .orange : .quiet }
-        let nameOf = { (g: G) -> String in "\(g.sd ? "Sold" : "Hedge") \(g.put ? "put" : "call") \(PE.fk(g.K))" }
+        let nameOf = { (g: G) -> String in "\(g.put ? "Put" : "Call") \(g.sd ? "sold" : "bought") \(PE.fk(g.K))" }
         let tags: [Tag] = tg.map { x in
             guard let g = x.g else { return Tag(id: "px", top: x.cy - TH / 2, n: String(format: "%.2f", S0), s: "", px: true, sold: true, put: false, title: "Today \(String(format: "%.2f", S0))", k: String(format: "%.2f", S0)) }
             let z = zOf(g.K), it = g.sd && itmOf(g), arw = x.out ? (x.up ? " ↑" : " ↓") : ""

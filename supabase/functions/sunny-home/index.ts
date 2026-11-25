@@ -31,7 +31,7 @@ import { buildTogether, type Side, type SideEvent, type SideLeg } from './togeth
 import { buildIncome, chainKey, rollTargets, type Chain, type IncLeg, type IncReal } from './income.ts';
 import { type ActEvent, type ActName, activityEvents, levelsOf } from './activity.ts';
 import { bsDelta, bsValue, fK, NameBook } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-25.5';
+const BUILD = '2026-11-25.7';
 import { BOOKS, partsOf } from '../_shared/books.ts';
 /* A book's heartbeat feed: book S keeps the old names, others add theirs (sunny-home-N). */
 const feedOf = (feed: string, book: string) => (book === 'S' ? feed : `${feed}-${book}`);
@@ -694,11 +694,11 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
      tbase / abase: what today's and all-time percentages divide by (yesterday's value, or the premium collected for
      what was sold; the cost for what is held), so a group's % is its parts' sums divided. */
   type PKey = 'sh' | 'hc' | 'ip' | 'sc' | 'sp';
-  type Part = { value: number; today: number; tbase: number; all: number; abase: number; held: boolean; tv: number };
+  type Part = { value: number; today: number; tbase: number; all: number; abase: number; held: boolean; tv: number; nl: number };
   const partsBy = new Map<string, Map<PKey, Part>>();
   const partOf = (t: string, k: PKey): Part => {
     const m = partsBy.get(t) ?? partsBy.set(t, new Map()).get(t)!;
-    return m.get(k) ?? m.set(k, { value: 0, today: 0, tbase: 0, all: 0, abase: 0, held: false, tv: 0 }).get(k)!;
+    return m.get(k) ?? m.set(k, { value: 0, today: 0, tbase: 0, all: 0, abase: 0, held: false, tv: 0, nl: 0 }).get(k)!;
   };
   const posKey = (p: Row): PKey => p.asset_category === 'STK' ? 'sh'
     : Number(p.position) < 0 ? (p.put_call === 'C' ? 'sc' : 'sp') : (p.put_call === 'C' ? 'hc' : 'ip');
@@ -860,9 +860,32 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       if (p.asset_category !== 'STK' || !(Number(p.position) > 0)) continue;
       const t = posTicker(p), q = Number(p.position), px = spotOf.get(t) ?? Number(p.mark_price), cost = Number(p.cost_basis_money ?? 0);
       const x = partOf(t, 'sh');
-      x.value += q * px; x.abase += cost; x.all += q * px - cost; x.held = true;
+      x.value += q * px; x.abase += cost; x.all += q * px - cost; x.held = true; x.nl += 1;
       const y = legOf(t, 'sh', null, null);
       y.n += q; y.value += q * px; y.base += cost; y.all += q * px - cost;
+    }
+    /* Shares bought or sold after that report (IWM's 100 bought 24 Nov were in no part): the lots at their cost, a sale
+       taking its share of the value and cost off, until IBKR's next daily report holds them. */
+    {
+      const D0 = String(anchor.report_date);
+      for (const l of lots) {
+        if (!(String(l.acquired_date) > D0)) continue;
+        const t = String(l.ticker).toUpperCase(), q = Number(l.qty_original ?? 0), c = Number(l.cost_per_share ?? 0);
+        if (!(q > 0) || !(c > 0)) continue;
+        const px = spotOf.get(t) ?? c, x = partOf(t, 'sh'), y = legOf(t, 'sh', null, null);
+        if (!x.held) x.nl += 1;
+        x.value += q * px; x.abase += q * c; x.all += q * (px - c); x.held = true;
+        y.n += q; y.value += q * px; y.base += q * c; y.all += q * (px - c);
+      }
+      for (const sl of sells) {
+        if (!(String(sl.trade_date) > D0)) continue;
+        const t = String(sl.ticker).toUpperCase(), q = Math.abs(Number(sl.quantity ?? 0)), y = legOf(t, 'sh', null, null);
+        if (!(q > 0) || !(y.n > 0)) continue;
+        const left = Math.max(0, 1 - q / y.n), x = partOf(t, 'sh');
+        for (const o of [x, y] as Row[]) for (const f of ['value', 'all', 'abase', 'base']) if (f in o) o[f] *= left;
+        y.n *= left;
+        if (y.n < 0.5) { x.held = false; x.nl = Math.max(0, x.nl - 1); }
+      }
     }
     for (const l of legs) {
       const n100 = l.n * 100, mark = l.mark ?? l.avg;
@@ -872,14 +895,12 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       y.n += l.n;
       if (l.side === 'sold') { y.value += l.avg * n100; y.base += l.avg * n100; y.all += (l.avg - mark) * n100; }
       else { y.value += mark * n100; y.base += l.avg * n100; y.all += (mark - l.avg) * n100; }
-      if (l.side === 'sold') {
-        x.value += l.avg * n100; x.abase += l.avg * n100; x.all += (l.avg - mark) * n100;
-        /* The time value still in what was sold (the name's own book shows it in brackets, §2.3). */
-        const S = spotOf.get(l.ticker) ?? l.underlying ?? 0;
-        x.tv += Math.max(0, mark - Math.max(0, l.type === 'call' ? S - l.strike : l.strike - S)) * n100;
-      }
+      /* The time value in the leg, sold or bought (Your book shows it on every option leg, Nik 24 Nov 2026). */
+      const S = spotOf.get(l.ticker) ?? l.underlying ?? 0;
+      x.tv += Math.max(0, mark - Math.max(0, l.type === 'call' ? S - l.strike : l.strike - S)) * n100;
+      if (l.side === 'sold') { x.value += l.avg * n100; x.abase += l.avg * n100; x.all += (l.avg - mark) * n100; }
       else { x.value += mark * n100; x.abase += l.avg * n100; x.all += (mark - l.avg) * n100; }
-      x.held = true;
+      x.held = true; x.nl += 1;
     }
     for (const [, m] of partsBy) for (const [k, x] of m) x.tbase = k === 'sc' || k === 'sp' ? x.value : x.value - x.today;
   }
@@ -891,14 +912,14 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       /* A part shows when it is held, or when it moved today (closed out today: its today still counts). */
       if (!x || (!x.held && Math.abs(x.today) < 0.5)) continue;
       o[k] = { value: r2(x.value), today: r2(x.today), tbase: r2(x.tbase), all: r2(x.all), abase: r2(x.abase), held: x.held,
-               ...(k === 'sc' || k === 'sp' ? { tv: r2(x.tv) } : {}) };
+               nl: x.nl, ...(k !== 'sh' ? { tv: r2(x.tv) } : {}) };
     }
     return o;
   };
   const wholeParts = new Map<PKey, Part>();
   for (const [, m] of partsBy) for (const [k, x] of m) {
-    const w = wholeParts.get(k) ?? wholeParts.set(k, { value: 0, today: 0, tbase: 0, all: 0, abase: 0, held: false, tv: 0 }).get(k)!;
-    w.value += x.value; w.today += x.today; w.tbase += x.tbase; w.all += x.all; w.abase += x.abase; w.held ||= x.held; w.tv += x.tv;
+    const w = wholeParts.get(k) ?? wholeParts.set(k, { value: 0, today: 0, tbase: 0, all: 0, abase: 0, held: false, tv: 0, nl: 0 }).get(k)!;
+    w.value += x.value; w.today += x.today; w.tbase += x.tbase; w.all += x.all; w.abase += x.abase; w.held ||= x.held; w.tv += x.tv; w.nl += x.nl;
   }
   const bookParts: Row | null = anchor ? {
     book: partsOut(wholeParts),
@@ -962,16 +983,19 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   }
   const names = [...new Set([...book, ...sharesNow.keys()])].sort();
   /* ── SHARE AVERAGE (handoff 2026-11-18, round 157a; Nik's rule of 15 Nov 2026, docs/SHARE_AVERAGE_CARD_DESIGN_BRIEF.md)
-     Per name holding shares: new average = (shares × average paid − realized) ÷ shares, realized = every close on the
-     ticker after the book's start (calls sold, puts sold, calls bought, puts bought, shares sold), a profit lowering it.
-     Five steps a share at the Friday before this week (s1) and now (s2): up is a loss. The week's closes for the chart.
+     Per name holding shares: new average = (shares × average paid − premium kept) ÷ shares, premium kept = every close
+     of a sold call or sold put on the ticker after the book's start, a profit lowering it. Two steps a share (calls
+     sold, puts sold) at the Friday before this week (s1) and now (s2): up is a loss. The week's closes for the chart.
      On the weekend Home (doc.ts) and in Search; never on Positions. ── */
   const shareAvg: Row[] = [];
   {
     const wdT = new Date(today + 'T12:00:00Z').getUTCDay();
     const mon = addDays(today, wdT === 0 ? -6 : wdT === 6 ? -5 : 1 - wdT);   // this week's Monday (the week just ended on a weekend)
     const F0 = addDays(mon, -3);
-    const KIND = ['calls sold', 'puts sold', 'calls bought', 'puts bought', 'shares'];
+    /* ⚠ PREMIUM KEPT ONLY (Nik, 24 Nov 2026, picked over "every closed leg"): the average moves with what sold calls
+       and sold puts kept, nothing else. A LEAP or hedge sold at a loss, or shares sold, no longer move it (FIS read
+       $38.98 against $29.30 paid from its LEAP sale). The same number as the Income tab's "avg $". */
+    const KIND = ['calls sold', 'puts sold'];
     const r4 = (v: number) => Math.round(v * 10000) / 10000;
     for (const [t, sh] of [...sharesNow].sort((a, b) => a[0].localeCompare(b[0]))) {
       if (!(sh > 0)) continue;

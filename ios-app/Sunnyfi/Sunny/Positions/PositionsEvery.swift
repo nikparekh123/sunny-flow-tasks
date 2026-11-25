@@ -6,18 +6,19 @@
 //  phone; Nik, 24 Nov 2026: "remove the card view from mobile"). A saved sunny.book196p is ignored; the web keeps Rows | List.
 //    The header "Every leg · N legs · N off", the whole book in a 2-column grid (So far, Theta a day, Delta, Nearest
 //    call sold, Nearest put sold, To roll), then the chips on three lines: (1) the expiries, (2) Calls, Puts, Shares,
-//    (3) Income, Hedges, Long with Switch off all (or on all) at the right end. No dividers between chips; a line too
-//    long for the screen scrolls sideways with no scroll indicator. A chip changes only itself (filled on, outlined off).
-//    Then the legs, grouped by what each needs (In the money, Danger, Roll, Watch, Safe, Hedges, Shares), nearest the
+//    (3) Sold, Bought (options only; Nik, 24 Nov 2026: never Long, Hedge or Income) with Switch off all (or on all) at
+//    the right end. No dividers between chips; a line too long for the screen scrolls sideways with no scroll
+//    indicator. A chip changes only itself (filled on, outlined off).
+//    Then the legs, grouped by what each needs (In the money, Danger, Roll, Watch, Safe, Bought, Shares), nearest the
 //    strike first.
 //    No explanation or how-to lines anywhere (Nik, 24 Nov 2026): no hint under the chips and no definitions under the
 //    groups; labels, figures and statuses only.
-//    Each leg: SD sold → now with kept % (sold), the SD from today (hedges), so far, the count, its own 51 × 31 switch
+//    Each leg: SD sold → now with kept % (sold), the SD from today (bought), so far, the count, its own 51 × 31 switch
 //    (44 pt targets). Calm: colour only on Danger, In the money, Roll and losses; legs with nothing to do read grey.
 //  A leg counts when its own switch and each of its chips are on: those legs drive Payoff and the Greeks (the off set
 //  goes to PosName.payoff; every leg starts on and a switch flips it, PosName.offs).
 //  SD sold → now: the SD when sold is sunny-sd's sold[].z0 (the fill's own price, IV and days); now is Sold in SD's
-//  (the leg's IV over the trading days left). A hedge reads its SD from today. Tried legs (PositionsTries) sit in their
+//  (the leg's IV over the trading days left). A leg bought reads its SD from today. Tried legs (PositionsTries) sit in their
 //  status group with "from Intelligence", a switch and ✕.
 //  No em dashes in any words here; no minus signs (red alone says negative).
 //
@@ -27,8 +28,9 @@ import SwiftUI
 // MARK: - The model
 
 struct PosEvery {
-    enum Role: String { case inc, hed, lng }
-    enum Status: String { case itm, dan, roll, wat, safe, hed, none }
+    /// Sold and Bought are options only; shares are their own (the Shares chip).
+    enum Role: String { case sold, bought, shares }
+    enum Status: String { case itm, dan, roll, wat, safe, bought, none }
     enum Own { case all, some, none }
 
     struct Leg: Identifiable, Hashable {
@@ -55,13 +57,13 @@ struct PosEvery {
         let st: Status
         var sh: Bool { ty == "s" }
         var call: Bool { ty == "c" }
-        var sold: Bool { role == .inc }
+        var sold: Bool { role == .sold }
         /// Nothing to do: grey (calm).
         var quiet: Bool { st != .itm && st != .dan && st != .roll }
         var name: String { sh ? "Shares" : "\(PE.fk(K)) \(call ? "call" : "put")" }
         var count: String {
             if sh { return "\(PosFmt.count(q)) at \(PosFmt.price(at ?? 0))" }
-            return (sold ? "Sold ×" : "Hedge ×") + PosFmt.count(q) + (tryID != nil ? " · from Intelligence" : "")
+            return (sold ? "Sold ×" : "Bought ×") + PosFmt.count(q) + (tryID != nil ? " · from Intelligence" : "")
         }
     }
     struct Group: Identifiable {
@@ -117,9 +119,9 @@ struct PosEvery {
         }
         func status(_ role: Role, _ sN: Double?, _ kp: Int?, itm: Bool) -> Status {
             switch role {
-            case .lng: return .none
-            case .hed: return .hed
-            case .inc:
+            case .shares: return .none
+            case .bought: return .bought
+            case .sold:
                 guard let s = sN else { return itm ? .itm : .wat }
                 return s < 0 ? .itm : s < 0.5 ? .dan : (kp ?? 0) >= 90 ? .roll : s < 1 ? .wat : .safe
             }
@@ -127,7 +129,7 @@ struct PosEvery {
         var legs: [Leg] = []
         for l in m.legs {
             let ty = l.ty == .shares ? "s" : l.ty == .put ? "p" : "c", put = ty == "p"
-            let role: Role = ty == "s" ? .lng : l.q < 0 ? .inc : .hed
+            let role: Role = ty == "s" ? .shares : l.q < 0 ? .sold : .bought
             let own = !offs.contains(l.id), eff = own && !chipOff((ty, l.iso, role), chips)
             if ty == "s" {
                 legs.append(Leg(id: l.id, tryID: nil, ty: ty, K: l.K, q: l.q, iso: "", exLabel: "", role: role, at: l.K, mk: S0,
@@ -138,13 +140,13 @@ struct PosEvery {
             let sf = a != nil && k != nil ? (k! - a!) * l.q * 100 : 0
             let th = m.greeks(m.S0, tt0, off: ids.subtracting([l.id])).th
             var sN: Double?, s0: Double?
-            if role == .inc, let r = sold.first(where: { $0.l.put == put && abs($0.l.K - l.K) < 1e-6 && $0.l.ex == l.iso }) {
+            if role == .sold, let r = sold.first(where: { $0.l.put == put && abs($0.l.K - l.K) < 1e-6 && $0.l.ex == l.iso }) {
                 sN = put ? -r.z : r.z
                 s0 = r.l.z0.flatMap { $0.isFinite ? (put ? -$0 : $0) : nil }
             } else {
                 sN = room(put, l.K, ivs[l.id] ?? nameIV, l.iso)
             }
-            let kp: Int? = role == .inc && (a ?? 0) > 0 && k != nil ? Int(PE.jsRound((1 - k! / a!) * 100)) : nil
+            let kp: Int? = role == .sold && (a ?? 0) > 0 && k != nil ? Int(PE.jsRound((1 - k! / a!) * 100)) : nil
             let be: Double? = a.map { put ? l.K - $0 : l.K + $0 }
             let itm = put ? S0 < l.K : S0 > l.K
             legs.append(Leg(id: l.id, tryID: nil, ty: ty, K: l.K, q: l.q, iso: l.iso, exLabel: label(l.iso), role: role, at: a, mk: k,
@@ -153,15 +155,15 @@ struct PosEvery {
         }
         var onTries: [PosTryLeg] = []
         for x in tries {
-            let role: Role = x.t.side == "s" ? .inc : .hed, own = x.t.on, eff = own && !chipOff((x.t.ty, x.t.ex, role), chips)
+            let role: Role = x.t.side == "s" ? .sold : .bought, own = x.t.on, eff = own && !chipOff((x.t.ty, x.t.ex, role), chips)
             if eff { onTries.append(x) }
             let g = x.greeks(m.S0, tt0), put = x.put
             let mm = PE.sdMove(x.iv, PE.tradingDays(today, x.t.ex, closed: closed, mins: Double(mins)))
             let sN: Double? = mm > 0 ? (put ? log(S0 / x.t.K) : log(x.t.K / S0)) / mm : nil
             legs.append(Leg(id: "try:" + x.t.id, tryID: x.t.id, ty: x.t.ty, K: x.t.K, q: x.q, iso: x.t.ex, exLabel: label(x.t.ex), role: role,
-                            at: x.en, mk: x.en, sf: 0, dl: g.d, th: g.th, sN: sN, s0: sN, kp: role == .inc ? 0 : nil,
+                            at: x.en, mk: x.en, sf: 0, dl: g.d, th: g.th, sN: sN, s0: sN, kp: role == .sold ? 0 : nil,
                             be: put ? x.t.K - x.en : x.t.K + x.en, own: own, eff: eff,
-                            st: status(role, sN, role == .inc ? 0 : nil, itm: put ? S0 < x.t.K : S0 > x.t.K)))
+                            st: status(role, sN, role == .sold ? 0 : nil, itm: put ? S0 < x.t.K : S0 > x.t.K)))
         }
 
         func sums(_ ls: [Leg]) -> (Double, Double, Double) {
@@ -173,7 +175,7 @@ struct PosEvery {
         // List: by what each leg needs, nearest the strike first (Roll: most kept first).
         // No line explaining what a status means (Nik, 24 Nov 2026: no how-to copy on the face of a screen).
         let SG: [(Status, String, String)] = [(.itm, "In the money", ""), (.dan, "Danger", ""), (.roll, "Roll", ""), (.wat, "Watch", ""),
-                                              (.safe, "Safe", ""), (.hed, "Hedges", ""), (.none, "Shares", "")]
+                                              (.safe, "Safe", ""), (.bought, "Bought", ""), (.none, "Shares", "")]
         let byStatus: [Group] = SG.compactMap { st, t, s in
             let ls = legs.filter { $0.st == st }.sorted { a, b in
                 st == .roll ? (a.kp ?? 0) > (b.kp ?? 0) : (a.sN ?? .infinity) < (b.sN ?? .infinity)
@@ -183,11 +185,11 @@ struct PosEvery {
             return Group(id: "L" + st.rawValue, title: "\(t) · \(ls.count)", sub: s, legs: ls,
                          sf: x.0, th: x.1, dl: x.2, none: !ls.contains(where: \.eff), own: own(ls), tone: st)
         }
-        // The chips: every expiry, then Calls, Puts, Shares, then Income, Hedges, Long (only what the name holds).
+        // The chips: every expiry, then Calls, Puts, Shares, then Sold, Bought (only what the name holds).
         let exChips = isos.map { Chip(id: "ex:" + $0, label: label($0), on: !chips.contains("ex:" + $0)) }
         let kinds = [("c", "Calls"), ("p", "Puts"), ("s", "Shares")].filter { k in legs.contains { $0.ty == k.0 } }
             .map { Chip(id: "kind:" + $0.0, label: $0.1, on: !chips.contains("kind:" + $0.0)) }
-        let roles = [(Role.inc, "Income"), (.hed, "Hedges"), (.lng, "Long")].filter { r in legs.contains { $0.role == r.0 } }
+        let roles = [(Role.sold, "Sold"), (.bought, "Bought")].filter { r in legs.contains { $0.role == r.0 } }
             .map { Chip(id: "role:" + $0.0.rawValue, label: $0.1, on: !chips.contains("role:" + $0.0.rawValue)) }
         let all = sums(legs)
         let soldOn = legs.filter { $0.eff && $0.sold && $0.sN != nil }
@@ -283,8 +285,8 @@ struct PosEveryBook: View {
 
     // MARK: The chips (handoff 2026-11-24-final-2 §2.1)
 
-    /// Three lines: the expiries, then Calls Puts Shares, then Income Hedges Long with Switch off all at the right end of
-    /// the last line. No dividers; each line scrolls sideways on its own when it runs past the screen (no indicator).
+    /// Three lines: the expiries, then Calls Puts Shares, then Sold Bought with Switch off all at the right end of the
+    /// last line. No dividers; each line scrolls sideways on its own when it runs past the screen (no indicator).
     private var chips: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(m.chipRows.enumerated()), id: \.offset) { i, row in
@@ -348,19 +350,19 @@ struct PosEveryBook: View {
         case .wat: "Watch"
         case .safe: "Safe"
         case .roll: "Roll"
-        case .hed: "Hedge"
+        case .bought: "Bought"
         case .none: ""
         }
         let sN = l.sN ?? 0, s0 = l.s0
         let dS = l.sold && s0 != nil ? Int(PE.jsRound(sN * 100)) - Int(PE.jsRound(s0! * 100)) : 0
-        let gn = l.role == .hed && (l.at ?? 0) > 0 ? Int(PE.jsRound(((l.mk ?? 0) / l.at! - 1) * 100)) : 0
-        let px2 = l.sold ? ((l.kp ?? 0) >= 0 ? "\(l.kp ?? 0)% kept" : "\(abs(l.kp ?? 0))% lost") : l.role == .hed ? "\(gn >= 0 ? "Up" : "Down") \(abs(gn))%" : ""
+        let gn = l.role == .bought && (l.at ?? 0) > 0 ? Int(PE.jsRound(((l.mk ?? 0) / l.at! - 1) * 100)) : 0
+        let px2 = l.sold ? ((l.kp ?? 0) >= 0 ? "\(l.kp ?? 0)% kept" : "\(abs(l.kp ?? 0))% lost") : l.role == .bought ? "\(gn >= 0 ? "Up" : "Down") \(abs(gn))%" : ""
         let added = l.tryID != nil
         return Look(tx: TX, word: word,
                     sdc: l.sold && sN < 0.5 ? PEC.red : TX, arc: q ? PEC.mu : dS < 0 ? PEC.red : dS > 0 ? PEC.green : PEC.mu,
                     sd0: l.sold ? (s0.map { $0 < 0 ? "In the money" : f2($0) } ?? "") : "",
                     sdN: l.sh || l.sN == nil ? "" : sN < 0 ? "In the money" : "\(f2(sN)) SD",
-                    px2: px2, px2c: (l.sold && (l.kp ?? 0) < 0) || (l.role == .hed && gn < 0) ? PEC.red : PEC.mu,
+                    px2: px2, px2c: (l.sold && (l.kp ?? 0) < 0) || (l.role == .bought && gn < 0) ? PEC.red : PEC.mu,
                     sf: added ? "new" : km(l.sf), sfc: added ? PEC.mu : qc(l.sf))
     }
 
@@ -436,7 +438,7 @@ struct PosEveryBook: View {
             if l.tryID != nil { xButton(l) }
             VStack(alignment: .trailing, spacing: 1) {
                 Text(k.sf).sType(PT.t(15, 20, 700)).foregroundStyle(k.sfc)
-                Text(l.tryID != nil ? (l.sold ? "Sold ×" : "Hedge ×") + PosFmt.count(l.q) : l.count).sType(PT.t(12, 16), tabular: true).foregroundStyle(PEC.mu)
+                Text(l.tryID != nil ? (l.sold ? "Sold ×" : "Bought ×") + PosFmt.count(l.q) : l.count).sType(PT.t(12, 16), tabular: true).foregroundStyle(PEC.mu)
             }
             .lineLimit(1)
             .opacity(op)

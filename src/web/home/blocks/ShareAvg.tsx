@@ -3,13 +3,13 @@
 // name whose average moved this week, biggest move first, side by side in a grid of columns at least 300 wide, 16
 // apart; the server's quiet line for the names that held under them. Never on Positions.
 // Each box: the header (logo, ticker, shares, "Down $8.13" green, "Up" red or "Held" grey, this week), the summary
-// (ahead of or behind the price, then what closed trades did to what was paid), the Average and price chart (the
+// (ahead of or behind the price, then what sold calls and puts did to what was paid), the Average and price chart (the
 // price through the week's closes, the average straight from last Friday to now, the gap shaded green under the
-// price and red over it, Paid dashed, Avg · Price · Paid tags), and What moved it · a share · since Sep 1 (five
-// tiles in the Performance legend colours; up is a loss, in red).
+// price and red over it, Paid dashed, Avg · Price · Paid tags), and What moved it · a share · since Sep 1 (two
+// tiles, Calls sold and Puts sold, in the Performance legend colours; up is a loss, in red).
 // Data: the brief doc's card {type: 'shareAvg', names, note} (sunny-home doc.ts shareAvgSection, index.ts shareAvg):
-// sh, paid, px, days and cl (the week's closes), s1 and s2 (the five steps a share at last Friday and now: calls sold,
-// puts sold, calls bought, puts bought, shares sold), w (the average last Friday and now), wk (this week's change).
+// sh, paid, px, days and cl (the week's closes), s1 and s2 (the two steps a share at last Friday and now: calls sold,
+// puts sold), w (the average last Friday and now: paid less the premium kept), wk (this week's change).
 import { useEffect, useState, type CSSProperties } from 'react';
 import type { J } from '../../lib/data';
 import { monthDay } from '../../lib/clock';
@@ -18,8 +18,8 @@ import { useWeb } from '../../lib/state';
 import { BOX, BOX_PAD } from './Card';
 
 const INK = C.ink, SUB = C.ink2, G = C.green, R = C.red, LINE = 'rgba(255,255,255,.08)', PXL = 'rgba(245,245,247,.5)';
-const LG = ['Calls sold', 'Puts sold', 'Calls bought', 'Puts bought', 'Shares sold'];
-const LC = ['#327133', '#2E5ECA', '#65C466', '#73B6F9', '#F2A93B'];
+const LG = ['Calls sold', 'Puts sold'];
+const LC = ['#327133', '#2E5ECA'];
 const HH = 160;
 
 interface SA { t: string; name: string; sh: number; paid: number; px: number; days: string[]; cl: number[]; s2: number[]; w: [number, number]; wk: number }
@@ -99,13 +99,13 @@ function Box({ b }: { b: SA }) {
       <p style={{ margin: 0, fontSize: 17, lineHeight: '24px', textWrap: 'pretty' } as CSSProperties}>
         {at ? <span style={{ fontWeight: 600 }}>At the price.</span>
           : <span style={{ fontWeight: 600 }}>{ahead ? 'Ahead of' : 'Behind'} the price by <span style={{ color: ahead ? G : R }}>{price(gap)}</span> a share.</span>}
-        {even ? <span> Closed trades left the {price(b.paid)} you paid where it was.</span>
-          : <span> Closed trades {pd0 > 0 ? 'added ' : 'took '}<span style={{ color: pd0 > 0 ? R : G }}>{price(pd0)}</span>{pd0 > 0 ? ' to' : ' off'} the {price(b.paid)} you paid.</span>}
+        {even ? <span> Sold calls and puts left the {price(b.paid)} you paid where it was.</span>
+          : <span> Sold calls and puts {pd0 > 0 ? 'added ' : 'took '}<span style={{ color: pd0 > 0 ? R : G }}>{price(pd0)}</span>{pd0 > 0 ? ' to' : ' off'} the {price(b.paid)} you paid.</span>}
       </p>
       {b.cl.length > 0 && <Chart b={b} />}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 14, borderTop: `1px solid ${LINE}` }}>
         <span style={{ fontSize: 12, lineHeight: '14px', fontWeight: 600, color: SUB }}>What moved it · a share · since Sep 1</span>
-        <div role="list" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: '14px 10px' }}>
+        <div role="list" style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: '14px 10px' }}>
           {b.s2.map((v, j) => {
             const z = v === 0, tiny = !z && Math.abs(v) < 0.005;
             const val = z ? '-' : tiny ? 'under 1¢' : price(v);

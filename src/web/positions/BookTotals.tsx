@@ -1,79 +1,84 @@
-// Book totals (handoff 2026-11-13-positions §3.1, with Nik's D7: five cells, not six).
-//   LONG Shares · HEDGE Calls (every call bought, LEAPS too), Puts · INCOME Calls, Puts.
-//   Long, Hedge: value now; gain = now less paid; % on paid.
-//   Income:      collected, the time value still left in brackets; kept = collected less the mark now; % on collected.
-// Two rows: the Whole book (every name on the account) and the name on screen.
-// Nothing shown that does not exist (handoff 2026-11-18 §3.3): a piece the book does not hold has no column (Nicolay:
-// no shares, no puts bought), a role with none has no header, and a piece the book holds but this name does not reads
-// a quiet "-". Never None or To do.
-// Every number is the book engine's holdings() (totals.ts), the numbers Home's brief sends the phone.
-// Under 860 px the strip scrolls sideways; nothing overlaps at any width.
+// Your book (Nik, 24 Nov 2026: "No need for Today and All time, just all time"): each leg, not Long, Hedge and Income.
+// Header: Your book, and on the right how many tickers and legs. Then one block per part the book holds, in this
+// order: Shares, Calls bought, Calls sold, Puts bought, Puts sold, in a grid that fills the width on a wide screen and
+// is one column on a phone. Each block:
+//   "Shares · gain" (or loss; sold parts read kept or lost), muted.
+//   The all time gain, loss or kept, big, green or red, never a minus sign.
+//   Bought: "$613K now · 1.3% return" (calls and puts bought add "· $91.3K time value").
+//   Sold:   "$8.8K now · 68.4% captured · $8.8K time value" (now = the cost to buy back, collected less kept).
+// The picked name's own book follows in the same blocks, only the parts it holds.
+// Every figure is sunny-home's (payload.brief_inputs.parts, totals.ts), the same numbers the phone reads.
 import { money, pct } from '../lib/format';
-import { PIECES, ROLES, gainOf, pctOfFig, type Cell, type Row } from './totals';
-import { G, K, MT, MU, R } from './ui';
+import { PARTS, legsIn, type PKey, type Part, type Parts } from './totals';
+import { G, K, MU, R } from './ui';
 
-const RULE = '1px solid rgba(255,255,255,.08)';
-const track = (p: (typeof PIECES)[number]) => (p.role === 'income' ? 'minmax(120px,1.25fr)' : 'minmax(96px,1fr)');
+const RULE = '1px solid rgba(255,255,255,.08)', SEP = 18;
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
-function show(c: Cell, income: boolean, mask: (s: string) => string, what: string) {
-  if (!c) return { v: '-', c: MU, tv: null as string | null, g: null as string | null, gc: MU, aria: what + ', not held' };
-  const g = gainOf(c, income), x = pctOfFig(c, income);
-  const v = mask(money(income ? c.paid : c.now)), tv = income ? mask(money(c.tv ?? 0)) : null, gs = mask(money(g)) + ' · ' + pct(x);
-  const up = g > 0 ? (income ? 'kept ' : 'up ') : g < 0 ? (income ? 'lost ' : 'down ') : '';
-  const aria = income
-    ? `${what}, collected ${v}, time value left ${tv}, ${up}${mask(money(g))}, ${pct(x)}`
-    : `${what}, ${v}, ${up}${mask(money(g))}, ${pct(x)}`;
-  return { v, c: K, tv, g: gs, gc: g > 0 ? G : g < 0 ? R : K, aria };
+function Block({ k, p, mask, who }: { k: PKey; p: Part; mask: (s: string) => string; who: string }) {
+  const def = PARTS.find((x) => x.k === k)!;
+  const a = p.all, ok = a >= -0.5, c = a > 0.5 ? G : a < -0.5 ? R : K;
+  const word = def.sold ? (ok ? 'kept' : 'lost') : ok ? 'gain' : 'loss';
+  const now = def.sold ? p.value - a : p.value;
+  const x = def.sold ? (p.value > 0 ? (a / p.value) * 100 : 0) : p.abase > 0 ? (a / p.abase) * 100 : 0;
+  const xw = def.sold ? 'captured' : 'return';
+  const big = mask(money(Math.abs(a))), nowS = mask(money(now)), tvS = p.tv != null ? mask(money(p.tv)) : null;
+  const aria = [`${who}${def.l}, ${word} ${big}`, `${nowS} now`,
+    def.sold ? `${pct(x)} ${ok ? 'captured' : 'lost'}` : `return ${ok ? 'up' : 'down'} ${pct(x)}`,
+    tvS ? `${tvS} time value` : ''].filter(Boolean).join(', ');
+  // The sub line wraps between its pieces, never inside one; each piece leads with its dot, and the dot that would
+  // start a line sits left of the clip, so no line starts or ends on a dot.
+  const segs: [string, string, string][] = [[nowS, 'now', K], [pct(x), xw, c], ...(tvS ? [[tvS, 'time value', K] as [string, string, string]] : [])];
+  return (
+    <div role="group" aria-label={aria} style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <span aria-hidden="true" style={{ fontSize: 15, lineHeight: '20px', color: MU, whiteSpace: 'nowrap' }}>{def.l} · {word}</span>
+      <span aria-hidden="true" style={{ marginTop: 2, fontSize: 40, lineHeight: '44px', fontWeight: 700, letterSpacing: '-0.02em', color: c, whiteSpace: 'nowrap' }}>{big}</span>
+      <span aria-hidden="true" style={{ marginTop: 4, display: 'block', overflow: 'hidden' }}>
+        <span style={{ display: 'flex', flexWrap: 'wrap', marginLeft: -SEP, fontSize: 15, lineHeight: '20px', fontWeight: 400, color: MU }}>
+          {segs.map(([v, w, col]) => (
+            <span key={w} style={{ whiteSpace: 'nowrap' }}>
+              <span style={{ display: 'inline-block', width: SEP, textAlign: 'center', userSelect: 'none' }}>·</span>
+              <span style={{ fontWeight: 600, color: col }}>{v}</span> {w}
+            </span>
+          ))}
+        </span>
+      </span>
+    </div>
+  );
 }
 
-export function BookTotals({ book, name, t, mask }: { book: Row; name: Row | null; t: string | null; mask: (s: string) => string }) {
-  const pieces = PIECES.filter((p) => book[p.key]);
-  const roles = ROLES.filter((r) => pieces.some((p) => p.role === r.k));
-  const starts = new Set(roles.slice(1).map((r) => pieces.findIndex((p) => p.role === r.k)));
-  const cols = '96px ' + pieces.map(track).join(' ');
-  const minW = 96 + pieces.reduce((a, p) => a + (p.role === 'income' ? 132 : 108), 0);
-  const rows: { k: string; l: string; me: boolean; row: Row | null }[] = [
-    { k: 'b', l: 'Whole book', me: false, row: book },
-    ...(t ? [{ k: 't', l: t, me: true, row: name }] : []),
-  ];
+function Head({ l, r }: { l: string; r: string }) {
   return (
-    <div aria-label="Book totals" className="swp-scroll tnum" style={{ overflowX: 'auto', borderTop: '1px solid rgba(255,255,255,.14)', borderBottom: RULE }}>
-      <div style={{ display: 'grid', gridTemplateColumns: cols, minWidth: minW, padding: '12px 0 2px' }}>
-        <span />
-        {roles.map((r, i) => {
-          const n = pieces.filter((p) => p.role === r.k).length;
-          return (
-            <div key={r.k} style={{ gridColumn: `span ${n}`, padding: `0 0 2px ${i ? 10 : 0}px`, borderLeft: i ? RULE : 'none' }}>
-              <span style={{ fontSize: 11, lineHeight: '14px', fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: MU }}>{r.h}</span>
-            </div>
-          );
-        })}
-        <span />
-        {pieces.map((p, i) => (
-          <span key={p.key} style={{ padding: starts.has(i) ? '0 8px 8px 10px' : '0 8px 8px 0', borderLeft: starts.has(i) ? RULE : 'none',
-            fontSize: 12, lineHeight: '16px', color: MT, whiteSpace: 'nowrap' }}>{p.l}</span>
-        ))}
-        {rows.map((r) => (
-          <div key={r.k} style={{ display: 'contents' }}>
-            <span aria-hidden="true" style={{ gridColumn: '1 / -1', height: 1, background: 'rgba(255,255,255,.08)' }} />
-            <span style={{ padding: '8px 8px 8px 0', fontSize: 13, lineHeight: '20px', fontWeight: r.me ? 600 : 400, color: r.me ? K : MU, whiteSpace: 'nowrap' }}>{r.l}</span>
-            {pieces.map((p, i) => {
-              const role = ROLES.find((x) => x.k === p.role)!.h;
-              const x = show(r.row ? r.row[p.key] : null, p.role === 'income', mask, `${r.l}, ${role} ${p.l.toLowerCase()}`);
-              return (
-                <div key={p.key} role="group" aria-label={x.aria} style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1,
-                  padding: starts.has(i) ? '8px 8px 8px 10px' : '8px 8px 8px 0', borderLeft: starts.has(i) ? RULE : 'none' }}>
-                  <span style={{ display: 'flex', alignItems: 'baseline', gap: 4, whiteSpace: 'nowrap' }}>
-                    <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600, color: x.c }}>{x.v}</span>
-                    {x.tv && <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 500, color: MT }}>({x.tv})</span>}
-                  </span>
-                  {x.g && <span style={{ fontSize: 12, lineHeight: '16px', fontWeight: 600, whiteSpace: 'nowrap', color: x.gc }}>{x.g}</span>}
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '4px 16px', flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 20, lineHeight: '24px', fontWeight: 700, color: K }}>{l}</span>
+      <span style={{ fontSize: 15, lineHeight: '20px', color: MU, whiteSpace: 'nowrap' }}>{r}</span>
     </div>
+  );
+}
+
+function Grid({ ps, mask, who, label }: { ps: Parts; mask: (s: string) => string; who: string; label: string }) {
+  return (
+    <div role="list" aria-label={label} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(min(100%,236px),1fr))', gap: '20px 28px' }}>
+      {PARTS.filter((x) => ps[x.k]).map((x) => (
+        <div key={x.k} role="listitem" style={{ minWidth: 0 }}><Block k={x.k} p={ps[x.k]!} mask={mask} who={who} /></div>
+      ))}
+    </div>
+  );
+}
+
+export function BookTotals({ book, nNames, name, t, mask }: { book: Parts; nNames: number; name: Parts | null; t: string | null; mask: (s: string) => string }) {
+  const nl = legsIn(book), nn = name ? legsIn(name) : 0;
+  return (
+    <section aria-label="Your book" className="tnum" style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '16px 0 20px', borderTop: '1px solid rgba(255,255,255,.14)', borderBottom: RULE }}>
+      <Head l="Your book" r={`${plural(nNames, 'ticker')} · ${plural(nl, 'leg')}`} />
+      <Grid ps={book} mask={mask} who="" label="Your book, each part" />
+      {t && name && nn > 0 && (
+        <>
+          <span aria-hidden="true" style={{ height: 1, background: 'rgba(255,255,255,.08)', margin: '4px 0 0' }} />
+          <Head l={t} r={plural(nn, 'leg')} />
+          <Grid ps={name} mask={mask} who={`${t} `} label={`${t}, each part`} />
+        </>
+      )}
+    </section>
   );
 }

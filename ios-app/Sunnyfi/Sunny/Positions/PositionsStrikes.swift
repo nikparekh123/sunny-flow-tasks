@@ -87,7 +87,7 @@ struct PosStrikes {
         let ernL = d.events?.earnings.map { PosFmt.md(String($0.prefix(10))) }
         let SN: [String: String] = ["Ceiling": "ceiling", "Floor": "floor", "Flip": "flip", "Resistance": "resistance", "Support": "support",
                                     "20-day average": "20-day", "50-day average": "50-day", "100-day average": "100-day", "200-day average": "200-day"]
-        // The cover check (sd-engine cover()): calls covered by the shares, then the hedge calls that last to each.
+        // The cover check (sd-engine cover()): calls covered by the shares, then the calls bought that last to each.
         let soldC = d.sold.filter { !$0.put }.map { (K: $0.K, n: $0.n, ex: $0.ex) }
 
         var exps: [Exp] = [], strikes: [String: [Strike]] = [:], free: [Int: Int] = [:], soldAt: [Int: Int] = [:]

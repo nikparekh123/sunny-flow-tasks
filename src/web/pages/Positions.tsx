@@ -1,5 +1,6 @@
 // Positions (handoff 2026-11-13-positions, Web Dark v2's Positions page; handoff 2026-11-24 §4), top to bottom:
-//   1 the title and the book on screen · 2 Book totals (five cells, D7; whole book and the name) · 3 the name strip
+//   1 the title and the book on screen · 2 Your book (Shares, Calls bought, Calls sold, Puts bought, Puts sold, all
+//   time; then the picked name's own) · 3 the name strip
 //   (on Together, Sunny's names, a hairline, then Nicolay's) · 4 the name header and its share average · 5 the band:
 //   Payoff | Price and What if, one height · 6 Every leg (SunnyBook, Rows | List) · 7 Intelligence (a capsule that
 //   opens into the full window). Sold, in SD is off (24 Nov 2026: its content lives in Every leg).
@@ -7,7 +8,8 @@
 //
 // Data, real only:
 //   Home's snapshot (useHome): the names (brief.names: the strip, st for the red dot), the legs Home priced
-//     (brief_inputs: Book totals, each leg's IV), the share averages (share_avg), the calendar and the marks' time.
+//     (brief_inputs: each leg's IV; brief_inputs.parts: Your book), the share averages (share_avg), the calendar and
+//     the marks' time.
 //   sunny-positions (usePositions): the name's grid of P&L by price and date (Payoff, Greeks, Every leg, What if).
 //   sunny-chart (useTicker): the name's daily closes for the Price chart.
 //   sunny-sd (useSd): the name's chain, the rule and the levels for Intelligence, and each sold leg's SD when sold
@@ -30,7 +32,7 @@ import { Intelligence } from '../positions/Intelligence';
 import { ivAtStrike, setIntelOpen, useIntelOpen, type SdReply } from '../positions/intel';
 import { PosModel, Pricer, expLabel, type GridW, type Inputs, type PLeg, type Trade } from '../positions/model';
 import { closedDays, soldLegs } from '../positions/sold';
-import { bookTotals, nameTotals } from '../positions/totals';
+import { readParts } from '../positions/totals';
 import { useTarget } from '../positions/target';
 import { tryNum, useTries } from '../positions/tries';
 import { G, K, MU, O, PosStyles, R, Segmented, useReducedMotion } from '../positions/ui';
@@ -76,8 +78,7 @@ export default function Positions() {
   const ahead = useMemo(() => { const i = Math.max(0, order.indexOf(t ?? '')); return [...order.slice(i + 1), ...order.slice(0, i)]; }, [order, t]);
   usePrefetchPositions(book, ahead, !!t);
 
-  const nt = useMemo(() => nameTotals(payload), [payload]);
-  const bt = useMemo(() => bookTotals(nt), [nt]);
+  const parts = useMemo(() => readParts(payload), [payload]);
 
   // The strip's dot: a sold leg in the money or within 0.5 SD (Home's legs, read at once).
   const sold = useMemo(() => soldInSd(soldLegs(payload, new Map())), [payload]);
@@ -106,7 +107,7 @@ export default function Positions() {
           <span style={{ fontSize: 13, color: MU }}>Each name you hold shows here once IBKR reports it.</span>
         </div>
       )}
-      {names.length > 0 && <BookTotals book={bt} name={t ? nt.get(t) ?? null : null} t={t} mask={mask} />}
+      {names.length > 0 && parts && <BookTotals book={parts.book} nNames={parts.names.size} name={t ? parts.names.get(t) ?? null : null} t={t} mask={mask} />}
       {names.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px 18px', flexWrap: 'wrap' }}>
           {strip.map((g, gi) => (
@@ -235,8 +236,8 @@ function Detail({ book, t, grid, payload, mask }: { book: BookId; t: string; gri
   // The switches (Nik, 24 Nov 2026: "keep all of them on"): every leg starts on; `flip` holds the legs switched
   // off. Every leg's chips (24 Nov 2026)
   // each switch their legs off on their own: a leg counts when its own switch and each of its chips are on. Payoff,
-  // its Greeks and Every leg follow. What if and Intelligence count only real changes (Nik: "Only what I flip"): an
-  // income leg that no longer counts is closed there (bought back); a leg bought or the shares switched on is already
+  // its Greeks and Every leg follow. What if and Intelligence count only real changes (Nik: "Only what I flip"): a
+  // sold leg that no longer counts is closed there (bought back); a leg bought or the shares switched on is already
   // held, no change.
   const base = m.legs;
   const flip = useMemo(() => new Set(wf.flip.filter((k) => base.some((l) => l.k === k))), [wf.flip, base]);
@@ -304,7 +305,7 @@ function Detail({ book, t, grid, payload, mask }: { book: BookId; t: string; gri
     const [b, v] = id.split(':');
     if (b === 'ex') return exShort(v, m.wholeDays(v));
     if (b === 'kind') return v === 'C' ? 'Calls' : v === 'P' ? 'Puts' : 'Shares';
-    return v === 'income' ? 'Income' : v === 'hedge' ? 'Hedges' : 'Long';
+    return v === 'sold' ? 'Sold' : 'Bought';
   }, [m]);
   const items: BookItem[] = useMemo(() => {
     const n0 = ny();
@@ -324,7 +325,7 @@ function Detail({ book, t, grid, payload, mask }: { book: BookId; t: string; gri
     const ls = [...base, ...pr.trades], has = (id: string) => ls.some((l) => chipIds(l).includes(id));
     const chip = (id: string): BookChip => ({ k: id, l: chipName(id), on: !cf.has(id), go: () => wf.toggleChip(id) });
     const exs = [...new Set(ls.filter((l) => l.ty !== 'S').map((l) => l.ex))].sort();
-    return [exs.map((x) => chip('ex:' + x)), ['kind:C', 'kind:P', 'kind:S'].filter(has).map(chip), ['role:income', 'role:hedge', 'role:long'].filter(has).map(chip)].filter((r) => r.length);
+    return [exs.map((x) => chip('ex:' + x)), ['kind:C', 'kind:P', 'kind:S'].filter(has).map(chip), ['side:sold', 'side:bought'].filter(has).map(chip)].filter((r) => r.length);
   }, [base, pr, cf, chipName, wf]);
   // A group's switch, Switch on all: each leg's own switch to `v` (held legs as flips from where they start, What if
   // trades, the tries on the server).

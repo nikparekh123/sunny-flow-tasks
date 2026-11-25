@@ -150,7 +150,7 @@ struct PosPriceChart: View {
         .accessibilityLabel(PosSay.words("Price chart, past week, \(PosFmt.price(p.pts.last?.v ?? 0)) today. " + p.tags.filter { !$0.px }.map { "\($0.title)" + ($0.zTone == .red ? ", close" : $0.zTone == .orange ? ", near" : "") }.joined(separator: "; ")))
     }
 
-    /// The nearest sold call and put, nearest first: "Sold call 36  ↑2.0% · 0.46 SD", and with the cone on, the day it
+    /// The nearest sold call and put, nearest first: "Call sold 36  ↑2.0% · 0.46 SD", and with the cone on, the day it
     /// first reaches it ("the cone reaches it Wed") or "outside the cone to Fri".
     private func nearCard(_ p: PosPrice) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -276,7 +276,7 @@ struct PosPayoffView: View {
     @Binding var rangePct: Int
     /// A target price set on the web (payoff_targets), or nil.
     var target: Double? = nil
-    /// What has expired by the date on the slider ("Nov 20: 20 sold calls expired"), "" before the first expiry;
+    /// What has expired by the date on the slider ("Nov 20: 20 calls sold expired"), "" before the first expiry;
     /// VoiceOver only.
     var gone = ""
     /// The Greeks at a price on this date (handoff 2026-11-24 §4: the Greeks row follows the touch, back on release).

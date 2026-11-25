@@ -193,7 +193,7 @@ function Body({ t, d, M, pick, setPick, pr, base, off, trades, setSd, mask }: In
           <span style={{ fontSize: 12, color: MU }}>Cover</span>
           <span style={{ fontWeight: 600, color: cv.uncovered > 0 ? O : G }}>{cv.uncovered > 0 ? `${cv.uncovered} uncovered` : 'Covered'}</span>
           <span style={{ color: MT }}>
-            {cv.sold} calls sold{cv.open && cv.sale ? ` (${cv.open} open, ${cv.sale} new)` : ''}, {cv.byShares + cv.byOtm} covered · {cv.byShares} from shares + {cv.byOtm} hedge calls
+            {cv.sold} calls sold{cv.open && cv.sale ? ` (${cv.open} open, ${cv.sale} new)` : ''}, {cv.byShares + cv.byOtm} covered · {cv.byShares} from shares + {cv.byOtm} calls bought
           </span>
         </div>
       )}

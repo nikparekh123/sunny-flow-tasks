@@ -1,7 +1,7 @@
 // The band's left side (handoff 2026-11-13-positions §3.4, §3.5; handoff 2026-11-18 §3, CHANGES Nov 16 and 17):
 // Price | Payoff.
 //   Price (round 162a, Nov 16): the ticker chart's closes (useTicker, its ranges 1W 1M 3M YTD 1Y All) with today's
-//          price at the end, calls blue and puts brown, sold dashed and hedges dotted, each line named at its right end,
+//          price at the end, calls blue and puts brown, sold dashed and bought dotted, each line named at its right end,
 //          the tag column with each strike's SD on this week's move, the nearest sold call and put in a card under the
 //          chart, the room between the nearest sold strikes shaded. The 1 SD switch (round 164, Nov 17) adds the cone.
 //   Payoff (round 168a, Nov 17): P&L by price at a date from today's marks, summed from the server's grid (Pricer; a
@@ -18,6 +18,7 @@ import { PC_RANGES, priceChart, type PCPoint, type PCRange, type PCStrike, type 
 import type { SoldRow } from '../../../supabase/functions/_shared/positions-engine.ts';
 import type { J } from '../lib/data';
 import { fk, type DPt, type PLeg, type PosModel, type Pricer } from './model';
+import { legWords } from './totals';
 import { G, K, MT, MU, O, QU, R, cl, kicker, tnum, useReducedMotion } from './ui';
 
 /* ── Price ─────────────────────────────────────────────────────────────── */
@@ -34,7 +35,7 @@ const toneOf = (l: PLeg, sold: SoldRow[]): PCTone | null =>
   l.q < 0 ? sold.find((r) => r.put === (l.ty === 'P') && Math.abs(r.K - l.K) < 1e-6 && r.ex === l.ex)?.tone ?? null : null;
 const strikesOf = (legs: PLeg[], trades: PLeg[], sold: SoldRow[]): PCStrike[] => [
   ...legs.filter((l) => l.ty !== 'S').map((l) => ({ key: l.k, K: l.K, ty: l.ty as 'C' | 'P', q: l.q, w: false, tone: toneOf(l, sold), ex: l.ex,
-    label: `${l.q < 0 ? 'Sold' : 'Hedge'} ${l.ty === 'C' ? 'calls' : 'puts'} ${fk(l.K)} ×${count(Math.abs(l.q))} · ${l.exL}` })),
+    label: `${legWords(l)} ${fk(l.K)} ×${count(Math.abs(l.q))} · ${l.exL}` })),
   ...trades.filter((l) => l.ty !== 'S').map((l) => ({ key: l.k, K: l.K, ty: l.ty as 'C' | 'P', q: l.q, w: true, ex: l.ex, label: `What if · ${l.lb}` })),
 ];
 function model(chart: J, S0: number, closed: Set<string>, rg: PCRange, strikes: PCStrike[], iv = 0, cone = false) {
@@ -114,8 +115,8 @@ export function PriceChart({ chart, failed, S0, closed, legs, trades, sold, rg, 
   };
   const hasSold = legs.some((l) => l.q < 0 && l.ty !== 'S');
   const note = !v ? '' : on && cn
-    ? `1 SD cone: a normal week, ${price(cn.lo)} to ${price(cn.hi)} by ${v.fridayWords}; about 2 weeks in 3 end inside.${hasSold ? ' Green: inside your sold strikes; red: where it spills past them. The dot marks the day it first reaches one.' : ''} Calls blue, puts brown; sold dashed, hedges dotted.`
-    : `Calls blue, puts brown; sold dashed, hedges dotted. ${v.m0 ? 'Each tag gives the strike’s SD on this week’s move: red under 0.5 SD or in the money, orange to 1 SD, gray past 1 SD.' : 'Each tag gives how far the strike is from today.'}${v.room ? ' Green is the room between your nearest sold put and call, faint red past them.' : ''} After the dot, the days left to ${v.fridayWords}. A trade you try in What if shows dashed orange.`;
+    ? `1 SD cone: a normal week, ${price(cn.lo)} to ${price(cn.hi)} by ${v.fridayWords}; about 2 weeks in 3 end inside.${hasSold ? ' Green: inside your sold strikes; red: where it spills past them. The dot marks the day it first reaches one.' : ''} Calls blue, puts brown; sold dashed, bought dotted.`
+    : `Calls blue, puts brown; sold dashed, bought dotted. ${v.m0 ? 'Each tag gives the strike’s SD on this week’s move: red under 0.5 SD or in the money, orange to 1 SD, gray past 1 SD.' : 'Each tag gives how far the strike is from today.'}${v.room ? ' Green is the room between your nearest sold put and call, faint red past them.' : ''} After the dot, the days left to ${v.fridayWords}. A trade you try in What if shows dashed orange.`;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {v ? <>
@@ -288,12 +289,12 @@ export function payDays(m: PosModel, wi: PLeg[], closed: Set<string>): { pts: Pa
 }
 /** "a, b and c". */
 const andList = (a: string[]) => (a.length < 2 ? a.join('') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`);
-/** What has expired by a date (Nik, 20 Nov 2026, option 1): "Nov 20: 20 sold calls and 10 sold puts expired",
+/** What has expired by a date (Nik, 20 Nov 2026, option 1): "Nov 20: 20 calls sold and 10 puts sold expired",
     "Nov 20 and Nov 27: ...", "Nov 20 to Dec 4, 3 expiries: ...". Empty before the first expiry. */
 export function goneWords(wi: PLeg[], iso: string): string {
   const by = new Map<string, PLeg[]>();
   for (const l of wi) if (l.ty !== 'S' && l.ex && l.ex < iso) by.set(l.ex, [...(by.get(l.ex) ?? []), l]);
-  const what = (ls: PLeg[]) => andList(([['C', -1, 'sold calls'], ['P', -1, 'sold puts'], ['C', 1, 'hedge calls'], ['P', 1, 'hedge puts']] as const)
+  const what = (ls: PLeg[]) => andList(([['C', -1, 'calls sold'], ['P', -1, 'puts sold'], ['C', 1, 'calls bought'], ['P', 1, 'puts bought']] as const)
     .map(([ty, sg, w]) => { const n = ls.filter((l) => l.ty === ty && Math.sign(l.q) === sg).reduce((a, l) => a + Math.abs(l.q), 0); return n > 0 ? `${count(n)} ${w}` : ''; })
     .filter(Boolean));
   const days = [...by.keys()].sort();
@@ -301,12 +302,13 @@ export function goneWords(wi: PLeg[], iso: string): string {
   const when = days.length === 1 ? mdDay(days[0]) : days.length === 2 ? `${mdDay(days[0])} and ${mdDay(days[1])}` : `${mdDay(days[0])} to ${mdDay(days[days.length - 1])}, ${days.length} expiries`;
   return `${when}: ${what(days.flatMap((d) => by.get(d)!))} expired`;
 }
-/** "Sold puts, hedge calls expire". */
+/** "Puts sold, calls bought expire". */
 const endsWords = (ls: PLeg[]) => {
   const nm = (a: PLeg[]) => [...new Set(a.map((l) => l.ty))].sort().map((y) => (y === 'C' ? 'calls' : 'puts')).join(' and ');
   const so = ls.filter((l) => l.q < 0), bo = ls.filter((l) => l.q > 0);
   if (!ls.length) return '';
-  return [so.length ? `Sold ${nm(so)}` : '', bo.length ? `${so.length ? 'hedge' : 'Hedge'} ${nm(bo)}` : ''].filter(Boolean).join(', ') + ' expire';
+  const s = [so.length ? `${nm(so)} sold` : '', bo.length ? `${nm(bo)} bought` : ''].filter(Boolean).join(', ') + ' expire';
+  return s.charAt(0).toUpperCase() + s.slice(1);
 };
 
 export interface PayoffProps {
@@ -471,7 +473,7 @@ export function Payoff({ t, pr, base, wi, chg, tab, mask, iv, closed, day, setDa
                 <span style={{ fontWeight: 600 }}>{ti === 0 ? 'Today' : full}</span>
                 <span style={{ color: MU }}> · {ti === 0 ? `${full} · now` : `close · ${P.cd === 0 ? 'today' : 'in ' + dayWords(P.cd)}`}</span>
               </span>
-              {/* No "Sold calls, hedge puts expire · At expiration" line (Nik, 18 Nov 2026): one line, so the date and range
+              {/* No "Calls sold, puts bought expire · At expiration" line (Nik, 18 Nov 2026): one line, so the date and range
                   sliders sit level. Screen readers still hear it in the slider's text. */}
             </div>
             <Slider label="Date the curve is drawn for" min={0} max={N} value={ti} onPick={pick}

@@ -26,7 +26,7 @@
  * null where no quote] }. A name we do not quote (or a day before it was added) has no entry; the chart then draws
  * that day straight between its closes.
  */
-const BUILD = '2026-11-13.1';
+const BUILD = '2026-11-25.1';
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -160,9 +160,9 @@ Deno.serve(async (req) => {
       if (n) {
         if (!n.noIv && Number(n.iv) > 0) sd = +(Number(n.iv) * Math.sqrt(5 / 252) * 100).toFixed(3);
         const legs = n.legs as Row[];
-        for (const l of legs.filter((x) => x.kind === 'leaps' || x.kind === 'otm')) positions.push({ k: l.K, label: `${l.kind === 'leaps' ? 'LEAPS' : 'Hedge'} ${fk(l.K)} ×${l.q}`, solid: false });
-        for (const l of legs.filter((x) => x.kind === 'sc' || x.kind === 'sp')) positions.push({ k: l.K, label: `Sold ${l.kind === 'sc' ? 'call' : 'put'} ${fk(l.K)} ×${-l.q}, ${md(String(l.ex))}`, solid: true });
-        for (const l of legs.filter((x) => x.kind === 'ins')) positions.push({ k: l.K, label: `Puts ${fk(l.K)} ×${l.q}`, solid: false });
+        for (const l of legs.filter((x) => x.kind === 'leaps' || x.kind === 'otm')) positions.push({ k: l.K, label: `Call bought ${fk(l.K)} ×${l.q}`, solid: false });
+        for (const l of legs.filter((x) => x.kind === 'sc' || x.kind === 'sp')) positions.push({ k: l.K, label: `${l.kind === 'sc' ? 'Call' : 'Put'} sold ${fk(l.K)} ×${-l.q}, ${md(String(l.ex))}`, solid: true });
+        for (const l of legs.filter((x) => x.kind === 'ins')) positions.push({ k: l.K, label: `Put bought ${fk(l.K)} ×${l.q}`, solid: false });
         const sh = legs.find((x) => x.kind === 'shares');
         if (sh && sh.K > 0) positions.push({ k: +Number(sh.K).toFixed(2), label: `Shares cost ${Number(sh.K).toFixed(2)}`, solid: false });
         const w = ((n.walls ?? []) as Row[]).find((c) => c.kind === 'Weekly') ?? (n.walls ?? [])[0];

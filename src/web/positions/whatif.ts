@@ -6,8 +6,10 @@
 // page works out what is on. Only a flip counts as a What if change (Nik picked "Only what I flip").
 //
 // 24 Nov 2026 (handoff 2026-11-24 §4, Every leg is SunnyBook): Every leg's chips are kept here too (`cf`, the chips
-// switched off: "ex:2026-11-27", "kind:C", "role:income"). Each chip is its own switch and changes only itself; a leg
+// switched off: "ex:2026-11-27", "kind:C", "side:sold"). Each chip is its own switch and changes only itself; a leg
 // counts when its own switch and each of its chips are on. Back to the book clears the chips with the rest.
+// sw-whatif4 (24 Nov 2026): the Long, Hedge and Income chips became Sold and Bought; the new key leaves the old
+// role: ids behind.
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import type { Trade } from './model';
 
@@ -15,12 +17,13 @@ import type { Trade } from './model';
 export interface Draft { side?: 's' | 'b'; ty?: 'c' | 'p'; K?: number; ex?: string; n?: number }
 export interface NameWhatIf { flip: string[]; trades: Trade[]; draft: Draft; cf: string[] }
 
-const KEY = 'sw-whatif3';
+const KEY = 'sw-whatif4';
 const EMPTY: NameWhatIf = { flip: [], trades: [], draft: {}, cf: [] };
 const store = new Map<string, NameWhatIf>();
 const subs = new Set<() => void>();
 
 try {
+  sessionStorage.removeItem('sw-whatif3');
   const raw = sessionStorage.getItem(KEY);
   if (raw) for (const [k, v] of Object.entries(JSON.parse(raw) as Record<string, NameWhatIf>)) store.set(k, { ...EMPTY, ...v });
 } catch { /* a private window: this session only */ }
