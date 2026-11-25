@@ -159,7 +159,9 @@ struct IncBannerView: View {
                 let on = m == monthly
                 Button {
                     guard !on else { return }
-                    withAnimation(S.moving(S.spring, reduce) ?? S.fade) { monthly = m }
+                    // The figures, bars and names swap in place; only the thumb slides (Nik, 25 Nov 2026: a cross-fade
+                    // laid the old and new numbers over each other and the names slid through each other).
+                    monthly = m
                 } label: {
                     Text(m ? "Monthly" : "Weekly")
                         .sType(IncT.t(12, 16, on ? 600 : 500), tabular: false)
@@ -179,6 +181,7 @@ struct IncBannerView: View {
                     .glassEffect(.regular, in: .capsule)
                     .frame(width: g.size.width / 2, height: g.size.height)
                     .offset(x: monthly ? g.size.width / 2 : 0)
+                    .animation(S.moving(S.spring, reduce) ?? S.fade, value: monthly)
             }
         }
         .padding(2)

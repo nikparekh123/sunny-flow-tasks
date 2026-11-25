@@ -154,11 +154,12 @@ export function barsOf(b: Banner, vw: 'w' | 'm', today: string, narrow: boolean)
       const range = w.range ?? `${md(w.k)} to ${md(addDays(w.k, 4))}`;
       const thisWk = w.k === m0;
       return { k: w.k, l: thisWk && !narrow ? 'This week' : w.l, c: +w.c || 0, p: +w.p || 0, t: (+w.c || 0) + (+w.p || 0), by: w.by ?? {}, bk: w.bk ?? {}, part: !!w.cur,
-        cap: w.cur ? `This week so far · to ${shortDate(today)}` : thisWk ? `This week · ${range}` : w.k === prev ? `Last week · ${range}` : `Week of ${range}`,
+        // Short (Nik, 25 Nov 2026: "This week so far · to Tue Nov 24 is too long"; the same in Monthly).
+        cap: w.cur ? 'This week so far' : thisWk ? 'This week' : w.k === prev ? 'Last week' : range,
         pl: w.cur || thisWk ? 'This week' : `Week of ${md(w.k)}` };
     })
     : b.months.map((m) => ({ k: m.k, l: m.l, c: +m.c || 0, p: +m.p || 0, t: (+m.c || 0) + (+m.p || 0), by: m.by ?? {}, bk: m.bk ?? {}, part: !!m.cur,
-      cap: m.cur ? `${m.long} so far · to ${shortDate(today)}` : m.from ? `${m.long} · from ${m.from}` : String(m.long ?? m.l), pl: String(m.long ?? m.l) }));
+      cap: m.cur ? `${m.long} so far` : String(m.long ?? m.l), pl: String(m.long ?? m.l) }));
   const first = bars.findIndex((x) => Math.abs(x.c) >= 0.5 || Math.abs(x.p) >= 0.5);
   bars = first < 0 ? bars.slice(-1) : bars.slice(first);
   const last = bars.length - 1;

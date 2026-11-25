@@ -56,8 +56,15 @@ struct SunnyTabBar: View {
             }
         }
         .background(alignment: .leading) {
+            // The design's thumb (Current App nav.thBg/thSh): white .6 with a white top edge, a .5 ring and a soft
+            // shadow in light (without the shadow it vanished over the light Income page, 25 Nov 2026); white .14 with
+            // a .18 top edge in dark.
             Capsule().fill(Self.thumb)
                 .overlay(Capsule().strokeBorder(Self.thumbEdge, lineWidth: 0.5))
+                .overlay(alignment: .top) {
+                    Capsule().stroke(Self.thumbTop, lineWidth: 1).frame(height: 54).mask(alignment: .top) { Rectangle().frame(height: 2) }
+                }
+                .shadow(color: Self.thumbShadow, radius: 1.5, y: 1)
                 .frame(width: Self.tabW, height: 54)
                 .offset(x: CGFloat(index) * Self.tabW)
                 .animation(S.moving(Self.thumbMove, reduce), value: index)
@@ -92,6 +99,8 @@ struct SunnyTabBar: View {
     /// The open tab's thumb: white over the glass in light, a soft lift in dark.
     private static let thumb = S.dynA(0xFFFFFF, 0.6, 0xFFFFFF, 0.14)
     private static let thumbEdge = S.dynA(0x000000, 0.04, 0xFFFFFF, 0.10)
+    private static let thumbTop = S.dynA(0xFFFFFF, 1, 0xFFFFFF, 0.18)
+    private static let thumbShadow = S.dynA(0x000000, 0.10, 0x000000, 0)
 }
 
 /// Pressed: the tab or the button grows 8%; under Reduce Motion it dims instead.

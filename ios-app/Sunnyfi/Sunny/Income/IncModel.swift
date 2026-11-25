@@ -276,7 +276,6 @@ nonisolated struct IncModel {
         guard case .object = b else { return nil }
         func cp(_ v: JSONValue) -> IncBanner.CP { .init(c: v[0].double ?? 0, p: v[1].double ?? 0) }
         func map(_ v: JSONValue) -> [String: IncBanner.CP] { v.object.mapValues(cp) }
-        let todayLong = IncFmt.dmd(today)
         let wk = b["weeks"].array
         let weeks: [IncBanner.Period] = wk.enumerated().map { i, w in
             let range = w["range"].string ?? ""
@@ -284,17 +283,18 @@ nonisolated struct IncModel {
             // The week under way "so far"; on a weekend the week just ended is this week. The one before is last week.
             let fromEnd = wk.count - 1 - i
             let cap: String
-            if cur { cap = "This week so far · to \(todayLong)" }
-            else if fromEnd == 0 { cap = "This week · \(range)" }
-            else if fromEnd == 1 { cap = "Last week · \(range)" }
-            else { cap = "Week of \(range)" }
+            // Short (Nik, 25 Nov 2026: "This week so far · to Tue Nov 24 is too long"; the same in Monthly).
+            if cur { cap = "This week so far" }
+            else if fromEnd == 0 { cap = "This week" }
+            else if fromEnd == 1 { cap = "Last week" }
+            else { cap = range }
             return .init(id: "w" + (w["k"].string ?? "\(i)"), l: w["l"].string ?? "", cap: cap, cur: cur,
                          c: w["c"].double ?? 0, p: w["p"].double ?? 0, by: map(w["by"]), bk: map(w["bk"]))
         }
         let months: [IncBanner.Period] = b["months"].array.enumerated().map { i, m in
             let long = m["long"].string ?? m["l"].string ?? ""
             let cur = m["cur"].bool
-            let cap = cur ? "\(long) so far · to \(todayLong)" : m["from"].string.map { "\(long) · from \($0)" } ?? long
+            let cap = cur ? "\(long) so far" : long
             return .init(id: "m" + (m["k"].string ?? "\(i)"), l: m["l"].string ?? "", cap: cap, cur: cur,
                          c: m["c"].double ?? 0, p: m["p"].double ?? 0, by: map(m["by"]), bk: map(m["bk"]))
         }
