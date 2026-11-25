@@ -34,10 +34,9 @@ struct ShareAvgRow: View {
                         ShareAvgCard(a: a, privacy: privacy).frame(width: 341)
                     }
                 }
-                .scrollTargetLayout()
             }
             .scrollIndicators(.hidden)
-            .scrollTargetBehavior(.viewAligned)
+            // Free flowing, no snap to a card, as the Positions leg cards (Nik, 25 Nov 2026: "All left and right scroll should be smooth like position cards").
             .contentMargins(.horizontal, S.margin, for: .scrollContent)
             .accessibilityLabel("Share averages, swipe for more")
             if let n = card["note"].string, !n.isEmpty {

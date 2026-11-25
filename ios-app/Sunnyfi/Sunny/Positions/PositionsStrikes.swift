@@ -264,7 +264,7 @@ struct PosStrikesView: View {
         .sensoryFeedback(.selection, trigger: sel.ex)
     }
 
-    /// The strikes in one row you swipe (handoff §2.3): it snaps to each tile, no scrollbar, the next tile peeks at the
+    /// The strikes in one row you swipe (handoff §2.3): free flowing (Nik, 25 Nov 2026), no scrollbar, the next tile peeks at the
     /// edge. The design's row reaches 6 pt past the content on each side (the count badge sits over a tile's corner).
     /// A new expiry or side brings the picked tile into view; a tap never moves the row.
     private func tileRow(_ tiles: [PosStrikes.Strike], _ picked: String?, page: String) -> some View {
@@ -275,10 +275,9 @@ struct PosStrikesView: View {
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 8).padding(.bottom, 10)
-                .scrollTargetLayout()
             }
             .scrollIndicators(.hidden)
-            .scrollTargetBehavior(.viewAligned)
+            // Free flowing, no snap to a card, as the Positions leg cards (Nik, 25 Nov 2026: "All left and right scroll should be smooth like position cards").
             .contentMargins(.horizontal, 6, for: .scrollContent)
             .padding(.horizontal, -6)
             .padding(.top, -8).padding(.bottom, -10)

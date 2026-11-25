@@ -618,11 +618,10 @@ struct BRow<Content: View>: View {
                 if lazy { LazyHStack(alignment: .top, spacing: spacing) { content() } }
                 else { HStack(alignment: .top, spacing: spacing) { content() } }
             }
-                .scrollTargetLayout()
                 .padding(.horizontal, S.margin)
         }
         .scrollIndicators(.hidden)
-        .scrollTargetBehavior(.viewAligned)
+            // Free flowing, no snap to a card, as the Positions leg cards (Nik, 25 Nov 2026: "All left and right scroll should be smooth like position cards").
         .scrollClipDisabled()
         .scrollPosition($pos)
         .task {

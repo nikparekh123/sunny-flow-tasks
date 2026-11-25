@@ -204,11 +204,10 @@ struct SunnyToday: View {
                     .id(t.symbol)
                 }
             }
-            .scrollTargetLayout()
         }
         .onAppear { if DebugPreset.bool("today.vix") { proxy.scrollTo("^VIX", anchor: .trailing) } }
         .contentMargins(.horizontal, S.margin, for: .scrollContent)
-        .scrollTargetBehavior(.viewAligned)
+            // Free flowing, no snap to a card, as the Positions leg cards (Nik, 25 Nov 2026: "All left and right scroll should be smooth like position cards").
         .scrollIndicators(.hidden)
         .scrollClipDisabled()
         }
