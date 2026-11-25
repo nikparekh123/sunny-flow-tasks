@@ -64,7 +64,7 @@ struct PositionsTab: View {
 
     enum Band: Hashable { case price, payoff }
     static let page = "positionsTab"
-    private static let margin: CGFloat = 16
+    static let margin: CGFloat = 16
 
     private var bookID: String? { brief.book }
     private var pageBook: BriefAccount { brief.account }
@@ -482,8 +482,9 @@ extension PositionsTab: Equatable {
 // MARK: - Your book
 
 /// Your book (Nik, 24 Nov 2026: "Move away from Long, Hedge and Income to each leg"; "No need for Today and All time,
-/// just all time"): one flat card. "Your book" with "9 tickers · 57 legs" on the right, then one block per leg the book
-/// holds, in Nik's order (Shares, Calls bought, Calls sold, Puts bought, Puts sold), all time only (PosPartBlock).
+/// just all time"; 25 Nov: "horizontal cards ... to save on scrolling", "iOS liquid glass effect so not a black box"):
+/// "Your book" with "9 tickers · 58 legs" on the right, then one Liquid Glass card per leg the book holds, side by side
+/// and swiped sideways, in Nik's order (Shares, Calls bought, Calls sold, Puts bought, Puts sold), all time only.
 /// Figures from sunny-home (brief_inputs.parts). Together shows the sums only: no account lines, no S or N.
 struct PosYourBook: View {
     let parts: [PosBook.Part]
@@ -493,7 +494,7 @@ struct PosYourBook: View {
     var body: some View {
         let legs = parts.reduce(0) { $0 + $1.nl }
         let count = "\(tickers) \(tickers == 1 ? "ticker" : "tickers") · \(legs) \(legs == 1 ? "leg" : "legs")"
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("Your book").sType(PT.t(20, 24, 700), tabular: false).foregroundStyle(PC.ink).lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
@@ -501,13 +502,38 @@ struct PosYourBook: View {
                 Text(count).sType(PT.t(15, 20), tabular: true).foregroundStyle(PC.mu).lineLimit(1)
                     .accessibilityLabel(PosSay.words(count))
             }
-            VStack(alignment: .leading, spacing: 20) {
-                ForEach(parts) { PosPartBlock(p: $0, privacy: privacy) }
-            }
+            PosPartCards(parts: parts, privacy: privacy)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 16).padding(.horizontal, 16).padding(.bottom, 18)
-        .sunnyGlass(radius: 22)
+    }
+}
+
+/// The legs side by side, one Liquid Glass card each (.glassEffect, the system's own: clear over the page, solid with
+/// Reduce Transparency), swiped sideways, snapping to a card; the row runs to the screen edges and the next card peeks.
+/// Every card is as tall as the tallest, so the row reads as one band.
+struct PosPartCards: View {
+    let parts: [PosBook.Part]
+    let privacy: Bool
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 10) {
+                ForEach(parts) { p in
+                    // Its own height, never squeezed: a card's lines keep 14 pt whatever the tallest card is.
+                    // 275 x 100 pt (Nik, 25 Nov 2026): the bottom line on one line, the next card peeking about 90 pt.
+                    PosPartBlock(p: p, privacy: privacy)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14).padding(.vertical, 11)
+                        .frame(width: 275, height: 100, alignment: .topLeading)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .scrollTargetLayout()
+        }
+        .contentMargins(.horizontal, PositionsTab.margin, for: .scrollContent)
+        .scrollTargetBehavior(.viewAligned)
+        .scrollClipDisabled()
+        .padding(.horizontal, -PositionsTab.margin)
     }
 }
 
@@ -531,7 +557,7 @@ struct PosPartBlock: View {
                 .padding(.top, 2)
             sub(c, pctWord: pctWord)
                 .sType(PT.t(14, 18), tabular: true).foregroundStyle(PC.mu)
-                .lineLimit(1).minimumScaleFactor(0.75)
+                .lineLimit(1).minimumScaleFactor(0.85)
                 .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -539,14 +565,15 @@ struct PosPartBlock: View {
         .accessibilityLabel(said(word, pctWord))
     }
 
-    /// "$92.3K now · 33.3% return · $91.3K time value": figures semibold in ink, the % in its colour, words muted.
+    /// "$92K now · 33% return · $91K TV": figures semibold in ink, the % in its colour, words muted (Nik, 25 Nov 2026:
+    /// whole K and M, whole %, "TV" for time value; VoiceOver still says "time value").
     /// Inter is one variable font, so the semibold is its own font (fontWeight cannot reach the wght axis).
     private func sub(_ c: Color, pctWord: String) -> Text {
         let semi = Font.inter(scales ? SDynamic.scaled(14, dts) : 14, 600, tabular: true)
         var t = Text(money(p.now)).font(semi).foregroundStyle(PC.ink) + Text(" now · ")
-            + Text(PE.pcx(p.pct)).font(semi).foregroundStyle(c) + Text(" \(pctWord)")
+            + Text(pc0(p.pct)).font(semi).foregroundStyle(c) + Text(" \(pctWord)")
         if let tv = p.tv {
-            t = t + Text(" · ") + Text(money(tv)).font(semi).foregroundStyle(PC.ink) + Text(" time value")
+            t = t + Text(" · ") + Text(money(tv)).font(semi).foregroundStyle(PC.ink) + Text(" TV")
         }
         return t
     }
@@ -555,27 +582,34 @@ struct PosPartBlock: View {
     private func said(_ word: String, _ pctWord: String) -> String {
         let fig = { (v: Double) in PosSay.money(v, privacy).replacingOccurrences(of: " dollars", with: "") }
         let tv = p.tv.map { ", \(fig($0)) time value" } ?? ""
-        return PosSay.words("\(p.label), \(word) \(PosSay.money(p.all, privacy)), \(fig(p.now)) now, \(PE.pcx(p.pct)) \(pctWord)\(tv)")
+        return PosSay.words("\(p.label), \(word) \(PosSay.money(p.all, privacy)), \(fig(p.now)) now, \(pc0(p.pct)) \(pctWord)\(tv)")
     }
 
     private func tone(_ v: Double) -> Color { v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink }
-    private func money(_ v: Double) -> String { privacy ? BriefMask.shown : PosFmt.money(v) }
+    /// Whole K and M, no decimals, no sign (Nik, 25 Nov 2026: "Round off the numbers also to be K M no decimals"):
+    /// $92.3K reads $92K, $7.8K $8K; under $1K whole dollars.
+    private func money(_ v: Double) -> String {
+        if privacy { return BriefMask.shown }
+        let a = abs(v)
+        if a >= 999_500 { return "$\(Int((a / 1_000_000).rounded()))M" }
+        if a >= 999.5 { return "$\(Int((a / 1_000).rounded()))K" }
+        return "$\(Int(a.rounded()))"
+    }
+    /// A whole-number percent, no sign (Nik, 25 Nov 2026: "Use no decimal in %"): 33.2% reads 33%.
+    private func pc0(_ x: Double) -> String { "\(Int((abs(x) * 100).rounded()))%" }
 }
 
-/// The picked name's own book (handoff 2026-11-18 §2.3; Nik, 24 Nov 2026), under the name: the same blocks as Your book
-/// for the legs this name holds, in the same order, between two rules. No card and no header row; no account lines on
-/// Together.
+/// The picked name's own book (handoff 2026-11-18 §2.3; Nik, 24 and 25 Nov 2026), under the name: the same glass cards
+/// as Your book for the legs this name holds, in the same order, swiped sideways; a rule under them. No header row; no
+/// account lines on Together.
 struct PosNameBook: View {
     let t: String
     let parts: [PosBook.Part]
     let privacy: Bool
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            ForEach(parts) { PosPartBlock(p: $0, privacy: privacy) }
-        }
+        PosPartCards(parts: parts, privacy: privacy)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 14)
-        .overlay(alignment: .top) { Rectangle().fill(PC.rule).frame(height: 1) }
+        .padding(.top, 6).padding(.bottom, 16)
         .overlay(alignment: .bottom) { Rectangle().fill(PC.rule).frame(height: 1) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(t) in your book")

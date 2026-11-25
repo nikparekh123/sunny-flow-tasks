@@ -8,7 +8,14 @@
 //   Sold:   "$8.8K now · 68.4% captured · $8.8K time value" (now = the cost to buy back, collected less kept).
 // The picked name's own book follows in the same blocks, only the parts it holds.
 // Every figure is sunny-home's (payload.brief_inputs.parts, totals.ts), the same numbers the phone reads.
-import { money, pct } from '../lib/format';
+
+/** A whole-number percent, no sign (Nik, 25 Nov 2026: "Use no decimal in %"). */
+const pct = (x: number) => `${Math.round(Math.abs(x))}%`;
+/** Whole K and M, no decimals, no sign (Nik, 25 Nov 2026: "Round off the numbers also to be K M no decimals"). */
+const money0 = (v: number) => {
+  const a = Math.abs(v);
+  return a >= 999_500 ? `$${Math.round(a / 1e6)}M` : a >= 999.5 ? `$${Math.round(a / 1e3)}K` : `$${Math.round(a)}`;
+};
 import { PARTS, legsIn, type PKey, type Part, type Parts } from './totals';
 import { G, K, MU, R } from './ui';
 
@@ -22,13 +29,13 @@ function Block({ k, p, mask, who }: { k: PKey; p: Part; mask: (s: string) => str
   const now = def.sold ? p.value - a : p.value;
   const x = def.sold ? (p.value > 0 ? (a / p.value) * 100 : 0) : p.abase > 0 ? (a / p.abase) * 100 : 0;
   const xw = def.sold ? 'captured' : 'return';
-  const big = mask(money(Math.abs(a))), nowS = mask(money(now)), tvS = p.tv != null ? mask(money(p.tv)) : null;
+  const big = mask(money0(a)), nowS = mask(money0(now)), tvS = p.tv != null ? mask(money0(p.tv)) : null;
   const aria = [`${who}${def.l}, ${word} ${big}`, `${nowS} now`,
     def.sold ? `${pct(x)} ${ok ? 'captured' : 'lost'}` : `return ${ok ? 'up' : 'down'} ${pct(x)}`,
     tvS ? `${tvS} time value` : ''].filter(Boolean).join(', ');
   // The sub line wraps between its pieces, never inside one; each piece leads with its dot, and the dot that would
   // start a line sits left of the clip, so no line starts or ends on a dot.
-  const segs: [string, string, string][] = [[nowS, 'now', K], [pct(x), xw, c], ...(tvS ? [[tvS, 'time value', K] as [string, string, string]] : [])];
+  const segs: [string, string, string][] = [[nowS, 'now', K], [pct(x), xw, c], ...(tvS ? [[tvS, 'TV', K] as [string, string, string]] : [])];
   return (
     <div role="group" aria-label={aria} style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <span aria-hidden="true" style={{ fontSize: 14, lineHeight: '18px', color: MU, whiteSpace: 'nowrap' }}>{def.l} · {word}</span>
