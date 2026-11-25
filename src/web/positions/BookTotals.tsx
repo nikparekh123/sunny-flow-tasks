@@ -48,11 +48,11 @@ function Block({ k, p, mask, who, usd, flip }: { k: PKey; p: Part; mask: (s: str
     <button type="button" onClick={flip} aria-label={aria} aria-pressed={usd}
       style={{ display: 'flex', flexDirection: 'column', minWidth: 0, width: '100%', padding: 0, margin: 0, border: 0, background: 'none', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
       <span aria-hidden="true" style={{ fontSize: 14, lineHeight: '18px', color: MU, whiteSpace: 'nowrap' }}>{def.l}</span>
-      <span aria-hidden="true" style={{ marginTop: 2, display: 'flex', alignItems: 'baseline', gap: 6, width: '100%', whiteSpace: 'nowrap' }}>
-        <span style={{ fontSize: 30, lineHeight: '36px', fontWeight: 700, letterSpacing: '-0.02em', color: K }}>{nowS}</span>
+      <span aria-hidden="true" style={{ marginTop: 6, display: 'flex', alignItems: 'baseline', gap: 6, width: '100%', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 18, lineHeight: '24px', fontWeight: 700, letterSpacing: '-0.01em', color: K }}>{nowS}</span>
         <span style={{ fontSize: 17, lineHeight: '22px', fontWeight: 600, color: c }}>({usd ? allS : pct(x)})</span>
         {tvS && (
-          <span style={{ marginLeft: 'auto', paddingLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 14, lineHeight: '18px', color: MU }}>
+          <span style={{ paddingLeft: 6, flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 14, lineHeight: '18px', color: MU }}>
             <Clock /><span style={{ fontWeight: 600, color: K }}>{tvS}</span>
           </span>
         )}
@@ -72,9 +72,11 @@ function Head({ l, r }: { l: string; r: string }) {
 
 function Grid({ ps, mask, who, label, usd, flip }: { ps: Parts; mask: (s: string) => string; who: string; label: string; usd: boolean; flip: () => void }) {
   return (
-    <div role="list" aria-label={label} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(min(100%,236px),1fr))', gap: '20px 28px' }}>
+    // Each block as wide as its line, 40 px apart, wrapping when the page is narrow (Nik, 25 Nov 2026: the even
+    // columns left big gaps).
+    <div role="list" aria-label={label} style={{ display: 'flex', flexWrap: 'wrap', gap: '16px 40px' }}>
       {PARTS.filter((x) => ps[x.k]).map((x) => (
-        <div key={x.k} role="listitem" style={{ minWidth: 0 }}><Block k={x.k} p={ps[x.k]!} mask={mask} who={who} usd={usd} flip={flip} /></div>
+        <div key={x.k} role="listitem" style={{ minWidth: 0, flex: '0 0 auto' }}><Block k={x.k} p={ps[x.k]!} mask={mask} who={who} usd={usd} flip={flip} /></div>
       ))}
     </div>
   );

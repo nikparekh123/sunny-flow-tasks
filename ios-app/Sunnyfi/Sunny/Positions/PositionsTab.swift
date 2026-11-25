@@ -522,11 +522,11 @@ struct PosPartCards: View {
             HStack(alignment: .top, spacing: 10) {
                 ForEach(parts) { p in
                     // Its own height, never squeezed: a card's lines keep 14 pt whatever the tallest card is.
-                    // 250 wide (Nik, 25 Nov 2026), the next card peeks about 115 pt; one line under the label, so 80 tall.
+                    // 225 x 75 (Nik, 25 Nov 2026): one line under the label, the next card peeks in from the right.
                     PosPartBlock(p: p, privacy: privacy)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 14).padding(.vertical, 11)
-                        .frame(width: 250, height: 80, alignment: .topLeading)
+                        .frame(width: 225, height: 75, alignment: .leading)
                         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 20))
                         .contentShape(.rect(cornerRadius: 20))
                         .onTapGesture { taps += 1; withAnimation(.snappy) { inDollars.toggle() } }
@@ -560,17 +560,19 @@ struct PosPartBlock: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(p.label).sType(PT.t(14, 18), tabular: false).foregroundStyle(PC.mu).lineLimit(1)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                // The figures hold their size on every card; a tight card shrinks the TV first.
-                Text(money(p.now)).sType(PT.t(30, 36, 700, tr: -0.02)).foregroundStyle(PC.ink).layoutPriority(2)
+                // Big figure 18 (Nik, 25 Nov 2026). The time value never shrinks: it takes its room first, and a
+                // tight card shrinks the figures instead.
+                Text(money(p.now)).sType(PT.t(18, 24, 700, tr: -0.01)).foregroundStyle(PC.ink).layoutPriority(1)
                 Text("(\(inDollars ? money(p.all) : pc0(p.pct)))").sType(PT.t(17, 22, 600)).foregroundStyle(c)
-                    .contentTransition(.numericText()).layoutPriority(2)
+                    .contentTransition(.numericText()).layoutPriority(1)
                 Spacer(minLength: 6)
                 if let tv = p.tv {
-                    tvLine(tv).sType(PT.t(14, 18), tabular: true).foregroundStyle(PC.mu).layoutPriority(1)
+                    tvLine(tv).sType(PT.t(14, 18), tabular: true).foregroundStyle(PC.mu)
+                        .minimumScaleFactor(1).fixedSize().layoutPriority(3)
                 }
             }
             .lineLimit(1).minimumScaleFactor(0.6)
-            .padding(.top, 2)
+            .padding(.top, 6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
