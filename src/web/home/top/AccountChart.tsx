@@ -34,8 +34,7 @@ export function AccountChart({ payload, moment }: { payload: J; moment: Line[] }
   if (v) {
     const dep = v.deps[v.deps.length - 1];
     lines.push({ k: 'r', v: changeText(v.change, v.Sv, dep), c: LC, l: WORDS[range] });
-    // The phone's deposit line (AccountChart.depositLine): a deposit is not a gain, so it is named on its own.
-    if (Math.abs(dep) >= 1) lines.push({ k: 'd', v: money(dep), c: C.ink, l: `${dep > 0 ? 'deposited' : 'withdrawn'} ${WORDS[range]}` });
+    // No "$149K deposited past month" line (Nik, 24 Nov 2026: "Remove this"); the change % still counts money paid in.
   }
   lines.push(...moment);
 

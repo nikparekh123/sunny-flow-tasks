@@ -330,7 +330,7 @@ struct AccountChart: View {
                     TodoLink(open: todo.openCount, action: tap)
                 }
             }
-            depositLine
+            // No "$149K deposited past month" line (Nik, 24 Nov 2026: "Remove this"); the change % still counts money paid in.
         }
     }
 
@@ -438,20 +438,6 @@ struct AccountChart: View {
     private static func kDollars(_ v: Double) -> String { BriefWords.speech(SampleEngine.fK(v)) }
     private static func signedK(_ v: Double) -> String { (v.rounded() < 0 ? "down " : "") + kDollars(v) }
     private static func percent(_ p: Double) -> String { String(format: "%.1f percent", abs(p)) }
-
-    /// Money paid in or out in the range, on its own line (never in the change above it).
-    @ViewBuilder private var depositLine: some View {
-        if let m = model, !fresh, !pnl, single == nil, !compare {
-            let (s, _) = bounds, dep = m.deposited(s, at)
-            if abs(dep) >= 1 {
-                Text("\(SampleEngine.fK(dep)) \(dep > 0 ? "deposited" : "withdrawn") \(scrubbing ? "by then" : range.words)")
-                    .sType(Self.changeWords, tabular: false).foregroundStyle(S.mutedOnPage)
-                    .blur(radius: hidden ? 9 : 0)
-                    .lineLimit(1)
-                    .accessibilityLabel("\(hidden ? "hidden" : Self.kDollars(dep)) \(dep > 0 ? "deposited" : "withdrawn") \(scrubbing ? "by then" : range.words)")
-            }
-        }
-    }
 
     private var eyeButton: some View {
         Button { withAnimation(S.fade) { hidden.toggle() } } label: {
