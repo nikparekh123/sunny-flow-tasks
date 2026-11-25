@@ -270,10 +270,9 @@ const fromToday = (x: number, S0: number) => { const ch = x / S0 - 1, a = Math.a
     today, and the legs that expire at its close. Index 0 is now. */
 export interface PayDay { iso: string; D: DPt; cd: number; fri: boolean; ends: PLeg[] }
 /** The slider's days: now, then each trading day (weekends and the calendar's closed days skipped) to the day the
-    LAST sold legs expire (Nik, 20 Nov 2026, option 1), or to the first expiry of any leg when nothing is sold; then on
-    to the last expiry of ANY leg (Nik, 25 Nov 2026: "Can we show till the last expiry?", picked "days, then weeks,
-    months"): each Friday for two months, then each monthly expiry, and every leg's own expiry; at most three years
-    out. Past an expiry the legs that ended there are worth what they were at that close and the rest keep their time
+    LAST sold legs expire, calls or puts sold (Nik, 20 Nov 2026, option 1; and again 25 Nov 2026: "change it back to
+    date when calls sold and put sold, not for all strikes"), or to the first expiry of any leg when nothing is sold;
+    at most a year out. Past an expiry the legs that ended there are worth what they were at that close and the rest keep their time
     value: the "do nothing" path. `exp` is the end (null: no option on); `near` the nearest sold expiry (where the
     slider opens when this Friday is not on it). */
 export function payDays(m: PosModel, wi: PLeg[], closed: Set<string>): { pts: PayDay[]; exp: string | null; near: string | null } {
@@ -281,10 +280,8 @@ export function payDays(m: PosModel, wi: PLeg[], closed: Set<string>): { pts: Pa
   const opts = wi.filter((l) => l.ty !== 'S' && !!l.ex && l.ex >= d0);
   const ex = (a: PLeg[]) => a.map((l) => l.ex).sort();
   const sold = opts.filter((l) => l.q < 0);
-  const daily = ex(sold).at(-1) ?? ex(opts)[0] ?? null, near = ex(sold)[0] ?? ex(opts)[0] ?? null;
-  const cap = isoAdd(d0, 1100), lastAny = ex(opts).at(-1) ?? null;
-  const exp = lastAny ? (lastAny < cap ? lastAny : cap) : null;
-  const end = daily ? (daily < cap ? daily : cap) : d0;
+  const exp = ex(sold).at(-1) ?? ex(opts)[0] ?? null, near = ex(sold)[0] ?? ex(opts)[0] ?? null;
+  const cap = isoAdd(d0, 366), end = exp ? (exp < cap ? exp : cap) : d0;
   const rowOf = new Map<string, number>();
   m.stops.forEach((s, i) => { if (s.tt > 0.01) { const iso = m.isoAt(s.tt); if (!rowOf.has(iso)) rowOf.set(iso, i); } });
   const at = (iso: string): DPt => { const r = rowOf.get(iso); return r != null ? { tt: m.stops[r].tt, row: r } : { tt: Math.max(0, m.daysTo(iso)), row: null }; };
@@ -296,22 +293,6 @@ export function payDays(m: PosModel, wi: PLeg[], closed: Set<string>): { pts: Pa
     const w = dowOf(d);
     if (w === 0 || w === 6 || closed.has(d)) continue;
     pts.push({ iso: d, D: at(d), cd: daysBetween(d0, d), fri: w === 5, ends: ends(d) });
-  }
-  // Past the daily run: each Friday for two months, then each monthly expiry, and every leg's own expiry.
-  if (exp && exp > end) {
-    const trading = (d: string) => { let y = d; while (dowOf(y) === 0 || dowOf(y) === 6 || closed.has(y)) y = isoAdd(y, -1); return y; };
-    const far = new Set<string>(), weeksTo = isoAdd(end, 61);
-    for (let d = isoAdd(end, 1); d <= weeksTo && d <= exp; d = isoAdd(d, 1)) if (dowOf(d) === 5) far.add(trading(d));
-    let y = Number(weeksTo.slice(0, 4)), mo = Number(weeksTo.slice(5, 7));
-    for (let i = 0; i < 40; i++) {
-      const wd1 = new Date(Date.UTC(y, mo - 1, 1)).getUTCDay();
-      const tf = trading(new Date(Date.UTC(y, mo - 1, 1 + ((5 - wd1 + 7) % 7) + 14)).toISOString().slice(0, 10));
-      if (tf > exp) break;
-      if (tf > weeksTo) far.add(tf);
-      mo += 1; if (mo > 12) { mo = 1; y += 1; }
-    }
-    for (const l of opts) if (l.ex > end && l.ex <= exp) far.add(l.ex);
-    for (const d of [...far].filter((x) => x > end).sort()) pts.push({ iso: d, D: at(d), cd: daysBetween(d0, d), fri: true, ends: ends(d) });
   }
   return { pts, exp, near };
 }

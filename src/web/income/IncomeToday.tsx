@@ -8,7 +8,7 @@ import { useMemo, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { J } from '../lib/data';
 import { marksWords } from '../lib/clock';
-import { label } from '../lib/focus';
+import { Dot, label } from '../lib/focus';
 import { wordOf } from '../lib/format';
 import { flipOf, ln, MU, readIncome, todayGroups, lineOf, type IncName } from './model';
 import { FlipBody, RungRow } from './ui';
@@ -23,6 +23,10 @@ export function IncomeToday({ payload, narrow }: { payload: J; narrow: boolean }
   if (!inc || !g) return null;
   // Under the header only the marks' time (README §1.3; no how-to line on the face, Nik 24 Nov 2026).
   const sub = marksWords(payload);
+  // One width for every row's big %, from the widest one in the card, so the titles line up (a signed −901% is
+  // five characters; Nik 25 Nov: the rows did not line up).
+  const fs = narrow ? 22 : 26, base = narrow ? 52 : 64;
+  const col = Math.max(base, Math.ceil(Math.max(0, ...g.groups.flatMap((gr) => gr.rows.map((r) => lineOf(r, true).big.length))) * fs * 0.7));
   return (
     <section aria-label="Income today" className="tnum"
       style={{ ...CARD, gap: narrow ? 10 : 14, padding: narrow ? '16px 16px 4px' : '20px 22px 10px', borderRadius: narrow ? 22 : 20 }}>
@@ -47,8 +51,11 @@ export function IncomeToday({ payload, narrow }: { payload: J; narrow: boolean }
       )}
       {g.groups.map((gr) => (
         <div key={gr.k} role="list" aria-label={gr.t} style={{ display: 'flex', flexDirection: 'column' }}>
-          <span style={{ padding: '10px 0 2px', borderTop: `1px solid ${ln(0.12)}`, ...label, lineHeight: '16px' }}>{gr.t}</span>
-          {gr.rows.map((r) => <RungRow key={r.k} x={lineOf(r, true)} narrow={narrow} />)}
+          {/* The dot on the group's title, not on every row (as the app; Nik 25 Nov: the row dots looked off). */}
+          <span style={{ display: 'flex', alignItems: 'center', padding: '10px 0 2px', borderTop: `1px solid ${ln(0.12)}`, ...label, lineHeight: '16px' }}>
+            {(gr.k === 'itm' || gr.k === 'roll') && <Dot k={gr.k === 'itm' ? 'r' : 'g'} />}{gr.t}
+          </span>
+          {gr.rows.map((r) => <RungRow key={r.k} x={lineOf(r, true)} narrow={narrow} col={col} />)}
         </div>
       ))}
       {!g.need && <span style={{ padding: '12px 0', borderTop: `1px solid ${ln(0.12)}`, fontSize: 15, lineHeight: '20px', fontWeight: 500 }}>Nothing needs you today.</span>}
