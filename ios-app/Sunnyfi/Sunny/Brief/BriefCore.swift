@@ -162,8 +162,6 @@ final class BriefState {
 
     /// Together's split (payload.split): each account's value and today, for the line under the account value.
     private(set) var split: [(name: String, value: Double, today: Double)] = []
-    /// Together: each account's Your book parts (payload.split[i].parts), for S and N under every total.
-    private(set) var splitParts: [(name: String, parts: JSONValue)] = []
     /// payload.split as it comes (Together only): [{id, name, value, today, pct, chart, open_pl, margin, tvLeft, heads
     /// {kicker: "$13.7K"}, names [tickers], parts, nameParts}].
     private(set) var splitRaw: JSONValue?
@@ -227,10 +225,6 @@ final class BriefState {
             return (n, v, p["today"].double ?? 0)
         }
         self.splitRaw = split
-        self.splitParts = (split?.array ?? []).compactMap { p in
-            guard let n = p["name"].string, case .object = p["parts"] else { return nil }
-            return (n, p["parts"])
-        }
         if !BriefDebug.sample {
             // The strip on the real books: Together first, then Sunny before Nicolay (Nik, 8 and 24 Nov 2026), whatever
             // order the memberships come in.

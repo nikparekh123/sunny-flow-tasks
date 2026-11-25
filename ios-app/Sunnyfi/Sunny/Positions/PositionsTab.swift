@@ -4,8 +4,8 @@
 //
 //  The Positions tab (handoff 2026-11-13-positions §2, 2026-11-18 §2, 2026-11-24 §4), top to bottom:
 //    the account strip · large title Positions, "Sunny’s book · Fri Nov 13 close" · Your book (one flat card, Long ·
-//    Hedge · Income with Today and All time; Income leads with what is left to earn; Together names each account in one
-//    muted line under every total, never S or N) · the name strip (Together: Sunny's names, a hairline, Nicolay's) · the
+//    Hedge · Income with Today and All time; Income leads with what is left to earn; no account lines on Together) · the
+//    name strip (Together: Sunny's names, a hairline, Nicolay's) · the
 //    name header · the name's own book · Share average · Payoff | Price (the Payoff's touch reads the Greeks at that
 //    price) · Every leg (SunnyBook, PositionsEvery.swift: List only, switches and chips on three lines) · Intelligence
 //    (SunnyStrikes look card, PositionsStrikes.swift: strike tiles in one swiped row, the strike card, Try in Payoff kept
@@ -183,8 +183,7 @@ struct PositionsTab: View {
         let n = book.names.first { $0.t == name } ?? book.names.first
         let tog = brief.account == .together
         if !book.groups.isEmpty {
-            PosYourBook(groups: book.groups, open: $bookOpen, privacy: privacy, reduce: reduce,
-                        accts: tog ? brief.splitParts.map { ($0.name, PosBook.groups($0.parts)) } : [])
+            PosYourBook(groups: book.groups, open: $bookOpen, privacy: privacy, reduce: reduce)
                 .padding(.horizontal, Self.margin)
         }
         // Together: Sunny's names, a hairline, then Nicolay's (each account's names, payload.split[i].names).
@@ -196,15 +195,6 @@ struct PositionsTab: View {
         .sensoryFeedback(.selection, trigger: picks)
         if let n {
             nameSection(n, book: b, sold: book.sold, own: book.nameGroups[n.t] ?? [])
-        }
-    }
-
-    /// Together: each account's parts of a name's own book (payload.split[i].nameParts[TICKER]); empty on one account.
-    private func nameAccts(_ t: String) -> [(name: String, groups: [PosBook.Group])] {
-        guard brief.account == .together else { return [] }
-        return (brief.splitRaw?.array ?? []).compactMap { p in
-            guard let nm = p["name"].string else { return nil }
-            return (nm, PosBook.groups(p["nameParts"][t]))
         }
     }
 
@@ -243,7 +233,7 @@ struct PositionsTab: View {
         }
         PosHeader(n: n, S0: S0).padding(.horizontal, Self.margin)
         if !own.isEmpty {
-            PosNameBook(t: n.t, groups: own, open: $ownOpen, privacy: privacy, reduce: reduce, accts: nameAccts(n.t))
+            PosNameBook(t: n.t, groups: own, open: $ownOpen, privacy: privacy, reduce: reduce)
                 .padding(.horizontal, Self.margin)
                 .padding(.top, -4)
         }
@@ -500,17 +490,12 @@ extension PositionsTab: Equatable {
 /// with collected and kept under it; its parts read left (Nik, 24 Nov 2026). Figures from sunny-home
 /// (brief_inputs.parts): Today is Home's today split by part, so the rows add up to it; All time is against IBKR's cost,
 /// or kept of what was sold.
-/// Together: each total carries its accounts in full words in one muted line under it ("Sunny $248K · Nicolay $367K").
-/// No S and N under Today and All time and no key for them (Nik, 24 Nov 2026: "very confusing and cluttered"). The
-/// muted lines run under the Today and All time columns too, so a 375 pt phone fits both names on one line.
+/// Together shows the sums only: no account lines, no S or N (Nik, 24 Nov 2026: "remove Sunny and Nicolay").
 struct PosYourBook: View {
     let groups: [PosBook.Group]
     @Binding var open: Set<String>
     let privacy: Bool
     let reduce: Bool
-    /// Together (handoff 2026-11-24 §2.2): each account's groups. Empty on one account.
-    var accts: [(name: String, groups: [PosBook.Group])] = []
-
     private static let label = PC.say                          // #C7C7CC
     private static let chevron = S.dyn(0x8E8E93, 0x636366)
 
@@ -561,12 +546,8 @@ struct PosYourBook: View {
                             .frame(width: 12)
                             .opacity(one ? 0 : 1)
                     }
-                    // The muted lines under the value, one line each, the full width of the row so both names fit
-                    // without a cut on a 375 pt phone (Nik, 24 Nov 2026).
+                    // Income's muted line under the value, the full width of the row.
                     Group {
-                        if let ps = partsOf(g.title) {
-                            Text(ps.map { "\($0.name) \(money(inc ? $0.x.value - $0.x.all : $0.x.value))" }.joined(separator: " · "))
-                        }
                         if inc {
                             Text((one ? g.parts[0].label + " · " : "") + "\(money(x.value)) collected · \(money(x.all)) kept")
                         }
@@ -611,11 +592,6 @@ struct PosYourBook: View {
         .overlay(alignment: .top) { Rectangle().fill(PC.rule).frame(height: 1) }
     }
 
-    /// Each account's part of a group (Together only): its name and the group's sums on that account; nil on one account.
-    private func partsOf(_ title: String) -> [(name: String, x: PosBook.Part)]? {
-        guard accts.count > 1 else { return nil }
-        return accts.map { a in (name: a.name, x: a.groups.first { $0.title == title }?.sum ?? PosBook.Part(key: title, label: title)) }
-    }
     /// $ over %, green when up or kept, red when down; no sign.
     private func figure(_ v: Double, _ pct: Double, big: Bool) -> some View {
         let c = v > 0.5 ? PC.green : v < -0.5 ? PC.red : PC.ink
@@ -634,24 +610,20 @@ struct PosYourBook: View {
         let x = g.sum
         let what = one ? "\(g.title), \(g.parts[0].label)" : g.title
         let v = inc ? "\(PosSay.money(x.value - x.all, privacy)) left to earn, of \(PosSay.money(x.value, privacy)) collected" : PosSay.money(x.value, privacy)
-        let ac = partsOf(g.title).map { ps in ". " + ps.map { "\($0.name) \(PosSay.money(inc ? $0.x.value - $0.x.all : $0.x.value, privacy))" }.joined(separator: ", ") } ?? ""
-        return PosSay.words("\(what), \(v), today \(PosSay.signed(x.today, privacy)), \(PE.pcx(x.todayPct)), all time \(PosSay.signed(x.all, privacy)), \(PE.pcx(x.allPct))\(ac)")
+        return PosSay.words("\(what), \(v), today \(PosSay.signed(x.today, privacy)), \(PE.pcx(x.todayPct)), all time \(PosSay.signed(x.all, privacy)), \(PE.pcx(x.allPct))")
     }
 }
 
 /// The picked name's own book (handoff 2026-11-18 §2.3), under the name: Long · Hedge · Income in as many columns as
 /// the name holds (never None or To do), each its value and its all-time gain ($ · %, green or red). Income reads what
 /// is left to earn, "kept $X of $Y" under it (2026-11-24). A tap on a group with two parts opens them under the row; the
-/// open cell sits on a soft tile. Together: each account's part under every total, in full words ("Sunny $48K").
+/// open cell sits on a soft tile. No account lines on Together (Nik, 24 Nov 2026).
 struct PosNameBook: View {
     let t: String
     let groups: [PosBook.Group]
     @Binding var open: String?
     let privacy: Bool
     let reduce: Bool
-    /// Together: each account's groups for this name (payload.split[i].nameParts[TICKER]). Empty on one account.
-    var accts: [(name: String, groups: [PosBook.Group])] = []
-
     var body: some View {
         let shown = groups.first { $0.title == open && $0.parts.count > 1 }
         VStack(alignment: .leading, spacing: 0) {
@@ -673,29 +645,8 @@ struct PosNameBook: View {
         .accessibilityLabel("\(t) in your book")
     }
 
-    /// Each account holding this group, with its value ("Sunny $48K", "Nicolay $12K"; one when only one holds it);
-    /// nil on one account. Names in full, never S or N (Nik, 24 Nov 2026).
-    private func acctParts(_ title: String, inc: Bool) -> [String]? {
-        guard accts.count > 1 else { return nil }
-        let ps = accts.compactMap { a -> String? in
-            guard let x = a.groups.first(where: { $0.title == title })?.sum else { return nil }
-            return "\(a.name) \(money(inc ? x.value - x.all : x.value))"
-        }
-        return ps.isEmpty ? nil : ps
-    }
-    /// The accounts in one muted line ("Sunny $48K · Nicolay $12K"), or one account a line when the column is too
-    /// narrow, so a name is never cut.
-    private func acctLine(_ ps: [String]) -> some View {
-        ViewThatFits(in: .horizontal) {
-            Text(ps.joined(separator: " · ")).fixedSize()
-            VStack(alignment: .leading, spacing: 0) { ForEach(ps, id: \.self) { Text($0) } }
-        }
-        .sType(PT.t(12, 16, 500)).foregroundStyle(PC.mu)
-    }
-
     private func cell(_ g: PosBook.Group) -> some View {
         let x = g.sum, two = g.parts.count > 1, on = two && open == g.title, inc = g.title == "Income"
-        let acs = acctParts(g.title, inc: inc), ac = acs?.joined(separator: " · ")
         return Button {
             guard two else { return }
             withAnimation(S.moving(.easeOut(duration: 0.2), reduce) ?? .linear(duration: 0)) { open = on ? nil : g.title }
@@ -704,7 +655,6 @@ struct PosNameBook: View {
                 Text(g.title).sType(PT.t(12, 16, 500), tabular: false).foregroundStyle(PC.mu)
                 Text(inc ? "\(money(x.value - x.all)) left" : money(x.value)).sType(PT.t(17, 22, 700)).foregroundStyle(PC.ink)
                 Text(inc ? "kept \(money(x.all)) of \(money(x.value))" : "\(money(x.all)) · \(PE.pcx(x.allPct))").sType(PT.t(12, 16, 600)).foregroundStyle(tone(x.all))
-                if let acs { acctLine(acs).padding(.top, 2) }
             }
             .lineLimit(1).minimumScaleFactor(0.7)
             .frame(maxWidth: .infinity, minHeight: 46, alignment: .topLeading)
@@ -717,7 +667,7 @@ struct PosNameBook: View {
         .padding(.horizontal, -2)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(PosSay.words("\(t) \(g.title), " + (inc ? "\(PosSay.money(x.value - x.all, privacy)) left, kept \(PosSay.money(x.all, privacy)) of \(PosSay.money(x.value, privacy))"
-                                                                 : "\(PosSay.money(x.value, privacy)), \(PosSay.signed(x.all, privacy)), \(PE.pcx(x.allPct))") + (ac.map { ". " + $0 } ?? "")))
+                                                                 : "\(PosSay.money(x.value, privacy)), \(PosSay.signed(x.all, privacy)), \(PE.pcx(x.allPct))")))
         .accessibilityHint(two ? (on ? "Hides its parts" : "Shows its parts") : "")
         .accessibilityAddTraits(two ? .isButton : [])
     }
