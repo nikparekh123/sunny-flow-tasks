@@ -1,6 +1,7 @@
 # Sundial 1.0
 
-The selling engine. Agreed with Nik on 25 Nov 2026, one rule at a time. First name: **NVDA in book N**.
+The selling engine. Agreed with Nik on 25 Nov 2026, one rule at a time. Names: **NVDA and SpaceX (SPCX), both in
+book N**, same rules for both (Nik, 25 Nov). The rest of the names come after.
 
 **Nik decides what to buy** (shares, calls, puts). **Sundial decides what to sell**: how many calls and puts,
 on which expiry, at which strike. It can also show what a purchase would unlock ("5 Jan calls bought = 8 more
@@ -61,6 +62,20 @@ expiries assumed since 2010. Earnings days = the busiest day of each Feb, May, A
 | Earnings weeks | 185 expiries over 68 reports | Calls only -$282K, equal calls and puts -$182K, puts only at 1 SD +$117K (at 1.6x normal IV) |
 | Quiet months | By month and holiday weeks, priced by trading days | Half-day weeks best (calls +$950, puts +$883 an expiry). Late-December calls weakest (-$714) |
 | Very cheap NVDA | Chance of a 20%+ week by distance from the 52-week high, since 2010 | About 1 to 2 days in 100 at every level. No special rule |
+
+**SpaceX check (25 Nov, real Theta end-of-day prices since the 12 Jun IPO, 10 contracts an expiry at SPCX $127).**
+Every rule held except the 50% early close, which lost $4.9K over 17 cases against holding while SpaceX fell from
+$161 to $127; Nik kept it for one rule on both names (SpaceX rose 23% in its August earnings week).
+
+| Rule | SpaceX since June |
+|---|---|
+| +20% test | 20%+ within a week on 3.6% of days; a 1-in-20 week +19%; weekly SD 8.7% |
+| Calls ladder | +$48K over 29 expiries, 3% paid out; Mon/Wed/Fri +$26.5K vs Fridays only +$24.8K (Oct to Nov) |
+| Puts ladder | +$6.3K (Oct to Nov -$0.3K) |
+| Calls in the money after a jump (4) | hold +$14.0K, close -$4.4K, roll +$11.0K |
+| Puts in the money after a drop (2) | hold -$6.1K, close -$8.6K, roll -$5.9K |
+| Earnings (2 reports) | calls -$3.1K in August's week (+23%), puts +$5.1K |
+| Big drop | fired 8 times, including 20 and 25 Nov |
 
 Scripts are in the session scratchpad (engine/, replay/, rolltest/); re-run before relying on a number.
 
