@@ -1,0 +1,73 @@
+# Sundial 1.0
+
+The selling engine. Agreed with Nik on 25 Nov 2026, one rule at a time. First name: **NVDA in book N**.
+
+**Nik decides what to buy** (shares, calls, puts). **Sundial decides what to sell**: how many calls and puts,
+on which expiry, at which strike. It can also show what a purchase would unlock ("5 Jan calls bought = 8 more
+calls you can sell"), but buying stays his call.
+
+---
+
+## Calls
+
+1. **When and which expiry.** At 3:45 PM ET every Monday, Wednesday and Friday, sell on the expiry a week out.
+   Three expiries are always open.
+2. **Strike.** The 11 Nov tables: the week's move in weekly SD (against the close 5 sessions back), the trend
+   (50-day and 200-day), then IV rich (0.25 SD closer) or cheap (0.25 SD wider). **Cheap wins whenever NVDA's
+   20-day real moves are bigger than its IV.** Calls stay between 0.25 and 1.25 SD; at the money only on a
+   20% up day.
+3. **How many: the +20% test.** The most calls that keep the whole NVDA book from losing money at any rise
+   from 0 to +20%, at any close in the next 5 trading days. "The whole book" is shares, calls bought, puts
+   bought and everything sold. Sold legs count in full (their premium is the cushion). Bought legs count only
+   what the move does to them, not their slow daily decay (that is the cost of protection, not of the rally).
+   Applied every week ("20% in a week is normal for NVDA"). Past +20% a loss is accepted.
+4. **Early profit.** If a call is worth half or less of its sale price at 3:45 PM on its first or second
+   trading day, buy it back. That expiry stays empty until the next normal sale.
+5. **In the money before expiry: hold.** No early roll or close.
+6. **In the money at expiry:** buy back and sell again. Shares are let go only from lots held over a year.
+7. **Earnings weeks: no calls** on any expiry that spans an NVDA report.
+
+## Puts
+
+8. **Normal.** 2 puts on each new expiry (a week out) at 3:45 PM on Monday, Wednesday and Friday, strike from
+   the 11 Nov put table. Earnings weeks: 1 SD.
+9. **Big drop.** When NVDA falls 2 daily SD below yesterday's close (daily SD = IV / square root of 252; about
+   9% at 71% IV), checked **live every minute**, sell puts up to the cap on the expiry a week out, strike from
+   the put table at that price. Nik gets a push.
+10. **Cap.** Never more than **30 sold puts open** (3,000 shares), counting every open sold put.
+11. **In the money before expiry: hold.** At expiry: take the shares if the strike is under the average cost,
+    otherwise buy back and sell again.
+12. **Early profit: none.** Puts are held.
+
+## Calendar
+
+13. Quiet months (August, late December) and holiday or half-day weeks: **sell as normal.**
+
+---
+
+## The evidence (all 25 Nov 2026)
+
+Model prices (Black-Scholes, no skew). IV before July 2026 = 20-day real moves x 1.10, the median ratio of
+NVDA's real IV to its real moves in Jul to Nov 2026. Money scaled to NVDA at $150. Monday, Wednesday and Friday
+expiries assumed since 2010. Earnings days = the busiest day of each Feb, May, Aug and Nov.
+
+| Question | What we tested | Result |
+|---|---|---|
+| Replay 16 to 25 Nov | Sundial against Nik's real trades, same purchases | Sundial -$21K, Nik -$29K (sold legs). Calls equal, big-drop puts +$13K against +$3K |
+| Calls in the money early | 187 up-jumps of 2 daily SD since 2010 | Hold -$11.2K a jump, close and resell -$10.4K to -$10.8K, roll -$11.4K. Holding best on 20% days |
+| Early profit | 2,387 call slots, 50% kept in the first 2 days | Close only +$1,089 a hit, hold +$861, close and resell closer +$720. Puts: no difference |
+| Puts in the money early | 156 falls of 2 daily SD since 2011 | Hold -$5.9K, close at the close -$5.9K, roll -$5.0K but worst -$83K against -$54K |
+| Why calls lost | 2,387 slots over 16 years | Normal weeks +$345K, earnings weeks -$689K |
+| Earnings weeks | 185 expiries over 68 reports | Calls only -$282K, equal calls and puts -$182K, puts only at 1 SD +$117K (at 1.6x normal IV) |
+| Quiet months | By month and holiday weeks, priced by trading days | Half-day weeks best (calls +$950, puts +$883 an expiry). Late-December calls weakest (-$714) |
+| Very cheap NVDA | Chance of a 20%+ week by distance from the 52-week high, since 2010 | About 1 to 2 days in 100 at every level. No special rule |
+
+Scripts are in the session scratchpad (engine/, replay/, rolltest/); re-run before relying on a number.
+
+## Not yet
+
+- Built: nothing. The engine, its 3:45 PM run, the live big-drop check and the pushes are the next step.
+- The Income page redesign reads Sundial's answer ("To sell", "Bought back"), once built.
+- Other names after NVDA.
+- Bug seen: sunny-home `risk.delta` counts only LEAP contracts as shares, so book N's 1,500 real NVDA shares
+  are left out of the delta card.

@@ -218,7 +218,13 @@ Friday, nearest strike, flat size. Assignment is how you buy it.
 
 100 TLT shares remain from an assignment. No options.
 
-### NVDA — no open leg since 2026-08-17
+### NVDA in book N: Sundial 1.0, from 2026-11-25
+
+Book N (the cousin's account, U29584055) holds NVDA again: 1,500 shares bought 20 Nov 2026, calls and puts
+bought by Nik. What to sell is decided by **Sundial 1.0**, agreed rule by rule on 25 Nov 2026:
+**read `docs/SUNDIAL.md`, do not reconstruct it.** Book S's NVDA note below is unchanged.
+
+### NVDA (book S) — no open leg since 2026-08-17
 
 Puts on Fridays only. An income wheel, not accumulation.
 
