@@ -25,7 +25,7 @@
  */
 import { addDays, bs, callSd, dropLine, isWeekday, ivFrom, putSd, room, RULES, signals, strikeAt, tdays, test20, yrs, type Leg, type Signals } from '../_shared/sundial.ts';
 
-const BUILD = '2026-11-25.2';
+const BUILD = '2026-11-26.1';
 const NAMES: { book: string; t: string; label: string }[] = [{ book: 'N', t: 'NVDA', label: 'NVDA' }, { book: 'N', t: 'SPCX', label: 'SpaceX' }];
 const NIK = '85dd190f-9381-4acf-b123-7f1f6f778947';   // nik@sunnyfi.co: Sundial's pushes go to his phones only
 const URL_ = Deno.env.get('SUPABASE_URL')!;
@@ -239,9 +239,11 @@ async function work(nm: { book: string; t: string; label: string }, c: Ctx) {
       const r = room(S, shares, legsP, Kc, target, ivEx, day, c.closed, minsLeft);
       // ⚠ THE EXPIRY CAP (data, 25 Nov 2026): at most half of what the test allows a book with no calls sold.
       const empty = room(S, shares, legsP.filter((l) => !(l.side < 0 && l.type === 'call')), Kc, target, ivEx, day, c.closed, minsLeft);
-      const cap = Math.floor(empty.n * RULES.expiryCap), n = Math.min(r.n, cap);
+      // The cap is for the whole expiry: calls already sold on it (and staying on) count toward it.
+      const onEx = legsAfter.filter((l) => l.side < 0 && l.type === 'call' && l.ex === target).reduce((a, l) => a + l.n, 0);
+      const cap = Math.floor(empty.n * RULES.expiryCap), n = Math.min(r.n, Math.max(0, cap - onEx));
       const tst = n === r.n ? r.test : test20(S, shares, [...legsP, { type: 'call', K: Kc, ex: target, n, side: -1, iv: ivEx }], day, c.closed, minsLeft);
-      calls = { kind: 'call', n, room: r.n, cap, K: Kc, ex: target, sd: kc, mid: r2(priceAt(Kc, false, T)), test: { worst: Math.round(tst.worst), at: tst.at, day: tst.day } };
+      calls = { kind: 'call', n, room: r.n, cap, onEx, K: Kc, ex: target, sd: kc, mid: r2(priceAt(Kc, false, T)), test: { worst: Math.round(tst.worst), at: tst.at, day: tst.day } };
     } else calls = { kind: 'call', n: 0, ex: target, earnings: true, why: `No calls: ${er ? md(er.d) : ''} earnings before ${md(target)}` };
     if (saleDay) {
       // ⚠ NETTED: buying back calls and selling the same contract again in one go only pays the spread twice. The overlap
