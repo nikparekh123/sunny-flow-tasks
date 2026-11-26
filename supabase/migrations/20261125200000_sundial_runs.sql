@@ -18,3 +18,7 @@ drop policy if exists sundial_runs_owner_read on public.sundial_runs;
 create policy sundial_runs_owner_read on public.sundial_runs for select to authenticated
   using (book_id in (select public.my_owned_books()));
 revoke insert, update, delete on public.sundial_runs from anon, authenticated;
+
+-- The scheduler (25 Nov 2026): every minute 13-21 UTC on weekdays; the function itself checks the session, watches for
+-- the big drop and runs the day's plan once from 15 minutes before the close (early closes honoured).
+select cron.schedule('sundial-tick', '* 13-21 * * 1-5', $$select public.cron_invoke_function_body('sundial', '{"mode":"tick"}'::jsonb)$$);

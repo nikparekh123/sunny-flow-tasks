@@ -22,6 +22,8 @@ calls you can sell"), but buying stays his call.
    bought and everything sold. Sold legs count in full (their premium is the cushion). Bought legs count only
    what the move does to them, not their slow daily decay (that is the cost of protection, not of the rally).
    Applied every week ("20% in a week is normal for NVDA"). Past +20% a loss is accepted.
+   **Cap: no expiry takes more than half** the calls the test allows a book with no calls sold (25 Nov, from data:
+   uncapped, the room piles onto one expiry after an early close).
 4. **Early profit.** If a call is worth half or less of its sale price at 3:45 PM on its first or second
    trading day, buy it back. That expiry stays empty until the next normal sale.
 5. **In the money before expiry: hold.** No early roll or close.
@@ -77,11 +79,19 @@ $161 to $127; Nik kept it for one rule on both names (SpaceX rose 23% in its Aug
 | Earnings (2 reports) | calls -$3.1K in August's week (+23%), puts +$5.1K |
 | Big drop | fired 8 times, including 20 and 25 Nov |
 
+**Decided from data the same night (NVDA since 2010, model prices):**
+
+| Question | Result |
+|---|---|
+| Expiry cap (1,500 shares, test-sized, early close on) | No cap +$284K, worst week -$88K, worst expiry -$88K. Half +$328K, -$61K, -$42K. A third +$272K, -$55K, -$26K. A quarter +$229K, -$46K, -$21K. Half chosen: most profit, bad weeks well under no cap |
+| More room: bigger 3 expiries or a 4th (about 9 days)? | 40 calls open either way: 3 expiries +$404K (+$23.7K a year), 4 expiries +$252K (+$14.9K). Sell more on the same 3 |
+| After a jump, sell puts 1.5 SD below (after a drop, calls above) | 175 jumps: same count as the in-the-money calls -$22K; premium-matched (about 5x the contracts) -$244K, worst -$146K. 142 drops: -$49K and -$211K. Not adopted: snap-backs hit the extra legs |
+
 Scripts are in the session scratchpad (engine/, replay/, rolltest/); re-run before relying on a number.
 
 ## Not yet
 
-- Built: nothing. The engine, its 3:45 PM run, the live big-drop check and the pushes are the next step.
+- Built 25 Nov: `sundial` edge function, `_shared/sundial.ts`, `sundial_runs`, scheduler `sundial-tick` (every minute in the session; plan at close minus 15). Pushes go to Nik's login only.
 - The Income page redesign reads Sundial's answer ("To sell", "Bought back"), once built.
 - Other names after NVDA.
 - Bug seen: sunny-home `risk.delta` counts only LEAP contracts as shares, so book N's 1,500 real NVDA shares

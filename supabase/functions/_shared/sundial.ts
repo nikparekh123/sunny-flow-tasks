@@ -16,7 +16,10 @@
  * No em dashes in any words written here (Nik).
  */
 
-export const RULES = { up: 0.2, horizons: 5, putsNormal: 2, putCap: 30, earlyKept: 0.5, earlyDays: 2, dropSd: 2, r: 0.04 };
+/** expiryCap (25 Nov 2026, from data, Nik: "it needs to be with risk and data, not a personal choice"): no expiry takes
+    more than half the calls the +20% test allows a book with no calls sold. NVDA since 2010, 1,500 shares: no cap
+    +$284K with a worst week of -$88K; half +$328K, -$61K; a third +$272K, -$55K; a quarter +$229K, -$46K. */
+export const RULES = { up: 0.2, horizons: 5, putsNormal: 2, putCap: 30, earlyKept: 0.5, earlyDays: 2, dropSd: 2, expiryCap: 0.5, r: 0.04 };
 
 // ── Black-Scholes (no dividends) ──
 export const N = (x: number): number => {
