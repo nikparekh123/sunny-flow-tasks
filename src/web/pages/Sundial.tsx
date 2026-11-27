@@ -13,7 +13,9 @@ export default function Sundial() {
   const { book, mask } = useWeb();
   const [tk, setTk] = useState('all');
   useEffect(() => setTk('all'), [book]);
-  const q = useBoard(book, tk);
+  // One reply carries every chip's view (sundial build 2026-11-27.4), so a chip switches at once (Nik 27 Nov: slow).
+  const q = useBoard(book, 'all');
+  const view = q.data?.views?.[tk] ?? (tk === 'all' ? q.data : undefined);
   const box = useRef<HTMLDivElement>(null);
   const [narrow, setNarrow] = useState(false);
   useEffect(() => {
@@ -25,7 +27,7 @@ export default function Sundial() {
   }, []);
   return (
     <div ref={box} aria-busy={!q.data} style={{ maxWidth: 1440 }}>
-      <Board data={q.data} narrow={narrow} tk={tk} setTk={setTk} mask={mask} />
+      <Board data={view ?? q.data} narrow={narrow} tk={tk} setTk={setTk} mask={mask} />
       {q.isError && !q.data && <p style={{ marginTop: 24, fontSize: 15, color: '#8C8C8C' }}>Sundial is not answering. It tries again in a minute.</p>}
     </div>
   );

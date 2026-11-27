@@ -34,6 +34,8 @@ nonisolated struct SDBoard: Decodable, Equatable, Sendable {
     let working: Working?
     let expiring: Expiring?
     let banked: Banked?
+    /// Every chip's view in the same reply (server 2026-11-27.4), so a chip switches without asking again.
+    let views: [String: SDBoard]?
 
     struct Month: Decodable, Equatable, Sendable { let label: String?; let amount: Double? }
     struct Name: Decodable, Equatable, Sendable { let t: String; let name: String? }
@@ -89,8 +91,13 @@ final class SundialStore {
     func load(_ acct: String, _ name: String) async {
         let k = Self.key(acct, name)
         do {
-            let b = try await Self.fetch(acct, name)
-            if boards[k] != b { boards[k] = b }
+            // One reply carries every chip's view (Nik 27 Nov: the page was slow): fill them all, so a chip switches at once.
+            let b = try await Self.fetch(acct, "all")
+            if let vs = b.views, !vs.isEmpty {
+                for (n, v) in vs { let kk = Self.key(acct, n); if boards[kk] != v { boards[kk] = v } }
+            } else {
+                let kk = Self.key(acct, "all"); if boards[kk] != b { boards[kk] = b }
+            }
             failed.remove(k)
         } catch {
             if !(error is CancellationError) { failed.insert(k) }

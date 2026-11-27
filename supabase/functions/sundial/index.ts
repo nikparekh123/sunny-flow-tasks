@@ -26,7 +26,7 @@
  */
 import { addDays, bs, callSd, dropLine, isWeekday, ivFrom, putSd, room, RULES, signals, strikeAt, tdays, test20, yrs, type Leg, type Signals } from '../_shared/sundial.ts';
 
-const BUILD = '2026-11-27.3';
+const BUILD = '2026-11-27.4';
 const NAMES: { book: string; t: string; label: string }[] = [{ book: 'N', t: 'NVDA', label: 'NVDA' }, { book: 'N', t: 'SPCX', label: 'SPCX' }]   // tickers for both (Nik, 27 Nov: a name for one looked odd);
 const NIK = '85dd190f-9381-4acf-b123-7f1f6f778947';   // nik@sunnyfi.co: Sundial's pushes go to his phones only
 const URL_ = Deno.env.get('SUPABASE_URL')!;
@@ -334,54 +334,58 @@ async function board(acct: string, name: string, c: Ctx) {
   const finalAt = c.closeMins - 15, final = !c.open || c.mins >= finalAt;
   const runs = c.open && scope.length ? await db(`sundial_runs?day=eq.${c.day}&book_id=eq.N&select=ticker,kind,run_at,payload`) : [];
   const run = (t: string, k: string) => runs.find((r) => r.ticker === t && r.kind === k) ?? null;
-  const ws: W[] = [];
-  for (const n of scope) { const plan = final ? run(n.t, 'plan') : null; ws.push(await work(n, c, plan ? (plan.payload?.close ?? []) : null)); }
-  const pick = ws.filter((w) => name === 'all' || w.t === name);
-  // trades of one contract that arrived since a run (a sale clears a To sell or drop leg)
-  const since = (w: W, at: number, action: string, type: string, K: number, ex: string) =>
-    w.todays.filter((x) => x.action === action && x.side < 0 && x.type === type && x.K === K && x.ex === ex && Date.parse(x.at) >= at).reduce((a, x) => a + x.n, 0);
-  const legOf = (x: Row, n: number) => ({ qty: n, expiry: x.ex, strike: x.K, type: x.kind, sd: x.sd, price: x.mid, credit: Math.round(n * x.mid * 100) });
+  // Every name at once (Nik 27 Nov: the page was slow), and every chip's view in the same reply, so a chip switches
+  // without asking again.
+  const ws: W[] = await Promise.all(scope.map((n) => { const plan = final ? run(n.t, 'plan') : null; return work(n, c, plan ? (plan.payload?.close ?? []) : null); }));
+  const view = (name: string) => {
+    const pick = ws.filter((w) => name === 'all' || w.t === name);
+    // trades of one contract that arrived since a run (a sale clears a To sell or drop leg)
+    const since = (w: W, at: number, action: string, type: string, K: number, ex: string) =>
+      w.todays.filter((x) => x.action === action && x.side < 0 && x.type === type && x.K === K && x.ex === ex && Date.parse(x.at) >= at).reduce((a, x) => a + x.n, 0);
+    const legOf = (x: Row, n: number) => ({ qty: n, expiry: x.ex, strike: x.K, type: x.kind, sd: x.sd, price: x.mid, credit: Math.round(n * x.mid * 100) });
 
-  const sellCards: Row[] = [], drops: Row[] = [], closeCards: Row[] = [], expCards: Row[] = [], workGroups: Row[] = [], bankGroups: Row[] = [];
-  for (const w of pick) {
-    // To sell: before 3:45 PM the live plan, after it the saved plan less what has arrived from IBKR
-    const pr = final ? run(w.t, 'plan') : null, src: Row = pr?.payload ?? w, at = pr ? Date.parse(pr.run_at) : 0;
-    const legs = ((src.toSell ?? []) as Row[]).filter((x) => !x.drop).map((x) => {
-      const n = x.n - (pr ? since(w, at, 'open', x.kind, x.K, x.ex) : 0);
-      if (n <= 0) return null;
-      return { ...legOf(x, n), keep: x.of && x.of > x.n ? { qty: x.of - x.n, total: x.of } : null };
-    }).filter(Boolean) as Row[];
-    // What the plan was worked out at (Nik, 27 Nov): before the final time the live price now, worked out again every
-    // minute; after it the price and time the saved plan locked at.
-    const basis = { price: r2(Number(src.S ?? w.S)), at: pr ? new Date(at).toISOString() : new Date().toISOString(), locked: !!pr };
-    if (legs.length) sellCards.push({ t: w.t, credit: legs.reduce((a, l) => a + l.credit, 0), reason: src.reason ?? w.reason, safe: 'Safe to +20%', basis, legs });
-    // The big drop: the day's saved drop run, or the live one in the minute before the scheduler saves it
-    const dr = run(w.t, 'drop'), d = dr ? dr.payload?.drop : w.drop;
-    if (d?.fired && d.puts && d.puts.n > 0) {
-      const dAt = dr ? Date.parse(dr.run_at) : Date.now(), n = d.puts.n - (dr ? since(w, dAt, 'open', 'put', d.puts.K, d.puts.ex) : 0);
-      if (n > 0) { const l = legOf(d.puts, n); drops.push({ t: w.t, at: new Date(dAt).toISOString(), price: r2(Number(dr?.payload?.S ?? w.S)), line: `Under $${kfmt(d.line)}`, credit: l.credit, legs: [l] }); }
+    const sellCards: Row[] = [], drops: Row[] = [], closeCards: Row[] = [], expCards: Row[] = [], workGroups: Row[] = [], bankGroups: Row[] = [];
+    for (const w of pick) {
+      // To sell: before 3:45 PM the live plan, after it the saved plan less what has arrived from IBKR
+      const pr = final ? run(w.t, 'plan') : null, src: Row = pr?.payload ?? w, at = pr ? Date.parse(pr.run_at) : 0;
+      const legs = ((src.toSell ?? []) as Row[]).filter((x) => !x.drop).map((x) => {
+        const n = x.n - (pr ? since(w, at, 'open', x.kind, x.K, x.ex) : 0);
+        if (n <= 0) return null;
+        return { ...legOf(x, n), keep: x.of && x.of > x.n ? { qty: x.of - x.n, total: x.of } : null };
+      }).filter(Boolean) as Row[];
+      // What the plan was worked out at (Nik, 27 Nov): before the final time the live price now, worked out again every
+      // minute; after it the price and time the saved plan locked at.
+      const basis = { price: r2(Number(src.S ?? w.S)), at: pr ? new Date(at).toISOString() : new Date().toISOString(), locked: !!pr };
+      if (legs.length) sellCards.push({ t: w.t, credit: legs.reduce((a, l) => a + l.credit, 0), reason: src.reason ?? w.reason, safe: 'Safe to +20%', basis, legs });
+      // The big drop: the day's saved drop run, or the live one in the minute before the scheduler saves it
+      const dr = run(w.t, 'drop'), d = dr ? dr.payload?.drop : w.drop;
+      if (d?.fired && d.puts && d.puts.n > 0) {
+        const dAt = dr ? Date.parse(dr.run_at) : Date.now(), n = d.puts.n - (dr ? since(w, dAt, 'open', 'put', d.puts.K, d.puts.ex) : 0);
+        if (n > 0) { const l = legOf(d.puts, n); drops.push({ t: w.t, at: new Date(dAt).toISOString(), price: r2(Number(dr?.payload?.S ?? w.S)), line: `Under $${kfmt(d.line)}`, credit: l.credit, legs: [l] }); }
+      }
+      for (const x of w.close as Row[]) closeCards.push({ t: w.t, qty: x.n, expiry: x.ex, strike: x.K, type: 'call', soldAt: x.at, now: x.now, keptPct: Math.round(x.kept * 100), buyBack: Math.round(x.n * x.now * 100), deadline: hm(finalAt), due: final, day: Math.max(1, Math.min(RULES.earlyDays, x.age ?? RULES.earlyDays)), of: RULES.earlyDays });
+      const wl = (w.working as Row[]).map((x) => ({ qty: x.n, strike: x.K, type: x.type, expiry: x.ex, daysLeft: x.days, keptPct: Math.round(x.kept * 100), sd: x.sd, itm: x.itm, toGo: x.toGo }));
+      if (wl.length) workGroups.push({ t: w.t, total: wl.reduce((a, x) => a + x.toGo, 0), legs: wl });
+      for (const x of w.expiring as Row[]) expCards.push({ t: w.t, qty: x.n, strike: x.K, type: x.type, expiry: x.ex, price: x.S, distance: x.distance, sd: x.sd, itm: x.itm, outcome: x.outcome, buyBack: x.buyBack, line: x.line });
+      const bl = w.banked.legs;
+      if (bl.length) bankGroups.push({ t: w.t, total: bl.reduce((a, x) => a + x.kept, 0), legs: bl });
     }
-    for (const x of w.close as Row[]) closeCards.push({ t: w.t, qty: x.n, expiry: x.ex, strike: x.K, type: 'call', soldAt: x.at, now: x.now, keptPct: Math.round(x.kept * 100), buyBack: Math.round(x.n * x.now * 100), deadline: hm(finalAt), due: final, day: Math.max(1, Math.min(RULES.earlyDays, x.age ?? RULES.earlyDays)), of: RULES.earlyDays });
-    const wl = (w.working as Row[]).map((x) => ({ qty: x.n, strike: x.K, type: x.type, expiry: x.ex, daysLeft: x.days, keptPct: Math.round(x.kept * 100), sd: x.sd, itm: x.itm, toGo: x.toGo }));
-    if (wl.length) workGroups.push({ t: w.t, total: wl.reduce((a, x) => a + x.toGo, 0), legs: wl });
-    for (const x of w.expiring as Row[]) expCards.push({ t: w.t, qty: x.n, strike: x.K, type: x.type, expiry: x.ex, price: x.S, distance: x.distance, sd: x.sd, itm: x.itm, outcome: x.outcome, buyBack: x.buyBack, line: x.line });
-    const bl = w.banked.legs;
-    if (bl.length) bankGroups.push({ t: w.t, total: bl.reduce((a, x) => a + x.kept, 0), legs: bl });
-  }
-  const sum = (a: Row[], f: (x: Row) => number) => a.reduce((p, x) => p + (f(x) || 0), 0);
-  const mon = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][Number(c.day.slice(5, 7)) - 1];
-  return {
-    build: BUILD, asOf: new Date().toISOString(), account: acct, book: who, name, day: c.day, open: c.open, final,
-    closeAt: hm(c.closeMins), finalAt: hm(finalAt),
-    month: { label: `${mon} so far`, amount: sum(pick, (w) => w.monthKept) },
-    names: ws.map((w) => ({ t: w.t, name: w.label })),
-    toSell: { total: sum(sellCards, (x) => x.credit) + sum(drops, (x) => x.credit), cards: sellCards },
-    drop: drops[0] ?? null, drops,
-    close: { total: sum(closeCards, (x) => x.buyBack), cards: closeCards },
-    working: { total: sum(workGroups, (x) => x.total), groups: workGroups },
-    expiring: { total: sum(expCards, (x) => x.buyBack), cards: expCards },
-    banked: { total: sum(bankGroups, (x) => x.total), groups: bankGroups },
+    const sum = (a: Row[], f: (x: Row) => number) => a.reduce((p, x) => p + (f(x) || 0), 0);
+    const mon = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][Number(c.day.slice(5, 7)) - 1];
+    return {
+      build: BUILD, asOf: new Date().toISOString(), account: acct, book: who, name, day: c.day, open: c.open, final,
+      closeAt: hm(c.closeMins), finalAt: hm(finalAt),
+      month: { label: `${mon} so far`, amount: sum(pick, (w) => w.monthKept) },
+      names: ws.map((w) => ({ t: w.t, name: w.label })),
+      toSell: { total: sum(sellCards, (x) => x.credit) + sum(drops, (x) => x.credit), cards: sellCards },
+      drop: drops[0] ?? null, drops,
+      close: { total: sum(closeCards, (x) => x.buyBack), cards: closeCards },
+      working: { total: sum(workGroups, (x) => x.total), groups: workGroups },
+      expiring: { total: sum(expCards, (x) => x.buyBack), cards: expCards },
+      banked: { total: sum(bankGroups, (x) => x.total), groups: bankGroups },
+    };
   };
+  return { ...view(name), views: Object.fromEntries(['all', ...ws.map((w) => w.t)].map((k) => [k, view(k)])) };
 }
 
 Deno.serve(async (req) => {
