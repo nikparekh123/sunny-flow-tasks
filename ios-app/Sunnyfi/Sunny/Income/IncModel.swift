@@ -3,7 +3,7 @@
 //  Sunny
 //
 //  Income (handoff 2026-11-24 late §1; SunnyIncome.dc.html, SunnyIncomeCal.dc.html): payload.income (sunny-home
-//  income.ts) decoded once per build into the words Income today, the realized banner and the Income calendar draw.
+//  income.ts) decoded once per build into the words the Home Sundial card draws (the tab is the Sundial board).
 //  Never built in a body: BriefState.setIncome builds it when a new build lands.
 //
 //  The row for a rung on Income today (SunnyIncome ln9, README 1.2): the big kept % (red in the money or at a loss,
@@ -158,32 +158,6 @@ nonisolated struct IncName: Identifiable, Hashable {
     let dot: IncTone?
 }
 
-// MARK: - The realized-income banner
-
-/// Realized income month by month (the app's banner is Monthly only, handoff 2026-11-24 late §1.2).
-nonisolated struct IncBanner: Hashable {
-    struct CP: Hashable { let c: Double; let p: Double; var total: Double { c + p } }
-    struct Period: Identifiable, Hashable {
-        let id: String
-        /// The bar's label: "Nov".
-        let l: String
-        /// Beside "Realized income": "Nov so far" for the month under way, else the month ("October"); no dates.
-        let cap: String
-        /// Not finished: the yield says "so far".
-        let cur: Bool
-        let c: Double
-        let p: Double
-        let by: [String: CP]
-        let bk: [String: CP]
-        var total: Double { c + p }
-    }
-    let capital: Double
-    let months: [Period]
-    /// Each ticker's share average after every premium kept (none: no shares).
-    let avg: [String: Double]
-    let tickers: [String]
-}
-
 // MARK: - The whole of Income
 
 nonisolated struct IncModel {
@@ -198,9 +172,6 @@ nonisolated struct IncModel {
     let near: String?
     /// The ladder names' delta lines, for Income today.
     let flips: [IncName.Flip]
-    let banner: IncBanner?
-    /// The Income tab's calendar.
-    let cal: IncCal
 
     var needCount: Int { itm.count + roll.count }
 
@@ -209,7 +180,6 @@ nonisolated struct IncModel {
         let today = j["today"].string ?? ""
         let rungs = j["rungs"].array.compactMap(IncRung.init)
         let byT = Dictionary(grouping: rungs, by: \.t)
-        var closed = Set<String>()
         let names: [IncName] = j["names"].array.compactMap { n in
             guard let t = n["t"].string else { return nil }
             let rs = byT[t] ?? []
@@ -217,8 +187,6 @@ nonisolated struct IncModel {
             let px = n["px"].double ?? 0
             var flip: IncName.Flip?
             if ladder { flip = Self.flip(t, n["flip"], px: px) }
-            // The market holidays the server marks on each name's small calendar.
-            for d in n["cal"].array where d["closed"].bool { if let iso = d["d"].string { closed.insert(iso) } }
             let dot: IncTone? = rs.contains { $0.itm } ? .red : rs.contains { $0.roll } ? .green : nil
             return IncName(t: t, co: n["co"].string ?? t, books: n["books"].array.compactMap(\.string), ladder: ladder, px: px,
                            chg: n["chg"].double, flip: flip, nextEx: n["nextEx"].string, dot: dot)
@@ -231,9 +199,7 @@ nonisolated struct IncModel {
                         itm: itm.map { IncLine.of($0, ticker: true) }, roll: roll.map { IncLine.of($0, ticker: true) },
                         quietCount: quiet.count,
                         near: near.map { "\($0.name(ticker: true)) \($0.exL) at \($0.kp ?? 0)%" },
-                        flips: names.compactMap(\.flip),
-                        banner: banner(j["banner"]),
-                        cal: IncCal.build(today: today, rungs: rungs, names: names, closed: closed))
+                        flips: names.compactMap(\.flip))
     }
 
     /// The delta line: how far the stock can rise before the name's book turns short (red inside 3%). The server looks
@@ -249,26 +215,6 @@ nonisolated struct IncModel {
                          b: "")
         }
         return .init(big: "↑40%+", tone: .quiet, a: "\(t) stays long", b: "")
-    }
-
-    private static func banner(_ b: JSONValue) -> IncBanner? {
-        guard case .object = b else { return nil }
-        func cp(_ v: JSONValue) -> IncBanner.CP { .init(c: v[0].double ?? 0, p: v[1].double ?? 0) }
-        func map(_ v: JSONValue) -> [String: IncBanner.CP] { v.object.mapValues(cp) }
-        let months: [IncBanner.Period] = b["months"].array.enumerated().map { i, m in
-            let l = m["l"].string ?? ""
-            let cur = m["cur"].bool
-            // SunnyIncome: "Oct so far" for the month under way (Nik, 24 Nov 2026: "Oct so far is enough"), a finished
-            // month by its name; no dates.
-            let cap = cur ? "\(l) so far" : (m["long"].string ?? l)
-            return .init(id: "m" + (m["k"].string ?? "\(i)"), l: l, cap: cap, cur: cur,
-                         c: m["c"].double ?? 0, p: m["p"].double ?? 0, by: map(m["by"]), bk: map(m["bk"]))
-        }
-        var avg: [String: Double] = [:]
-        for (t, s) in b["shares"].object { if let a = s["avg"].double, (s["sh"].double ?? 0) > 0 { avg[t] = a } }
-        var tickers = Set(b["shares"].object.keys)
-        for p in months { tickers.formUnion(p.by.keys) }
-        return IncBanner(capital: b["capital"].double ?? 0, months: months, avg: avg, tickers: tickers.sorted())
     }
 }
 

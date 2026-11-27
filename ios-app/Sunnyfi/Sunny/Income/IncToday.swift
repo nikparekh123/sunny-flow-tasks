@@ -82,7 +82,7 @@ struct IncTodayCard: View {
     }
 
     private var head: some View {
-        Text("Income today").sType(IncT.t(17, 22, 700, tr: -0.01), tabular: false).foregroundStyle(IncC.ink)
+        Text("Sundial").sType(IncT.t(17, 22, 700, tr: -0.01), tabular: false).foregroundStyle(IncC.ink)
             .accessibilityAddTraits(.isHeader)
     }
     /// Focus: ink words (they were red or green); the groups under it carry the dots.

@@ -24,12 +24,13 @@ final class HomeRouter {
     /// The tabs and Search, the round button right of them (block 27). Opens on Home.
     enum Tab: Hashable {
         case home, income, positions, gamma, insights, search
-        /// Home · Income · Positions (handoff 2026-11-24 §2.1). Gamma and Insights went on 6 Nov (answer 7): Walls on
+        /// Home · Sundial · Positions (handoff 2026-11-24 §2.1; Income is called Sundial since 27 Nov, and the
+        /// case keeps its old name). Gamma and Insights went on 6 Nov (answer 7): Walls on
         /// Positions and the ticker chart do Gamma's job, Your position, To decide and the Thesis check do Insights'.
         static let bar: [Tab] = [.home, .income, .positions]
         var title: String {
             switch self {
-            case .home: "Home"; case .income: "Income"; case .positions: "Positions"; case .gamma: "Gamma"; case .insights: "Insights"
+            case .home: "Home"; case .income: "Sundial"; case .positions: "Positions"; case .gamma: "Gamma"; case .insights: "Insights"
             case .search: "Search"
             }
         }

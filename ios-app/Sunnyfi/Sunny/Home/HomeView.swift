@@ -127,10 +127,10 @@ struct HomeView: View {
                     }
                     .modifier(OwnTabBar())
                 }
-                // Income (handoff 2026-11-24 §2.1): the Income page, its own scroll; Equatable (always equal) as Positions.
-                Tab("Income", systemImage: "calendar", value: HomeRouter.Tab.income) {
+                // Sundial (handoff 2026-11-27 §2): the board, its own scroll; Equatable (always equal) as Positions.
+                Tab("Sundial", systemImage: "circle.circle", value: HomeRouter.Tab.income) {
                     NavigationStack {
-                        IncomeTab().equatable().toolbar(.hidden, for: .navigationBar)
+                        SundialTab().equatable().toolbar(.hidden, for: .navigationBar)
                     }
                     .modifier(OwnTabBar())
                 }
@@ -230,7 +230,7 @@ struct HomeView: View {
     private func briefSetup() {
         // Debug runs (simulator only): open on a tab or an overlay, privacy on, on the sample or the real book.
         if BriefDebug.tab == "positions" { router.tab = .positions }
-        if BriefDebug.tab == "income" { router.tab = .income }
+        if BriefDebug.tab == "income" || BriefDebug.tab == "sundial" { router.tab = .income }
         if BriefDebug.privacy { UserDefaults.standard.set(true, forKey: BriefPrivacy.key) }
         #if DEBUG && targetEnvironment(simulator)
         // A saved-data run (-fixture) sets privacy from its own flag every time, so one run never leaks into the next.

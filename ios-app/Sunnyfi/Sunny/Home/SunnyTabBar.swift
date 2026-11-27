@@ -2,13 +2,10 @@
 //  SunnyTabBar.swift
 //  Sunny
 //
-//  The tab bar, drawn by hand (Nik, 28 Oct 2026). iOS 27 puts the system's
-//  search tab inside the bar as a fifth tab, and the design keeps it apart
-//  (block 27). Home · Income · Positions in a glass capsule, 70 pt each, centred 36 pt left of
-//  the middle; the round 62 pt search button 10 pt to its right; both 28 pt from
-//  the bottom of the screen. The open tab sits on a lighter thumb that slides
-//  with a little overshoot. Tap Search to open it; press and hold 0.45 s to
-//  open it listening.
+//  The tab bar, drawn by hand (Nik, 28 Oct 2026). Since the 27 Nov handoff one glass capsule holds
+//  Home · Sundial · Positions · Search, icons only, 70 pt each, centred, 28 pt from the bottom of the
+//  screen. The open tab sits on a lighter thumb that slides with a little overshoot. Tap Search to
+//  open it; press and hold 0.45 s to open it listening. Sundial's icon is the moon mark (SundialMark).
 //
 
 import SwiftUI
@@ -22,18 +19,18 @@ struct SunnyTabBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
-        // Handoff 2026-11-24 §2.1: Home · Income · Positions, three 70 × 54 tabs in the glass bar (62 high, radius 31,
-        // 4 pt padding), the bar centred at 50% − 36 pt; the 62 pt Search circle from 50% + 83 pt (10 right of the
-        // bar); both 28 pt from the bottom.
+        // Handoff 2026-11-27 §3.1: one floating glass bar, Home · Sundial · Positions · Search, 288 pt (four 70 × 54
+        // slots and 4 pt padding), centred, 62 tall, 28 pt from the bottom. Icons only; each keeps its name as the
+        // accessible label. Search's round button is folded in: a tap opens Search, a press and hold asks by voice.
         GeometryReader { g in
-            let mid = g.size.width / 2, y = g.size.height - 28 - 31
-            bar.position(x: mid - 36, y: y)
-            searchButton.position(x: mid + 83 + 31, y: y)
+            bar.position(x: g.size.width / 2, y: g.size.height - 28 - 31)
         }
         .ignoresSafeArea()
     }
 
     static let tabW: CGFloat = 70
+    /// Unpicked icons: grey #8C8C8C (light #6E6E6E); the picked one #F2F2F2 (light #212121). One colour, no glow.
+    static let off = S.dyn(0x6E6E6E, 0x8C8C8C)
 
     private var index: Int { HomeRouter.Tab.bar.firstIndex(of: tab) ?? 0 }
 
@@ -41,24 +38,28 @@ struct SunnyTabBar: View {
         HStack(spacing: 0) {
             ForEach(HomeRouter.Tab.bar, id: \.self) { t in
                 Button { pick(t) } label: {
-                    VStack(spacing: 1) {
-                        SunnyTabIcon(tab: t).frame(width: 24, height: 24)
-                        Text(t.title).font(.inter(11, 600)).tracking(0.11).lineLimit(1).fixedSize()
+                    Group {
+                        if t == .income {
+                            SundialMark(live: tab == .income, size: 30)
+                        } else {
+                            SunnyTabIcon(tab: t).frame(width: 24, height: 24)
+                        }
                     }
-                    .foregroundStyle(t == tab ? S.ink : S.secondary)
+                    .foregroundStyle(t == tab ? S.ink : Self.off)
                     .frame(width: Self.tabW, height: 54)
                     .contentShape(.capsule)
                 }
                 .buttonStyle(SunnyTabPress())
                 .accessibilityLabel(t.title)
-                .accessibilityValue("tab \(HomeRouter.Tab.bar.firstIndex(of: t).map { $0 + 1 } ?? 1) of \(HomeRouter.Tab.bar.count)")
+                .accessibilityValue("tab \(HomeRouter.Tab.bar.firstIndex(of: t).map { $0 + 1 } ?? 1) of \(HomeRouter.Tab.bar.count + 1)")
                 .accessibilityAddTraits(t == tab ? [.isSelected] : [])
             }
+            searchSlot
         }
         .background(alignment: .leading) {
             // The design's thumb (Current App nav.thBg/thSh): white .6 with a white top edge, a .5 ring and a soft
-            // shadow in light (without the shadow it vanished over the light Income page, 25 Nov 2026); white .14 with
-            // a .18 top edge in dark.
+            // shadow in light; white .14 with a .18 top edge in dark. It sits on the open tab (Search opens a page
+            // over the tab, so it never takes the thumb).
             Capsule().fill(Self.thumb)
                 .overlay(Capsule().strokeBorder(Self.thumbEdge, lineWidth: 0.5))
                 .overlay(alignment: .top) {
@@ -77,20 +78,19 @@ struct SunnyTabBar: View {
         .accessibilityLabel("Tabs")
     }
 
-    private var searchButton: some View {
+    private var searchSlot: some View {
         // A hold opens Search listening at 0.45 s; the release that follows lands on a Search already open.
         Button { search(false) } label: {
-            SunnySearchGlyph().frame(width: 24, height: 24).foregroundStyle(S.ink)
-                .frame(width: 62, height: 62).contentShape(.circle)
+            SunnySearchGlyph().frame(width: 24, height: 24).foregroundStyle(Self.off)
+                .frame(width: Self.tabW, height: 54).contentShape(.capsule)
         }
         .buttonStyle(SunnyTabPress())
-        .glassEffect(.regular, in: .circle)
         .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             search(true)
         })
-        .accessibilityLabel("Search")
-        .accessibilityHint("Press and hold to ask by voice")
+        .accessibilityLabel("Search. Press and hold to ask by voice")
+        .accessibilityValue("tab \(HomeRouter.Tab.bar.count + 1) of \(HomeRouter.Tab.bar.count + 1)")
         .accessibilityAction(named: "Ask by voice") { search(true) }
     }
 
@@ -121,11 +121,8 @@ struct SunnyTabIcon: View {
             switch tab {
             case .home: SunnyHouseGlyph()
             case .income:
-                // A calendar: the header bar at 45%, the body solid, two rings on top.
-                part(3, 4.6, 18, 4.4, 2).opacity(0.45)
-                part(3, 10.4, 18, 10.8, 2.6)
-                part(6.8, 2.4, 2.2, 4.6, 1.1)
-                part(15, 2.4, 2.2, 4.6, 1.1)
+                // Sundial: the moon mark, still (the bar draws it live while the tab is open).
+                SundialMark(live: false, size: 24)
             case .positions:
                 part(8, 2.6, 8, 1.8, 0.9).opacity(0.35)
                 part(5.5, 5.6, 13, 2, 1).opacity(0.6)
