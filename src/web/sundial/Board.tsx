@@ -83,12 +83,24 @@ function Head({ title, sum, sub, ct }: { title: string; sum: string; sub?: strin
     </div>
   );
 }
-function SellLeg({ l, many }: { l: J; many: boolean }) {
+/** Done and New (Nik 27 Nov): what was sold today stays on the card, marked Done; what is still to sell is New. New is
+    the ready-to-act mark (a green pill with a word), Done a quiet outlined one. */
+function Tag({ k }: { k: 'New' | 'Done' }) {
+  return (
+    <span style={{ flex: 'none', display: 'inline-block', marginRight: 8, padding: '0 7px', borderRadius: 9, fontSize: 12, lineHeight: '18px', fontWeight: 500, verticalAlign: '.1em',
+      background: k === 'New' ? GREEN : 'transparent', color: k === 'New' ? '#171717' : GREY, boxShadow: k === 'New' ? 'none' : 'inset 0 0 0 1px rgba(255,255,255,.22)' }}>{k}</span>
+  );
+}
+function SellLeg({ l, many, tag }: { l: J; many: boolean; tag?: 'New' | 'Done' }) {
+  const done = tag === 'Done';
+  const meta = done
+    ? [md(l.expiry), `sold at $${(+l.price).toFixed(2)}`, l.at ? clock12(ny(new Date(l.at))) : ''].filter(Boolean).join(' · ')
+    : [md(l.expiry), sdW(l.sd), `$${(+l.price).toFixed(2)} each`].filter(Boolean).join(' · ');
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: '2px 12px', alignItems: 'baseline' }}>
-      <span style={{ fontSize: 16, lineHeight: '21px', fontWeight: 500 }}>{contract(l.qty, l.strike, l.type)}</span>
-      <span style={{ fontSize: 16, lineHeight: '21px', fontWeight: 500, textAlign: 'right' }}>{many ? sC(l.credit) : ''}</span>
-      <span style={{ gridColumn: '1 / -1', ...T13 }}>{[md(l.expiry), sdW(l.sd), `$${(+l.price).toFixed(2)} each`].filter(Boolean).join(' · ')}</span>
+      <span style={{ fontSize: 16, lineHeight: '21px', fontWeight: 500, color: done ? INK2 : INK }}>{contract(l.qty, l.strike, l.type)}</span>
+      <span style={{ fontSize: 16, lineHeight: '21px', fontWeight: 500, textAlign: 'right', color: done ? INK2 : INK }}>{many ? sC(l.credit) : ''}</span>
+      <span style={{ gridColumn: '1 / -1', ...T13 }}>{tag && <Tag k={tag} />}{meta}</span>
       {l.keep && (
         <span style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 4 }}>
           <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500 }}>Keep {l.keep.qty}</span>
@@ -127,6 +139,8 @@ export function Board({ data, narrow, tk, setTk, mask }: { data: J; narrow: bool
   const byName = (cards: J[]) => { const o: { t: string; items: J[] }[] = []; for (const c of cards) { let g = o.find((x) => x.t === c.t); if (!g) o.push(g = { t: c.t, items: [] }); g.items.push(c); } return o; };
 
   const sellN = toSell.cards.length + drops.length;
+  // What is still to sell (New), apart from what was already sold today (Done)
+  const newN = toSell.cards.reduce((a: number, c: J) => a + c.legs.length, 0) + drops.length;
   const chips = [{ t: 'all', l: 'All' }, ...names.map((x) => ({ t: x.t, l: x.name }))];
   return (
     <div ref={root} className="tnum" style={{ display: 'flex', flexDirection: 'column', gap: S.gap, color: INK }}>
@@ -162,7 +176,7 @@ export function Board({ data, narrow, tk, setTk, mask }: { data: J; narrow: bool
 
             {/* To sell */}
             <section aria-label="To sell" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-              <Head title="To sell" ct={S.ct} sum={sellN ? mask(sT(toSell.total)) : 'None'} sub={!final && sellN ? `Plan · final at ${hm12(finalAt)}` : undefined} />
+              <Head title="To sell" ct={S.ct} sum={newN ? mask(sT(toSell.total)) : sellN ? 'All sold' : 'None'} sub={!final && newN ? `Plan · final at ${hm12(finalAt)}` : undefined} />
               {drops.map((d) => (
                 <div key={'drop' + d.t} data-ib="0" style={{ padding: '16px 18px 18px', borderRadius: 18, background: SELL, boxShadow: DRING, display: 'flex', flexDirection: 'column', gap: 14 }}>
                   <span style={{ fontSize: 13, lineHeight: '16px', fontWeight: 500, color: GREY }}>Big drop · {clock12(ny(new Date(d.at)))}{d.price ? ` · $${(+d.price).toFixed(2)}` : ''}</span>
@@ -186,9 +200,12 @@ export function Board({ data, narrow, tk, setTk, mask }: { data: J; narrow: bool
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <Logo t={c.t} size={32} />
                     <span style={{ flex: 1, minWidth: 0, fontSize: 17, lineHeight: '22px', fontWeight: 500 }}>{nameOf(c.t)}</span>
-                    <span style={{ flex: 'none', fontSize: 32, lineHeight: '36px', fontWeight: 700, letterSpacing: '-.02em', color: final ? INK : INK2 }}>{mask(sC(c.credit))}</span>
+                    <span style={{ flex: 'none', fontSize: 32, lineHeight: '36px', fontWeight: 700, letterSpacing: '-.02em', color: final && c.legs.length ? INK : INK2 }}>{mask(sC(c.legs.length ? c.credit : (c.doneCredit ?? 0)))}</span>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{c.legs.map((l: J, i: number) => <SellLeg key={i} l={l} many={c.legs.length > 1} />)}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {c.legs.map((l: J, i: number) => <SellLeg key={'n' + i} l={l} many={c.legs.length + (c.done?.length ?? 0) > 1} tag={c.done?.length ? 'New' : undefined} />)}
+                    {(c.done ?? []).map((l: J, i: number) => <SellLeg key={'d' + i} l={l} many={c.legs.length + c.done.length > 1} tag="Done" />)}
+                  </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 3, paddingTop: 12, borderTop: `1px solid ${L8}` }}>
                     <span style={T13}>{c.reason}</span>
                     <span style={T13}>{c.safe}</span>

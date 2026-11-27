@@ -26,7 +26,7 @@
  */
 import { addDays, bs, callSd, dropLine, isWeekday, ivFrom, putSd, room, RULES, signals, strikeAt, tdays, test20, yrs, type Leg, type Signals } from '../_shared/sundial.ts';
 
-const BUILD = '2026-11-27.4';
+const BUILD = '2026-11-27.6';
 const NAMES: { book: string; t: string; label: string }[] = [{ book: 'N', t: 'NVDA', label: 'NVDA' }, { book: 'N', t: 'SPCX', label: 'SPCX' }]   // tickers for both (Nik, 27 Nov: a name for one looked odd);
 const NIK = '85dd190f-9381-4acf-b123-7f1f6f778947';   // nik@sunnyfi.co: Sundial's pushes go to his phones only
 const URL_ = Deno.env.get('SUPABASE_URL')!;
@@ -173,7 +173,7 @@ async function work(nm: { book: string; t: string; label: string }, c: Ctx, froz
   }
   const bankLegs = [...bankMap.values()].map((x) => ({ ...x, kept: Math.round(x.kept) })).sort((a, b) => a.kept - b.kept);
   // Today's trades, so the board can clear a card once its trade arrives from IBKR
-  const todays = trades.filter((x) => String(x.trade_date) === day).map((x) => ({ action: String(x.action), side: x.direction === 'long' ? 1 : -1, type: x.option_type === 'put' ? 'put' : 'call', K: Number(x.strike), ex: String(x.expiry), n: Number(x.contracts), at: String(x.executed_at ?? '') }));
+  const todays = trades.filter((x) => String(x.trade_date) === day).map((x) => ({ action: String(x.action), side: x.direction === 'long' ? 1 : -1, type: x.option_type === 'put' ? 'put' : 'call', K: Number(x.strike), ex: String(x.expiry), n: Number(x.contracts), px: Number(x.premium), at: String(x.executed_at ?? '') }));
   const byId = new Map<string, Row>(); for (const m of marks) if (!byId.has(m.option_trade_id)) byId.set(m.option_trade_id, m);
   const markOf = new Map<string, { iv: number; mark: number; at: string }>();
   for (const tr of trades) {
@@ -260,7 +260,10 @@ async function work(nm: { book: string; t: string; label: string }, c: Ctx, froz
   const legsAfter: Leg[] = legs.map((l) => ({ ...l, n: l.n - (l.side < 0 && l.type === 'call' ? closeLots.filter((x) => x.K === l.K && x.ex === l.ex).reduce((a, x) => a + x.n, 0) : 0) })).filter((l) => l.n > 0);
   if (target) {
     // Puts first (2 an expiry, inside the cap), so the calls are sized with them on the book.
-    const nP = Math.min(RULES.putsNormal, Math.max(0, RULES.putCap - soldPutsOpen));
+    // ⚠ 2 puts an EXPIRY (Nik 27 Nov: he sold the 2 Dec 4 SPCX puts in the morning and the board asked for 2 more): puts
+    // already sold on the target expiry count toward the 2.
+    const putsOnTarget = live.filter((l) => l.side < 0 && l.type === 'put' && l.ex === target).reduce((a, l) => a + l.n, 0);
+    const nP = Math.min(Math.max(0, RULES.putsNormal - putsOnTarget), Math.max(0, RULES.putCap - soldPutsOpen));
     const Kp = strikeAt(S, kp, ivEx, T, true, listed(true));
     puts = { kind: 'put', n: nP, K: Kp, ex: target, sd: kp, mid: r2(priceAt(Kp, true, T)), earnings: earn };
     const legsP: Leg[] = saleDay && nP > 0 ? [...legsAfter, { type: 'put', K: Kp, ex: target, n: nP, side: -1, iv: ivEx }] : legsAfter;
@@ -356,7 +359,19 @@ async function board(acct: string, name: string, c: Ctx) {
       // What the plan was worked out at (Nik, 27 Nov): before the final time the live price now, worked out again every
       // minute; after it the price and time the saved plan locked at.
       const basis = { price: r2(Number(src.S ?? w.S)), at: pr ? new Date(at).toISOString() : new Date().toISOString(), locked: !!pr };
-      if (legs.length) sellCards.push({ t: w.t, credit: legs.reduce((a, l) => a + l.credit, 0), reason: src.reason ?? w.reason, safe: 'Safe to +20%', basis, legs });
+      // Done (Nik 27 Nov: he sold the morning plan and the card changed under him): what was sold today on the plan's
+      // expiry stays on the card for the rest of the day, marked Done; anything still to sell is New.
+      const target = String(src.target ?? w.target ?? '');
+      const doneMap = new Map<string, Row>();
+      for (const x of w.todays) {
+        if (x.action !== 'open' || x.side > 0 || x.ex !== target) continue;
+        const k = `${x.type}|${x.K}`, e = doneMap.get(k);
+        if (e) { e.cash += x.n * x.px; e.qty += x.n; if (x.at < e.at) e.at = x.at; }
+        else doneMap.set(k, { qty: x.n, strike: x.K, type: x.type, expiry: x.ex, cash: x.n * x.px, at: x.at });
+      }
+      const done = [...doneMap.values()].map((d) => ({ qty: d.qty, strike: d.strike, type: d.type, expiry: d.expiry, price: r2(d.cash / d.qty), credit: Math.round(d.cash * 100), at: Number.isFinite(Date.parse(d.at)) ? new Date(Date.parse(d.at)).toISOString() : null }))
+        .sort((a, b) => (a.type === b.type ? a.strike - b.strike : a.type === 'call' ? -1 : 1));
+      if (legs.length || done.length) sellCards.push({ t: w.t, credit: legs.reduce((a, l) => a + l.credit, 0), reason: src.reason ?? w.reason, safe: 'Safe to +20%', basis, legs, done, doneCredit: done.reduce((a, d) => a + d.credit, 0) });
       // The big drop: the day's saved drop run, or the live one in the minute before the scheduler saves it
       const dr = run(w.t, 'drop'), d = dr ? dr.payload?.drop : w.drop;
       if (d?.fired && d.puts && d.puts.n > 0) {
@@ -377,7 +392,7 @@ async function board(acct: string, name: string, c: Ctx) {
       closeAt: hm(c.closeMins), finalAt: hm(finalAt),
       month: { label: `${mon} so far`, amount: sum(pick, (w) => w.monthKept) },
       names: ws.map((w) => ({ t: w.t, name: w.label })),
-      toSell: { total: sum(sellCards, (x) => x.credit) + sum(drops, (x) => x.credit), cards: sellCards },
+      toSell: { total: sum(sellCards, (x) => x.credit) + sum(drops, (x) => x.credit), done: sum(sellCards, (x) => x.doneCredit), cards: sellCards },
       drop: drops[0] ?? null, drops,
       close: { total: sum(closeCards, (x) => x.buyBack), cards: closeCards },
       working: { total: sum(workGroups, (x) => x.total), groups: workGroups },

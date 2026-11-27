@@ -139,8 +139,10 @@ export function test20(S0: number, shares: number, legs: Leg[], today: string, c
   for (const h of hs) {
     const T = legs.map((l) => (l.ex < h ? 0 : yrs(h, l.ex, closed)));
     const base = legs.map((l, i) => (l.side > 0 ? bs(S0, l.K, T[i], l.iv, l.type === 'put') : 0));
+    // 21 steps from 0 to the test size (RULES.up: +20% for NVDA and SPCX; a name's own size elsewhere). At +20% these are
+    // the same 1% steps as before, so NVDA and SPCX answer exactly as they did.
     for (let p = 0; p <= 20; p++) {
-      const S = S0 * (1 + p / 100);
+      const S = S0 * (1 + RULES.up * p / 20);
       let v = shares * (S - S0);
       legs.forEach((l, i) => {
         const x = bs(S, l.K, T[i], l.iv, l.type === 'put');

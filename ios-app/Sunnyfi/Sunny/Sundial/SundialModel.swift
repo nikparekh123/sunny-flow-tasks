@@ -43,11 +43,14 @@ nonisolated struct SDBoard: Decodable, Equatable, Sendable {
     struct Leg: Decodable, Equatable, Sendable {
         let qty: Int; let expiry: String; let strike: Double; let type: String
         let sd: Double?; let price: Double?; let credit: Double?; let keep: Keep?
+        /// When a Done leg was sold (today's IBKR trade).
+        let at: String?
     }
     /// What a To sell card was worked out at (Nik, 27 Nov): before the final time the live price, every minute; after it the plan's lock.
     struct Basis: Decodable, Equatable, Sendable { let price: Double; let at: String; let locked: Bool }
-    struct SellCard: Decodable, Equatable, Sendable { let t: String; let credit: Double; let reason: String?; let safe: String?; let basis: Basis?; let legs: [Leg] }
-    struct Sell: Decodable, Equatable, Sendable { let total: Double; let cards: [SellCard] }
+    /// `legs` are still to sell (New); `done` were sold today on the plan's expiry (Nik 27 Nov: keep them on the card, marked Done).
+    struct SellCard: Decodable, Equatable, Sendable { let t: String; let credit: Double; let reason: String?; let safe: String?; let basis: Basis?; let legs: [Leg]; let done: [Leg]?; let doneCredit: Double? }
+    struct Sell: Decodable, Equatable, Sendable { let total: Double; let done: Double?; let cards: [SellCard] }
     struct Drop: Decodable, Equatable, Sendable { let t: String; let at: String?; let price: Double?; let line: String?; let credit: Double; let legs: [Leg] }
     struct CloseCard: Decodable, Equatable, Sendable {
         let t: String; let qty: Int; let expiry: String; let strike: Double; let type: String?

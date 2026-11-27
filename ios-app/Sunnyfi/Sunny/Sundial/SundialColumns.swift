@@ -133,9 +133,11 @@ struct SDToSell: View {
     var body: some View {
         let cards = board.toSell?.cards ?? [], drops = board.drops ?? [], plan = board.final == false
         let total = board.toSell?.total ?? 0
+        // Still to sell (New), apart from what was sold today (Done)
+        let newN = cards.reduce(0) { $0 + $1.legs.count } + drops.count
         VStack(alignment: .leading, spacing: 12) {
-            SDHead(title: "To sell", sum: cards.isEmpty && drops.isEmpty ? "None" : SDF.signedT(total),
-                   note: plan && !cards.isEmpty ? "Plan · final at \(SDF.t12(board.finalAt))" : nil)
+            SDHead(title: "To sell", sum: newN > 0 ? SDF.signedT(total) : (cards.isEmpty ? "None" : "All sold"),
+                   note: plan && newN > 0 ? "Plan · final at \(SDF.t12(board.finalAt))" : nil)
             ForEach(Array(drops.enumerated()), id: \.offset) { i, d in
                 SDDropCard(drop: d, name: board.label(d.t)).sdEnter(0, i)
             }
@@ -149,17 +151,34 @@ struct SDToSell: View {
 
 /// One leg to sell: "10 $162.50 calls", its credit on the right when the card has two or more legs, then
 /// "Dec 2 · 0.75 SD · $2.31 each", then Keep N when the sale nets with a buy-back.
+/// Done and New (Nik 27 Nov): New is the ready-to-act mark (a green pill with a word), Done a quiet outlined one.
+struct SDTag: View {
+    let done: Bool
+    var body: some View {
+        Text(done ? "Done" : "New").sType(IncT.t(12, 18, 500), tabular: false)
+            .foregroundStyle(done ? SDC.mu : S.dyn(0xFFFFFF, 0x171717))
+            .padding(.horizontal, 7)
+            .background(Capsule().fill(done ? Color.clear : SDC.green))
+            .overlay { if done { Capsule().strokeBorder(SDC.mu.opacity(0.45), lineWidth: 1) } }
+    }
+}
+
 struct SDSellLeg: View {
     let leg: SDBoard.Leg
     let showCredit: Bool
+    /// nil: no tag (nothing sold yet today); false: New; true: Done
+    var done: Bool? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(SDF.contract(leg.qty, leg.strike, leg.type)).sType(IncT.t(16, 21, 500)).foregroundStyle(SDC.ink)
+                Text(SDF.contract(leg.qty, leg.strike, leg.type)).sType(IncT.t(16, 21, 500)).foregroundStyle(done == true ? SDC.dim : SDC.ink)
                 Spacer(minLength: 0)
-                if showCredit, let c = leg.credit { Text(SDF.signedC(c)).sType(IncT.t(16, 21, 500)).foregroundStyle(SDC.ink) }
+                if showCredit, let c = leg.credit { Text(SDF.signedC(c)).sType(IncT.t(16, 21, 500)).foregroundStyle(done == true ? SDC.dim : SDC.ink) }
             }
-            Text(meta).sType(IncT.t(13, 17)).foregroundStyle(SDC.mu)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let d = done { SDTag(done: d) }
+                Text(meta).sType(IncT.t(13, 17)).foregroundStyle(SDC.mu)
+            }
             if let k = leg.keep {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("Keep \(k.qty)").sType(IncT.t(15, 20, 500)).foregroundStyle(SDC.ink)
@@ -171,6 +190,12 @@ struct SDSellLeg: View {
         .accessibilityElement(children: .combine)
     }
     private var meta: String {
+        if done == true {
+            var p = [SDF.md(leg.expiry)]
+            if let x = leg.price { p.append("sold at \(SDF.money2(x))") }
+            if let d = SDF.parse(leg.at) { p.append(SDF.time(d)) }
+            return p.joined(separator: " · ")
+        }
         var p = [SDF.md(leg.expiry)]
         if let s = leg.sd { p.append("\(SDF.sd(s)) SD") }
         if let x = leg.price { p.append("\(SDF.money2(x)) each") }
@@ -201,9 +226,12 @@ struct SDSellCard: View {
     @Environment(\.colorScheme) private var scheme
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            SDCardTop(t: card.t, name: name, credit: card.credit, heroColor: plan ? SDC.dim : SDC.ink)
+            let done = card.done ?? [], many = card.legs.count + done.count > 1
+            SDCardTop(t: card.t, name: name, credit: card.legs.isEmpty ? (card.doneCredit ?? 0) : card.credit,
+                      heroColor: plan || card.legs.isEmpty ? SDC.dim : SDC.ink)
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(Array(card.legs.enumerated()), id: \.offset) { _, l in SDSellLeg(leg: l, showCredit: card.legs.count > 1) }
+                ForEach(Array(card.legs.enumerated()), id: \.offset) { _, l in SDSellLeg(leg: l, showCredit: many, done: done.isEmpty ? nil : false) }
+                ForEach(Array(done.enumerated()), id: \.offset) { _, l in SDSellLeg(leg: l, showCredit: many, done: true) }
             }
             VStack(alignment: .leading, spacing: 3) {
                 if let r = card.reason { Text(r).sType(IncT.t(13, 17), tabular: false).foregroundStyle(SDC.mu) }

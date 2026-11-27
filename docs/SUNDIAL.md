@@ -93,6 +93,36 @@ $161 to $127; Nik kept it for one rule on both names (SpaceX rose 23% in its Aug
 
 Scripts are in the session scratchpad (engine/, replay/, rolltest/); re-run before relying on a number.
 
+## Next names (agreed 27 Nov 2026, not built yet)
+
+**Sunny's six (book S): BABA, FIS, NFLX, LULU, NKE, UBER.** Sundial replaces the 20 Oct call rule (at the money on
+every 100 shares plus 1.5 SD hedge calls). One expiry: each Friday at 3:45 PM for next Friday (Nik tried a smaller
+second week too, then: "just do it weekly"). Each name's own test size, the same safety as NVDA's +20% (its 1-in-100
+week outside earnings, x1.24): **NKE +11%, FIS +11%, NFLX +20%, LULU +17%, BABA +20%, UBER +19%.** LEAPs and other
+bought calls count by what a rise does to them. Still to test: earnings weeks, the 50% early close, puts.
+
+| Since 2016, real prices, per 1,000 shares, earnings weeks out | Today's rule | Sundial |
+|---|---|---|
+| NKE | -$2.3K | +$7.1K |
+| FIS (218 weeks) | +$16.7K | +$23.6K |
+| NFLX | -$35.5K | -$8.2K |
+| LULU | -$9.6K | +$68.3K |
+| BABA | +$95.7K | +$115.4K |
+| UBER (since 2020) | +$25.5K | +$31.3K |
+
+Losing weeks 15 to 21% against 24 to 35%. Sundial sells about 13 calls about 0.75 SD out, so its worst week is a little
+bigger; today's rule won only BABA's 2021-23 fall.
+
+**TLT in Nicolay's book (book N), replacing IWM.** 1,000 shares building to about 5,000. **Weekly at +6.5%, no richness
+gate** (Nik, 27 Nov). TLT's 1-in-100 week is +5.3% since 2003. Real prices: weekly calls -$1.7K in 2016-20 (rising),
++$25.3K in 2021-23 (falling, shares -$30.6K), +$8.1K in 2024-26; weekly beat Mon/Wed/Fri since 2024 (+$8.1K against
++$6.3K); the gate lowered every period. Forward 3 years at real option prices (IV about real moves): Nik's view (72, then
+110) calls +$0.5K middle path, flat +$7.9K, early rally +$3.4K, keeps falling +$10.8K (per 1,000 shares). Still to test:
+puts on drops to build the position.
+
+The test now checks up to each name's own size (fixed 27 Nov: it used to check to +20% whatever the size; NVDA and
+SPCX are unchanged).
+
 ## Not yet
 
 - Built 25 Nov: `sundial` edge function, `_shared/sundial.ts`, `sundial_runs`, scheduler `sundial-tick` (every minute in the session; plan at close minus 15). Pushes go to Nik's login only.
