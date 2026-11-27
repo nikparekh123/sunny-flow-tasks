@@ -27,7 +27,7 @@
  */
 import { addDays, bs, callSd, dropLine, isWeekday, ivFrom, putSd, room, RULES, signals, strikeAt, tdays, test20, yrs, type Leg, type Signals } from '../_shared/sundial.ts';
 
-const BUILD = '2026-11-27.8';
+const BUILD = '2026-11-27.9';
 // Every name Sundial covers, each with its own settings (Nik, 27 Nov 2026; docs/SUNDIAL.md). Tickers, never names.
 //   cad      'mwf' sells Mon, Wed and Fri a week out (3 expiries open, each capped at half the empty room);
 //            'weekly' sells each Friday for next Friday (one expiry, no cap)
@@ -37,7 +37,8 @@ const BUILD = '2026-11-27.8';
 //   early    the 50% close in the first 2 days (NVDA, SPCX only: it lost on the weekly names, 27 Nov test)
 //   drop     extra puts on a big down day (2 daily SD), up to the put cap
 // FIS is off (Nik 27 Nov: hold the shares, sell nothing), so it is not listed. Sunny's names first (Together's order).
-interface Name { book: string; t: string; label: string; cad: 'mwf' | 'weekly'; up: number; puts: number; putCap: number | 'target'; target?: number; earn: 'puts1sd' | 'nothing'; early: boolean; drop: boolean }
+//   dropPuts  [at 2 daily SD, at 3 daily SD]: the extra puts a big drop sells in all that day (none: up to the put cap)
+interface Name { book: string; t: string; label: string; cad: 'mwf' | 'weekly'; up: number; puts: number; putCap: number | 'target'; target?: number; earn: 'puts1sd' | 'nothing'; early: boolean; drop: boolean; dropPuts?: [number, number] }
 const W6 = { book: 'S', cad: 'weekly', earn: 'nothing', early: false, drop: false, putCap: 1000 } as const;
 const NAMES: Name[] = [
   { ...W6, t: 'NFLX', label: 'NFLX', up: 0.15, puts: 10 },
@@ -47,7 +48,7 @@ const NAMES: Name[] = [
   { ...W6, t: 'NKE', label: 'NKE', up: 0.11, puts: 5 },
   { book: 'N', t: 'NVDA', label: 'NVDA', cad: 'mwf', up: 0.20, puts: 2, putCap: 30, earn: 'puts1sd', early: true, drop: true },
   { book: 'N', t: 'SPCX', label: 'SPCX', cad: 'mwf', up: 0.20, puts: 2, putCap: 30, earn: 'puts1sd', early: true, drop: true },
-  { book: 'N', t: 'TLT', label: 'TLT', cad: 'weekly', up: 0.065, puts: 10, putCap: 'target', target: 5000, earn: 'nothing', early: false, drop: true },
+  { book: 'N', t: 'TLT', label: 'TLT', cad: 'weekly', up: 0.065, puts: 10, putCap: 'target', target: 5000, earn: 'nothing', early: false, drop: true, dropPuts: [10, 20] },
 ];
 const upWord = (up: number) => `Safe to +${String(+(up * 100).toFixed(1))}%`;
 const NIK = '85dd190f-9381-4acf-b123-7f1f6f778947';   // nik@sunnyfi.co: Sundial's pushes go to his phones only
@@ -155,7 +156,7 @@ function lotsOf(trades: Row[], since: string) {
 
 // ── One name, worked out ──
 interface Ctx { day: string; mins: number; closed: Set<string>; closeMins: number; open: boolean }
-async function work(nm: Name, c: Ctx, frozen: Row[] | null = null) {
+async function work(nm: Name, c: Ctx, frozen: Row[] | null = null, dropAt: string | null = null) {
   const { t, book } = nm, day = c.day, minsLeft = c.open ? Math.max(0, c.closeMins - c.mins) : 0;
   const monday = addDays(day, -((wd(day) + 6) % 7)), monthStart = day.slice(0, 8) + '01';
   const [quote, closesR, ivR, earnR, trades, marks, sharesR, exps] = await Promise.all([
@@ -316,11 +317,16 @@ async function work(nm: Name, c: Ctx, frozen: Row[] | null = null) {
       if (nP > 0) toSell.push({ ...puts, credit: Math.round(nP * puts.mid * 100) });
     }
     // The big drop: live price at or under yesterday's close less 2 daily SD
-    const line = dropLine(prevClose, ivPrev);
-    const nD = Math.max(0, capPuts - soldPutsOpen);
-    if (nm.drop && S <= line && c.open) {
+    // Two lines: 2 daily SD (the big drop) and 3 daily SD (a bigger one, where TLT sells 20 in all, Nik 27 Nov). The count is
+    // for the day: puts sold since the first drop today (dropAt) come off it.
+    const line = dropLine(prevClose, ivPrev), line3 = prevClose * (1 - 3 * ivPrev / Math.sqrt(252));
+    const level = S <= line3 ? 3 : S <= line ? 2 : 0;
+    const dayTotal = nm.dropPuts ? (level === 3 ? nm.dropPuts[1] : level === 2 ? nm.dropPuts[0] : 0) : Infinity;
+    const soldDrop = dropAt ? todays.filter((x) => x.action === 'open' && x.side < 0 && x.type === 'put' && Date.parse(x.at) >= Date.parse(dropAt)).reduce((a, x) => a + x.n, 0) : 0;
+    const nD = Math.max(0, Math.min(dayTotal - soldDrop, capPuts - soldPutsOpen));
+    if (nm.drop && level && c.open) {
       const Kd = strikeAt(S, kp, ivEx, T, true, listed(true));
-      putsDrop = { kind: 'put', drop: true, n: nD, K: Kd, ex: target, sd: kp, mid: r2(priceAt(Kd, true, T)), credit: Math.round(nD * priceAt(Kd, true, T) * 100), line: r2(line) };
+      putsDrop = { kind: 'put', drop: true, level, n: nD, K: Kd, ex: target, sd: kp, mid: r2(priceAt(Kd, true, T)), credit: Math.round(nD * priceAt(Kd, true, T) * 100), line: r2(level === 3 ? line3 : line) };
       if (nD > 0) toSell.unshift(putsDrop);
     }
   }
@@ -335,7 +341,7 @@ async function work(nm: Name, c: Ctx, frozen: Row[] | null = null) {
     signals: { z: r2(sig.z), trend: sig.trend, iv30: r2(sig.iv30), hv20: sig.hv20 && r2(sig.hv20), rank: Math.round(sig.rank), rich: sig.rich, cheap: sig.cheap, freak: sig.freak, ivEx: r2(ivEx) },
     earnings: er, target, saleDay,
     plan: { calls, puts },
-    drop: { line: r2(dropLine(prevClose, ivPrev)), fired: !!putsDrop, puts: putsDrop },
+    drop: { line: r2(putsDrop?.line ?? dropLine(prevClose, ivPrev)), level: putsDrop?.level ?? 0, fired: !!putsDrop, puts: putsDrop },
     toSell, close, working, expiring,
     banked: { total: Math.round(bankedTot), rows: banked.map((b) => ({ ...b, kept: Math.round(b.kept) })), legs: bankLegs },
     monthKept, reason, todays, closeMins: c.closeMins,
@@ -364,7 +370,7 @@ async function board(acct: string, name: string, c: Ctx, books: string[]) {
   const run = (t: string, k: string) => runs.find((r) => r.ticker === t && r.kind === k) ?? null;
   // Every name at once (Nik 27 Nov: the page was slow), and every chip's view in the same reply, so a chip switches
   // without asking again.
-  const ws: W[] = await Promise.all(scope.map((n) => { const plan = final ? run(n.t, 'plan') : null; return work(n, c, plan ? (plan.payload?.close ?? []) : null); }));
+  const ws: W[] = await Promise.all(scope.map((n) => { const plan = final ? run(n.t, 'plan') : null; return work(n, c, plan ? (plan.payload?.close ?? []) : null, run(n.t, 'drop')?.run_at ?? null); }));
   const view = (name: string) => {
     const pick = ws.filter((w) => name === 'all' || w.t === name);
     // trades of one contract that arrived since a run (a sale clears a To sell or drop leg)
@@ -398,9 +404,9 @@ async function board(acct: string, name: string, c: Ctx, books: string[]) {
         .sort((a, b) => (a.type === b.type ? a.strike - b.strike : a.type === 'call' ? -1 : 1));
       if (legs.length || done.length) sellCards.push({ t: w.t, credit: legs.reduce((a, l) => a + l.credit, 0), reason: src.reason ?? w.reason, safe: upWord(w.up), basis, legs, done, doneCredit: done.reduce((a, d) => a + d.credit, 0) });
       // The big drop: the day's saved drop run, or the live one in the minute before the scheduler saves it
-      const dr = run(w.t, 'drop'), d = dr ? dr.payload?.drop : w.drop;
+      const dr = run(w.t, 'drop'), live = !!w.drop?.fired, d = live ? w.drop : dr?.payload?.drop;
       if (d?.fired && d.puts && d.puts.n > 0) {
-        const dAt = dr ? Date.parse(dr.run_at) : Date.now(), n = d.puts.n - (dr ? since(w, dAt, 'open', 'put', d.puts.K, d.puts.ex) : 0);
+        const dAt = dr ? Date.parse(dr.run_at) : Date.now(), n = d.puts.n - (!live && dr ? since(w, dAt, 'open', 'put', d.puts.K, d.puts.ex) : 0);
         if (n > 0) { const l = legOf(d.puts, n); drops.push({ t: w.t, at: new Date(dAt).toISOString(), price: r2(Number(dr?.payload?.S ?? w.S)), line: `Under $${kfmt(d.line)}`, credit: l.credit, legs: [l] }); }
       }
       for (const x of w.close as Row[]) closeCards.push({ t: w.t, qty: x.n, expiry: x.ex, strike: x.K, type: 'call', soldAt: x.at, now: x.now, keptPct: Math.round(x.kept * 100), buyBack: Math.round(x.n * x.now * 100), deadline: hm(finalAt), due: final, day: Math.max(1, Math.min(RULES.earlyDays, x.age ?? RULES.earlyDays)), of: RULES.earlyDays });
@@ -556,25 +562,29 @@ Deno.serve(async (req) => {
     if (mode !== 'tick') return json(400, { error: 'mode: view or tick' });
     const inSession = cal.open && mins >= 9 * 60 + 30 && mins < cal.closeMins;
     if (!inSession) return json(200, { build: BUILD, skip: 'market closed' });
-    const done = await db(`sundial_runs?day=eq.${day}&select=book_id,ticker,kind`);
+    const done = await db(`sundial_runs?day=eq.${day}&select=book_id,ticker,kind,run_at,level:payload->drop->level`);
+    const dropRun = (t: string) => done.find((r) => r.ticker === t && r.kind === 'drop') ?? null;
     const has = (t: string, kind: string) => done.some((r) => r.ticker === t && r.kind === kind);
     const planDue = mins >= cal.closeMins - 15;
     const out: Row[] = [];
     for (const n of NAMES) {
-      const needPlan = planDue && !has(n.t, 'plan'), needDrop = n.drop && !has(n.t, 'drop');
+      const dr0 = dropRun(n.t), lvl0 = Number(dr0?.level ?? 0);
+      const needPlan = planDue && !has(n.t, 'plan'), needDrop = n.drop && (!dr0 || (!!n.dropPuts && lvl0 < 3));
       if (!needPlan && !needDrop) continue;
       if (!needPlan) {
         // The cheap watch first: only work the name out when the live price is at or under the line
         const [q, cl, iv] = await Promise.all([db(`ticker_quotes_live?ticker=eq.${n.t}&select=spot`), db(`daily_closes?ticker=eq.${n.t}&date=lt.${day}&order=date.desc&limit=1&select=close_price`),
           db(`ticker_iv_daily?ticker=eq.${n.t}&atm_iv=gt.0&snapshot_date=lt.${day}&order=snapshot_date.desc&limit=1&select=atm_iv`)]);
         const S = Number(q[0]?.spot), pc = Number(cl[0]?.close_price), v = Number(iv[0]?.atm_iv);
-        if (!(S > 0 && pc > 0 && v > 0) || S > dropLine(pc, v)) continue;
+        const at = dr0 ? pc * (1 - 3 * v / Math.sqrt(252)) : dropLine(pc, v);   // after a 2 SD run, only 3 SD is news
+        if (!(S > 0 && pc > 0 && v > 0) || S > at) continue;
       }
-      const w = await work(n, ctx);
-      if (needDrop && w.drop.fired && w.drop.puts) {
+      const w = await work(n, ctx, null, dr0?.run_at ?? null);
+      if (needDrop && w.drop.fired && w.drop.puts && w.drop.level > lvl0) {
+        // the first drop of the day keeps its time (sales since it count off the day's total); a 3 SD follow-up updates it
         await send('POST', 'sundial_runs?on_conflict=book_id,ticker,kind,day', [{ book_id: n.book, ticker: n.t, kind: 'drop', day, build: BUILD, payload: w }], 'resolution=merge-duplicates,return=minimal');
         const p = w.drop.puts;
-        await push(`sundial:${n.t}:drop:${day}`, `${n.label} under $${kfmt(w.drop.line)}`, p.n > 0 ? `Sell ${p.n} $${kfmt(p.K)} ${kind(p.n, 'put')} · ${md(p.ex)} · +${k1(p.credit)}` : `Puts at the cap of ${RULES.putCap}`, n.t);
+        await push(`sundial:${n.t}:drop${w.drop.level}:${day}`, `${n.label} under $${kfmt(w.drop.line)}`, p.n > 0 ? `Sell ${p.n} $${kfmt(p.K)} ${kind(p.n, 'put')} · ${md(p.ex)} · +${k1(p.credit)}` : `Puts at the cap of ${RULES.putCap}`, n.t);
         out.push({ t: n.t, drop: true });
       }
       if (needPlan) {

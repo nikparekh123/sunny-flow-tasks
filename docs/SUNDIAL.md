@@ -131,8 +131,8 @@ gate** (Nik, 27 Nov). TLT's 1-in-100 week is +5.3% since 2003. Real prices: week
 +$25.3K in 2021-23 (falling, shares -$30.6K), +$8.1K in 2024-26; weekly beat Mon/Wed/Fri since 2024 (+$8.1K against
 +$6.3K); the gate lowered every period. Forward 3 years at real option prices (IV about real moves): Nik's view (72, then
 110) calls +$0.5K middle path, flat +$7.9K, early rally +$3.4K, keeps falling +$10.8K (per 1,000 shares).
-**Puts (Nik, 27 Nov): 10 a week** at the put table's strike, plus extra on a big drop (2 daily SD, about 1.5%) as for
-NVDA; assignment is how the position grows. **Cap: open puts never exceed the shares still wanted** (5,000 less held;
+**Puts (Nik, 27 Nov): 10 a week** at the put table's strike, plus extra on a big down day: **10 when TLT falls 2 daily
+SD (about 1.5%), 20 in all when it falls 3 daily SD (about 2.3%)**, inside the cap; assignment is how the position grows. **Cap: open puts never exceed the shares still wanted** (5,000 less held;
 40 puts at 1,000 shares). History: weekly TLT puts about break-even (+$0.3K per 10 over 530 weeks, shares in at $119.47
 against a $117.85 average); drop puts +$1.5K over 37, shares in at $113.10.
 
