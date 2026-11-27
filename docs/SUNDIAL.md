@@ -150,8 +150,18 @@ Two layers watch the engine. Both push Nik only when they find a problem.
   `sundial-inspect`). Picked from the date between 10 AM and 30 minutes before the close. Shares no code with the
   engine: its own option maths, data reads and count search, and the rules typed again from this page. Checks every
   name: settings as agreed, data fresh, book delta positive now (and what +1 weekly SD does), the reads, the drop
-  lines, earnings, strike distances, the chain IV and strikes, the counts and the credit. `{"force":true}` runs it now.
-- Next: a short written review each day by Claude, reading both.
+  lines, earnings, strike distances, the chain IV and strikes, the counts and the credit. It also checks every stored
+  close the engine reads (the last year) against Theta's official closes: none off by more than 1%, none missing.
+  `{"force":true}` runs it now.
+- **The review, right after the inspection** (`sundial-review`, saved on the inspection's row). Claude (Opus 5.5,
+  medium effort, about 2 minutes and 40 cents) reads this page, the engine's answer, the board, the inspection and the
+  day's checks with each name's price at each check, and writes one line per name plus anything worth a look:
+  a rule not followed, numbers that do not add up, stale data, or a sale the rules allow that looks risky today. Nik's
+  hand trades are never a rule broken. Its first run found TLT's close stuck at $81.95 for 15 sessions, which led to
+  SPCX's closes (stuck at $110.95 for 3 Aug to 2 Sep, missing 3 Sep to 13 Oct, so its 50-day line was wrong) and a
+  close stored on Thanksgiving (a four-session "week": NVDA read Down week on an up week). Fixed 27 Nov: real closes
+  from Theta (SPCX from its 12 Jun listing; Theta's older SPCX rows are a different fund), the close job skips stale
+  prices and holidays, and the engine and inspector skip holiday closes.
 
 ## Not yet
 

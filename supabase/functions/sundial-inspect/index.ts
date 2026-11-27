@@ -16,6 +16,8 @@
  *   delta      the book's delta now and at +1 weekly SD (a problem if it is below zero now)
  *   health     price under 2 minutes old in the session, IV saved lately, IBKR synced in the last 30 minutes
  * Saved in sundial_inspections; a run with problems pushes Nik. POST { force: true } runs it now (the scheduler's key).
+ * Then sundial-review (part 3) writes Claude's review of the run on the same row; a forced run asks for one only with
+ * { force: true, review: true }.
  *
  * ⚠ DEPLOY WITH verify_jwt = false: the scheduler sends x-cron-key (vault cron_secret). No em dashes in any words here.
  */
@@ -24,8 +26,9 @@ const SK = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const THETA_URL = Deno.env.get('THETA_URL') ?? '';
 const THETA_KEY = Deno.env.get('THETA_PROXY_KEY') ?? '';
 const NIK = '85dd190f-9381-4acf-b123-7f1f6f778947';
-const BUILD = '2026-11-27.1';
+const BUILD = '2026-11-27.5';
 type Row = Record<string, any>;
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void };
 const json = (s: number, b: unknown) => new Response(JSON.stringify(b), { status: s, headers: { 'Content-Type': 'application/json' } });
 
 // ── What Nik agreed, written out again from docs/SUNDIAL.md (not read from the engine) ──
@@ -168,7 +171,9 @@ async function inspect(t: string, a: Agreed, eng: Row | null, shown: Row | null,
     db(`option_trades?book_id=eq.${a.book}&ticker=eq.${t}&voided_at=is.null&expiry=gte.${day}&select=id,action,direction,option_type,strike,expiry,contracts`),
     db(`share_lots?book_id=eq.${a.book}&ticker=eq.${t}&voided_at=is.null&qty_remaining=gt.0&select=qty_remaining`),
   ]);
-  const S = Number(quote[0]?.spot), closes = closesR.slice().reverse().map((r) => Number(r.close_price)), closeDays = closesR.slice().reverse().map((r) => String(r.date));
+  // sessions only (a close stored on a holiday is not a session)
+  const sess = closesR.slice().reverse().filter((r) => !closed.has(String(r.date)) && dow(String(r.date)) % 6 !== 0);
+  const S = Number(quote[0]?.spot), closes = sess.map((r) => Number(r.close_price)), closeDays = sess.map((r) => String(r.date));
   if (!(S > 0) || closes.length < 30) { problems.push('data: no price or closes'); return { t, problems, notes, checks }; }
 
   // health
@@ -181,6 +186,30 @@ async function inspect(t: string, a: Agreed, eng: Row | null, shown: Row | null,
   const sync = ctx.syncAt[a.book];
   const ageS = sync ? (Date.now() - Date.parse(sync)) / 60000 : Infinity;
   if (inSession && ageS > 30) health.push(`IBKR last synced ${Number.isFinite(ageS) ? Math.round(ageS) + ' min' : 'never'} ago`);
+  // the closes themselves (27 Nov 2026: TLT's close sat at $81.95 for 15 sessions after it left the price feed; the
+  // review found it, as the engine and this inspector read the same table)
+  let prevS = plusDays(day, -1); while (dow(prevS) % 6 === 0 || closed.has(prevS)) prevS = plusDays(prevS, -1);
+  if (closeDays.at(-1)! < prevS) health.push(`the last close stored is ${md(closeDays.at(-1)!)}, the last session was ${md(prevS)}`);
+  const last5 = closes.slice(-5);
+  if (last5.length === 5 && last5.every((x) => x === last5[0])) health.push(`the last 5 closes are all $${last5[0].toFixed(2)}: the price feed stopped for ${t}`);
+  // Every stored close the engine reads, against Theta's official closes: an outside source, so a bad table cannot pass
+  // (27 Nov 2026: SPCX's closes were stuck at $110.95 for 3 Aug to 2 Sep and missing for 3 Sep to 13 Oct; its 50-day
+  // line read 18 of the stuck ones). Off by more than 1%, or a session Theta has and the table does not.
+  if (closeDays.length) {
+    // Theta takes at most 365 days a request; the 260 sessions the engine reads run a little longer, so the last year
+    const from = closeDays[0] > plusDays(prevS, -364) ? closeDays[0] : plusDays(prevS, -364);
+    const eod = await theta(`/v3/stock/history/eod?symbol=${t}&start_date=${from.replaceAll('-', '')}&end_date=${prevS.replaceAll('-', '')}`);
+    const real = new Map<string, number>(eod.filter((r) => Number(r.close) > 0).map((r) => [String(r.created ?? r.last_trade ?? '').slice(0, 10), Number(r.close)]));
+    if (!real.size) notes.push('data: Theta had no closes to compare with');
+    else {
+      const stored = new Map(closeDays.map((d, i) => [d, closes[i]]));
+      const off = closeDays.filter((d) => d >= from && real.has(d) && Math.abs(stored.get(d)! / real.get(d)! - 1) > 0.01);
+      const gone = [...real.keys()].filter((d) => d >= from && d <= prevS && !stored.has(d)).sort();
+      if (off.length) health.push(`${off.length} stored close${off.length > 1 ? 's' : ''} off Theta's by more than 1% (${md(off[0])}: $${stored.get(off[0])!.toFixed(2)} stored, $${real.get(off[0])!.toFixed(2)} real)`);
+      if (gone.length) health.push(`${gone.length} session${gone.length > 1 ? 's' : ''} missing from the closes (first ${md(gone[0])})`);
+      checks.closes = { compared: closeDays.filter((d) => real.has(d)).length, off: off.length, missing: gone.length };
+    }
+  }
   if (t !== 'TLT' && !earnR.length) health.push('no next report date on file');
   checks.health = health.length ? health : 'fresh';
   if (health.length) problems.push(`health: ${health.join(', ')}`);
@@ -330,7 +359,7 @@ Deno.serve(async (req) => {
   if (!cron || (req.headers.get('x-cron-key') !== cron && req.headers.get('x-admin-key') !== cron)) return json(401, { error: 'not allowed' });
   const body = await req.json().catch(() => ({})) as Row;
   const { day, mins } = nyClock();
-  const cal = await db(`market_calendar?date=gte.${plusDays(day, -10)}&date=lte.${plusDays(day, 60)}&select=date,kind,closes`);
+  const cal = await db(`market_calendar?date=gte.${plusDays(day, -400)}&date=lte.${plusDays(day, 60)}&select=date,kind,closes`);
   const closed = new Set(cal.filter((r) => r.kind === 'closed').map((r) => String(r.date)));
   const todayRow = cal.find((r) => String(r.date) === day);
   const closeMins = todayRow?.kind === 'early_close' && todayRow.closes ? Number(String(todayRow.closes).slice(0, 2)) * 60 + Number(String(todayRow.closes).slice(3, 5)) : 16 * 60;
@@ -354,10 +383,19 @@ Deno.serve(async (req) => {
   for (const t of OFF) if (engNames.some((n) => n.t === t)) results.push({ t, problems: [`settings: ${t} is off but the engine covers it`], notes: [], checks: {} });
   for (const n of engNames) if (!AGREED[n.t] && !OFF.includes(n.t)) results.push({ t: n.t, problems: [`settings: the engine covers ${n.t}, which nobody agreed`], notes: [], checks: {} });
   const problems = results.reduce((s, r) => s + r.problems.length, 0);
-  await send('sundial_inspections', [{ day, at_mins: mins, forced: !!body.force, build: BUILD, engine_build: view.build ?? null, problems, results }], 'return=minimal');
+  const ins = await fetch(`${URL_}/rest/v1/sundial_inspections?select=id`, { method: 'POST', headers: { apikey: SK, Authorization: `Bearer ${SK}`, 'Content-Type': 'application/json', Prefer: 'return=representation' },
+    body: JSON.stringify([{ day, at_mins: mins, forced: !!body.force, build: BUILD, engine_build: view.build ?? null, problems, results }]) });
+  const id = ins.ok ? Number((await ins.json())?.[0]?.id) : (await ins.body?.cancel(), null);
+  // Part 3: Claude's written review of this inspection (sundial-review). Every scheduled run; a forced one only with
+  // { review: true }. It answers at once and writes the review in the background.
+  if (id && (!body.force || body.review)) {
+    const rv = fetch(`${URL_}/functions/v1/sundial-review`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-cron-key': Deno.env.get('CRON_SECRET') ?? '' }, body: JSON.stringify({ id }) })
+      .then((r) => r.body?.cancel()).catch(() => {});
+    try { EdgeRuntime.waitUntil(rv); } catch { await rv; }
+  }
   if (problems && !body.force) {
     const lines = results.filter((r) => r.problems.length).map((r) => `${r.t}: ${r.problems[0]}`);
     await send('alert_dispatch?on_conflict=dedup_key', [{ category: 'sundial', dedup_key: `sundial:inspect:${day}`, ticker: null, title: `Sundial inspection: ${problems} to look at`, body: lines.slice(0, 4).join('. '), deep_link: null, book_id: 'S', meta: { user_id: NIK, src: 'sundial-inspect' } }], 'resolution=ignore-duplicates,return=minimal');
   }
-  return json(200, { build: BUILD, day, at: `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, '0')}`, engine: view.build, problems, results });
+  return json(200, { build: BUILD, id, day, at: `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, '0')}`, engine: view.build, problems, results });
 });

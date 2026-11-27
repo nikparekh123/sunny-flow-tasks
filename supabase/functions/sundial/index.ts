@@ -27,7 +27,7 @@
  */
 import { addDays, bs, callSd, dropLine, isWeekday, ivFrom, putSd, room, RULES, signals, strikeAt, tdays, test20, yrs, type Leg, type Signals } from '../_shared/sundial.ts';
 
-const BUILD = '2026-11-27.10';
+const BUILD = '2026-11-27.12';
 // Every name Sundial covers, each with its own settings (Nik, 27 Nov 2026; docs/SUNDIAL.md). Tickers, never names.
 //   cad      'mwf' sells Mon, Wed and Fri a week out (3 expiries open, each capped at half the empty room);
 //            'weekly' sells each Friday for next Friday (one expiry, no cap)
@@ -106,7 +106,8 @@ const nyNow = () => {
   return { day: `${p.year}-${p.month}-${p.day}`, mins: (Number(p.hour) % 24) * 60 + Number(p.minute) };
 };
 async function calendar(day: string) {
-  const rows = await db(`market_calendar?date=gte.${addDays(day, -10)}&date=lte.${addDays(day, 60)}&select=date,kind,closes`);
+  // a year back, so the closes can skip the holidays (the close job stored a close on them until 27 Nov 2026)
+  const rows = await db(`market_calendar?date=gte.${addDays(day, -400)}&date=lte.${addDays(day, 60)}&select=date,kind,closes`);
   const closed = new Set(rows.filter((r) => r.kind === 'closed').map((r) => String(r.date)));
   const today = rows.find((r) => String(r.date) === day);
   const closeMins = today?.kind === 'early_close' && today.closes ? Number(String(today.closes).slice(0, 2)) * 60 + Number(String(today.closes).slice(3, 5)) : 16 * 60;
@@ -169,7 +170,8 @@ async function work(nm: Name, c: Ctx, frozen: Row[] | null = null, dropAt: strin
     db(`share_lots?book_id=eq.${book}&ticker=eq.${t}&voided_at=is.null&qty_remaining=gt.0&select=qty_remaining,cost_per_share,acquired_date`),
     expiries(t),
   ]);
-  const closesD = closesR.slice().reverse(), closes = closesD.map((r) => Number(r.close_price));
+  // sessions only: a close stored on a holiday (Thanksgiving 2026 and others) would make a week four sessions long
+  const closesD = closesR.slice().reverse().filter((r) => !c.closed.has(String(r.date))), closes = closesD.map((r) => Number(r.close_price));
   const S = Number(quote[0]?.spot) || closes.at(-1)!, prevClose = closes.at(-1)!;
   const ivs = ivR.map((r) => ({ d: String(r.snapshot_date), v: Number(r.atm_iv) }));
   const ivOn = (d: string) => [...ivs].reverse().find((x) => x.d <= d)?.v ?? ivs.at(-1)?.v ?? 0.5;
@@ -373,9 +375,14 @@ async function board(acct: string, name: string, c: Ctx, books: string[]) {
   const ws: W[] = await Promise.all(scope.map((n) => { const plan = final ? run(n.t, 'plan') : null; return work(n, c, plan ? (plan.payload?.close ?? []) : null, run(n.t, 'drop')?.run_at ?? null); }));
   const view = (name: string) => {
     const pick = ws.filter((w) => name === 'all' || w.t === name);
-    // trades of one contract that arrived since a run (a sale clears a To sell or drop leg)
-    const since = (w: W, at: number, action: string, type: string, K: number, ex: string) =>
-      w.todays.filter((x) => x.action === action && x.side < 0 && x.type === type && x.K === K && x.ex === ex && Date.parse(x.at) >= at).reduce((a, x) => a + x.n, 0);
+    // sales of one contract the saved run did not see (a sale clears a To sell or drop leg). Counted against the run's
+    // own list of today's trades, not its time: IBKR sends a fill minutes later, so a sale just before the plan locked
+    // can arrive after it (BABA, 27 Nov: 5 $94 calls sold 12:44, plan locked 12:45 without them, card kept showing 5).
+    const soldOf = (list: Row[], type: string, K: number, ex: string) =>
+      list.filter((x) => x.action === 'open' && x.side < 0 && x.type === type && x.K === K && x.ex === ex).reduce((a, x) => a + x.n, 0);
+    const since = (w: W, saved: Row, at: number, type: string, K: number, ex: string) => Array.isArray(saved?.todays)
+      ? Math.max(0, soldOf(w.todays, type, K, ex) - soldOf(saved.todays, type, K, ex))
+      : soldOf(w.todays.filter((x) => Date.parse(x.at) >= at), type, K, ex);
     const legOf = (x: Row, n: number) => ({ qty: n, expiry: x.ex, strike: x.K, type: x.kind, sd: x.sd, price: x.mid, credit: Math.round(n * x.mid * 100) });
 
     const sellCards: Row[] = [], drops: Row[] = [], closeCards: Row[] = [], expCards: Row[] = [], workGroups: Row[] = [], bankGroups: Row[] = [];
@@ -383,7 +390,7 @@ async function board(acct: string, name: string, c: Ctx, books: string[]) {
       // To sell: before 3:45 PM the live plan, after it the saved plan less what has arrived from IBKR
       const pr = final ? run(w.t, 'plan') : null, src: Row = pr?.payload ?? w, at = pr ? Date.parse(pr.run_at) : 0;
       const legs = ((src.toSell ?? []) as Row[]).filter((x) => !x.drop).map((x) => {
-        const n = x.n - (pr ? since(w, at, 'open', x.kind, x.K, x.ex) : 0);
+        const n = x.n - (pr ? since(w, src, at, x.kind, x.K, x.ex) : 0);
         if (n <= 0) return null;
         return { ...legOf(x, n), keep: x.of && x.of > x.n ? { qty: x.of - x.n, total: x.of } : null };
       }).filter(Boolean) as Row[];
@@ -406,7 +413,7 @@ async function board(acct: string, name: string, c: Ctx, books: string[]) {
       // The big drop: the day's saved drop run, or the live one in the minute before the scheduler saves it
       const dr = run(w.t, 'drop'), live = !!w.drop?.fired, d = live ? w.drop : dr?.payload?.drop;
       if (d?.fired && d.puts && d.puts.n > 0) {
-        const dAt = dr ? Date.parse(dr.run_at) : Date.now(), n = d.puts.n - (!live && dr ? since(w, dAt, 'open', 'put', d.puts.K, d.puts.ex) : 0);
+        const dAt = dr ? Date.parse(dr.run_at) : Date.now(), n = d.puts.n - (!live && dr ? since(w, dr.payload, dAt, 'put', d.puts.K, d.puts.ex) : 0);
         if (n > 0) { const l = legOf(d.puts, n); drops.push({ t: w.t, at: new Date(dAt).toISOString(), price: r2(Number(dr?.payload?.S ?? w.S)), line: `Under $${kfmt(d.line)}`, credit: l.credit, legs: [l] }); }
       }
       for (const x of w.close as Row[]) closeCards.push({ t: w.t, qty: x.n, expiry: x.ex, strike: x.K, type: 'call', soldAt: x.at, now: x.now, keptPct: Math.round(x.kept * 100), buyBack: Math.round(x.n * x.now * 100), deadline: hm(finalAt), due: final, day: Math.max(1, Math.min(RULES.earlyDays, x.age ?? RULES.earlyDays)), of: RULES.earlyDays });
