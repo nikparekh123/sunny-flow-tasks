@@ -117,7 +117,7 @@ export class PosModel {
     const inLeg = new Map((iname?.legs ?? []).map((l) => [l.k, l]));
     if (iname) {
       const legs = iname.legs.map((l) => (l.ty === 'S' ? l : { ...l, days: l.days - gone }));
-      this.local = new NameBook({ t: w.t, S0: w.S0, P0: w.P0, iv: w.iv, legs, divs: this.divs, r: this.r, noIv: !!iname.noIv, earn: this.earn });
+      this.local = new NameBook({ t: w.t, S0: w.S0, P0: w.P0, iv: w.iv, legs, divs: this.divs, r: this.r, noIv: !!iname.noIv, earn: this.earn, settle: true });
       for (const l of legs) this.localLeg.set(l.k, l);
     }
     this.legs = w.legs.map((l) => {
@@ -193,7 +193,7 @@ export class Pricer {
   constructor(m: PosModel, trades: Trade[]) {
     this.m = m;
     const legs: Leg[] = trades.map((u) => this.engineLeg(u));
-    if (legs.length) this.tnb = new NameBook({ t: m.t, S0: m.S0, P0: m.P0, iv: m.tradeIv, legs, divs: m.divs, r: m.r, earn: m.earn });
+    if (legs.length) this.tnb = new NameBook({ t: m.t, S0: m.S0, P0: m.P0, iv: m.tradeIv, legs, divs: m.divs, r: m.r, earn: m.earn, settle: true });
     legs.forEach((l, i) => {
       this.tleg.set(l.k, l);
       const p = trades[i].pr;

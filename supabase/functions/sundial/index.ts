@@ -11,6 +11,7 @@
  * Nik decides what to buy; nothing here suggests a purchase.
  *
  * POST { mode, account?, name? }:
+ *   'audit' (the scheduler) the check at 10 AM, 12 PM, 2 PM and 4 PM New York: is anything over or under suggested?
  *   'board' (an owner of book N) the Sundial board for account a | b | ab and name all | a ticker (README 2026-11-27 §4).
  *   'view'  (an owner of the book, or the scheduler's key) works it out and returns it, nothing saved or sent.
  *   'tick'  (the scheduler, every minute 13-21 UTC on weekdays): outside the session it returns at once. In the session
@@ -26,7 +27,7 @@
  */
 import { addDays, bs, callSd, dropLine, isWeekday, ivFrom, putSd, room, RULES, signals, strikeAt, tdays, test20, yrs, type Leg, type Signals } from '../_shared/sundial.ts';
 
-const BUILD = '2026-11-27.7';
+const BUILD = '2026-11-27.8';
 // Every name Sundial covers, each with its own settings (Nik, 27 Nov 2026; docs/SUNDIAL.md). Tickers, never names.
 //   cad      'mwf' sells Mon, Wed and Fri a week out (3 expiries open, each capped at half the empty room);
 //            'weekly' sells each Friday for next Friday (one expiry, no cap)
@@ -427,6 +428,96 @@ async function board(acct: string, name: string, c: Ctx, books: string[]) {
   return { ...view(name), views: Object.fromEntries(['all', ...ws.map((w) => w.t)].map((k) => [k, view(k)])) };
 }
 
+// ── The check (Nik, 27 Nov 2026: "check the positions at 10am, 12pm, 2pm and 4pm, that the engine is not over or under
+// suggesting"). For every name it rebuilds the book a second way, straight from IBKR's trades netted per contract (not
+// the FIFO lots the engine uses) and the share lots, then asks of what the board shows:
+//   over      the book plus the suggested calls and puts fails the name's test (more than $100 short at some rise)
+//   under     before the final time on a sale day, outside earnings: one more call at the suggested strike still passes
+//             (and fits the expiry cap), or fewer puts than the rule allows are suggested
+//   puts      suggested puts break the per-expiry count or the put cap
+//   data      the engine's shares or open sold legs differ from IBKR's
+//   book      (a note, not a problem) the book as it stands fails the test: the price moved after the sales
+// Each run is saved in sundial_audits; a run with problems pushes Nik.
+async function audit(c: Ctx) {
+  const books = [...new Set(NAMES.map((n) => n.book))];
+  const b = await board('ab', 'all', c, books);
+  const minsLeft = c.open ? Math.max(0, c.closeMins - c.mins) : 0, beforeFinal = c.open && c.mins < c.closeMins - 15;
+  const out: Row[] = [];
+  for (const nm of NAMES) {
+    const res: Row = { t: nm.t, book: nm.book, problems: [] as string[], notes: [] as string[] };
+    try {
+      const w = await work(nm, c);
+      const card = (b.views[nm.t]?.toSell?.cards ?? []).find((x: Row) => x.t === nm.t);
+      const newLegs: Row[] = card?.legs ?? [];
+      const [tr, sh, q] = await Promise.all([
+        dbPage(`option_trades?book_id=eq.${nm.book}&ticker=eq.${nm.t}&voided_at=is.null&expiry=gte.${c.day}&select=id,action,direction,option_type,strike,expiry,contracts`),
+        db(`share_lots?book_id=eq.${nm.book}&ticker=eq.${nm.t}&voided_at=is.null&qty_remaining=gt.0&select=qty_remaining`),
+        db(`ticker_quotes_live?ticker=eq.${nm.t}&select=spot`),
+      ]);
+      const ids = tr.map((x) => x.id);
+      const gk = ids.length ? await dbPage(`option_greeks_live?option_trade_id=in.(${ids.join(',')})&select=option_trade_id,iv,captured_at&order=captured_at.desc`) : [];
+      const ivOf = new Map<string, number>(); for (const g of gk) if (!ivOf.has(g.option_trade_id) && Number(g.iv) > 0.05) ivOf.set(g.option_trade_id, Number(g.iv));
+      const net = new Map<string, Leg & { ivs: number[] }>();
+      for (const x of tr) {
+        const side = (x.direction === 'long' ? 1 : -1) as 1 | -1, type = x.option_type === 'put' ? 'put' : 'call';
+        const k = `${type}|${side}|${Number(x.strike)}|${x.expiry}`, e = net.get(k) ?? { type, K: Number(x.strike), ex: String(x.expiry), n: 0, side, iv: 0, ivs: [] };
+        e.n += (x.action === 'open' ? 1 : -1) * Number(x.contracts); const v = ivOf.get(x.id); if (v) e.ivs.push(v); net.set(k, e);
+      }
+      const iv0 = Number(w.signals?.iv30) || 0.4;
+      // every open leg (today's expiries too, until the close, as the engine counts them); the test leaves today's out
+      const afterClose = !c.open || c.mins >= c.closeMins;
+      const all: Leg[] = [...net.values()].filter((l) => l.n > 0 && !(l.ex === c.day && afterClose)).map((l) => ({ type: l.type, K: l.K, ex: l.ex, n: l.n, side: l.side, iv: l.ivs[0] ?? iv0 }));
+      const legs = all.filter((l) => l.ex > c.day);
+      const shares = sh.reduce((a, r) => a + Number(r.qty_remaining), 0), S = Number(q[0]?.spot) || Number(w.S);
+      const ivEx = Number(w.signals?.ivEx) || iv0;
+      const dropLegs: Row[] = (b.views[nm.t]?.drops ?? []).filter((d: Row) => d.t === nm.t).flatMap((d: Row) => d.legs);
+      const toLeg = (l: Row): Leg => ({ type: l.type, K: Number(l.strike), ex: String(l.expiry), n: Number(l.qty), side: -1, iv: ivEx });
+      const sugg: Leg[] = [...newLegs, ...dropLegs].map(toLeg), weekly: Leg[] = newLegs.map(toLeg);
+      const T = (x: Leg[]) => test20(S, shares, x, c.day, c.closed, minsLeft, nm.up);
+      const now = T(legs), withNew = T([...legs, ...sugg]);
+      res.test = { up: nm.up, now: Math.round(now.worst), withNew: Math.round(withNew.worst), at: withNew.at, day: withNew.day };
+      res.suggested = newLegs.map((l) => `${l.qty} $${kfmt(Number(l.strike))} ${kind(Number(l.qty), l.type)} ${md(String(l.expiry))}`);
+      const sCalls = sugg.filter((l) => l.type === 'call').reduce((a, l) => a + l.n, 0), sPuts = sugg.filter((l) => l.type === 'put').reduce((a, l) => a + l.n, 0);
+      const wPuts = weekly.filter((l) => l.type === 'put').reduce((a, l) => a + l.n, 0);
+      res.suggested.push(...dropLegs.map((l) => `big drop: ${l.qty} $${kfmt(Number(l.strike))} ${kind(Number(l.qty), l.type)} ${md(String(l.expiry))}`));
+      // over: the suggestions take the book past its test
+      if (sugg.length && withNew.worst < -100) res.problems.push(`over: with the ${sCalls ? sCalls + ' calls' : ''}${sCalls && sPuts ? ' and ' : ''}${sPuts ? sPuts + ' puts' : ''} suggested the book loses ${k1(-withNew.worst)} at +${Math.round(nm.up * withNew.at / 20 * 1000) / 10}% (test +${Math.round(nm.up * 1000) / 10}%)`);
+      if (now.worst < -100) res.notes.push(`book: as it stands it loses ${k1(-now.worst)} at +${Math.round(nm.up * now.at / 20 * 1000) / 10}% (the price moved after the sales)`);
+      // puts: the per-expiry count and the cap
+      const target = String(w.target ?? ''), earn = !!w.plan?.calls?.earnings || !!w.plan?.puts?.earnings && nm.earn === 'nothing';
+      const onTarget = legs.filter((l) => l.side < 0 && l.type === 'put' && l.ex === target).reduce((a, l) => a + l.n, 0);
+      const openPuts = all.filter((l) => l.side < 0 && l.type === 'put').reduce((a, l) => a + l.n, 0);
+      const capPuts = nm.putCap === 'target' ? Math.max(0, Math.floor(((nm.target ?? 0) - shares) / 100)) : nm.putCap;
+      const sale = !!w.saleDay;
+      if (wPuts && onTarget + wPuts > nm.puts) res.problems.push(`puts: ${wPuts} suggested with ${onTarget} already on ${md(target)}, the rule is ${nm.puts} an expiry`);
+      if (sPuts && openPuts + sPuts > capPuts) res.problems.push(`puts: ${sPuts} suggested with ${openPuts} open, over the cap of ${capPuts}`);
+      const quiet = earn && nm.earn === 'nothing';
+      // under: only while the plan is live (after the final time the plan is locked by design)
+      if (sale && beforeFinal && !quiet) {
+        const wantPuts = Math.max(0, Math.min(nm.puts - onTarget, capPuts - openPuts));
+        if (wPuts < wantPuts) res.problems.push(`under: ${wPuts} puts suggested, the rule allows ${wantPuts}`);
+        const Kc = Number(w.plan?.calls?.K);
+        if (Kc && !earn) {
+          const extra = room(S, shares, [...legs, ...sugg], Kc, target, ivEx, c.day, c.closed, minsLeft, 150, nm.up).n;
+          const onEx = [...legs, ...sugg].filter((l) => l.side < 0 && l.type === 'call' && l.ex === target).reduce((a, l) => a + l.n, 0);
+          const capLeft = nm.cad === 'mwf' ? Math.max(0, Number(w.plan?.calls?.cap ?? 0) - onEx) : Infinity;
+          const more = Math.min(extra, capLeft);
+          if (more >= 2) res.problems.push(`under: room for ${more} more $${kfmt(Kc)} calls on ${md(target)} that were not suggested`);
+        }
+      }
+      // data: the engine's book against IBKR's
+      const engShares = Number(w.holds?.shares ?? 0);
+      if (Math.abs(engShares - shares) >= 1) res.problems.push(`data: the engine holds ${engShares} shares, IBKR ${shares}`);
+      const engSoldPuts = Number(w.holds?.soldPutsOpen ?? 0), rawSoldPuts = openPuts;
+      if (engSoldPuts !== rawSoldPuts) res.problems.push(`data: the engine counts ${engSoldPuts} sold puts open, IBKR ${rawSoldPuts}`);
+    } catch (e) {
+      res.problems.push(`error: ${String((e as Error)?.message ?? e)}`);
+    }
+    out.push(res);
+  }
+  return out;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   const who = await caller(req);
@@ -441,6 +532,21 @@ Deno.serve(async (req) => {
       const acct = ['a', 'b', 'ab'].includes(String(body.account)) ? String(body.account) : 'b';
       const nm = String(body.name ?? 'all');
       return json(200, await board(acct, NAMES.some((n) => n.t === nm) ? nm : 'all', ctx, who.books));
+    }
+    if (mode === 'audit') {
+      // 10 AM, 12 PM, 2 PM and 4 PM New York (the scheduler calls every hour on weekdays); `force` runs it now.
+      if (!who.cron) return json(401, { error: 'the check is the scheduler\'s' });
+      const slot = Math.floor(mins / 60);
+      if (!body.force && (![10, 12, 14, 16].includes(slot) || mins % 60 > 20 || !isWeekday(day))) return json(200, { build: BUILD, skip: 'not a check time' });
+      const results = await audit(ctx);
+      const problems = results.reduce((a, r) => a + r.problems.length, 0);
+      const slotName = `${slot > 12 ? slot - 12 : slot}${slot >= 12 ? 'pm' : 'am'}`;
+      await send('POST', 'sundial_audits?on_conflict=day,slot', [{ day, slot: body.force ? `${slotName}-${mins}` : slotName, build: BUILD, problems, results }], 'resolution=merge-duplicates,return=minimal');
+      if (problems && !body.force) {
+        const lines = results.filter((r) => r.problems.length).map((r) => `${r.t}: ${r.problems[0]}`);
+        await send('POST', 'alert_dispatch?on_conflict=dedup_key', [{ category: 'sundial', dedup_key: `sundial:audit:${day}:${slotName}`, ticker: null, title: `Sundial check: ${problems} to look at`, body: lines.slice(0, 4).join('. '), deep_link: null, book_id: 'S', meta: { user_id: NIK, src: 'sundial-audit' } }], 'resolution=ignore-duplicates,return=minimal');
+      }
+      return json(200, { build: BUILD, day, slot: slotName, problems, results });
     }
     if (mode === 'view' || !who.cron) {
       const names = [];

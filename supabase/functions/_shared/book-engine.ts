@@ -51,6 +51,10 @@ export interface NameIn {
   t0?: number;        // days into today the "now" values sit at (the prototype's moment offset; 0 in the app)
   noIv?: boolean;     // no IV anywhere (no chain, no leg IV, no option mark): no priced move, never short or thin
   earn?: Earn | null; // an earnings report before some legs' expiry, priced into their IV now (see NameBook.ivAt)
+  /** Positions' Payoff (27 Nov 2026, Nik: SPCX showed a loss from calls expiring that afternoon): a leg that expires
+   *  before the date viewed settles at the price on its own expiry, on a straight line from today's price to the price
+   *  viewed, so a leg expiring today settles at today's price. Off: it settles at the price viewed (the old way). */
+  settle?: boolean;
 }
 
 /** An earnings report ahead (18 Nov 2026, Nik: the payoff kept BABA's earnings premium in its options after the
@@ -83,8 +87,9 @@ export interface Opt { off?: Set<string>; extra?: Leg[]; earned?: boolean }
 
 /** One name's book: every leg, valued at any price S and any time tt days on. */
 export class NameBook {
-  t: string; S0: number; P0: number; iv: number; legs: Leg[]; divs: Div[]; r: number; t0: number; noIv: boolean; earn: Earn | null;
+  t: string; S0: number; P0: number; iv: number; legs: Leg[]; divs: Div[]; r: number; t0: number; noIv: boolean; earn: Earn | null; settle: boolean;
   constructor(x: NameIn) {
+    this.settle = !!x.settle;
     this.t = x.t; this.S0 = x.S0; this.P0 = x.P0 ?? x.S0; this.iv = x.iv; this.legs = x.legs;
     this.divs = x.divs ?? []; this.r = x.r ?? 0; this.t0 = x.t0 ?? 0; this.noIv = !!x.noIv;
     this.earn = x.earn && x.earn.v > 0 && x.earn.days > this.t0 ? x.earn : null;
@@ -110,14 +115,24 @@ export class NameBook {
     for (const d of this.divs) if (d.days > tt && d.days <= l.days) s += d.amt * Math.exp(-this.r * (d.days - tt) / 365);
     return s;
   }
+  /** With `settle` on: the price a leg that expires by tt settled at (x), and how far along the line it was (f). */
+  private sx(l: Leg, S: number, tt: number): { x: number; f: number } | null {
+    if (!this.settle || l.ty === 'S' || !(tt > this.t0) || l.days > tt) return null;
+    const f = Math.min(1, Math.max(0, (l.days - this.t0) / (tt - this.t0)));
+    return { x: this.S0 + (S - this.S0) * f, f };
+  }
   /** What a leg is worth at S, tt days on (dv bumps its IV, for vega). */
   val(l: Leg, S: number, tt: number, dv = 0): number {
     if (l.ty === 'S') return l.q * S;
+    const st = this.sx(l, S, tt);
+    if (st) return l.q * 100 * Math.max(0, l.ty === 'C' ? st.x - l.K : l.K - st.x);
     return l.q * 100 * bsValue(S, l.K, this.T(l, tt), this.ivAt(l, tt) + dv, l.ty === 'P', this.r, this.dpv(l, tt));
   }
   /** A leg's delta in shares. */
   dl(l: Leg, S: number, tt: number): number {
     if (l.ty === 'S') return l.q;
+    const st = this.sx(l, S, tt);
+    if (st) return l.q * 100 * (l.ty === 'C' ? (st.x > l.K ? 1 : 0) : (st.x < l.K ? -1 : 0)) * st.f;
     return l.q * 100 * bsDelta(S, l.K, this.T(l, tt), this.ivAt(l, tt), l.ty === 'P', this.r, this.dpv(l, tt));
   }
   /** A leg's P&L from now: its value at (S, tt) less its value now. */
