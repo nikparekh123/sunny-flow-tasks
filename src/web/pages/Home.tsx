@@ -67,7 +67,7 @@ export default function Home() {
         </div>
       </main>
       {side && (
-        <aside aria-label="Income" className="noscroll"
+        <aside aria-label="Sundial" className="noscroll"
           style={{ flex: '0 0 340px', position: 'sticky', top: 92, maxHeight: 'calc(100vh - 112px)', overflowY: 'auto', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 28 }}>
           <IncomeToday payload={payload} narrow />
         </aside>

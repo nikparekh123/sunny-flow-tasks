@@ -157,6 +157,23 @@ async function callFn(name: string, body: Record<string, unknown>): Promise<J> {
   return r.json();
 }
 
+/** The Sundial board (handoff 2026-11-27 README §4): one call per account and name; every number, total and order is
+    the server's (sundial mode 'board'). S is Sunny (a), N Nicolay (b), T Together (ab). Refreshed every minute on a
+    trading day; the clock on Expiring today ticks on the page. */
+export const boardAccount = (book: BookId | null | undefined) => (book === 'S' ? 'a' : book === 'N' ? 'b' : 'ab');
+export function useBoard(book: BookId | null | undefined, name: string) {
+  const account = boardAccount(book);
+  return useQuery({
+    queryKey: ['sw', 'board', account, name],
+    enabled: !!book,
+    staleTime: 30_000,
+    gcTime: 30 * 60_000,
+    refetchInterval: (q) => ((q.state.data as J)?.open ? 60_000 : false),
+    placeholderData: (prev) => prev,
+    queryFn: () => (FX ? fx(`board/${account}-${name}.json`) : callFn('sundial', { mode: 'board', account, name })),
+  });
+}
+
 /** One name's Positions grid: P&L and delta by price and date (wide: out to ±50% for the zoom). */
 const positionsKey = (book: BookId | null | undefined, t: string | null | undefined) => ['sw', 'positions', book, t];
 const fetchPositions = (book: BookId, t: string) => (FX ? fx(`grids/${book}-${t}.json`) : callFn('sunny-positions', { book, t, wide: true }));

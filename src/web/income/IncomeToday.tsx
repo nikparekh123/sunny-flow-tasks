@@ -28,17 +28,17 @@ export function IncomeToday({ payload, narrow }: { payload: J; narrow: boolean }
   const fs = narrow ? 22 : 26, base = narrow ? 52 : 64;
   const col = Math.max(base, Math.ceil(Math.max(0, ...g.groups.flatMap((gr) => gr.rows.map((r) => lineOf(r, true).big.length))) * fs * 0.7));
   return (
-    <section aria-label="Income today" className="tnum"
+    <section aria-label="Sundial" className="tnum"
       style={{ ...CARD, gap: narrow ? 10 : 14, padding: narrow ? '16px 16px 4px' : '20px 22px 10px', borderRadius: narrow ? 22 : 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px 20px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: `1 1 ${narrow ? 160 : 360}px`, minWidth: 0 }}>
           <span style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: narrow ? 17 : 20, lineHeight: narrow ? '22px' : '26px', fontWeight: narrow ? 500 : 700, letterSpacing: '-.01em' }}>Income today</span>
+            <span style={{ fontSize: narrow ? 17 : 20, lineHeight: narrow ? '22px' : '26px', fontWeight: narrow ? 500 : 700, letterSpacing: '-.01em' }}>Sundial</span>
             <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500, color: wordOf(g.needC, 15) }}>{g.needT}</span>
           </span>
           {sub && <span style={{ fontSize: 13, lineHeight: '18px', color: MU, textWrap: 'pretty' } as CSSProperties}>{sub}</span>}
         </div>
-        <button type="button" className="bare sw-inc-open" onClick={() => { nav('/income'); }}
+        <button type="button" className="bare sw-inc-open" onClick={() => { nav('/sundial'); }}
           style={{ flex: 'none', height: 34, padding: '0 14px', borderRadius: 999, boxShadow: `inset 0 0 0 1px ${ln(0.16)}`, fontSize: 13, lineHeight: '34px', fontWeight: 400, whiteSpace: 'nowrap' }}>
           Every rung ›
         </button>

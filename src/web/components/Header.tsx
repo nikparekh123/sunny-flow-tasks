@@ -56,15 +56,15 @@ export function Header() {
   const loc = useLocation();
   const n = useNY(15_000);
   const { privacy, setPrivacy } = useWeb();
-  // Home · Income · Positions (handoff 2026-11-24 §3). The ticker page keeps the tab it came from selected
-  // (state.from: 'home' | 'income' | 'positions').
+  // Home · Sundial · Positions (handoff 2026-11-27 §1: Income is called Sundial). The ticker page keeps the tab it came
+  // from selected (state.from: 'home' | 'sundial' | 'positions').
   const from = (loc.state as { from?: string } | null)?.from;
   const tk = loc.pathname.startsWith('/t/');
   const onPositions = loc.pathname.startsWith('/positions') || (tk && from === 'positions');
-  const onIncome = loc.pathname.startsWith('/income') || (tk && from === 'income');
+  const onIncome = loc.pathname.startsWith('/sundial') || (tk && (from === 'sundial' || from === 'income'));
   const tabs = [
     { k: 'home', l: 'Home', on: !onPositions && !onIncome, go: () => nav('/home') },
-    { k: 'income', l: 'Income', on: onIncome, go: () => nav('/income') },
+    { k: 'sundial', l: 'Sundial', on: onIncome, go: () => nav('/sundial') },
     { k: 'positions', l: 'Positions', on: onPositions, go: () => nav('/positions') },
   ];
   const pvL = privacy ? 'Show amounts' : 'Hide amounts';
