@@ -26,7 +26,7 @@
  */
 import { addDays, bs, callSd, dropLine, isWeekday, ivFrom, putSd, room, RULES, signals, strikeAt, tdays, test20, yrs, type Leg, type Signals } from '../_shared/sundial.ts';
 
-const BUILD = '2026-11-27.2';
+const BUILD = '2026-11-27.3';
 const NAMES: { book: string; t: string; label: string }[] = [{ book: 'N', t: 'NVDA', label: 'NVDA' }, { book: 'N', t: 'SPCX', label: 'SPCX' }]   // tickers for both (Nik, 27 Nov: a name for one looked odd);
 const NIK = '85dd190f-9381-4acf-b123-7f1f6f778947';   // nik@sunnyfi.co: Sundial's pushes go to his phones only
 const URL_ = Deno.env.get('SUPABASE_URL')!;
@@ -351,12 +351,15 @@ async function board(acct: string, name: string, c: Ctx) {
       if (n <= 0) return null;
       return { ...legOf(x, n), keep: x.of && x.of > x.n ? { qty: x.of - x.n, total: x.of } : null };
     }).filter(Boolean) as Row[];
-    if (legs.length) sellCards.push({ t: w.t, credit: legs.reduce((a, l) => a + l.credit, 0), reason: src.reason ?? w.reason, safe: 'Safe to +20%', legs });
+    // What the plan was worked out at (Nik, 27 Nov): before the final time the live price now, worked out again every
+    // minute; after it the price and time the saved plan locked at.
+    const basis = { price: r2(Number(src.S ?? w.S)), at: pr ? new Date(at).toISOString() : new Date().toISOString(), locked: !!pr };
+    if (legs.length) sellCards.push({ t: w.t, credit: legs.reduce((a, l) => a + l.credit, 0), reason: src.reason ?? w.reason, safe: 'Safe to +20%', basis, legs });
     // The big drop: the day's saved drop run, or the live one in the minute before the scheduler saves it
     const dr = run(w.t, 'drop'), d = dr ? dr.payload?.drop : w.drop;
     if (d?.fired && d.puts && d.puts.n > 0) {
       const dAt = dr ? Date.parse(dr.run_at) : Date.now(), n = d.puts.n - (dr ? since(w, dAt, 'open', 'put', d.puts.K, d.puts.ex) : 0);
-      if (n > 0) { const l = legOf(d.puts, n); drops.push({ t: w.t, at: new Date(dAt).toISOString(), line: `Under $${kfmt(d.line)}`, credit: l.credit, legs: [l] }); }
+      if (n > 0) { const l = legOf(d.puts, n); drops.push({ t: w.t, at: new Date(dAt).toISOString(), price: r2(Number(dr?.payload?.S ?? w.S)), line: `Under $${kfmt(d.line)}`, credit: l.credit, legs: [l] }); }
     }
     for (const x of w.close as Row[]) closeCards.push({ t: w.t, qty: x.n, expiry: x.ex, strike: x.K, type: 'call', soldAt: x.at, now: x.now, keptPct: Math.round(x.kept * 100), buyBack: Math.round(x.n * x.now * 100), deadline: hm(finalAt), due: final, day: Math.max(1, Math.min(RULES.earlyDays, x.age ?? RULES.earlyDays)), of: RULES.earlyDays });
     const wl = (w.working as Row[]).map((x) => ({ qty: x.n, strike: x.K, type: x.type, expiry: x.ex, daysLeft: x.days, keptPct: Math.round(x.kept * 100), sd: x.sd, itm: x.itm, toGo: x.toGo }));

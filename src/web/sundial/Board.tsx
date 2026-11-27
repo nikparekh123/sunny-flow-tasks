@@ -34,6 +34,12 @@ const sdW = (x: number | null | undefined) => (x == null ? '' : `${String(+(+x).
 const hm12 = (hm: string) => { const h = Number(hm.slice(0, 2)), m = hm.slice(3, 5); return `${((h + 11) % 12) + 1}:${m} ${h < 12 ? 'AM' : 'PM'}`; };
 const minsOf = (hm: string) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5));
 const legsN = (n: number) => `${n} ${n === 1 ? 'leg' : 'legs'}`;
+/** What a To sell card was worked out at (Nik, 27 Nov): the live price and time before the final time, worked out
+    again every minute; after it, the time and price the plan locked at. */
+const basisLine = (b: { price: number; at: string; locked: boolean }) => {
+  const t = clock12(ny(new Date(b.at))), px = `$${(+b.price).toFixed(2)}`;
+  return b.locked ? `Set at ${t} · ${px}` : `At ${px} · ${t} · updates every minute`;
+};
 
 /* ── motion (README §2.5, very subtle, none under Reduce Motion) ── */
 type Anim = HTMLElement & { __ib?: 1 };
@@ -162,7 +168,7 @@ export function Board({ data, narrow, tk, setTk, mask }: { data: J; narrow: bool
               <Head title="To sell" ct={S.ct} sum={sellN ? mask(sT(toSell.total)) : 'None'} sub={!final && sellN ? `Plan · final at ${hm12(finalAt)}` : undefined} />
               {drops.map((d) => (
                 <div key={'drop' + d.t} data-ib="0" style={{ padding: '16px 18px 18px', borderRadius: 18, background: SELL, boxShadow: DRING, display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <span style={{ fontSize: 13, lineHeight: '16px', fontWeight: 500, color: GREY }}>Big drop · {clock12(ny(new Date(d.at)))}</span>
+                  <span style={{ fontSize: 13, lineHeight: '16px', fontWeight: 500, color: GREY }}>Big drop · {clock12(ny(new Date(d.at)))}{d.price ? ` · $${(+d.price).toFixed(2)}` : ''}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <Logo t={d.t} size={32} />
                     <span style={{ flex: 1, minWidth: 0, fontSize: 17, lineHeight: '22px', fontWeight: 500 }}>{nameOf(d.t)}</span>
@@ -189,6 +195,7 @@ export function Board({ data, narrow, tk, setTk, mask }: { data: J; narrow: bool
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 3, paddingTop: 12, borderTop: `1px solid ${L8}` }}>
                     <span style={T13}>{c.reason}</span>
                     <span style={T13}>{c.safe}</span>
+                    {c.basis && <span style={T13}>{basisLine(c.basis)}</span>}
                   </div>
                 </div>
               ))}

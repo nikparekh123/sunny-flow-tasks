@@ -208,6 +208,7 @@ struct SDSellCard: View {
             VStack(alignment: .leading, spacing: 3) {
                 if let r = card.reason { Text(r).sType(IncT.t(13, 17), tabular: false).foregroundStyle(SDC.mu) }
                 Text(card.safe ?? "Safe to +20%").sType(IncT.t(13, 17), tabular: false).foregroundStyle(SDC.mu)
+                if let b = card.basis { Text(SDF.basis(b)).sType(IncT.t(13, 17), tabular: false).foregroundStyle(SDC.mu) }
             }
             .padding(.top, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -238,7 +239,7 @@ struct SDDropCard: View {
     @Environment(\.colorScheme) private var scheme
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Big drop" + (SDF.parse(drop.at).map { " · " + SDF.time($0) } ?? ""))
+            Text("Big drop" + (SDF.parse(drop.at).map { " · " + SDF.time($0) } ?? "") + (drop.price.map { " · " + SDF.money2($0) } ?? ""))
                 .sType(IncT.t(13, 16, 500), tabular: false).foregroundStyle(SDC.mu)
             SDCardTop(t: drop.t, name: name, credit: drop.credit)
             HStack(spacing: 8) {

@@ -42,9 +42,11 @@ nonisolated struct SDBoard: Decodable, Equatable, Sendable {
         let qty: Int; let expiry: String; let strike: Double; let type: String
         let sd: Double?; let price: Double?; let credit: Double?; let keep: Keep?
     }
-    struct SellCard: Decodable, Equatable, Sendable { let t: String; let credit: Double; let reason: String?; let safe: String?; let legs: [Leg] }
+    /// What a To sell card was worked out at (Nik, 27 Nov): before the final time the live price, every minute; after it the plan's lock.
+    struct Basis: Decodable, Equatable, Sendable { let price: Double; let at: String; let locked: Bool }
+    struct SellCard: Decodable, Equatable, Sendable { let t: String; let credit: Double; let reason: String?; let safe: String?; let basis: Basis?; let legs: [Leg] }
     struct Sell: Decodable, Equatable, Sendable { let total: Double; let cards: [SellCard] }
-    struct Drop: Decodable, Equatable, Sendable { let t: String; let at: String?; let line: String?; let credit: Double; let legs: [Leg] }
+    struct Drop: Decodable, Equatable, Sendable { let t: String; let at: String?; let price: Double?; let line: String?; let credit: Double; let legs: [Leg] }
     struct CloseCard: Decodable, Equatable, Sendable {
         let t: String; let qty: Int; let expiry: String; let strike: Double; let type: String?
         let soldAt: Double; let now: Double; let keptPct: Int; let buyBack: Double
@@ -182,6 +184,11 @@ enum SDF {
     }
     /// Trading days left (Nik, 27 Nov 2026): "1 day", "3 days".
     static func days(_ n: Int) -> String { n == 1 ? "1 day" : "\(n) days" }
+    /// "At $149.36 · 11:42 AM · updates every minute" (the plan) or "Set at 12:45 PM · $148.20" (locked).
+    static func basis(_ b: SDBoard.Basis) -> String {
+        let t = parse(b.at).map { time($0) } ?? "", px = money2(b.price)
+        return b.locked ? "Set at \(t) · \(px)" : "At \(px) · \(t) · updates every minute"
+    }
 
     // New York's clock
 
