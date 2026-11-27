@@ -26,6 +26,8 @@ calls you can sell"), but buying stays his call.
    uncapped, the room piles onto one expiry after an early close).
 4. **Early profit.** If a call is worth half or less of its sale price at 3:45 PM on its first or second
    trading day, buy it back. That expiry stays empty until the next normal sale.
+   After day 2, hold to expiry, even at 90% kept (27 Nov, from data: closing on the last day pays the ask for
+   very little risk, and holding never delays the next sale, since calls expiring that day take no room).
 5. **In the money before expiry: hold.** No early roll or close.
 6. **In the money at expiry:** buy back and sell again. Shares are let go only from lots held over a year.
 7. **Earnings weeks: no calls** on any expiry that spans an NVDA report.
@@ -63,6 +65,7 @@ expiries assumed since 2010. Earnings days = the busiest day of each Feb, May, A
 | Why calls lost | 2,387 slots over 16 years | Normal weeks +$345K, earnings weeks -$689K |
 | Earnings weeks | 185 expiries over 68 reports | Calls only -$282K, equal calls and puts -$182K, puts only at 1 SD +$117K (at 1.6x normal IV) |
 | Quiet months | By month and holiday weeks, priced by trading days | Half-day weeks best (calls +$950, puts +$883 an expiry). Late-December calls weakest (-$714) |
+| Late close (27 Nov) | Legs at 90% kept or more at the close the day before expiry, earnings weeks out. Real Theta quotes since 2016 (268 calls, 306 puts), model since 2010 (984 calls, 1,402 puts) | Hold wins. Real calls: close at the ask $14.6K, hold $3.5K (paid out 3 times, worst $1,706). Real puts: $14.9K against $5.6K. Model calls: hold better by $24K to $43K. Same at 80% and 95%, every period, every expiry day |
 | Very cheap NVDA | Chance of a 20%+ week by distance from the 52-week high, since 2010 | About 1 to 2 days in 100 at every level. No special rule |
 
 **SpaceX check (25 Nov, real Theta end-of-day prices since the 12 Jun IPO, 10 contracts an expiry at SPCX $127).**
@@ -78,6 +81,7 @@ $161 to $127; Nik kept it for one rule on both names (SpaceX rose 23% in its Aug
 | Puts in the money after a drop (2) | hold -$6.1K, close -$8.6K, roll -$5.9K |
 | Earnings (2 reports) | calls -$3.1K in August's week (+23%), puts +$5.1K |
 | Big drop | fired 8 times, including 20 and 25 Nov |
+| Late close at 90% (27 Nov) | calls: close better by $2.1K over 16 cases, all from one +7.4% day (2 Oct); puts: hold better by $773 over 14. Too few to change the rule |
 
 **Decided from data the same night (NVDA since 2010, model prices):**
 
