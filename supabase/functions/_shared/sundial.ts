@@ -132,7 +132,7 @@ export interface TestOut { ok: boolean; worst: number; at: number; day: string }
 /** The whole book (shares + every leg) at every rise from 0 to +20% at the close of each of the next 5 trading days,
     against now. Sold legs count in full (from today's value: their premium is the cushion); bought legs only what the
     move does to them (their value at the risen price less their value at today's price, both on that day). */
-export function test20(S0: number, shares: number, legs: Leg[], today: string, closed: Set<string>, minsLeft: number): TestOut {
+export function test20(S0: number, shares: number, legs: Leg[], today: string, closed: Set<string>, minsLeft: number, up = RULES.up): TestOut {
   let worst = Infinity, at = 0, day = today;
   const hs = nextTdays(today, RULES.horizons, closed);
   const now = legs.map((l) => (l.side < 0 ? bs(S0, l.K, yrs(today, l.ex, closed, minsLeft), l.iv, l.type === 'put') : 0));
@@ -142,7 +142,7 @@ export function test20(S0: number, shares: number, legs: Leg[], today: string, c
     // 21 steps from 0 to the test size (RULES.up: +20% for NVDA and SPCX; a name's own size elsewhere). At +20% these are
     // the same 1% steps as before, so NVDA and SPCX answer exactly as they did.
     for (let p = 0; p <= 20; p++) {
-      const S = S0 * (1 + RULES.up * p / 20);
+      const S = S0 * (1 + up * p / 20);
       let v = shares * (S - S0);
       legs.forEach((l, i) => {
         const x = bs(S, l.K, T[i], l.iv, l.type === 'put');
@@ -154,12 +154,12 @@ export function test20(S0: number, shares: number, legs: Leg[], today: string, c
   return { ok: worst >= 0, worst, at, day };
 }
 /** The most calls at K on `ex` that still pass. */
-export function room(S0: number, shares: number, legs: Leg[], K: number, ex: string, iv: number, today: string, closed: Set<string>, minsLeft: number, max = 150): { n: number; test: TestOut } {
-  let n = 0, test = test20(S0, shares, legs, today, closed, minsLeft);
+export function room(S0: number, shares: number, legs: Leg[], K: number, ex: string, iv: number, today: string, closed: Set<string>, minsLeft: number, max = 150, up = RULES.up): { n: number; test: TestOut } {
+  let n = 0, test = test20(S0, shares, legs, today, closed, minsLeft, up);
   if (!test.ok) return { n: 0, test };
   // Grow by doubling, then halve back: the test is monotone in the count.
   let lo = 0, hi = 1;
-  const pass = (k: number) => test20(S0, shares, [...legs, { type: 'call', K, ex, n: k, side: -1, iv }], today, closed, minsLeft);
+  const pass = (k: number) => test20(S0, shares, [...legs, { type: 'call', K, ex, n: k, side: -1, iv }], today, closed, minsLeft, up);
   while (hi <= max && pass(hi).ok) { lo = hi; hi *= 2; }
   hi = Math.min(hi, max + 1);
   while (hi - lo > 1) { const m = (lo + hi) >> 1; if (pass(m).ok) lo = m; else hi = m; }

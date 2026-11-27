@@ -99,7 +99,20 @@ Scripts are in the session scratchpad (engine/, replay/, rolltest/); re-run befo
 every 100 shares plus 1.5 SD hedge calls). One expiry: each Friday at 3:45 PM for next Friday (Nik tried a smaller
 second week too, then: "just do it weekly"). Each name's own test size, the same safety as NVDA's +20% (its 1-in-100
 week outside earnings, x1.24): **NKE +11%, FIS +11%, NFLX +20%, LULU +17%, BABA +20%, UBER +19%.** LEAPs and other
-bought calls count by what a rise does to them. Still to test: earnings weeks, the 50% early close, puts.
+bought calls count by what a rise does to them.
+
+**Agreed 27 Nov (Nik's read, then the data):** FIS is **off** (no calls, no puts; the shares just sit). NFLX and UBER test
+at **+15%** (Nik: they rarely jump more than 10-12% a week; a smaller test sells MORE calls, so +12% would sell 15-17 a
+week; return against worst week is the same at +12, +15 and +20%). **Earnings weeks: sell nothing** (calls lost -$122K
+to -$265K over the six by rule, puts at 1 SD -$34K). **Weekly puts** at the put table's strike (about 0.9 SD), outside
+earnings weeks: **NFLX 10, UBER 10, BABA 4, LULU 6, NKE 5** a week (per 10 since 2016: NFLX +$56.5K, UBER +$55.2K, BABA
++$72.2K, LULU +$34.9K, NKE +$3.9K; assigned about 1 week in 6). **No 50% early close** on the weekly names or TLT
+(27 Nov test, Sundial's weekly calls since 2016: holding +$254K, closing at the mid -$27K less, at the ask -$64K less;
+only NFLX gained, +$2.6K at the ask). NVDA and SPCX keep theirs.
+
+**Built 27 Nov (sundial v11, build 2026-11-27.7):** every name carries its own settings in `NAMES` (cadence, test size,
+puts, put cap, earnings rule, early close, big drop). Sunny's board shows NFLX, UBER, BABA, LULU and NKE; Nicolay's adds
+TLT; Together shows all. A signed-in user sees only the books they own.
 
 | Since 2016, real prices, per 1,000 shares, earnings weeks out | Today's rule | Sundial |
 |---|---|---|
@@ -117,8 +130,11 @@ bigger; today's rule won only BABA's 2021-23 fall.
 gate** (Nik, 27 Nov). TLT's 1-in-100 week is +5.3% since 2003. Real prices: weekly calls -$1.7K in 2016-20 (rising),
 +$25.3K in 2021-23 (falling, shares -$30.6K), +$8.1K in 2024-26; weekly beat Mon/Wed/Fri since 2024 (+$8.1K against
 +$6.3K); the gate lowered every period. Forward 3 years at real option prices (IV about real moves): Nik's view (72, then
-110) calls +$0.5K middle path, flat +$7.9K, early rally +$3.4K, keeps falling +$10.8K (per 1,000 shares). Still to test:
-puts on drops to build the position.
+110) calls +$0.5K middle path, flat +$7.9K, early rally +$3.4K, keeps falling +$10.8K (per 1,000 shares).
+**Puts (Nik, 27 Nov): 10 a week** at the put table's strike, plus extra on a big drop (2 daily SD, about 1.5%) as for
+NVDA; assignment is how the position grows. **Cap: open puts never exceed the shares still wanted** (5,000 less held;
+40 puts at 1,000 shares). History: weekly TLT puts about break-even (+$0.3K per 10 over 530 weeks, shares in at $119.47
+against a $117.85 average); drop puts +$1.5K over 37, shares in at $113.10.
 
 The test now checks up to each name's own size (fixed 27 Nov: it used to check to +20% whatever the size; NVDA and
 SPCX are unchanged).

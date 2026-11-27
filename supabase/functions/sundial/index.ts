@@ -26,8 +26,29 @@
  */
 import { addDays, bs, callSd, dropLine, isWeekday, ivFrom, putSd, room, RULES, signals, strikeAt, tdays, test20, yrs, type Leg, type Signals } from '../_shared/sundial.ts';
 
-const BUILD = '2026-11-27.6';
-const NAMES: { book: string; t: string; label: string }[] = [{ book: 'N', t: 'NVDA', label: 'NVDA' }, { book: 'N', t: 'SPCX', label: 'SPCX' }]   // tickers for both (Nik, 27 Nov: a name for one looked odd);
+const BUILD = '2026-11-27.7';
+// Every name Sundial covers, each with its own settings (Nik, 27 Nov 2026; docs/SUNDIAL.md). Tickers, never names.
+//   cad      'mwf' sells Mon, Wed and Fri a week out (3 expiries open, each capped at half the empty room);
+//            'weekly' sells each Friday for next Friday (one expiry, no cap)
+//   up       the test size: no loss on any rise up to it at any close in the next 5 sessions
+//   puts     puts sold on each new expiry; putCap the most open sold puts ('target': the shares still wanted, in puts)
+//   earn     an expiry spanning a report: 'puts1sd' no calls, puts at 1 SD (NVDA, SPCX); 'nothing' (the weekly names)
+//   early    the 50% close in the first 2 days (NVDA, SPCX only: it lost on the weekly names, 27 Nov test)
+//   drop     extra puts on a big down day (2 daily SD), up to the put cap
+// FIS is off (Nik 27 Nov: hold the shares, sell nothing), so it is not listed. Sunny's names first (Together's order).
+interface Name { book: string; t: string; label: string; cad: 'mwf' | 'weekly'; up: number; puts: number; putCap: number | 'target'; target?: number; earn: 'puts1sd' | 'nothing'; early: boolean; drop: boolean }
+const W6 = { book: 'S', cad: 'weekly', earn: 'nothing', early: false, drop: false, putCap: 1000 } as const;
+const NAMES: Name[] = [
+  { ...W6, t: 'NFLX', label: 'NFLX', up: 0.15, puts: 10 },
+  { ...W6, t: 'UBER', label: 'UBER', up: 0.15, puts: 10 },
+  { ...W6, t: 'BABA', label: 'BABA', up: 0.20, puts: 4 },
+  { ...W6, t: 'LULU', label: 'LULU', up: 0.17, puts: 6 },
+  { ...W6, t: 'NKE', label: 'NKE', up: 0.11, puts: 5 },
+  { book: 'N', t: 'NVDA', label: 'NVDA', cad: 'mwf', up: 0.20, puts: 2, putCap: 30, earn: 'puts1sd', early: true, drop: true },
+  { book: 'N', t: 'SPCX', label: 'SPCX', cad: 'mwf', up: 0.20, puts: 2, putCap: 30, earn: 'puts1sd', early: true, drop: true },
+  { book: 'N', t: 'TLT', label: 'TLT', cad: 'weekly', up: 0.065, puts: 10, putCap: 'target', target: 5000, earn: 'nothing', early: false, drop: true },
+];
+const upWord = (up: number) => `Safe to +${String(+(up * 100).toFixed(1))}%`;
 const NIK = '85dd190f-9381-4acf-b123-7f1f6f778947';   // nik@sunnyfi.co: Sundial's pushes go to his phones only
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -45,16 +66,17 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
 const kfmt = (K: number) => (K % 1 ? K.toFixed(K * 2 % 1 ? 2 : 1) : String(K));
 
 // ── Who may call ──
-async function caller(req: Request): Promise<'cron' | 'owner' | null> {
+async function caller(req: Request): Promise<{ cron: boolean; books: string[] } | null> {
   const cron = Deno.env.get('CRON_SECRET');
-  if (cron && (req.headers.get('x-cron-key') === cron || req.headers.get('x-admin-key') === cron)) return 'cron';
+  if (cron && (req.headers.get('x-cron-key') === cron || req.headers.get('x-admin-key') === cron)) return { cron: true, books: [...new Set(NAMES.map((n) => n.book))] };
   const auth = req.headers.get('authorization') ?? '';
   if (!auth.startsWith('Bearer ')) return null;
   const r = await fetch(`${URL_}/rest/v1/rpc/my_owned_books`, { method: 'POST', headers: { apikey: ANON, Authorization: auth, 'Content-Type': 'application/json' }, body: '{}' });
   if (!r.ok) { await r.body?.cancel(); return null; }
   const books = (await r.json()) as unknown[];
   const ids = books.map((b) => (typeof b === 'string' ? b : (b as Row)?.my_owned_books));
-  return NAMES.every((n) => ids.includes(n.book)) ? 'owner' : null;
+  const own = [...new Set(NAMES.map((n) => n.book))].filter((b) => ids.includes(b));
+  return own.length ? { cron: false, books: own } : null;
 }
 const db = async (path: string): Promise<Row[]> => {
   const r = await fetch(`${URL_}/rest/v1/${path}`, { headers: { apikey: SK, Authorization: `Bearer ${SK}` } });
@@ -132,7 +154,7 @@ function lotsOf(trades: Row[], since: string) {
 
 // ── One name, worked out ──
 interface Ctx { day: string; mins: number; closed: Set<string>; closeMins: number; open: boolean }
-async function work(nm: { book: string; t: string; label: string }, c: Ctx, frozen: Row[] | null = null) {
+async function work(nm: Name, c: Ctx, frozen: Row[] | null = null) {
   const { t, book } = nm, day = c.day, minsLeft = c.open ? Math.max(0, c.closeMins - c.mins) : 0;
   const monday = addDays(day, -((wd(day) + 6) % 7)), monthStart = day.slice(0, 8) + '01';
   const [quote, closesR, ivR, earnR, trades, marks, sharesR, exps] = await Promise.all([
@@ -198,7 +220,8 @@ async function work(nm: { book: string; t: string; label: string }, c: Ctx, froz
   const soldPutsOpen = live.filter((l) => l.side < 0 && l.type === 'put' && !(l.ex === day && c.mins >= c.closeMins)).reduce((a, l) => a + l.n, 0);
 
   // The expiry a week out, its live chain and its own IV
-  const target = exps.find((e) => e >= addDays(day, 7)) ?? null;
+  const fri = (e: string) => wd(e) === 5 || (wd(e) === 4 && c.closed.has(addDays(e, 1)));
+  const target = exps.find((e) => e >= addDays(day, 7) && (nm.cad === 'mwf' || fri(e))) ?? null;
   const er = earnR[0] ? { d: String(earnR[0].report_date), t: String(earnR[0].report_time ?? 'amc') } : null;
   const spans = (ex: string) => !!er && ((er.d > day && er.d < ex) || (er.d === day && er.t !== 'bmo') || (er.d === ex && er.t === 'bmo'));
   let chain: Q[] = [], ivEx = iv30, est = true;
@@ -231,7 +254,7 @@ async function work(nm: { book: string; t: string; label: string }, c: Ctx, froz
       sd: sd == null ? null : Math.round(sd * 10) / 10, days: tdays(day, g.ex, c.closed), age: tdays(g.sold, day, c.closed), toGo: Math.round(g.now * g.n * 100) };
   };
   const sold = live.filter((x) => x.side < 0);
-  const isEarly = (l: Lot) => l.type === 'call' && l.ex > day && (() => { const age = tdays(l.day, day, c.closed); return age >= 1 && age <= RULES.earlyDays; })() && l.px > 0 && 1 - valueNow(l) / l.px >= RULES.earlyKept;
+  const isEarly = (l: Lot) => nm.early && l.type === 'call' && l.ex > day && (() => { const age = tdays(l.day, day, c.closed); return age >= 1 && age <= RULES.earlyDays; })() && l.px > 0 && 1 - valueNow(l) / l.px >= RULES.earlyKept;
   // After 3:45 PM the Close list is the one the day's plan saved (frozen), so a tick after the decision cannot add or drop
   // a card; a card clears when its lots are bought back.
   const inFrozen = (l: Lot) => !!frozen && l.type === 'call' && frozen.some((f) => Number(f.K) === l.K && String(f.ex) === l.ex) && (() => { const age = tdays(l.day, day, c.closed); return age >= 1 && age <= RULES.earlyDays; })();
@@ -251,11 +274,12 @@ async function work(nm: { book: string; t: string; label: string }, c: Ctx, froz
 
   // ── To sell ──
   const toSell: Row[] = [];
-  const saleDay = c.open && [1, 3, 5].includes(wd(day));
-  const earn = target ? spans(target) : false;
+  const saleDay = c.open && (nm.cad === 'mwf' ? [1, 3, 5].includes(wd(day)) : fri(day));
+  const earn = target ? spans(target) : false, quiet = earn && nm.earn === 'nothing';   // the weekly names sell nothing then
+  const capPuts = nm.putCap === 'target' ? Math.max(0, Math.floor(((nm.target ?? 0) - shares) / 100)) : nm.putCap;
   let calls: Row | null = null, puts: Row | null = null, putsDrop: Row | null = null;
   const T = target ? yrs(day, target, c.closed, minsLeft) : 0;
-  const kc = callSd(sig, earn), kp = putSd(sig, earn);
+  const kc = quiet ? null : callSd(sig, earn), kp = putSd(sig, earn);
   // The sale is sized as if the Close list is bought back first.
   const legsAfter: Leg[] = legs.map((l) => ({ ...l, n: l.n - (l.side < 0 && l.type === 'call' ? closeLots.filter((x) => x.K === l.K && x.ex === l.ex).reduce((a, x) => a + x.n, 0) : 0) })).filter((l) => l.n > 0);
   if (target) {
@@ -263,21 +287,21 @@ async function work(nm: { book: string; t: string; label: string }, c: Ctx, froz
     // ⚠ 2 puts an EXPIRY (Nik 27 Nov: he sold the 2 Dec 4 SPCX puts in the morning and the board asked for 2 more): puts
     // already sold on the target expiry count toward the 2.
     const putsOnTarget = live.filter((l) => l.side < 0 && l.type === 'put' && l.ex === target).reduce((a, l) => a + l.n, 0);
-    const nP = Math.min(Math.max(0, RULES.putsNormal - putsOnTarget), Math.max(0, RULES.putCap - soldPutsOpen));
+    const nP = quiet ? 0 : Math.min(Math.max(0, nm.puts - putsOnTarget), Math.max(0, capPuts - soldPutsOpen));
     const Kp = strikeAt(S, kp, ivEx, T, true, listed(true));
     puts = { kind: 'put', n: nP, K: Kp, ex: target, sd: kp, mid: r2(priceAt(Kp, true, T)), earnings: earn };
     const legsP: Leg[] = saleDay && nP > 0 ? [...legsAfter, { type: 'put', K: Kp, ex: target, n: nP, side: -1, iv: ivEx }] : legsAfter;
     if (kc != null) {
       const Kc = strikeAt(S, kc, ivEx, T, false, listed(false));
-      const r = room(S, shares, legsP, Kc, target, ivEx, day, c.closed, minsLeft);
+      const r = room(S, shares, legsP, Kc, target, ivEx, day, c.closed, minsLeft, 150, nm.up);
       // ⚠ THE EXPIRY CAP (data, 25 Nov 2026): at most half of what the test allows a book with no calls sold.
-      const empty = room(S, shares, legsP.filter((l) => !(l.side < 0 && l.type === 'call')), Kc, target, ivEx, day, c.closed, minsLeft);
+      const empty = room(S, shares, legsP.filter((l) => !(l.side < 0 && l.type === 'call')), Kc, target, ivEx, day, c.closed, minsLeft, 150, nm.up);
       // The cap is for the whole expiry: calls already sold on it (and staying on) count toward it.
       const onEx = legsAfter.filter((l) => l.side < 0 && l.type === 'call' && l.ex === target).reduce((a, l) => a + l.n, 0);
-      const cap = Math.floor(empty.n * RULES.expiryCap), n = Math.min(r.n, Math.max(0, cap - onEx));
-      const tst = n === r.n ? r.test : test20(S, shares, [...legsP, { type: 'call', K: Kc, ex: target, n, side: -1, iv: ivEx }], day, c.closed, minsLeft);
+      const cap = nm.cad === 'mwf' ? Math.floor(empty.n * RULES.expiryCap) : Infinity, n = Math.min(r.n, Math.max(0, cap - onEx));
+      const tst = n === r.n ? r.test : test20(S, shares, [...legsP, { type: 'call', K: Kc, ex: target, n, side: -1, iv: ivEx }], day, c.closed, minsLeft, nm.up);
       calls = { kind: 'call', n, room: r.n, cap, onEx, K: Kc, ex: target, sd: kc, mid: r2(priceAt(Kc, false, T)), test: { worst: Math.round(tst.worst), at: tst.at, day: tst.day } };
-    } else calls = { kind: 'call', n: 0, ex: target, earnings: true, why: `No calls: ${er ? md(er.d) : ''} earnings before ${md(target)}` };
+    } else calls = { kind: 'call', n: 0, ex: target, earnings: true, why: `No calls${quiet ? ' or puts' : ''}: ${er ? md(er.d) : ''} earnings before ${md(target)}` };
     if (saleDay) {
       // ⚠ NETTED: buying back calls and selling the same contract again in one go only pays the spread twice. The overlap
       // stays on: the Close row and the sale both shrink by it ("keep N").
@@ -292,8 +316,8 @@ async function work(nm: { book: string; t: string; label: string }, c: Ctx, froz
     }
     // The big drop: live price at or under yesterday's close less 2 daily SD
     const line = dropLine(prevClose, ivPrev);
-    const nD = Math.max(0, RULES.putCap - soldPutsOpen);
-    if (S <= line && c.open) {
+    const nD = Math.max(0, capPuts - soldPutsOpen);
+    if (nm.drop && S <= line && c.open) {
       const Kd = strikeAt(S, kp, ivEx, T, true, listed(true));
       putsDrop = { kind: 'put', drop: true, n: nD, K: Kd, ex: target, sd: kp, mid: r2(priceAt(Kd, true, T)), credit: Math.round(nD * priceAt(Kd, true, T) * 100), line: r2(line) };
       if (nD > 0) toSell.unshift(putsDrop);
@@ -304,9 +328,9 @@ async function work(nm: { book: string; t: string; label: string }, c: Ctx, froz
   const tr = sig.trend === 'down' ? 'under the 50-day' : sig.trend === 'up' ? 'over the 200-day' : sig.ma50 ? 'over the 50-day' : null;
   const reason = [wk, tr, sig.rich ? 'options rich' : sig.cheap ? 'options cheap' : 'options fair', earn && er ? `earnings ${md(er.d)}` : null].filter(Boolean).join(' · ');
   const bankedTot = banked.reduce((a, b) => a + b.kept, 0);
-  const bookTest = test20(S, shares, legs, day, c.closed, minsLeft);
+  const bookTest = test20(S, shares, legs, day, c.closed, minsLeft, nm.up);
   return {
-    t, label: nm.label, book, S: r2(S), prevClose: r2(prevClose), est,
+    t, label: nm.label, book, up: nm.up, cad: nm.cad, S: r2(S), prevClose: r2(prevClose), est,
     signals: { z: r2(sig.z), trend: sig.trend, iv30: r2(sig.iv30), hv20: sig.hv20 && r2(sig.hv20), rank: Math.round(sig.rank), rich: sig.rich, cheap: sig.cheap, freak: sig.freak, ivEx: r2(ivEx) },
     earnings: er, target, saleDay,
     plan: { calls, puts },
@@ -331,11 +355,11 @@ const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${Stri
 // ── The Sundial board (handoff 2026-11-27 README §4): one call per account and name, every number worked out here ──
 // Account a (Sunny) is empty: Sundial 1.0 covers Nicolay's NVDA and SpaceX only (Nik, 27 Nov); his names come later.
 type W = Awaited<ReturnType<typeof work>>;
-async function board(acct: string, name: string, c: Ctx) {
+async function board(acct: string, name: string, c: Ctx, books: string[]) {
   const who = acct === 'a' ? 'Sunny' : acct === 'ab' ? 'Sunny and Nicolay' : 'Nicolay';
-  const scope = acct === 'a' ? [] : NAMES;
+  const scope = NAMES.filter((n) => books.includes(n.book) && (acct === 'ab' || n.book === (acct === 'a' ? 'S' : 'N')));
   const finalAt = c.closeMins - 15, final = !c.open || c.mins >= finalAt;
-  const runs = c.open && scope.length ? await db(`sundial_runs?day=eq.${c.day}&book_id=eq.N&select=ticker,kind,run_at,payload`) : [];
+  const runs = c.open && scope.length ? await db(`sundial_runs?day=eq.${c.day}&book_id=in.(S,N)&select=book_id,ticker,kind,run_at,payload`) : [];
   const run = (t: string, k: string) => runs.find((r) => r.ticker === t && r.kind === k) ?? null;
   // Every name at once (Nik 27 Nov: the page was slow), and every chip's view in the same reply, so a chip switches
   // without asking again.
@@ -371,7 +395,7 @@ async function board(acct: string, name: string, c: Ctx) {
       }
       const done = [...doneMap.values()].map((d) => ({ qty: d.qty, strike: d.strike, type: d.type, expiry: d.expiry, price: r2(d.cash / d.qty), credit: Math.round(d.cash * 100), at: Number.isFinite(Date.parse(d.at)) ? new Date(Date.parse(d.at)).toISOString() : null }))
         .sort((a, b) => (a.type === b.type ? a.strike - b.strike : a.type === 'call' ? -1 : 1));
-      if (legs.length || done.length) sellCards.push({ t: w.t, credit: legs.reduce((a, l) => a + l.credit, 0), reason: src.reason ?? w.reason, safe: 'Safe to +20%', basis, legs, done, doneCredit: done.reduce((a, d) => a + d.credit, 0) });
+      if (legs.length || done.length) sellCards.push({ t: w.t, credit: legs.reduce((a, l) => a + l.credit, 0), reason: src.reason ?? w.reason, safe: upWord(w.up), basis, legs, done, doneCredit: done.reduce((a, d) => a + d.credit, 0) });
       // The big drop: the day's saved drop run, or the live one in the minute before the scheduler saves it
       const dr = run(w.t, 'drop'), d = dr ? dr.payload?.drop : w.drop;
       if (d?.fired && d.puts && d.puts.n > 0) {
@@ -416,11 +440,11 @@ Deno.serve(async (req) => {
     if (mode === 'board') {
       const acct = ['a', 'b', 'ab'].includes(String(body.account)) ? String(body.account) : 'b';
       const nm = String(body.name ?? 'all');
-      return json(200, await board(acct, NAMES.some((n) => n.t === nm) ? nm : 'all', ctx));
+      return json(200, await board(acct, NAMES.some((n) => n.t === nm) ? nm : 'all', ctx, who.books));
     }
-    if (mode === 'view' || who === 'owner') {
+    if (mode === 'view' || !who.cron) {
       const names = [];
-      for (const n of NAMES) names.push(await work(n, ctx));
+      for (const n of NAMES.filter((x) => who.books.includes(x.book))) names.push(await work(n, ctx));
       return json(200, { build: BUILD, at: new Date().toISOString(), day, mins, open: cal.open, closesAt: cal.closeMins, names });
     }
     if (mode !== 'tick') return json(400, { error: 'mode: view or tick' });
@@ -431,7 +455,7 @@ Deno.serve(async (req) => {
     const planDue = mins >= cal.closeMins - 15;
     const out: Row[] = [];
     for (const n of NAMES) {
-      const needPlan = planDue && !has(n.t, 'plan'), needDrop = !has(n.t, 'drop');
+      const needPlan = planDue && !has(n.t, 'plan'), needDrop = n.drop && !has(n.t, 'drop');
       if (!needPlan && !needDrop) continue;
       if (!needPlan) {
         // The cheap watch first: only work the name out when the live price is at or under the line
