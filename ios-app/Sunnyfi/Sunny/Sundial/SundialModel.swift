@@ -184,10 +184,9 @@ enum SDF {
     }
     /// Trading days left (Nik, 27 Nov 2026): "1 day", "3 days".
     static func days(_ n: Int) -> String { n == 1 ? "1 day" : "\(n) days" }
-    /// "At $149.36 · 11:42 AM · updates every minute" (the plan) or "Set at 12:45 PM · $148.20" (locked).
+    /// "Updated 8:45 AM ($149.36)": when the card was last worked out and the stock price it used (Nik, 27 Nov: short).
     static func basis(_ b: SDBoard.Basis) -> String {
-        let t = parse(b.at).map { time($0) } ?? "", px = money2(b.price)
-        return b.locked ? "Set at \(t) · \(px)" : "At \(px) · \(t) · updates every minute"
+        "Updated \(parse(b.at).map { time($0) } ?? "") (\(money2(b.price)))"
     }
 
     // New York's clock

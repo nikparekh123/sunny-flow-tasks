@@ -34,12 +34,9 @@ const sdW = (x: number | null | undefined) => (x == null ? '' : `${String(+(+x).
 const hm12 = (hm: string) => { const h = Number(hm.slice(0, 2)), m = hm.slice(3, 5); return `${((h + 11) % 12) + 1}:${m} ${h < 12 ? 'AM' : 'PM'}`; };
 const minsOf = (hm: string) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5));
 const legsN = (n: number) => `${n} ${n === 1 ? 'leg' : 'legs'}`;
-/** What a To sell card was worked out at (Nik, 27 Nov): the live price and time before the final time, worked out
-    again every minute; after it, the time and price the plan locked at. */
-const basisLine = (b: { price: number; at: string; locked: boolean }) => {
-  const t = clock12(ny(new Date(b.at))), px = `$${(+b.price).toFixed(2)}`;
-  return b.locked ? `Set at ${t} · ${px}` : `At ${px} · ${t} · updates every minute`;
-};
+/** When a To sell card was last worked out and the stock price it used (Nik, 27 Nov: "Updated 8:45 AM ($149.36)",
+    short). Before the final time it is worked out again every minute; after it, the time the plan locked at. */
+const basisLine = (b: { price: number; at: string; locked: boolean }) => `Updated ${clock12(ny(new Date(b.at)))} ($${(+b.price).toFixed(2)})`;
 
 /* ── motion (README §2.5, very subtle, none under Reduce Motion) ── */
 type Anim = HTMLElement & { __ib?: 1 };
