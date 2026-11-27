@@ -27,7 +27,7 @@
  */
 import { addDays, bs, callSd, dropLine, isWeekday, ivFrom, putSd, room, RULES, signals, strikeAt, tdays, test20, yrs, type Leg, type Signals } from '../_shared/sundial.ts';
 
-const BUILD = '2026-11-27.9';
+const BUILD = '2026-11-27.10';
 // Every name Sundial covers, each with its own settings (Nik, 27 Nov 2026; docs/SUNDIAL.md). Tickers, never names.
 //   cad      'mwf' sells Mon, Wed and Fri a week out (3 expiries open, each capped at half the empty room);
 //            'weekly' sells each Friday for next Friday (one expiry, no cap)
@@ -337,7 +337,7 @@ async function work(nm: Name, c: Ctx, frozen: Row[] | null = null, dropAt: strin
   const bankedTot = banked.reduce((a, b) => a + b.kept, 0);
   const bookTest = test20(S, shares, legs, day, c.closed, minsLeft, nm.up);
   return {
-    t, label: nm.label, book, up: nm.up, cad: nm.cad, S: r2(S), prevClose: r2(prevClose), est,
+    t, label: nm.label, book, up: nm.up, cad: nm.cad, cfg: { puts: nm.puts, putCap: nm.putCap, target: nm.target ?? null, earn: nm.earn, early: nm.early, drop: nm.drop, dropPuts: nm.dropPuts ?? null }, S: r2(S), prevClose: r2(prevClose), est,
     signals: { z: r2(sig.z), trend: sig.trend, iv30: r2(sig.iv30), hv20: sig.hv20 && r2(sig.hv20), rank: Math.round(sig.rank), rich: sig.rich, cheap: sig.cheap, freak: sig.freak, ivEx: r2(ivEx) },
     earnings: er, target, saleDay,
     plan: { calls, puts },

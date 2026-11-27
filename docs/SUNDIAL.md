@@ -139,6 +139,20 @@ against a $117.85 average); drop puts +$1.5K over 37, shares in at $113.10.
 The test now checks up to each name's own size (fixed 27 Nov: it used to check to +20% whatever the size; NVDA and
 SPCX are unchanged).
 
+## Checks (built 27 Nov 2026)
+
+Two layers watch the engine. Both push Nik only when they find a problem.
+
+- **The check, 10 AM, 12 PM, 2 PM and 4 PM New York** (`sundial` mode `audit`, table `sundial_audits`, cron
+  `sundial-audit`). Rebuilds every name's book from IBKR's trades a second way and checks the board is not over or
+  under suggesting: calls inside the test, puts per expiry and under the cap, drop puts inside the day's total.
+- **The inspection, once a trading day at a random time** (`sundial-inspect`, table `sundial_inspections`, cron
+  `sundial-inspect`). Picked from the date between 10 AM and 30 minutes before the close. Shares no code with the
+  engine: its own option maths, data reads and count search, and the rules typed again from this page. Checks every
+  name: settings as agreed, data fresh, book delta positive now (and what +1 weekly SD does), the reads, the drop
+  lines, earnings, strike distances, the chain IV and strikes, the counts and the credit. `{"force":true}` runs it now.
+- Next: a short written review each day by Claude, reading both.
+
 ## Not yet
 
 - Built 25 Nov: `sundial` edge function, `_shared/sundial.ts`, `sundial_runs`, scheduler `sundial-tick` (every minute in the session; plan at close minus 15). Pushes go to Nik's login only.
