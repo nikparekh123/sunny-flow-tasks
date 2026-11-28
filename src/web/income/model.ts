@@ -5,7 +5,8 @@
 // This file only says it the way the design does (SunnyIncome renderVals: ln9 for a rung row, fx9 for the delta line,
 // the banner's periods and scale).
 //
-// Nik's rules: ready to roll at 90% kept, 95% shown too ("or wait for 95%"); in the money is flagged only, never
+// Nik's rules: NO ROLLS (27 Nov 2026: "I thought we agreed not to roll"; Sundial holds every sold leg to expiry after
+// day 2, so the server never sends 'roll' and a quiet rung says "Held to expiry"); in the money is flagged only, never
 // advice; a loss carries a − and the words wear no colour (handoff 2026-11-25-focus §2: the colours below mark a
 // state, the page draws them as a dot or a ring); no em dashes; never invent a strike (no chain, "Ready to roll").
 import type { J } from '../lib/data';
@@ -76,7 +77,7 @@ export function lineOf(r: Rung, withTicker: boolean): Line {
   if (itm) act = `In the money by ${f2(r.intr)}`;
   else if (roll) act = nx && nx.K != null ? `to ${nx.exL} ${fk(nx.K)}${nx.pr != null ? ` for ${f2(nx.pr)}` : ''}` : 'Ready to roll';
   else if (loss && r.mk != null) act = `Down ${f2(r.mk - r.at)} a share`;
-  else if (kp != null) act = `${90 - kp}% to the roll`;
+  else if (kp != null) act = 'Held to expiry';
   let grey: string | null = null;
   if (itm) grey = `Breakeven ${f2(r.be)} · ${daysLeft(r.days)} · flagged, you decide`;
   else if (roll) {
@@ -115,15 +116,13 @@ export function todayGroups(inc: Income) {
   const itm = inc.rungs.filter((r) => r.st === 'itm').sort((a, b) => (a.sN ?? 0) - (b.sN ?? 0));
   const roll = inc.rungs.filter((r) => r.st === 'roll').sort((a, b) => (b.kp ?? 0) - (a.kp ?? 0));
   const quiet = inc.rungs.filter((r) => r.st === 'hold');
-  const near = quiet.filter((r) => r.kp != null && r.kp >= 0).sort((a, b) => (b.kp ?? 0) - (a.kp ?? 0))[0];
   const need = itm.length + roll.length;
   const groups = [
     ...(itm.length ? [{ k: 'itm', t: `In the money · you decide · ${itm.length}`, c: RED, rows: itm }] : []),
     ...(roll.length ? [{ k: 'roll', t: `Ready to roll · ${roll.length}`, c: GRN, rows: roll }] : []),
   ];
   const foot = quiet.length
-    ? `${quiet.length} more ${quiet.length === 1 ? 'rung runs' : 'rungs run'} on their own` +
-      (near ? ` · nearest to a roll: ${near.t} ${fk(near.K)} ${side(near)} ${near.exL} at ${near.kp}%` : '') + '.'
+    ? `${quiet.length} more ${quiet.length === 1 ? 'rung runs' : 'rungs run'} on their own, held to expiry.`
     : inc.rungs.length ? 'Every rung is in the list above.' : null;
   return {
     groups, need, foot,

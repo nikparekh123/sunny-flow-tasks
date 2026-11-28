@@ -12,6 +12,7 @@ import { type J } from '../lib/data';
 import { clock12, ny, useNY } from '../lib/clock';
 import { signed, GREEN, RED, ORANGE, INK, INK2, GREY, CHIP_ON } from '../lib/focus';
 import { Disc } from '../income/ui';
+import { SundialInfo } from './HowItWorks';
 
 const BOX = '#212121', SELL = '#313131', PLAN = '#232323', E1 = '#1D1D1D', E2 = '#1A1A1A';
 const TRK = 'rgba(255,255,255,.14)', L8 = 'rgba(255,255,255,.08)', L12 = 'rgba(255,255,255,.12)', DASH = 'rgba(255,255,255,.24)';
@@ -147,7 +148,10 @@ export function Board({ data, narrow, tk, setTk, mask }: { data: J; narrow: bool
       {/* Header: the title and whose book, the name chips, one hero (README §2.1: nothing else) */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '6px 16px', flexWrap: 'wrap' }}>
-          <h1 style={{ margin: 0, fontSize: S.h1, lineHeight: 1.1, fontWeight: 700, letterSpacing: '-.01em' }}>Sundial</h1>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h1 style={{ margin: 0, fontSize: S.h1, lineHeight: 1.1, fontWeight: 700, letterSpacing: '-.01em' }}>Sundial</h1>
+            <SundialInfo size={narrow ? 22 : 24} />
+          </span>
           {data && <span style={{ ...T13, lineHeight: '16px' }}>{who}</span>}
         </div>
         <div role="group" aria-label="Names" className="noscroll"

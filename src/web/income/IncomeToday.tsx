@@ -12,6 +12,7 @@ import { Dot, label } from '../lib/focus';
 import { wordOf } from '../lib/format';
 import { flipOf, ln, MU, readIncome, todayGroups, lineOf, type IncName } from './model';
 import { FlipBody, RungRow } from './ui';
+import { SundialInfo } from '../sundial/HowItWorks';
 
 const CARD: CSSProperties = { boxSizing: 'border-box', display: 'flex', flexDirection: 'column', background: 'rgba(255,255,255,.04)', boxShadow: `inset 0 0 0 1px ${ln(0.08)}`, minWidth: 0 };
 
@@ -33,7 +34,10 @@ export function IncomeToday({ payload, narrow }: { payload: J; narrow: boolean }
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px 20px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: `1 1 ${narrow ? 160 : 360}px`, minWidth: 0 }}>
           <span style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: narrow ? 17 : 20, lineHeight: narrow ? '22px' : '26px', fontWeight: narrow ? 500 : 700, letterSpacing: '-.01em' }}>Sundial</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'center' }}>
+              <span style={{ fontSize: narrow ? 17 : 20, lineHeight: narrow ? '22px' : '26px', fontWeight: narrow ? 500 : 700, letterSpacing: '-.01em' }}>Sundial</span>
+              <SundialInfo size={20} />
+            </span>
             <span style={{ fontSize: 15, lineHeight: '20px', fontWeight: 500, color: wordOf(g.needC, 15) }}>{g.needT}</span>
           </span>
           {sub && <span style={{ fontSize: 13, lineHeight: '18px', color: MU, textWrap: 'pretty' } as CSSProperties}>{sub}</span>}

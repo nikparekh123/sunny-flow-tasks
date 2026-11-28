@@ -31,7 +31,7 @@ import { buildTogether, type Side, type SideEvent, type SideLeg } from './togeth
 import { buildIncome, chainKey, rollTargets, type Chain, type IncLeg, type IncReal } from './income.ts';
 import { type ActEvent, type ActName, activityEvents, levelsOf } from './activity.ts';
 import { bsDelta, bsValue, fK, NameBook } from '../_shared/book-engine.ts';
-const BUILD = '2026-11-25.8';
+const BUILD = '2026-11-27.1';
 import { BOOKS, partsOf } from '../_shared/books.ts';
 /* A book's heartbeat feed: book S keeps the old names, others add theirs (sunny-home-N). */
 const feedOf = (feed: string, book: string) => (book === 'S' ? feed : `${feed}-${book}`);

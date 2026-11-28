@@ -9,7 +9,10 @@
 //     ladder (Nicolay's Nvidia and SpaceX): its calendar shows four weeks and a rung rolls to the next listed expiry
 //     after the last one open on that side. Otherwise weekly: two weeks, a rung rolls to the next week's expiry.
 //     Daily (IWM) only once a daily name is sold (D4).
-//   · Ready to roll at 90% kept (1 - mark ÷ sold at); 95% is shown too. In the money is flagged only, never advice.
+//   · No rolls (Nik, 27 Nov 2026: "I thought we agreed not to roll"). Sundial decides every sale and buy-back
+//     (docs/SUNDIAL.md): after day 2 a sold leg is held to expiry, even at 90% kept, and in the money it is held too.
+//     So a rung is 'itm' (flagged only, never advice) or 'hold'; the status 'roll' is never sent. (Was: ready to roll
+//     at 90% kept, 95% shown too.)
 //   · The next rung: calls at the SD they were sold at (option_fill_context z0, at least 0.25; 0.5 when unknown), puts
 //     at 1 SD from today, both on a strike the chain lists for that expiry, priced at its mid. No chain, no strike.
 //   · The delta line (ladders): how far the stock can rise before the name's book turns short (book-engine
@@ -54,15 +57,17 @@ const calDays = (a: string, b: string) => Math.round((Date.parse(b + 'T12:00:00Z
 
 export function chainKey(t: string, ex: string) { return `${t}|${ex}`; }
 
-/** The rungs that are ready to roll and where each would go: the caller fetches those chains, then builds. */
+/** Where the rungs on each name's nearest expiry land next (the calendar's dashed day): the caller fetches those
+    chains, then builds. Nothing rolls (27 Nov 2026); kp and itm stay for the callers. */
 export function rollTargets(x: Pick<IncIn, 'today' | 'legs' | 'expiries' | 'addDays'> & { kp: (l: IncLeg) => number | null; itm: (l: IncLeg) => boolean }):
   { t: string; ex: string }[] {
   const out = new Map<string, { t: string; ex: string }>();
   for (const l of x.legs) {
     const k = x.kp(l);
-    // A ready rung, or one on its name's nearest expiry (the calendar's dashed "next" day shows where those land).
+    // Only a rung on its name's nearest expiry (the calendar's dashed "next" day shows where those land).
+    void k;
     const nearest = l.ex === x.legs.filter((y) => y.t === l.t).map((y) => y.ex).sort()[0];
-    if (!nearest && (k == null || k < 90 || x.itm(l))) continue;
+    if (!nearest) continue;
     const ex = targetOf(l, x.legs, x.expiries.get(l.t) ?? [], x.addDays);
     if (ex) out.set(chainKey(l.t, ex), { t: l.t, ex });
   }
@@ -101,12 +106,12 @@ export function buildIncome(x: IncIn): Row {
     const z = w ? l.lots.reduce((a, o) => a + (x.z0.has(o.id) ? o.n * x.z0.get(o.id)! : 0), 0) / w : null;
     const s0 = z == null ? null : c ? z : -z;
     const kp = kpOf(l), itm = sN != null && sN < 0;
-    const st: 'itm' | 'roll' | 'hold' = itm ? 'itm' : kp != null && kp >= 90 ? 'roll' : 'hold';
+    const st: 'itm' | 'hold' = itm ? 'itm' : 'hold';   // never 'roll' (27 Nov 2026: Sundial holds)
     let next: Row | null = null;
     /* The next rung: for a ready one (where it rolls), and for every rung on its name's nearest expiry (the Income
        calendar's dashed landing day, handoff 2026-11-24 late §1.3: "on one ticker it shows the strike and premium"). */
     const nearest = l.ex === x.legs.filter((y) => y.t === l.t).map((y) => y.ex).sort()[0];
-    if (st === 'roll' || nearest) {
+    if (nearest) {
       const ex = targetOf(l, x.legs, x.expiries.get(l.t) ?? [], addDays);
       if (ex) {
         const ch = x.chains.get(chainKey(l.t, ex)), tdN = tradingDays(ex);
@@ -144,7 +149,7 @@ export function buildIncome(x: IncIn): Row {
       const chip = (ty: 'c' | 'p') => {
         const g = on.filter((r) => r.ty === ty), q = g.reduce((a, r) => a + r.q, 0);
         if (!q) return null;
-        const tone = g.some((r) => r.itm) ? 'itm' : g.some((r) => r.st === 'roll') ? 'roll' : 'run';
+        const tone = g.some((r) => r.itm) ? 'itm' : 'run';
         return { k: ty, q, t: `${q} ${ty === 'c' ? (q === 1 ? 'call' : 'calls') : (q === 1 ? 'put' : 'puts')}`, tone };
       };
       const chips = [chip('c'), chip('p')].filter(Boolean) as Row[];
@@ -158,7 +163,7 @@ export function buildIncome(x: IncIn): Row {
 
   // ── Totals (the page's row) ──
   const col = rungs.reduce((a, r) => a + r.at * r.q * 100, 0), left = rungs.reduce((a, r) => a + (r.mk ?? r.at) * r.q * 100, 0);
-  const totals = { left: r2(left), kept: r2(col - left), collected: r2(col), roll: rungs.filter((r) => r.st === 'roll').length,
+  const totals = { left: r2(left), kept: r2(col - left), collected: r2(col), roll: 0,
     itm: rungs.filter((r) => r.st === 'itm').length };
 
   // ── The banner: realized income by week and by month ──

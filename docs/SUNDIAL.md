@@ -3,6 +3,12 @@
 The selling engine. Agreed with Nik on 25 Nov 2026, one rule at a time. Names: **NVDA and SpaceX (SPCX), both in
 book N**, same rules for both (Nik, 25 Nov). The rest of the names come after.
 
+**How it works, for Nik:** `public/sundial/how.html` (sunnyfi.co/sundial/how.html), opened by the i next to "Sundial"
+on the Sundial tab and the Home card, app and web. **Change it in the same commit as any rule here.**
+
+**No rolls anywhere** (Nik, 27 Nov 2026: "I thought we agreed not to roll"): Home's Sundial card shows only legs in the
+money (flagged) and the delta lines; sunny-home never sends a 'roll' status.
+
 **Nik decides what to buy** (shares, calls, puts). **Sundial decides what to sell**: how many calls and puts,
 on which expiry, at which strike. It can also show what a purchase would unlock ("5 Jan calls bought = 8 more
 calls you can sell"), but buying stays his call.

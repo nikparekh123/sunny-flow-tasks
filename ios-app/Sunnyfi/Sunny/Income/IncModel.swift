@@ -44,7 +44,7 @@ nonisolated struct IncRung: Identifiable, Hashable {
     let intr: Double
     let be: Double
     let books: [String]
-    /// Ready to roll (90% kept, not in the money).
+    /// Ready to roll: only if the server says so, which it no longer does (27 Nov 2026: Sundial holds to expiry).
     let roll: Bool
     let next: Next?
 
@@ -66,7 +66,7 @@ nonisolated struct IncRung: Identifiable, Hashable {
         intr = j["intr"].double ?? 0
         be = j["be"].double ?? (call ? K + at : K - at)
         books = j["books"].array.compactMap(\.string)
-        roll = !itm && (j["st"].string == "roll" || (kp ?? 0) >= 90 && j["st"].isNull)
+        roll = !itm && j["st"].string == "roll"
         let n = j["next"]
         if case .object = n, let nex = n["ex"].string {
             next = Next(ex: nex, exL: n["exL"].string ?? IncFmt.md(nex), K: n["K"].double, pr: n["pr"].double,
@@ -126,8 +126,8 @@ nonisolated struct IncLine: Identifiable, Hashable {
             }
         } else if let kp, kp < 0, let mk = r.mk {
             action = "Down \(IncFmt.f2(mk - r.at)) a share"
-        } else if let kp {
-            action = "\(90 - kp)% to the roll"
+        } else if kp != nil {
+            action = "Held to expiry"
         } else {
             action = "No mark yet"
         }
@@ -194,11 +194,10 @@ nonisolated struct IncModel {
         let itm = rungs.filter(\.itm).sorted { ($0.sN ?? 0) < ($1.sN ?? 0) }
         let roll = rungs.filter(\.roll).sorted { ($0.kp ?? 0) > ($1.kp ?? 0) }
         let quiet = rungs.filter { !$0.itm && !$0.roll }
-        let near = quiet.filter { ($0.kp ?? -1) >= 0 }.max { ($0.kp ?? 0) < ($1.kp ?? 0) }
         return IncModel(today: today, rungs: rungs, names: names,
                         itm: itm.map { IncLine.of($0, ticker: true) }, roll: roll.map { IncLine.of($0, ticker: true) },
                         quietCount: quiet.count,
-                        near: near.map { "\($0.name(ticker: true)) \($0.exL) at \($0.kp ?? 0)%" },
+                        near: nil,
                         flips: names.compactMap(\.flip))
     }
 

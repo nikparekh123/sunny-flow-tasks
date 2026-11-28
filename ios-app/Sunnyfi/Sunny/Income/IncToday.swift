@@ -82,8 +82,11 @@ struct IncTodayCard: View {
     }
 
     private var head: some View {
-        Text("Sundial").sType(IncT.t(17, 22, 700, tr: -0.01), tabular: false).foregroundStyle(IncC.ink)
-            .accessibilityAddTraits(.isHeader)
+        HStack(alignment: .center, spacing: 8) {
+            Text("Sundial").sType(IncT.t(17, 22, 700, tr: -0.01), tabular: false).foregroundStyle(IncC.ink)
+                .accessibilityAddTraits(.isHeader)
+            SundialInfoButton(size: 20)
+        }
     }
     /// Focus: ink words (they were red or green); the groups under it carry the dots.
     private func need(_ n: Int, _ m: IncModel) -> some View {
@@ -110,10 +113,10 @@ struct IncTodayCard: View {
         }
     }
 
-    /// "17 more rungs run on their own · nearest to a roll: NKE 36 call Oct 30 at 73%."
+    /// "17 more rungs run on their own, held to expiry." (27 Nov 2026: no rolls, so no "nearest to a roll".)
     static func footer(_ m: IncModel) -> String {
         let q = m.quietCount
-        return "\(q) more \(q == 1 ? "rung runs" : "rungs run") on their own" + (m.near.map { " · nearest to a roll: \($0)" } ?? "") + "."
+        return "\(q) more \(q == 1 ? "rung runs" : "rungs run") on their own, held to expiry."
     }
 
     /// The marks' time: "Tue Nov 24 close" for marks at or after the close (or an earlier day), else

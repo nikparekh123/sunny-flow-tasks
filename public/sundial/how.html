@@ -1,0 +1,242 @@
+<!doctype html>
+<!--
+  How Sundial works (Nik, 27 Nov 2026: "an html page on how it works so I can reference it, shown as an i next to
+  Sundial"). One page for the web (sunnyfi.co/sundial/how.html, opened from the i on the Sundial page and the Home
+  card) and the app (the same URL in a sheet), so an edit here reaches both without a TestFlight build.
+  Source of truth: docs/SUNDIAL.md. Change a rule there first, then here.
+  The focus look: neutral palette, no colour on words, colour only on marks, bold only at 20 px and up. Dark by
+  default, light when the device is light; ?theme=light or ?theme=dark forces one. No em dashes.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>How Sundial works</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+<script>
+  try {
+    var t = new URLSearchParams(location.search).get('theme');
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+  } catch (e) {}
+</script>
+<style>
+  :root {
+    --bg: #171717; --box: #212121; --box2: #2A2A2A; --ink: #F2F2F2; --ink2: #AAAAAA; --grey: #8C8C8C;
+    --hair: rgba(250, 250, 250, .08); --hair2: rgba(250, 250, 250, .14); --red: #E82127; --green: #4CBB6C;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #FFFFFF; --box: #F4F4F4; --box2: #EBEBEB; --ink: #171717; --ink2: #212121; --grey: #6E6E6E;
+      --hair: rgba(33, 33, 33, .08); --hair2: rgba(33, 33, 33, .14); color-scheme: light;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #FFFFFF; --box: #F4F4F4; --box2: #EBEBEB; --ink: #171717; --ink2: #212121; --grey: #6E6E6E;
+    --hair: rgba(33, 33, 33, .08); --hair2: rgba(33, 33, 33, .14); color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 400 15px/22px Inter, -apple-system, system-ui, sans-serif;
+    font-feature-settings: 'tnum' 1, 'cv11' 1; -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 28px 16px 56px; }
+  h1 { font-size: 30px; line-height: 36px; font-weight: 700; letter-spacing: -.01em; margin: 0 0 10px; }
+  h2 { font-size: 22px; line-height: 28px; font-weight: 700; letter-spacing: -.01em; margin: 40px 0 12px; }
+  h3 { font-size: 16px; line-height: 22px; font-weight: 500; margin: 24px 0 8px; }
+  p { margin: 0 0 12px; }
+  .lede { font-size: 17px; line-height: 25px; color: var(--ink); }
+  .sub { color: var(--grey); font-size: 13px; line-height: 18px; }
+  .grey { color: var(--grey); }
+  ul { margin: 0 0 12px; padding-left: 20px; }
+  li { margin: 0 0 6px; }
+  li::marker { color: var(--grey); }
+  b, strong { font-weight: 500; }
+  .box { background: var(--box); border-radius: 16px; padding: 16px; margin: 0 0 12px; }
+  .box > :last-child { margin-bottom: 0; }
+  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; margin: 0 0 12px; }
+  .pair .box { margin: 0; }
+  .kicker { font-size: 13px; line-height: 18px; font-weight: 500; color: var(--grey); margin: 0 0 4px; }
+  .big { font-size: 20px; line-height: 26px; font-weight: 700; margin: 0 0 6px; }
+  .wrap { overflow-x: auto; margin: 0 0 12px; border-radius: 16px; background: var(--box); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 20px; }
+  th, td { text-align: left; padding: 10px 12px; vertical-align: top; }
+  th { font-weight: 500; font-size: 13px; line-height: 18px; color: var(--grey); }
+  tbody tr { border-top: 1px solid var(--hair); }
+  td.n, th.n { text-align: right; }
+  td:first-child { font-weight: 500; }
+  .names td:first-child, .names td.n { white-space: nowrap; }
+  .time { display: grid; grid-template-columns: 92px 1fr; gap: 0 12px; }
+  .time > div { padding: 12px 0; border-top: 1px solid var(--hair); }
+  .time > div:nth-child(-n+2) { border-top: 0; }
+  .time .when { font-weight: 500; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; }
+  .dot.r { background: var(--red); } .dot.g { background: var(--green); }
+  .cols { display: grid; gap: 0; }
+  .cols > div { padding: 12px 0; border-top: 1px solid var(--hair); }
+  .cols > div:first-child { border-top: 0; padding-top: 0; }
+  .cols .t { font-weight: 500; }
+  .note { border-left: 2px solid var(--hair2); padding: 2px 0 2px 12px; color: var(--ink2); margin: 0 0 12px; }
+  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--hair); }
+  @media (max-width: 420px) { .time { grid-template-columns: 76px 1fr; } }
+</style>
+</head>
+<body>
+<main>
+
+<h1>How Sundial works</h1>
+<p class="lede">Sundial decides what to sell: which calls and puts, how many, on which expiry and at which strike. You decide what to buy. Sundial never places an order; it shows the plan and you trade it.</p>
+<p class="sub">Rules agreed with Nik on 25 to 27 Nov 2026. Every rule here was tested on real or model prices first.</p>
+
+<h2>A day with Sundial</h2>
+<div class="box time">
+  <div class="when">All day</div>
+  <div>The <b>To sell</b> column is the plan, worked out again every minute from the live price. The line under it says when: “Updated 2:14 PM ($150.37)”.</div>
+  <div class="when">Every minute</div>
+  <div>Watches every name for a <b>big drop</b> (see Puts). If one comes, you get a push straight away.</div>
+  <div class="when">3:45 PM</div>
+  <div>The plan <b>locks</b>, 15 minutes before the close (12:45 PM on a half day). You get one push for each name with something to sell. After that the card shows the locked plan, less what you have already sold.</div>
+  <div class="when">As you sell</div>
+  <div>What you sell today on the plan’s expiry stays on the card, marked <b>Done</b>. Anything still to sell is <b>New</b>.</div>
+</div>
+
+<h2>The names</h2>
+<div class="wrap">
+<table class="names">
+  <thead><tr><th>Name</th><th>Sells</th><th class="n">Test</th><th>Puts</th></tr></thead>
+  <tbody>
+    <tr><td>NVDA</td><td>Mon, Wed and Fri, a week out</td><td class="n">+20%</td><td>2 an expiry, at most 30 open</td></tr>
+    <tr><td>SPCX</td><td>Mon, Wed and Fri, a week out</td><td class="n">+20%</td><td>2 an expiry, at most 30 open</td></tr>
+    <tr><td>NFLX</td><td>Fridays, for next Friday</td><td class="n">+15%</td><td>10 a week</td></tr>
+    <tr><td>UBER</td><td>Fridays, for next Friday</td><td class="n">+15%</td><td>10 a week</td></tr>
+    <tr><td>BABA</td><td>Fridays, for next Friday</td><td class="n">+20%</td><td>4 a week</td></tr>
+    <tr><td>LULU</td><td>Fridays, for next Friday</td><td class="n">+17%</td><td>6 a week</td></tr>
+    <tr><td>NKE</td><td>Fridays, for next Friday</td><td class="n">+11%</td><td>5 a week</td></tr>
+    <tr><td>TLT</td><td>Fridays, for next Friday</td><td class="n">+6.5%</td><td>10 a week, more on a big drop</td></tr>
+    <tr><td>FIS</td><td class="grey">Off: nothing is sold, the shares just sit</td><td class="n grey">-</td><td class="grey">-</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="sub">When a Friday is a holiday, the Friday names sell on Thursday. NVDA and SPCX always have three expiries open.</p>
+
+<h2>Calls</h2>
+
+<h3>How many: the test</h3>
+<p>The most calls that keep the <b>whole book</b> from losing money if the stock rises anywhere from 0 up to its test size (+20% for NVDA), at any close in the next 5 trading days.</p>
+<ul>
+  <li>The whole book is shares, calls bought (LEAPs too), puts bought and everything sold.</li>
+  <li>Sold calls and puts count in full: their premium is the cushion.</li>
+  <li>Bought calls and puts count only what the rise does to them, not their slow daily decay.</li>
+  <li>Past the test size, a loss is accepted.</li>
+  <li>NVDA and SPCX: no single expiry takes more than half of the calls the test would allow with none sold.</li>
+</ul>
+<p class="note">So when the price rises after a sale, a book can end up over its test. Sundial then suggests nothing more on that name until there is room again.</p>
+
+<h3>Which strike</h3>
+<p>Measured in <b>SD</b>, a normal week’s move for that stock (its IV over one week). Three reads decide it, and the card shows them in words, for example “Flat week · under the 50-day · options cheap”.</p>
+<div class="wrap">
+<table>
+  <thead><tr><th>The week’s move</th><th class="n">Calls above the price</th></tr></thead>
+  <tbody>
+    <tr><td>Up 20% today</td><td class="n">At the money</td></tr>
+    <tr><td>Up 2 SD or more</td><td class="n">0.25 SD</td></tr>
+    <tr><td>Up 1 to 2 SD</td><td class="n">0.5 SD</td></tr>
+    <tr><td>Flat, over the 50- and 200-day</td><td class="n">0.75 SD</td></tr>
+    <tr><td>Flat, otherwise</td><td class="n">0.5 SD</td></tr>
+    <tr><td>Down 1 to 2 SD</td><td class="n">0.75 SD</td></tr>
+    <tr><td>Down 2 SD or more</td><td class="n">0.5 SD</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Then the options: <b>rich</b> moves the strike 0.25 SD closer, <b>cheap</b> 0.25 SD wider. Calls stay between 0.25 and 1.25 SD.</p>
+
+<h3>After the sale</h3>
+<div class="pair">
+  <div class="box">
+    <p class="kicker">NVDA and SPCX</p>
+    <p class="big">Early profit</p>
+    <p>If a call is worth half or less of what it sold for at 3:45 PM on its first or second trading day, buy it back. It shows in the <b>Close</b> column.</p>
+  </div>
+  <div class="box">
+    <p class="kicker">Every name</p>
+    <p class="big">Then hold</p>
+    <p>After day 2, hold to expiry, even at 90% kept. <b>No rolls.</b> Closing late pays the ask for very little risk, and holding never delays the next sale.</p>
+  </div>
+</div>
+<ul>
+  <li><b>In the money before expiry:</b> hold. Home flags it so you can decide.</li>
+  <li><b>In the money at expiry:</b> buy back and sell again. Shares are let go only from lots held over a year.</li>
+  <li><b>Earnings:</b> NVDA and SPCX sell no calls on an expiry that spans a report. The Friday names and TLT sell nothing that week.</li>
+</ul>
+
+<h2>Puts</h2>
+<p>Puts are how the share positions grow: being assigned is fine. They are always held to expiry, with no early profit.</p>
+
+<h3>Which strike</h3>
+<div class="wrap">
+<table>
+  <thead><tr><th>The week’s move</th><th class="n">Trend up</th><th class="n">Trend mid</th><th class="n">Trend down</th></tr></thead>
+  <tbody>
+    <tr><td>Up 1 SD or more</td><td class="n">1 SD</td><td class="n">1 SD</td><td class="n">1 SD</td></tr>
+    <tr><td>Flat</td><td class="n">0.75 SD</td><td class="n">1 SD</td><td class="n">1 SD</td></tr>
+    <tr><td>Down 1 to 2 SD</td><td class="n">0.5 SD</td><td class="n">0.75 SD</td><td class="n">1 SD</td></tr>
+    <tr><td>Down 2 SD or more</td><td class="n">1 strike in the money</td><td class="n">At the money</td><td class="n">0 to 0.5&nbsp;SD*</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="sub">Below the price. Then rich 0.25 SD closer, cheap 0.25 SD wider, never wider than 1 SD. An NVDA or SPCX earnings week: 1 SD. *Closer the nearer the stock is to its 52-week low.</p>
+
+<h3>Big drop</h3>
+<p>When a name falls <b>2 daily SD</b> below yesterday’s close (about 9% for NVDA, about 1.5% for TLT), checked every minute, Sundial sells extra puts a week out at the put table’s strike, and you get a push.</p>
+<ul>
+  <li><b>NVDA and SPCX:</b> up to the cap of 30 open.</li>
+  <li><b>TLT:</b> 10 extra at 2 daily SD, 20 in all that day at 3 daily SD (about 2.3%), never more than the shares still wanted (5,000 less what is held, in contracts).</li>
+</ul>
+
+<h3>At expiry</h3>
+<p>In the money: take the shares if the strike is under your average cost, otherwise buy back and sell again.</p>
+
+<h2>The words on the board</h2>
+<div class="box cols">
+  <div><span class="t">To sell</span><br><span class="grey">The plan. New until you sell it, then Done.</span></div>
+  <div><span class="t"><span class="dot r"></span>Close</span><br><span class="grey">NVDA and SPCX calls worth half or less of their price on day 1 or 2: buy back at 3:45 PM.</span></div>
+  <div><span class="t">Working</span><br><span class="grey">Everything sold and still open, with what is left to earn.</span></div>
+  <div><span class="t">Expiring today</span><br><span class="grey">How far each is from its strike, and what a buy-back would cost.</span></div>
+  <div><span class="t">Banked this week</span><br><span class="grey">What expired or was bought back this week, and what it kept.</span></div>
+</div>
+<div class="box cols">
+  <div><span class="t">SD</span><br><span class="grey">A normal week’s move: the stock’s IV over one week. A daily SD is the same for one day.</span></div>
+  <div><span class="t">The week’s move</span><br><span class="grey">Today’s price against the close 5 sessions back, in SD. Holidays do not count as sessions.</span></div>
+  <div><span class="t">Trend</span><br><span class="grey">Under the 50-day line is down; over both the 50- and 200-day is up; anything else is mid.</span></div>
+  <div><span class="t">Rich or cheap</span><br><span class="grey">Cheap whenever the stock’s last 20 days moved more than its IV says. Otherwise rich when IV sits in the top 30% of its range over the past year, or at 1.3 times the real moves or more; cheap when it sits in the bottom 20% of that range.</span></div>
+  <div><span class="t">Turns short</span><br><span class="grey">On Home, for NVDA and SPCX: how far the stock can rise before the book’s delta goes below zero.</span></div>
+</div>
+
+<h2>Who checks Sundial</h2>
+<p>Three checks watch the engine. You only hear from them when something needs a look.</p>
+<div class="pair">
+  <div class="box">
+    <p class="kicker">10 AM, 12 PM, 2 PM, 4 PM</p>
+    <p class="big">The check</p>
+    <p>Rebuilds every book from IBKR’s trades a second way, and checks the board is not suggesting too many or too few calls and puts.</p>
+  </div>
+  <div class="box">
+    <p class="kicker">Once a day, at a random time</p>
+    <p class="big">The inspection</p>
+    <p>Works every name out again with its own code: settings, reads, strikes, counts, credit, delta, and every stored close against the exchange’s official closes.</p>
+  </div>
+  <div class="box">
+    <p class="kicker">Right after the inspection</p>
+    <p class="big">The review</p>
+    <p>Claude reads the rules, the board and both checks, and writes a line on each name: a rule not followed, numbers that do not add up, stale data, or a sale that looks risky today. Your own trades are never a rule broken.</p>
+  </div>
+</div>
+
+<footer class="sub">Sundial 1.0 · rules in docs/SUNDIAL.md · updated 27 Nov 2026</footer>
+</main>
+</body>
+</html>

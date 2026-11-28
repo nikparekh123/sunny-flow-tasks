@@ -165,8 +165,12 @@ struct SundialHead: View {
     @Binding var name: String
 
     static var title: some View {
-        Text("Sundial").sType(IncT.t(30, 33, 700, tr: -0.01), tabular: false).foregroundStyle(SDC.ink)
-            .accessibilityAddTraits(.isHeader)
+        HStack(alignment: .center, spacing: 10) {
+            Text("Sundial").sType(IncT.t(30, 33, 700, tr: -0.01), tabular: false).foregroundStyle(SDC.ink)
+                .accessibilityAddTraits(.isHeader)
+            // How Sundial works (Nik, 27 Nov 2026)
+            SundialInfoButton(size: 24)
+        }
     }
 
     var body: some View {
